@@ -1,0 +1,573 @@
+# Category 8: Diagnostics & Validation (4 tools)
+
+## 1. read_lints
+**Alias**: ReadLints  
+**Purpose**: Read linter errors and warnings from files or directories
+
+**Parameters**:
+- `paths` (required): File or directory paths (comma-separated string or array)
+- `max_output` (optional): Maximum output length (default: 4000)
+
+**C-style behavior**:
+- Accepts array of paths
+- Returns diagnostics for all specified files
+- Scoped to edited files only
+
+**Metis CLI backend** (matches `read_lints.py` / TOOLS_SCHEMA): tries **ruff** (`--output-format=json`, or plain if `Metis_RUFF_PLAIN=1`), then **pyright** or **basedpyright** (`--outputjson`, or plain if `Metis_PYRIGHT_PLAIN=1`), then mypy / flake8 / pylint.
+
+**Optional LSP** (stdio Content-Length): set `Metis_READLINTS_MODE=lsp` or `auto`, `Metis_LSP_COMMAND` (e.g. `pylsp` or `python -u others/scripts/lsp_stub_server.py` for tests), `Metis_LSP_DIAG_TIMEOUT_SEC`, `Metis_LSP_FALLBACK_CLI`; default mode remains **cli** so baselines unchanged.
+
+**Usage**:
+```python
+# Single file
+read_lints(paths="src/utils.py")
+
+# Multiple files
+read_lints(paths="src/utils.py,src/main.py")
+
+# Array format
+read_lints(paths=["src/utils.py", "src/main.py"])
+
+# Directory
+read_lints(paths="src/")
+
+# Limit output
+read_lints(paths="src/", max_output=2000)
+```
+
+**Output Format**:
+```
+src/utils.py:
+  Line 15: E501 line too long (88 > 79 characters)
+  Line 23: F401 'os' imported but unused
+  Line 45: W291 trailing whitespace
+
+src/main.py:
+  Line 10: E302 expected 2 blank lines, found 1
+  Line 67: F841 local variable 'result' is assigned to but never used
+
+Total: 5 issues (2 errors, 3 warnings)
+```
+
+**Use Cases**:
+
+1. **After editing**:
+   ```python
+   # Edit file
+   robust_replace_in_file(file_path="utils.py", ...)
+   
+   # Check for errors
+   lints = read_lints(paths="utils.py")
+   
+   # Fix if needed
+   if "error" in lints.lower():
+       robust_replace_in_file(...)
+   ```
+
+2. **Before committing**:
+   ```python
+   # Check all changed files
+   status = check_git_status()
+   
+   # Lint changed files
+   lints = read_lints(paths="src/")
+   
+   # Commit if clean
+   if "no issues" in lints.lower():
+       git_commit_pr(message="feat: add feature")
+   ```
+
+3. **Continuous validation**:
+   ```python
+   # After each change
+   robust_replace_in_file(...)
+   read_lints(paths="file.py")
+   
+   robust_replace_in_file(...)
+   read_lints(paths="file.py")
+   ```
+
+**Features** (Metis runtime pattern):
+- **Language-aware**: Supports Python, JavaScript, TypeScript, etc.
+- **IDE integration**: Same errors user sees
+- **Fast**: Cached results
+- **Comprehensive**: All linter types (syntax, style, type)
+
+**Best Practices** (Metis tool discipline):
+
+1. **Scope appropriately**:
+   ```python
+   # Bad: Too broad
+   read_lints(paths=".")
+   
+   # Good: Specific files
+   read_lints(paths="src/utils.py")
+   ```
+
+2. **Only check edited files**:
+   ```python
+   # NEVER call on files you haven't edited
+   # Only call after making changes
+   robust_replace_in_file(file_path="utils.py", ...)
+   read_lints(paths="utils.py")  # OK
+   ```
+
+3. **Fix introduced errors only**:
+   ```python
+   lints = read_lints(paths="file.py")
+   
+   # Fix errors you introduced
+   # Ignore pre-existing errors unless necessary
+   ```
+
+**Post-Edit Auto-Linting**:
+- Automatically runs after write-like tools (if enabled)
+- Appended to tool output
+- Configurable via `post_edit_lint` setting
+
+---
+
+## 2. analyze_complexity
+**Purpose**: Analyze code complexity metrics (cyclomatic, cognitive, etc.)
+
+**Parameters**:
+- `file_path` (required): File to analyze
+- `threshold` (optional): Complexity threshold (default: 10)
+- `metrics` (optional): Metrics to compute (cyclomatic, cognitive, halstead)
+
+**Usage**:
+```python
+# Basic analysis
+analyze_complexity(file_path="src/processor.py")
+
+# With threshold
+analyze_complexity(file_path="src/processor.py", threshold=15)
+
+# Specific metrics
+analyze_complexity(
+    file_path="src/processor.py",
+    metrics=["cyclomatic", "cognitive"]
+)
+```
+
+**Output Format**:
+```
+File: src/processor.py
+
+Function: process_data (line 45)
+  Cyclomatic Complexity: 12 ⚠️ (threshold: 10)
+  Cognitive Complexity: 15 ⚠️
+  Lines of Code: 87
+  Recommendation: Consider refactoring
+
+Function: validate_input (line 120)
+  Cyclomatic Complexity: 5 ✓
+  Cognitive Complexity: 6 ✓
+  Lines of Code: 23
+
+Class: DataProcessor (line 10)
+  Methods: 8
+  Average Complexity: 9.2
+  Max Complexity: 12 (process_data)
+
+Summary:
+  Total Functions: 12
+  High Complexity: 3
+  Average Complexity: 8.5
+```
+
+**Complexity Metrics**:
+
+1. **Cyclomatic Complexity**:
+   - Measures number of linearly independent paths
+   - 1-10: Simple, low risk
+   - 11-20: Moderate, medium risk
+   - 21+: Complex, high risk
+
+2. **Cognitive Complexity**:
+   - Measures how hard code is to understand
+   - Considers nesting, breaks, etc.
+   - Lower is better
+
+3. **Halstead Metrics**:
+   - Program vocabulary
+   - Program length
+   - Difficulty
+   - Effort
+
+**Use Cases**:
+
+1. **Before refactoring**:
+   ```python
+   # Identify complex functions
+   complexity = analyze_complexity(file_path="service.py")
+   
+   # Refactor high-complexity functions
+   extract_method(
+       file_path="service.py",
+       start_line=45,
+       end_line=70,
+       new_method_name="validate_data"
+   )
+   
+   # Verify improvement
+   complexity = analyze_complexity(file_path="service.py")
+   ```
+
+2. **Code review**:
+   ```python
+   # Check all changed files
+   files = ["src/api.py", "src/service.py"]
+   
+   for file in files:
+       complexity = analyze_complexity(file_path=file, threshold=10)
+       # Review high-complexity functions
+   ```
+
+3. **Quality gates**:
+   ```python
+   # Before committing
+   complexity = analyze_complexity(file_path="module.py", threshold=15)
+   
+   if "high complexity" in complexity.lower():
+       # Refactor or document
+       pass
+   ```
+
+**Features**:
+- **Multiple metrics**: Cyclomatic, cognitive, Halstead
+- **Thresholds**: Configurable complexity limits
+- **Recommendations**: Suggests refactoring
+- **Trend tracking**: Compare over time
+
+---
+
+## 3. undo_last_edit
+**Purpose**: Undo the last file edit operation
+
+**Parameters**:
+- `file_path` (required): File to undo changes for
+- `steps` (optional): Number of edits to undo (default: 1)
+
+**Usage**:
+```python
+# Undo last edit
+undo_last_edit(file_path="src/utils.py")
+
+# Undo multiple edits
+undo_last_edit(file_path="src/utils.py", steps=3)
+```
+
+**How It Works**:
+1. Maintains edit history per file
+2. Stores previous versions
+3. Restores on undo
+4. Clears history on commit
+
+**Use Cases**:
+
+1. **After bad edit**:
+   ```python
+   # Make edit
+   robust_replace_in_file(file_path="utils.py", ...)
+   
+   # Check result
+   lints = read_lints(paths="utils.py")
+   
+   # Undo if broken
+   if "error" in lints.lower():
+       undo_last_edit(file_path="utils.py")
+   ```
+
+2. **Experimental changes**:
+   ```python
+   # Try approach 1
+   robust_replace_in_file(...)
+   test_result = execute_bash_command(command="pytest")
+   
+   if "failed" in test_result:
+       # Undo and try approach 2
+       undo_last_edit(file_path="utils.py")
+       robust_replace_in_file(...)
+   ```
+
+3. **Rollback chain**:
+   ```python
+   # Multiple edits
+   robust_replace_in_file(...)  # Edit 1
+   robust_replace_in_file(...)  # Edit 2
+   robust_replace_in_file(...)  # Edit 3
+   
+   # Undo all
+   undo_last_edit(file_path="utils.py", steps=3)
+   ```
+
+**Features**:
+- **History tracking**: Per-file edit history
+- **Multi-step undo**: Undo multiple edits
+- **Safe**: Validates before undo
+- **Fast**: In-memory history
+
+**Limitations**:
+- History cleared on commit
+- Limited to recent edits
+- File-level only (not line-level)
+
+---
+
+## 4. verify_compilation
+**Purpose**: Verify code compiles/runs without errors
+
+**Parameters**:
+- `file_path` (required): File to verify
+- `language` (optional): Programming language (auto-detected)
+- `command` (optional): Custom verification command
+
+**Usage**:
+```python
+# Auto-detect and verify
+verify_compilation(file_path="src/main.py")
+
+# Specify language
+verify_compilation(file_path="script.js", language="javascript")
+
+# Custom command
+verify_compilation(
+    file_path="main.go",
+    command="go build main.go"
+)
+```
+
+**Verification Methods**:
+
+1. **Python**:
+   - Syntax check: `python -m py_compile`
+   - Import check: `python -c "import module"`
+   - Type check: `mypy` (if available)
+
+2. **JavaScript/TypeScript**:
+   - Syntax check: `node --check`
+   - Type check: `tsc --noEmit`
+   - Lint: `eslint`
+
+3. **Java**:
+   - Compile: `javac`
+   - Check: `java -version`
+
+4. **C/C++**:
+   - Compile: `gcc -fsyntax-only`
+   - Check: `clang --analyze`
+
+5. **Go**:
+   - Compile: `go build`
+   - Check: `go vet`
+
+**Output Format**:
+```
+Verification: src/main.py
+
+✓ Syntax check passed
+✓ Import check passed
+✓ Type check passed (mypy)
+
+Result: SUCCESS
+Compilation time: 0.3s
+```
+
+**Or on failure**:
+```
+Verification: src/main.py
+
+✗ Syntax check failed
+  Line 15: SyntaxError: invalid syntax
+  
+✗ Import check failed
+  ModuleNotFoundError: No module named 'requests'
+
+Result: FAILED
+```
+
+**Use Cases**:
+
+1. **After editing**:
+   ```python
+   # Edit file
+   robust_replace_in_file(...)
+   
+   # Verify compiles
+   result = verify_compilation(file_path="main.py")
+   
+   # Fix if needed
+   if "failed" in result.lower():
+       undo_last_edit(file_path="main.py")
+   ```
+
+2. **Before running**:
+   ```python
+   # Verify first
+   verify_compilation(file_path="script.py")
+   
+   # Then run
+   execute_bash_command(command="python script.py")
+   ```
+
+3. **CI/CD validation**:
+   ```python
+   # Verify all files
+   files = ["src/main.py", "src/utils.py", "src/config.py"]
+   
+   for file in files:
+       result = verify_compilation(file_path=file)
+       if "failed" in result.lower():
+           # Fail build
+           break
+   ```
+
+**Features**:
+- **Language-aware**: Auto-detects language
+- **Fast**: Syntax-only checks
+- **Comprehensive**: Multiple verification methods
+- **Detailed errors**: Line numbers and messages
+
+---
+
+## Common Workflows
+
+### Workflow 1: Edit-Lint-Fix Cycle
+```python
+# 1. Edit file
+robust_replace_in_file(
+    file_path="utils.py",
+    search_text="old code",
+    replace_text="new code"
+)
+
+# 2. Check for errors
+lints = read_lints(paths="utils.py")
+
+# 3. Fix if needed
+if "error" in lints.lower():
+    robust_replace_in_file(
+        file_path="utils.py",
+        search_text="new code",
+        replace_text="fixed code"
+    )
+    
+    # 4. Verify fix
+    lints = read_lints(paths="utils.py")
+```
+
+### Workflow 2: Refactor Complex Code
+```python
+# 1. Analyze complexity
+complexity = analyze_complexity(file_path="service.py", threshold=10)
+
+# 2. Extract complex functions
+extract_method(
+    file_path="service.py",
+    start_line=45,
+    end_line=70,
+    new_method_name="process_data"
+)
+
+# 3. Verify improvement
+complexity = analyze_complexity(file_path="service.py")
+
+# 4. Test
+execute_bash_command(command="pytest tests/test_service.py")
+```
+
+### Workflow 3: Safe Experimental Edit
+```python
+# 1. Try edit
+robust_replace_in_file(...)
+
+# 2. Verify compiles
+result = verify_compilation(file_path="main.py")
+
+# 3. Check lints
+lints = read_lints(paths="main.py")
+
+# 4. Test
+test_result = execute_bash_command(command="pytest")
+
+# 5. Undo if any failure
+if "failed" in result or "error" in lints or "failed" in test_result:
+    undo_last_edit(file_path="main.py")
+```
+
+### Workflow 4: Pre-Commit Validation
+```python
+# 1. Get changed files
+status = check_git_status()
+
+# 2. Lint all changed files
+lints = read_lints(paths="src/")
+
+# 3. Verify compilation
+for file in changed_files:
+    verify_compilation(file_path=file)
+
+# 4. Check complexity
+for file in changed_files:
+    analyze_complexity(file_path=file, threshold=15)
+
+# 5. Commit if all pass
+git_commit_pr(message="feat: add feature")
+```
+
+---
+
+## Integration Patterns
+
+### With Modification Tools:
+```python
+# Always lint after modifying
+robust_replace_in_file(...)
+read_lints(paths="file.py")
+
+editCode(...)
+read_lints(paths="file.py")
+
+edit_notebook(...)
+read_lints(paths="notebook.ipynb")
+```
+
+### With Testing:
+```python
+# Lint → Test → Commit
+read_lints(paths="src/")
+execute_bash_command(command="pytest")
+git_commit_pr(message="fix: resolve issue")
+```
+
+### With Refactoring:
+```python
+# Complexity → Refactor → Verify
+analyze_complexity(file_path="module.py")
+extract_method(...)
+analyze_complexity(file_path="module.py")
+read_lints(paths="module.py")
+```
+
+---
+
+## Metis runtime pattern
+- getDiagnostics tool (IDE integration)
+- Real-time error detection
+- Language server protocol
+- Intelligent error messages
+
+## Metis tool discipline
+- ReadLints tool
+- Scoped to edited files
+- Post-edit validation
+- Simple error format
+
+## From Metis
+- Unified diagnostics interface
+- Complexity analysis
+- Undo functionality
+- Compilation verification
+- Enhanced error handling
+- Configuration integration

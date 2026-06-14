@@ -1,0 +1,1421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Desk Automation — 编排控制台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&family=Marcellus&family=Raleway:wght@200;300;400;500&display=swap" rel="stylesheet"/>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #f7f3ed;
+  --bg2:        #f0ebe1;
+  --bg3:        #e8e1d4;
+  --border:     rgba(160,128,88,0.2);
+  --border2:    rgba(160,128,88,0.5);
+  --ink:        #2a2018;
+  --ink2:       #5a4a35;
+  --ink3:       #9a8a72;
+  --ink4:       #c4b49a;
+  --rose:       #b5736a;
+  --rose-light: rgba(181,115,106,0.12);
+  --teal:       #5a8a7a;
+  --teal-light: rgba(90,138,122,0.1);
+  --ease:       cubic-bezier(0.4,0,0.2,1);
+  --ease-out:   cubic-bezier(0,0,0.2,1);
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Raleway', sans-serif;
+  font-weight: 300;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.028'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 15% 5%,  rgba(181,115,106,0.055) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 45% at 85% 95%, rgba(90,138,122,0.045) 0%, transparent 55%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Header（外观参考 方案/html/index.html）── */
+header.da-header {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 40px 24px 28px;
+  animation: fadeDown 0.9s var(--ease-out) both;
+}
+
+.da-eyebrow {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.45em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 14px;
+  display: block;
+}
+
+.da-site-title {
+  font-family: 'Pinyon Script', cursive;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 400;
+  color: var(--ink);
+  line-height: 0.9;
+  letter-spacing: 0.01em;
+}
+
+.da-site-title .accent { color: var(--rose); }
+
+.da-ornament {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 18px auto 14px;
+}
+
+.da-orn-line {
+  height: 1px;
+  width: 56px;
+  background: linear-gradient(to right, transparent, var(--border2));
+}
+
+.da-orn-line.r {
+  background: linear-gradient(to left, transparent, var(--border2));
+}
+
+.da-orn-dot      { width: 5px; height: 5px; background: var(--ink4); transform: rotate(45deg); }
+.da-orn-dot.sm   { width: 3px; height: 3px; opacity: 0.5; }
+
+.da-tagline {
+  font-family: 'Marcellus', serif;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--ink3);
+  text-transform: uppercase;
+}
+
+/* ── Main shell ── */
+main.da-main {
+  position: relative;
+  z-index: 2;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 28px 72px;
+  animation: fadeUp 0.9s 0.12s var(--ease-out) both;
+}
+
+/* 目标条 */
+.goal-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px 20px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.04);
+}
+
+.goal-bar .goal-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+}
+
+.goal-bar .goal-badge {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  font-family: 'Marcellus', serif;
+  font-weight: 400;
+}
+
+.gb-idle    { background: var(--bg2); color: var(--ink3); }
+.gb-running { background: var(--teal-light); color: var(--teal); border-color: rgba(90,138,122,0.35); }
+.gb-paused  { background: var(--rose-light); color: var(--rose); border-color: rgba(181,115,106,0.35); }
+.gb-done    { background: rgba(90,138,122,0.12); color: var(--teal); }
+.gb-error   { background: var(--rose-light); color: #8b4545; }
+
+.goal-bar .vision-badge {
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  font-family: 'Marcellus', serif;
+  font-weight: 400;
+  flex-shrink: 0;
+}
+.vb-idle { background: var(--bg2); color: var(--ink3); }
+.vb-running {
+  background: var(--teal-light);
+  color: var(--teal);
+  border-color: rgba(90,138,122,0.4);
+  animation: visionBadgePulse 1.35s ease-in-out infinite;
+}
+.vb-paused {
+  background: rgba(212, 160, 90, 0.22);
+  color: #a06020;
+  border-color: rgba(200, 140, 60, 0.45);
+}
+.vb-done { background: rgba(90,138,122,0.1); color: var(--teal); }
+.vb-error { background: var(--rose-light); color: #8b4545; }
+@keyframes visionBadgePulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(90,138,122,0.28); }
+  50% { opacity: 0.9; box-shadow: 0 0 0 7px rgba(90,138,122,0); }
+}
+
+/* 选项卡 = direction-row 风格 */
+.tabs {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+  border: 1px solid var(--border);
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  background: #fff;
+}
+
+.tab {
+  padding: 12px 22px;
+  border: none;
+  background: transparent;
+  font-family: 'Raleway', sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: all 0.25s var(--ease);
+}
+
+.tab + .tab { border-left: 1px solid var(--border); }
+
+.tab:hover {
+  background: var(--bg);
+  color: var(--ink2);
+}
+
+.tab.active {
+  background: var(--bg2);
+  color: var(--ink2);
+  letter-spacing: 0.26em;
+}
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* 卡片 */
+.card {
+  background: #fff;
+  border: 1px solid var(--border);
+  padding: 22px 24px 24px;
+  margin-bottom: 18px;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--rose);
+  opacity: 0.35;
+}
+
+.card:hover {
+  border-color: var(--border2);
+  box-shadow: 0 4px 22px rgba(0,0,0,0.06);
+}
+
+.card h2 {
+  font-size: 9px;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 16px;
+  font-weight: 400;
+  padding-left: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+label { cursor: pointer; font-size: 13px; color: var(--ink2); }
+
+/* 开关 */
+.switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  display: inline-block;
+}
+
+.switch input { opacity: 0; width: 0; height: 0; }
+
+.slider {
+  position: absolute;
+  inset: 0;
+  background: var(--bg3);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  transition: 0.25s;
+  cursor: pointer;
+}
+
+.slider::before {
+  content: "";
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 2px;
+  background: #fff;
+  border: 1px solid var(--border2);
+  border-radius: 50%;
+  transition: 0.25s;
+}
+
+.switch input:checked + .slider {
+  background: var(--teal-light);
+  border-color: rgba(90,138,122,0.45);
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(20px);
+  border-color: var(--teal);
+}
+
+/* 按钮 */
+button {
+  padding: 11px 22px;
+  border: 1px solid var(--border2);
+  background: #fff;
+  font-family: 'Raleway', sans-serif;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  cursor: pointer;
+  transition: color 0.25s, border-color 0.25s, background 0.25s, letter-spacing 0.25s;
+}
+
+button:hover {
+  background: var(--bg);
+  border-color: var(--rose);
+  color: var(--rose);
+  letter-spacing: 0.32em;
+}
+
+button.primary {
+  padding: 13px 32px;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+  letter-spacing: 0.38em;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+button.primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--rose);
+  transform: translateX(-100%);
+  transition: transform 0.35s var(--ease);
+  z-index: -1;
+}
+
+button.primary:hover::before { transform: translateX(0); }
+button.primary:hover {
+  border-color: var(--rose);
+  color: var(--bg);
+  letter-spacing: 0.42em;
+}
+
+button.danger {
+  border-color: rgba(181,115,106,0.55);
+  color: var(--rose);
+}
+
+button.danger:hover {
+  background: var(--rose);
+  border-color: var(--rose);
+  color: #fff;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dot-on { background: var(--teal); box-shadow: 0 0 0 2px var(--teal-light); }
+.dot-off { background: var(--ink4); }
+.dot-pause { background: var(--rose); }
+.dot-run { background: var(--teal); animation: pulseDot 1.2s ease-in-out infinite; }
+
+@keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+input[type=text], input[type=number], textarea, select {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-family: 'Raleway', sans-serif;
+  font-weight: 400;
+  resize: vertical;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--border2);
+  background: #fff;
+}
+
+textarea { min-height: 3.2rem; line-height: 1.5; }
+
+select {
+  width: auto;
+  min-width: 160px;
+  cursor: pointer;
+}
+
+.log-box {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  font-family: 'Cascadia Code', Consolas, ui-monospace, monospace;
+  font-size: 11px;
+  padding: 14px;
+  min-height: 5.5rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--ink2);
+  line-height: 1.55;
+}
+
+.log-warn { color: #a07040; }
+.log-error { color: var(--rose); }
+
+.steps-list { list-style: none; padding: 0; }
+
+.steps-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--ink2);
+}
+
+.steps-list li:last-child { border-bottom: none; }
+
+.step-status {
+  font-weight: 500;
+  min-width: 5rem;
+  text-align: center;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  font-family: 'Marcellus', serif;
+}
+
+.s-pending { background: var(--bg); color: var(--ink3); }
+.s-running { background: var(--teal-light); color: var(--teal); animation: pulseDot 1.2s infinite; }
+.s-done { background: rgba(90,138,122,0.15); color: var(--teal); }
+.s-error { background: var(--rose-light); color: #8b4545; }
+.s-skipped { background: var(--bg3); color: var(--ink3); }
+
+.preview { margin-top: 12px; text-align: center; }
+
+.preview img {
+  max-width: 100%;
+  border: 1px solid var(--border2);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+}
+
+.badge {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  margin: 4px 6px 4px 0;
+  color: var(--ink2);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(42,32,24,0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  backdrop-filter: blur(3px);
+}
+
+.overlay.active { display: flex; }
+
+.dialog {
+  background: #fff;
+  border: 1px solid var(--border2);
+  padding: 32px 36px;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.12);
+}
+
+.dialog h3 {
+  font-family: 'Pinyon Script', cursive;
+  font-size: 36px;
+  color: var(--rose);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+
+.dialog p {
+  font-size: 13px;
+  margin-bottom: 22px;
+  color: var(--ink3);
+  line-height: 1.6;
+}
+
+.dialog .row { justify-content: center; gap: 14px; }
+
+.dialog.vision-interrupt-dialog { max-width: 520px; text-align: left; }
+.dialog.vision-interrupt-dialog h3 { text-align: center; }
+.vision-form-label {
+  display: block; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink3); margin: 14px 0 6px;
+}
+.vision-form-input, .vision-form-textarea {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  font-family: 'Raleway', sans-serif; font-size: 13px; background: var(--bg);
+  color: var(--ink2);
+}
+.vision-form-textarea { min-height: 72px; resize: vertical; }
+.preview-label {
+  font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink3); margin-bottom: 8px;
+}
+.vision-dual-preview {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start;
+}
+@media (max-width: 720px) {
+  .vision-dual-preview { grid-template-columns: 1fr; }
+}
+
+/* 视觉页内联说明色 */
+.panel .row span[style*="color:#8b949e"],
+.panel span[style*="color:#8b949e"] {
+  color: var(--ink3) !important;
+}
+
+.panel strong[style*="color:#3fb950"] { color: var(--teal) !important; }
+.panel strong[style*="color:#58a6ff"] { color: #4a7a8c !important; }
+.panel strong[style*="color:#d29922"] { color: #a08050 !important; }
+
+/* Footer */
+footer.da-footer {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  padding: 28px 24px 40px;
+  border-top: 1px solid var(--border);
+  animation: fadeUp 0.9s 0.2s var(--ease-out) both;
+}
+
+.da-footer-script {
+  font-family: 'Pinyon Script', cursive;
+  font-size: 28px;
+  color: var(--ink2);
+  opacity: 0.35;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.da-footer-text {
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink4);
+  line-height: 2.4;
+}
+
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 700px) {
+  main.da-main { padding: 0 16px 56px; }
+  .tabs { flex-direction: column; width: 100%; }
+  .tab + .tab { border-left: none; border-top: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+
+<header class="da-header">
+  <span class="da-eyebrow">127.0.0.1 · Local only · Desk automation</span>
+  <div class="da-site-title">Desk <span class="accent">Automation</span></div>
+  <div class="da-ornament">
+    <div class="da-orn-line"></div>
+    <div class="da-orn-dot sm"></div>
+    <div class="da-orn-dot"></div>
+    <div class="da-orn-dot sm"></div>
+    <div class="da-orn-line r"></div>
+  </div>
+  <p class="da-tagline">Vision · Goals · Tools · Delegate · Settings</p>
+</header>
+
+<main class="da-main">
+
+  <!-- 目标状态栏 -->
+  <div class="goal-bar" id="goalBar">
+    <span class="status-dot dot-off" id="goalDot"></span>
+    <span class="goal-text" id="goalText">无活跃目标</span>
+    <span class="goal-badge gb-idle" id="goalBadge">IDLE</span>
+    <span class="vision-badge vb-idle" id="visionStatusBadge" title="视觉循环状态">VISION · IDLE</span>
+  </div>
+
+  <!-- 选项卡 -->
+  <div class="tabs">
+    <div class="tab active" data-tab="vision">视觉操控</div>
+    <div class="tab" data-tab="goal">步骤编排</div>
+    <div class="tab" data-tab="tools">工具 &amp; 环境</div>
+    <div class="tab" data-tab="delegate">AI 委派</div>
+    <div class="tab" data-tab="settings">设置</div>
+  </div>
+
+  <!-- ═══ 视觉操控（核心）═══ -->
+  <div class="panel active" id="panelVision">
+    <div class="card">
+      <h2>告诉我要做什么（自然语言）</h2>
+      <div class="row">
+        <input type="text" id="visionGoal" placeholder="例：打开记事本写一段话  /  搜索今天天气  /  把文件复制到桌面" style="flex:1"/>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="btnVisionStart" style="font-size:inherit;padding:13px 28px;letter-spacing:0.32em">开始执行</button>
+        <button class="danger" id="btnVisionStop">停止</button>
+        <button id="btnVisionResume">继续</button>
+        <span style="margin-left:auto;font-size:12px;color:var(--ink3)">
+          步数上限: <input type="number" id="visionMaxSteps" value="50" min="1" max="200" style="width:56px;padding:8px;text-align:center"/>
+        </span>
+      </div>
+      <div class="row" style="margin-top:10px;padding:14px 16px;background:var(--bg);border:1px solid var(--border)">
+        <span style="font-size:12px;color:var(--ink3);min-width:72px">操作模式:</span>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="execMode" value="auto" checked/> <strong style="color:var(--teal)">auto</strong>
+          <span style="color:var(--ink3);font-size:11px">先 skill，再 human（OCR+节流）</span>
+        </label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:12px">
+          <input type="radio" name="execMode" value="human"/> <strong style="color:#4a7a8c">human</strong>
+          <span style="color:var(--ink3);font-size:11px">OCR→帧差节流→局部/全图 API</span>
+        </label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:12px">
+          <input type="radio" name="execMode" value="skill"/> <strong style="color:#a08050">skill</strong>
+          <span style="color:var(--ink3);font-size:11px">OpenClaw式：API/CLI/技能链，不跑 human 视觉</span>
+        </label>
+      </div>
+      <div id="humanCoreRow" class="row" style="margin-top:6px;padding:10px 16px;background:var(--bg);border:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px 12px">
+        <span style="font-size:12px;color:var(--ink3);min-width:72px">human 核心:</span>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="humanCore" value="som" checked/> <strong style="color:var(--teal)">SoM</strong>
+          <span style="color:var(--ink3);font-size:11px">ROI + 双图 + 编号</span>
+        </label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="humanCore" value="llm"/> <strong style="color:#4a7a8c">LLM</strong>
+          <span style="color:var(--ink3);font-size:11px">文本 + OCR</span>
+        </label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="humanCore" value="multimodal"/> <strong style="color:var(--rose)">多模态</strong>
+          <span style="color:var(--ink3);font-size:11px">批量规划</span>
+        </label>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <span id="visionIntent" class="badge" style="font-size:11px">等待输入…</span>
+        <span id="visionStepInfo" style="font-size:12px;color:var(--ink3)"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>监工视角 · ROI 原图 + SoM 标注</h2>
+      <p style="font-size:12px;color:var(--ink3);margin-bottom:14px;line-height:1.55">右侧为 vision_som_latest.png（红框 ~n）；与主站 <code>Frontend/index.html</code> 行为一致。</p>
+      <div class="vision-dual-preview" style="margin-bottom:16px">
+        <div>
+          <div class="preview-label">原图 ROI</div>
+          <div class="preview" id="visionShotBox">
+            <div class="vision-preview-placeholder" style="color:var(--ink3);font-size:13px;padding:2rem;font-family:'Marcellus',serif;letter-spacing:0.08em;text-align:center">开始任务后显示</div>
+          </div>
+        </div>
+        <div>
+          <div class="preview-label">SoM 标注</div>
+          <div class="preview" id="visionSomBox">
+            <div class="vision-preview-placeholder" style="color:var(--ink3);font-size:13px;padding:2rem;font-family:'Marcellus',serif;letter-spacing:0.08em;text-align:center">等待 SoM 落盘…</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+        <div style="flex:1;min-width:260px;max-width:520px">
+          <div style="font-size:9px;letter-spacing:0.28em;text-transform:uppercase;color:var(--ink3);margin-bottom:8px">当前动作</div>
+          <div id="visionAction" style="background:var(--bg);border:1px solid var(--border);padding:12px;font-family:ui-monospace,monospace;font-size:11px;min-height:88px;color:var(--ink2);white-space:pre-wrap"></div>
+          <div style="font-size:9px;letter-spacing:0.28em;text-transform:uppercase;color:var(--ink3);margin-top:14px">全部操作（action_history JSON）</div>
+          <pre id="visionHistoryJson" style="max-height:320px;overflow:auto;margin:0;padding:10px;background:var(--bg);border:1px solid var(--border);font-size:10px;line-height:1.35;color:var(--ink2);white-space:pre-wrap;word-break:break-word">[]</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>视觉循环日志</h2>
+      <p style="font-size:11px;color:var(--ink3);margin:-8px 0 10px">服务端 vision_event_log（完整 LLM 字段 + 执行 detail）</p>
+      <pre id="visionServerLog" class="log-box" style="white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,monospace;font-size:10px;max-height:420px;overflow-y:auto;margin:0 0 10px;padding:12px;background:var(--bg);border:1px solid var(--border)"></pre>
+      <div class="log-box" id="visionLog" style="max-height:140px;overflow-y:auto"></div>
+    </div>
+
+    <div class="card">
+      <h2>步骤编排快照</h2>
+      <p style="font-size:11px;color:var(--ink3);margin:-8px 0 10px">/api/goal/state</p>
+      <ul class="steps-list" id="visionGoalStepsMirror" style="max-height:220px;overflow-y:auto">
+        <li style="color:var(--ink3);justify-content:center">无数据</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══ 步骤编排 ═══ -->
+  <div class="panel" id="panelGoal">
+    <div class="card">
+      <h2>设定目标</h2>
+      <div class="row">
+        <input type="text" id="goalInput" placeholder="输入最终目标…（例：重构 auth 模块并通过测试）" style="flex:1"/>
+        <button class="primary" id="btnGoalStart">启动</button>
+        <button class="danger" id="btnGoalStop">停止</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>添加步骤</h2>
+      <div class="row">
+        <select id="stepType">
+          <option value="cursor:">cursor: 发送提示词</option>
+          <option value="ask:">ask: 向 AI 提问</option>
+          <option value="shell:">shell: 执行命令</option>
+          <option value="screenshot">screenshot: 截图</option>
+          <option value="wait:">wait: 等待 N 秒</option>
+          <option value="verify">verify: 人工验收</option>
+        </select>
+        <input type="text" id="stepDetail" placeholder="步骤内容…" style="flex:1"/>
+        <button id="btnAddStep">+ 步骤</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>步骤列表</h2>
+      <ul class="steps-list" id="stepsList">
+        <li style="color:var(--ink3);justify-content:center">暂无步骤</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>实时日志</h2>
+      <div class="log-box" id="goalLog"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 工具 & 环境 ═══ -->
+  <div class="panel" id="panelTools">
+    <div class="card">
+      <h2>环境感知（不需要开关）</h2>
+      <div class="row">
+        <button id="invSoft">已装软件</button>
+        <button id="invCli">CLI 探测</button>
+        <button id="invEnv">环境快照</button>
+        <button id="invWin">可见窗口</button>
+        <button id="invProc">进程 Top</button>
+        <button id="invShort">开始菜单</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>截图（需开关开）</h2>
+      <div class="row">
+        <button id="shotFull">主屏截图</button>
+        <input type="text" id="winTitle" placeholder="窗口标题关键字" style="flex:1"/>
+        <button id="shotWin">窗口截图</button>
+      </div>
+      <div class="preview" id="shotBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Cursor 状态</h2>
+      <div class="row">
+        <button id="btnCursorStatus">检测 Cursor 窗口</button>
+        <span id="cursorInfo" style="font-size:13px;color:var(--ink3)">点击检测…</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>工具日志</h2>
+      <div class="log-box" id="toolLog"></div>
+    </div>
+  </div>
+
+  <!-- ═══ AI 委派 ═══ -->
+  <div class="panel" id="panelDelegate">
+    <div class="card">
+      <h2>组装提示词（模板 A: 明确求助）</h2>
+      <textarea id="dBg" placeholder="背景：项目简述…" rows="2"></textarea>
+      <textarea id="dProblem" placeholder="我遇到的问题：只描述现象…" rows="2" style="margin-top:8px"></textarea>
+      <textarea id="dTried" placeholder="我已经尝试过（可选）…" rows="1" style="margin-top:8px"></textarea>
+      <textarea id="dNeed" placeholder="我需要你做什么…" rows="1" style="margin-top:8px"></textarea>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="btnComposeA">生成 &amp; 复制到剪贴板</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>组装提示词（模板 B: 开放探索）</h2>
+      <textarea id="dGoal" placeholder="目标…" rows="2"></textarea>
+      <textarea id="dConstraints" placeholder="约束（操作系统、语言、工具等）…" rows="2" style="margin-top:8px"></textarea>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="btnComposeB">生成 &amp; 复制到剪贴板</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>路由建议</h2>
+      <div class="row">
+        <select id="routeType">
+          <option value="code_generation">代码生成</option>
+          <option value="code_review">代码审查</option>
+          <option value="search_docs">搜索文档</option>
+          <option value="translation">翻译</option>
+          <option value="image_analysis">图像分析</option>
+          <option value="planning">规划</option>
+          <option value="debug">调试</option>
+          <option value="file_conversion">文件转换</option>
+        </select>
+        <button id="btnRoute">查询建议</button>
+        <span id="routeResult" style="font-size:13px;color:var(--ink3)"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 设置 ═══ -->
+  <div class="panel" id="panelSettings">
+    <div class="card">
+      <h2>桌面自动化开关</h2>
+      <div class="row">
+        <span class="status-dot dot-off" id="dotEn"></span>
+        <label class="switch"><input type="checkbox" id="en"/><span class="slider"></span></label>
+        <span style="font-size:14px;color:var(--ink2)">总开关</span>
+        <span class="status-dot dot-off" id="dotPause" style="margin-left:auto"></span>
+        <span style="font-size:14px;color:var(--ink2)" id="pauseLabel">未暂停</span>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button id="btnPause">暂停</button>
+        <button id="btnResume">继续</button>
+        <button id="btnRefresh" style="margin-left:auto">刷新状态</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>说明</h2>
+      <ul style="font-size:13px;color:var(--ink3);padding-left:1.25rem;line-height:1.75">
+        <li>总开关<strong style="color:var(--ink2)">默认关</strong>，开启后 Agent 可截图/键鼠</li>
+        <li>按 <strong style="color:var(--ink2)">ESC</strong> 急停（与主站 Flask 一体时进程内监听；独立 httpd 时仍可用 pause 文件）</li>
+        <li>暂停时弹窗选择：继续 / 终止</li>
+        <li>所有操作仅限 127.0.0.1 本机</li>
+        <li>编排引擎支持：cursor: / ask: / shell: / screenshot / wait: / verify 六种步骤</li>
+      </ul>
+    </div>
+  </div>
+</main>
+
+<footer class="da-footer">
+  <span class="da-footer-script">Orchestrate with care</span>
+  <div class="da-footer-text">
+    Vision loop · Goal steps · Inventory · Delegate · Localhost only
+  </div>
+</footer>
+
+<!-- 暂停对话框 -->
+<div class="overlay" id="pauseOverlay">
+  <div class="dialog">
+    <h3>已暂停</h3>
+    <p>自动化已暂停（ESC 或手动触发）。</p>
+    <div class="row">
+      <button id="dlgResume">继续</button>
+      <button class="danger" id="dlgStop">终止（关闭开关）</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="visionInterruptModal" aria-hidden="true">
+  <div class="dialog vision-interrupt-dialog">
+    <h3>任务已挂起</h3>
+    <p style="text-align:center">ESC 急停或已停止。可追加指令后恢复，或终止本轮视觉任务。</p>
+    <label class="vision-form-label" for="interruptGoalInput">新目标（选填）</label>
+    <input type="text" id="interruptGoalInput" class="vision-form-input" placeholder="留空则保持原目标" autocomplete="off"/>
+    <label class="vision-form-label" for="interruptExtraInput">追加指令 / 上下文（选填）</label>
+    <textarea id="interruptExtraInput" class="vision-form-textarea" placeholder="注入下一轮 User Message…"></textarea>
+    <div class="row" style="margin-top:22px">
+      <button class="primary" type="button" id="interruptBtnResume">继续执行</button>
+      <button class="danger" type="button" id="interruptBtnTerminate">终止任务</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.getElementById(s);
+function TL(logId, m, cls='') {
+  const el=$(logId);
+  const span = document.createElement('span');
+  if(cls) span.className=cls;
+  span.textContent=`[${new Date().toLocaleTimeString()}] ${m}\n`;
+  el.appendChild(span);
+  el.scrollTop=el.scrollHeight;
+}
+const L = (m,cls)=>TL('toolLog',m,cls);
+
+async function api(path, opt) {
+  const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}}, opt||{}));
+  const t = await r.text();
+  let j; try{j=JSON.parse(t)}catch{j={raw:t}}
+  if(!r.ok) throw new Error(j.error||j.detail||t||r.status);
+  return j;
+}
+
+// ── 选项卡切换 ──
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    $('panel'+t.dataset.tab.charAt(0).toUpperCase()+t.dataset.tab.slice(1)).classList.add('active');
+  };
+});
+
+// ── 状态同步 ──
+function setDot(id, cls){ $(id).className='status-dot '+cls; }
+const statusMap={idle:'gb-idle',running:'gb-running',paused:'gb-paused',done:'gb-done',error:'gb-error'};
+const dotMap={idle:'dot-off',running:'dot-run',paused:'dot-pause',done:'dot-on',error:'dot-off'};
+
+/**
+ * @param {Record<string, unknown>} p
+ */
+function applyVisionBadgeFromPayload(p) {
+  const el = $('visionStatusBadge');
+  if (!el) return;
+
+  const stRaw = String(p.vision_status != null ? p.vision_status : 'idle').toLowerCase();
+  const vr = p.vision_running === true;
+
+  let vbClass = 'vision-badge vb-idle';
+  let line = 'VISION · IDLE';
+
+  if (stRaw === 'paused') {
+    vbClass = 'vision-badge vb-paused';
+    line = 'VISION · PAUSED';
+  } else if (stRaw === 'running' && vr) {
+    vbClass = 'vision-badge vb-running';
+    line = 'VISION · RUNNING';
+  } else if (stRaw === 'running' && !vr) {
+    vbClass = 'vision-badge vb-idle';
+    line = 'VISION · IDLE';
+  } else if (stRaw === 'done') {
+    vbClass = 'vision-badge vb-done';
+    line = 'VISION · DONE';
+  } else if (stRaw === 'error') {
+    vbClass = 'vision-badge vb-error';
+    line = 'VISION · ERROR';
+  } else {
+    line = 'VISION · ' + stRaw.toUpperCase();
+  }
+
+  el.className = vbClass;
+  el.textContent = line;
+  const g = p.vision_goal != null ? String(p.vision_goal) : '';
+  const step = p.vision_step != null ? Number(p.vision_step) : NaN;
+  const mx = p.vision_max_steps != null ? Number(p.vision_max_steps) : NaN;
+  const extra = g ? g.slice(0, 100) : '';
+  const stHint = !Number.isNaN(step) && !Number.isNaN(mx) ? ' · 步 ' + step + '/' + mx : '';
+  el.title = ('视觉：' + stRaw + stHint + (extra ? ' — ' + extra : '')).trim();
+}
+
+function showVisionInterruptModalIfNeeded() {
+  const m = $('visionInterruptModal');
+  if (!m || m.classList.contains('active')) return;
+  m.classList.add('active');
+  m.setAttribute('aria-hidden', 'false');
+}
+
+function hideVisionInterruptModal() {
+  const m = $('visionInterruptModal');
+  if (!m) return;
+  m.classList.remove('active');
+  m.setAttribute('aria-hidden', 'true');
+}
+
+/** @type {EventSource | null} */
+let _deskEventSource = null;
+
+function connectDeskSse() {
+  if (_deskEventSource) return;
+  try {
+    _deskEventSource = new EventSource('/api/desk/stream');
+    _deskEventSource.onmessage = (ev) => {
+      try {
+        const d = /** @type {Record<string, unknown>} */ (JSON.parse(ev.data));
+        const evName = String(d.event || '');
+        if (evName === 'interrupt' && d.paused === true) {
+          showVisionInterruptModalIfNeeded();
+          _prevVisionStatus = 'paused';
+        }
+        if (evName === 'interrupt' || evName === 'vision_state' || evName === 'hello') {
+          applyVisionBadgeFromPayload(d);
+        }
+      } catch (_) {}
+    };
+    _deskEventSource.onerror = () => {
+      try { _deskEventSource?.close(); } catch (_) {}
+      _deskEventSource = null;
+      setTimeout(connectDeskSse, 3000);
+    };
+  } catch (_) {}
+}
+
+function syncHumanCoreRow(){
+  const mode=document.querySelector('input[name="execMode"]:checked');
+  if(!mode) return;
+  const row=$('humanCoreRow');
+  if(row) row.style.display=(mode.value==='human'||mode.value==='auto')?'flex':'none';
+}
+
+async function syncStatus(){
+  try{
+    const s=await api('/api/status');
+    $('en').checked=!!s.enabled;
+    setDot('dotEn', s.enabled?'dot-on':'dot-off');
+    setDot('dotPause', s.paused?'dot-pause':'dot-off');
+    $('pauseLabel').textContent=s.paused?'已暂停':'未暂停';
+    $('goalText').textContent=s.goal||'无活跃目标';
+    const gs=s.goal_status||'idle';
+    $('goalBadge').className='goal-badge '+(statusMap[gs]||'gb-idle');
+    $('goalBadge').textContent=gs.toUpperCase();
+    setDot('goalDot', dotMap[gs]||'dot-off');
+    if(s.paused) $('pauseOverlay').classList.add('active');
+    else $('pauseOverlay').classList.remove('active');
+    const modeRadio=document.querySelector(`input[name="execMode"][value="${s.exec_mode||'auto'}"]`);
+    if(modeRadio) modeRadio.checked=true;
+    syncHumanCoreRow();
+    if(s.human_core){
+      const coreRadio=document.querySelector(`input[name="humanCore"][value="${s.human_core}"]`);
+      if(coreRadio) coreRadio.checked=true;
+    }
+    applyVisionBadgeFromPayload({
+      vision_status: s.vision_status,
+      vision_running: s.vision_running,
+      vision_goal: s.vision_goal,
+      vision_step: s.vision_step,
+      vision_max_steps: s.vision_max_steps,
+    });
+  }catch(e){L('ERR '+e.message,'log-error')}
+}
+
+async function syncGoalState(){
+  try{
+    const s=await api('/api/goal/state');
+    const ul=$('stepsList');
+    ul.innerHTML='';
+    const steps=s.steps||[];
+    if(!steps.length){ul.innerHTML='<li style="color:var(--ink3);justify-content:center">暂无步骤</li>';return}
+    steps.forEach(st=>{
+      const li=document.createElement('li');
+      const badge=document.createElement('span');
+      badge.className='step-status s-'+(st.status||'pending');
+      badge.textContent=st.status||'pending';
+      const txt=document.createElement('span');
+      txt.style.flex='1';
+      txt.textContent=st.action+(st.detail?' — '+st.detail:'');
+      const res=document.createElement('span');
+      res.style.cssText='font-size:11px;color:var(--ink3);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      res.textContent=st.result||'';
+      li.append(badge,txt,res);
+      ul.appendChild(li);
+    });
+  }catch(e){}
+}
+
+async function syncGoalLog(){
+  try{
+    const r=await api('/api/goal/log?n=80');
+    const el=$('goalLog');
+    el.innerHTML='';
+    (r.log||[]).forEach(l=>{
+      const span=document.createElement('span');
+      span.className=l.level==='error'?'log-error':l.level==='warn'?'log-warn':'';
+      span.textContent=`[${l.ts}] ${l.msg}\n`;
+      el.appendChild(span);
+    });
+    el.scrollTop=el.scrollHeight;
+  }catch(e){}
+}
+
+// ── 开关/暂停 ──
+$('en').onchange=async ev=>{
+  try{await api('/api/enabled',{method:'POST',body:JSON.stringify({enabled:ev.target.checked})});syncStatus()}catch(e){L('ERR '+e.message,'log-error');ev.target.checked=!ev.target.checked}
+};
+$('btnPause').onclick=async()=>{try{await api('/api/pause',{method:'POST',body:'{}'});syncStatus()}catch(e){L('ERR '+e.message,'log-error')}};
+$('btnResume').onclick=$('dlgResume').onclick=async()=>{try{await api('/api/resume',{method:'POST',body:'{}'});syncStatus()}catch(e){L('ERR '+e.message,'log-error')}};
+$('dlgStop').onclick=async()=>{
+  try{await api('/api/goal/stop',{method:'POST',body:'{}'});await api('/api/resume',{method:'POST',body:'{}'});await api('/api/enabled',{method:'POST',body:'{"enabled":false}'});syncStatus();L('已终止')}catch(e){L('ERR '+e.message,'log-error')}
+};
+$('btnRefresh').onclick=()=>{syncStatus();syncGoalState();syncGoalLog()};
+
+// ── 目标控制 ──
+$('btnGoalStart').onclick=async()=>{
+  const goal=$('goalInput').value.trim();
+  if(!goal){TL('goalLog','请输入目标','log-warn');return}
+  try{
+    const r=await api('/api/goal/start',{method:'POST',body:JSON.stringify({goal})});
+    TL('goalLog','目标已启动: '+goal);
+    syncStatus();syncGoalState();
+  }catch(e){TL('goalLog','ERR: '+e.message,'log-error')}
+};
+$('btnGoalStop').onclick=async()=>{
+  try{await api('/api/goal/stop',{method:'POST',body:'{}'});TL('goalLog','目标已停止');syncStatus();syncGoalState()}catch(e){TL('goalLog','ERR: '+e.message,'log-error')}
+};
+
+$('btnAddStep').onclick=async()=>{
+  const type=$('stepType').value;
+  const detail=$('stepDetail').value.trim();
+  const action=type.endsWith(':')?type+detail:type;
+  try{
+    await api('/api/goal/step',{method:'POST',body:JSON.stringify({action,detail})});
+    $('stepDetail').value='';
+    syncGoalState();
+  }catch(e){TL('goalLog','ERR: '+e.message,'log-error')}
+};
+
+// ── 环境/截图 ──
+async function invBtn(path,label){
+  try{const j=await api(path);L(label+': '+JSON.stringify(j).slice(0,600))}catch(e){L('ERR '+e.message,'log-error')}
+}
+$('invSoft').onclick=()=>invBtn('/api/inventory/software','software');
+$('invCli').onclick=()=>invBtn('/api/inventory/cli','cli');
+$('invEnv').onclick=()=>invBtn('/api/inventory/env','env');
+$('invWin').onclick=()=>invBtn('/api/inventory/windows','windows');
+$('invProc').onclick=()=>invBtn('/api/inventory/processes','processes');
+$('invShort').onclick=()=>invBtn('/api/inventory/shortcuts','shortcuts');
+
+async function showShot(url,opt){
+  const box=$('shotBox');box.innerHTML='';
+  try{
+    const r=await fetch(url,opt||{});
+    if(!r.ok){const t=await r.text();throw new Error(t)}
+    const blob=await r.blob();
+    const img=document.createElement('img');
+    img.src=URL.createObjectURL(blob);
+    box.appendChild(img);
+    L('screenshot ok');
+  }catch(e){L('ERR '+e.message,'log-error')}
+}
+$('shotFull').onclick=()=>showShot('/api/screenshot.png');
+$('shotWin').onclick=()=>{
+  const t=$('winTitle').value.trim();
+  if(!t){L('请输入窗口标题关键字','log-warn');return}
+  showShot('/api/capture/window',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t})});
+};
+
+$('btnCursorStatus').onclick=async()=>{
+  try{const r=await api('/api/cursor/status');$('cursorInfo').textContent=r.found?`✓ ${r.title} (PID:${r.pid})`:'✗ 未检测到 Cursor 窗口'}catch(e){$('cursorInfo').textContent='ERR: '+e.message}
+};
+
+// ── AI 委派 ──
+$('btnComposeA').onclick=async()=>{
+  try{
+    const r=await api('/api/delegate/compose',{method:'POST',body:JSON.stringify({template:'a',background:$('dBg').value,problem:$('dProblem').value,tried:$('dTried').value,need:$('dNeed').value})});
+    await api('/api/delegate/clipboard',{method:'POST',body:JSON.stringify({prompt:r.prompt})});
+    TL('goalLog','模板 A 已复制到剪贴板 ('+r.prompt.length+' 字)');
+  }catch(e){TL('goalLog','ERR: '+e.message,'log-error')}
+};
+$('btnComposeB').onclick=async()=>{
+  try{
+    const r=await api('/api/delegate/compose',{method:'POST',body:JSON.stringify({template:'b',goal:$('dGoal').value,constraints:$('dConstraints').value})});
+    await api('/api/delegate/clipboard',{method:'POST',body:JSON.stringify({prompt:r.prompt})});
+    TL('goalLog','模板 B 已复制到剪贴板 ('+r.prompt.length+' 字)');
+  }catch(e){TL('goalLog','ERR: '+e.message,'log-error')}
+};
+$('btnRoute').onclick=async()=>{
+  try{const r=await api('/api/routing?type='+$('routeType').value);$('routeResult').textContent=`推荐: ${r.prefer} | 备选: ${r.fallback} — ${r.reason}`}catch(e){$('routeResult').textContent='ERR'}
+};
+
+// ── 视觉循环 ──
+document.querySelectorAll('input[name="execMode"]').forEach(r=>{
+  r.onchange=async()=>{
+    syncHumanCoreRow();
+    try{await api('/api/exec_mode',{method:'POST',body:JSON.stringify({mode:r.value})});TL('visionLog','模式切换: '+r.value)}catch(e){TL('visionLog','ERR: '+e.message,'log-error')}
+  };
+});
+document.querySelectorAll('input[name="humanCore"]').forEach(r=>{
+  r.onchange=async()=>{
+    try{await api('/api/human_core',{method:'POST',body:JSON.stringify({core:r.value})});TL('visionLog','human 核心: '+r.value)}catch(e){TL('visionLog','ERR: '+e.message,'log-error')}
+  };
+});
+syncHumanCoreRow();
+
+let _prevVisionStatus = 'idle';
+
+$('btnVisionStart').onclick=async()=>{
+  const goal=$('visionGoal').value.trim();
+  if(!goal){TL('visionLog','请输入要做什么','log-warn');return}
+  const ms=parseInt($('visionMaxSteps').value)||50;
+  const mode=document.querySelector('input[name="execMode"]:checked').value;
+  try{
+    const r=await api('/api/vision/start',{method:'POST',body:JSON.stringify({goal,max_steps:ms,exec_mode:mode})});
+    TL('visionLog',`[${r.exec_mode||mode}] 启动: `+goal);
+    _prevVisionStatus='running';
+    hideVisionInterruptModal();
+  }catch(e){TL('visionLog','ERR: '+e.message,'log-error')}
+};
+$('btnVisionStop').onclick=async()=>{
+  try{await api('/api/vision/stop',{method:'POST',body:'{}'});TL('visionLog','已停止（paused）')}catch(e){TL('visionLog','ERR: '+e.message,'log-error')}
+};
+$('btnVisionResume').onclick=async()=>{
+  try{
+    await api('/api/vision/resume',{method:'POST',body:JSON.stringify({})});
+    TL('visionLog','已恢复');
+    hideVisionInterruptModal();
+    _prevVisionStatus='running';
+  }catch(e){TL('visionLog','ERR: '+e.message,'log-error')}
+};
+
+$('visionGoal').oninput=async()=>{
+  const msg=$('visionGoal').value.trim();
+  if(!msg){$('visionIntent').textContent='等待输入…';return}
+  try{
+    const r=await api('/api/nlu/classify',{method:'POST',body:JSON.stringify({message:msg})});
+    $('visionIntent').textContent='意图: '+r.intent+(r.constraints?' — '+r.constraints:'');
+  }catch(e){}
+};
+
+async function _fillVisionPngBox(box, url) {
+  try {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return false;
+    const blob = await r.blob();
+    box.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(blob);
+    img.style.cssText = 'max-width:100%;height:auto;display:block;border:1px solid var(--border2)';
+    box.appendChild(img);
+    return true;
+  } catch (e) { return false; }
+}
+function _resetVisionPreviewPlaceholders() {
+  const ph = '<div class="vision-preview-placeholder" style="color:var(--ink3);font-size:13px;padding:2rem;font-family:\'Marcellus\',serif;letter-spacing:0.08em;text-align:center">开始任务后显示</div>';
+  const phSom = '<div class="vision-preview-placeholder" style="color:var(--ink3);font-size:13px;padding:2rem;font-family:\'Marcellus\',serif;letter-spacing:0.08em;text-align:center">等待 SoM 落盘…</div>';
+  $('visionShotBox').innerHTML = ph;
+  $('visionSomBox').innerHTML = phSom;
+}
+
+function formatVisionServerLog(evts) {
+  if (!evts || !evts.length) return '（尚无服务端事件）\n';
+  const lines = [];
+  for (const ev of evts) {
+    const tw = ev.ts_wall || '';
+    const k = ev.kind || '';
+    if (k === 'som_step') {
+      const L = ev.llm || {};
+      const X = ev.exec || {};
+      lines.push(`══ ${tw}  [${k}] step=${ev.step} roi=${ev.roi_label || ''} ══`);
+      lines.push(`  observation: ${L.observation || ''}`);
+      lines.push(`  history_check: ${L.history_check || ''}`);
+      lines.push(`  action: ${L.action}  params: ${JSON.stringify(L.params || {})}`);
+      lines.push(`  reasoning: ${L.reasoning || ''}`);
+      lines.push(`  exec.result: ${(X && X.result) || ''}  target_snapshot: ${(X && X.target_snapshot) || ''}`);
+      lines.push(`  exec.detail: ${JSON.stringify((X && X.detail) || {})}`);
+      lines.push('');
+    } else if (k === 'som_exec_error') {
+      lines.push(`══ ${tw}  [${k}] step=${ev.step} ══`);
+      lines.push(`  error: ${ev.error || ''}`);
+      lines.push(`  llm: ${JSON.stringify(ev.llm || {})}`);
+      lines.push(`  target_snapshot: ${ev.target_snapshot || ''}`);
+      lines.push('');
+    } else if (k === 'llm_http_error') {
+      lines.push(`══ ${tw}  [${k}] step=${ev.step ?? '-'} ══`);
+      lines.push(`  error: ${ev.error || ''}`);
+      lines.push('');
+    } else if (k === 'terminal') {
+      lines.push(`══ ${tw}  [terminal:${ev.terminal}] ══`);
+      if (ev.error) lines.push(`  error: ${ev.error}`);
+      lines.push(JSON.stringify(ev.llm || {}, null, 2));
+      lines.push('');
+    } else if (k === 'som_screenshot') {
+      lines.push(`══ ${tw}  [screenshot] step=${ev.step} ══`);
+      lines.push(JSON.stringify(ev.llm || {}, null, 2));
+      lines.push('');
+    } else {
+      lines.push(`══ ${tw}  [${k}] ══`);
+      lines.push(JSON.stringify(ev, null, 2));
+      lines.push('');
+    }
+  }
+  return lines.join('\n');
+}
+
+async function syncVision(){
+  try{
+    const s=await api('/api/vision/state');
+    if (_prevVisionStatus === 'running' && s.status === 'paused') {
+      showVisionInterruptModalIfNeeded();
+    }
+    _prevVisionStatus = s.status;
+
+    applyVisionBadgeFromPayload({
+      vision_status: s.status,
+      vision_running: s.vision_running,
+      vision_goal: s.goal,
+      vision_step: s.step_count,
+      vision_max_steps: s.max_steps,
+    });
+
+    $('visionStepInfo').textContent=s.status!=='idle'?`步骤 ${s.step_count}/${s.max_steps} | ${s.status} | ${s.elapsed_sec}s`:'';
+    if(s.last_action && s.last_action.action){
+      $('visionAction').textContent=JSON.stringify(s.last_action,null,2);
+    }
+    const vhj = $('visionHistoryJson');
+    if (vhj) vhj.textContent = JSON.stringify(s.action_history || [], null, 2);
+    const vsl = $('visionServerLog');
+    if (vsl) vsl.textContent = formatVisionServerLog(s.vision_event_log || []);
+
+    try {
+      const g = await api('/api/goal/state');
+      const ul = $('visionGoalStepsMirror');
+      if (ul) {
+        const steps = g.steps || [];
+        ul.innerHTML = '';
+        if (!steps.length) {
+          ul.innerHTML = '<li style="color:var(--ink3);justify-content:center">暂无步骤</li>';
+        } else {
+          steps.forEach(st => {
+            const li = document.createElement('li');
+            const badge = document.createElement('span');
+            badge.className = 'step-status s-' + (st.status || 'pending');
+            badge.textContent = st.status || 'pending';
+            const txt = document.createElement('span');
+            txt.style.flex = '1';
+            txt.style.fontSize = '11px';
+            txt.textContent = st.action + (st.detail ? ' — ' + st.detail : '');
+            li.append(badge, txt);
+            ul.appendChild(li);
+          });
+        }
+      }
+    } catch (_) {}
+    const live = s.status === 'running' || s.status === 'paused';
+    const t = Date.now();
+    if (live) {
+      await _fillVisionPngBox($('visionShotBox'), `/api/vision/artifacts/vision_raw_latest.png?t=${t}`);
+      await _fillVisionPngBox($('visionSomBox'), `/api/vision/artifacts/vision_som_latest.png?t=${t}`);
+    } else if (s.status === 'idle' && (s.step_count|0) === 0) {
+      _resetVisionPreviewPlaceholders();
+    }
+  }catch(e){}
+}
+
+$('interruptBtnResume').onclick = async () => {
+  const g = $('interruptGoalInput').value.trim();
+  const ex = $('interruptExtraInput').value.trim();
+  const body = {};
+  if (g) body.goal = g;
+  if (ex) body.extra_context = ex;
+  try {
+    const r = await api('/api/vision/resume', { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok === false) throw new Error(r.error || 'resume failed');
+    if (g) $('visionGoal').value = g;
+    hideVisionInterruptModal();
+    _prevVisionStatus = 'running';
+    TL('visionLog', '已继续执行');
+  } catch (e) { TL('visionLog', 'Resume ERR: ' + e.message, 'log-error'); }
+};
+$('interruptBtnTerminate').onclick = async () => {
+  try {
+    await api('/api/vision/terminate', { method: 'POST', body: '{}' });
+    hideVisionInterruptModal();
+    _prevVisionStatus = 'idle';
+    _resetVisionPreviewPlaceholders();
+    TL('visionLog', '视觉任务已终止');
+  } catch (e) { TL('visionLog', 'Terminate ERR: ' + e.message, 'log-error'); }
+};
+
+// ── 自动轮询 + SSE ──
+connectDeskSse();
+syncStatus(); syncGoalState(); syncGoalLog(); syncVision();
+setInterval(()=>{syncStatus();syncGoalState();syncGoalLog();syncVision()}, 3000);
+</script>
+</body>
+</html>

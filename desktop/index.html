@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://127.0.0.1:* data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:*; connect-src 'self' http://127.0.0.1:*; frame-src 'self' http://127.0.0.1:*;" />
+    <link rel="icon" type="image/png" href="/src/assets/metis-M-128.png" />
+    <title>Metis</title>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('metis.theme') || 'cathedral-obsidian';
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.background = theme === 'templar-silver' || theme === 'paladin-ivory' || theme === 'crusader-parchment' ? '#F5F3EF' : '#0A0A0E';
+        } catch (_) {
+          document.documentElement.dataset.theme = 'cathedral-obsidian';
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

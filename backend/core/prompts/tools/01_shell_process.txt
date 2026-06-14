@@ -1,0 +1,152 @@
+# Category 1: Shell & Process Management (5 tools)
+
+## 1. execute_bash_command
+**Alias**: Shell  
+**Purpose**: Execute shell commands with timeout and working directory control
+
+**Parameters**:
+- `command` (required): Shell command to execute
+- `cwd` (optional): Working directory (defaults to workspace root)
+- `timeout` (optional): Timeout in seconds (default: 30)
+- `description` (optional): Description for logging
+
+**C-style aliases**:
+- `working_directory` → `cwd`
+- `block_until_ms` → `timeout` (converted from ms to seconds)
+
+**Usage**:
+```python
+# Basic command
+execute_bash_command(command="ls -la")
+
+# With working directory
+execute_bash_command(command="npm install", cwd="frontend")
+
+# With timeout
+execute_bash_command(command="pytest", timeout=60)
+
+# C-style
+execute_bash_command(command="npm test", working_directory="frontend", block_until_ms=60000)
+```
+
+**Safety**:
+- Never use `cd` command (use `cwd` parameter)
+- Avoid long-running commands (use start_long_running_process)
+- Commands are logged with description
+- Timeout prevents hanging
+
+---
+
+## 2. start_long_running_process
+**Purpose**: Start background processes (dev servers, watchers)
+
+**Parameters**:
+- `command` (required): Command to run in background
+- `cwd` (optional): Working directory
+
+**Returns**:
+- `terminalId`: Unique identifier for the process
+- `isReused`: Whether existing process was reused
+
+**Usage**:
+```python
+# Start dev server
+result = start_long_running_process(command="npm run dev", cwd="frontend")
+terminal_id = result["terminalId"]
+
+# Start watcher
+start_long_running_process(command="webpack --watch")
+
+# Start Python server
+start_long_running_process(command="python manage.py runserver", cwd="backend")
+```
+
+**Use cases**:
+- npm run dev, yarn start
+- webpack --watch, rollup --watch
+- python manage.py runserver
+- Any command that doesn't terminate quickly
+
+**Features**:
+- Returns immediately (non-blocking)
+- Reuses existing process if same command+cwd
+- Can monitor with read_terminal_state
+- Can stop with stop_long_running_process
+
+---
+
+## 3. stop_long_running_process
+**Purpose**: Stop a background process
+
+**Parameters**:
+- `terminalId` (required): Process identifier from start_long_running_process
+
+**Usage**:
+```python
+# Stop specific process
+stop_long_running_process(terminalId="term_abc123")
+
+# Typical workflow
+result = start_long_running_process(command="npm run dev")
+# ... do work ...
+stop_long_running_process(terminalId=result["terminalId"])
+```
+
+**Features**:
+- Graceful termination
+- Cleans up resources
+- Closes terminal
+
+---
+
+## 4. list_long_running_processes
+**Purpose**: List all active background processes
+
+**Returns**: List of processes with terminalId, command, path, status
+
+**Usage**:
+```python
+# List all processes
+processes = list_long_running_processes()
+
+# Iterate and display
+for proc in processes:
+    print(f"{proc['terminalId']}: {proc['command']} ({proc['status']})")
+
+# Find specific process
+dev_servers = [p for p in processes if "dev" in p['command']]
+```
+
+**Status values**:
+- `running`: Process is active
+- `stopped`: Process has terminated
+- `unknown`: Status cannot be determined
+
+---
+
+## 5. register_external_process
+**Purpose**: Register externally started processes for monitoring
+
+**Parameters**:
+- `terminalId` (required): External process identifier
+- `command` (required): Command that was run
+- `cwd` (optional): Working directory
+
+**Usage**:
+```python
+# Register external process
+register_external_process(
+    terminalId="external_123",
+    command="docker-compose up",
+    cwd="deployment"
+)
+
+# Now can monitor with list_long_running_processes
+processes = list_long_running_processes()
+```
+
+**Use case**:
+- Processes started outside Metis
+- Manual terminal processes
+- System services
+- Docker containers

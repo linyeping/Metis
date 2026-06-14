@@ -1,0 +1,521 @@
+# Category 6: Modify & Refactor (6 tools)
+
+## 1. robust_replace_in_file
+**Alias**: StrReplace  
+**Purpose**: Precise text replacement in files with exact matching
+
+**Parameters**:
+- `file_path` (required): Path to file
+- `search_text` (required): Text to find (must be unique unless replace_all=true)
+- `replace_text` (required): Replacement text
+- `replace_all` (optional): Replace all occurrences (default: false)
+
+**C-style aliases**:
+- `path` → `file_path`
+- `old_string` → `search_text`
+- `new_string` → `replace_text`
+
+**Usage**:
+```python
+# Single replacement
+robust_replace_in_file(
+    file_path="src/auth.py",
+    search_text="def login(username, password):\n    return authenticate(username, password)",
+    replace_text="def login(username, password):\n    if not username or not password:\n        raise ValueError('Required')\n    return authenticate(username, password)"
+)
+
+# C-style aliases
+robust_replace_in_file(
+    path="config.py",
+    old_string="DEBUG = True",
+    new_string="DEBUG = False"
+)
+
+# Replace all occurrences
+robust_replace_in_file(
+    file_path="utils.py",
+    search_text="old_function()",
+    replace_text="new_function()",
+    replace_all=True
+)
+```
+
+**Critical Requirements** (Metis tool discipline):
+
+1. **EXACT MATCHING**: `search_text` must match EXACTLY
+   - Every character must match
+   - Whitespace must match (spaces, tabs, newlines)
+   - Case must match
+
+2. **WHITESPACE SENSITIVE**: Extra important for Python
+   ```python
+   # Bad: Wrong indentation
+   search_text="def foo():\nreturn 1"
+   
+   # Good: Correct indentation
+   search_text="def foo():\n    return 1"
+   ```
+
+3. **UNIQUENESS**: `search_text` must be unique (unless replace_all=true)
+   - Include 2-3 lines of context before/after
+   - If not unique, operation fails
+   - Use replace_all=true for multiple occurrences
+
+4. **STRINGS MUST BE DIFFERENT**: `search_text` ≠ `replace_text`
+
+**Best Practices**:
+
+1. **Include context for uniqueness**:
+   ```python
+   # Bad: Not unique (appears multiple times)
+   search_text="return True"
+   
+   # Good: Unique with context
+   search_text="""def validate_user(user):
+       if user.is_active:
+           return True"""
+   ```
+
+2. **Parallel execution for multiple files**:
+   ```python
+   # All execute simultaneously
+   robust_replace_in_file(file_path="a.py", ...)
+   robust_replace_in_file(file_path="b.py", ...)
+   robust_replace_in_file(file_path="c.py", ...)
+   ```
+
+3. **Read first, then replace**:
+   ```python
+   # 1. Read to understand
+   content = read_file(file_path="module.py", explanation="Find function to modify")
+   
+   # 2. Replace with exact text from file
+   robust_replace_in_file(
+       file_path="module.py",
+       search_text="<exact text from file>",
+       replace_text="<modified text>"
+   )
+   ```
+
+**Features**:
+- **Exact matching**: No fuzzy matching
+- **Whitespace sensitive**: Preserves formatting
+- **Uniqueness check**: Prevents ambiguous replacements
+- **replace_all option**: For multiple occurrences
+- **Post-edit linting**: Auto-runs if enabled
+
+**Common Errors**:
+
+1. **"search_text not found"**:
+   - Check exact match (including whitespace)
+   - Read file first to get exact text
+   - Check file path is correct
+
+2. **"search_text found multiple times"**:
+   - Add more context lines
+   - Use replace_all=true
+   - Make search_text more specific
+
+3. **"search_text and replace_text are the same"**:
+   - Ensure they are different
+   - Check for accidental copy-paste
+
+---
+
+## 2. apply_patch (ApplyPatch)
+**Purpose**: Apply unified diff patches for complex multi-location changes
+
+**Parameters**:
+- `patch` (required): Unified diff patch content
+- `file_path` (optional): Target file (if not in patch)
+- `strip` (optional): Strip N leading path components (default: 0)
+
+**Usage**:
+```python
+# Apply patch
+patch_content = """
+--- a/src/utils.py
++++ b/src/utils.py
+@@ -10,7 +10,7 @@
+ def process(data):
+-    return data
++    return data.strip()
+     
+@@ -25,3 +25,5 @@
+ def validate(input):
+     return bool(input)
++
++def sanitize(input):
++    return input.strip().lower()
+"""
+
+apply_patch(patch=patch_content)
+
+# Apply to specific file
+apply_patch(
+    patch=patch_content,
+    file_path="src/utils.py"
+)
+
+# Strip path components
+apply_patch(
+    patch=patch_content,
+    strip=1  # Remove first path component
+)
+```
+
+**Use Cases**:
+- Complex multi-location changes
+- Changes from git diff
+- Batch modifications
+- Porting changes between branches
+
+**Patch Format** (unified diff):
+```
+--- a/file.py
++++ b/file.py
+@@ -line,count +line,count @@
+ context line
+-removed line
++added line
+ context line
+```
+
+---
+
+## 3. editCode
+**Purpose**: AST-based code editing (safer than text replacement)
+
+**Parameters**:
+- `file_path` (required): Path to code file
+- `edit_instructions` (required): Natural language edit instructions
+- `target_symbol` (optional): Specific symbol to edit (function/class name)
+- `language` (optional): Programming language (auto-detected)
+
+**Usage**:
+```python
+# Edit specific function
+editCode(
+    file_path="src/utils.py",
+    target_symbol="process_data",
+    edit_instructions="Add input validation at the beginning"
+)
+
+# General edit
+editCode(
+    file_path="src/main.py",
+    edit_instructions="Add error handling to all functions"
+)
+
+# With language specified
+editCode(
+    file_path="script.js",
+    language="javascript",
+    edit_instructions="Convert all var to const or let"
+)
+```
+
+**Features** (Metis runtime pattern):
+- **AST-aware**: Understands code structure
+- **Safer**: Preserves syntax
+- **Intelligent**: Understands context
+- **Language-agnostic**: Works with multiple languages
+
+**When to Use**:
+- Complex code transformations
+- Need to preserve structure
+- Multiple related changes
+- Refactoring operations
+
+**When NOT to Use**:
+- Simple text replacement (use robust_replace_in_file)
+- Non-code files
+- Need exact control over changes
+
+---
+
+## 4. edit_notebook
+**Alias**: EditNotebook  
+**Purpose**: Edit Jupyter notebooks with multiple modes
+
+**Parameters**:
+- `path` (required): Path to notebook (.ipynb)
+- `cell_index` (required): Cell index to edit (0-indexed)
+- `is_new_cell` (optional): Insert new cell (default: false)
+- `old_string` (optional): Text to replace (block mode)
+- `new_string` (optional): Replacement text (block mode)
+- `new_content` (optional): Complete new cell content
+
+**C-style aliases**:
+- `target_notebook` → `path`
+
+**Three Modes**:
+
+### Mode 1: Insert New Cell
+```python
+edit_notebook(
+    path="analysis.ipynb",
+    cell_index=5,
+    is_new_cell=True,
+    new_content="import pandas as pd\nimport numpy as np"
+)
+```
+
+### Mode 2: Block Replacement
+```python
+edit_notebook(
+    path="analysis.ipynb",
+    cell_index=3,
+    old_string="df = pd.read_csv('old.csv')",
+    new_string="df = pd.read_csv('new.csv')"
+)
+```
+
+### Mode 3: Whole Cell Replacement
+```python
+edit_notebook(
+    path="analysis.ipynb",
+    cell_index=2,
+    new_content="# Updated analysis\ndf.describe()\ndf.info()"
+)
+```
+
+**Features**:
+- **Three modes**: Insert, block replace, whole replace
+- **Preserves structure**: Maintains notebook format
+- **Cell indexing**: 0-based indexing
+- **Metadata preserved**: Keeps cell metadata
+
+**Best Practices**:
+
+1. **Read notebook first**:
+   ```python
+   # 1. Read to understand structure
+   content = read_file(path="notebook.ipynb", explanation="Check notebook structure")
+   
+   # 2. Edit specific cell
+   edit_notebook(path="notebook.ipynb", cell_index=3, ...)
+   ```
+
+2. **Use appropriate mode**:
+   - New cell: `is_new_cell=True`
+   - Small change: `old_string`/`new_string`
+   - Complete rewrite: `new_content`
+
+---
+
+## 5. rename_symbol
+**Purpose**: Semantic symbol renaming across codebase with automatic reference updates
+
+**Parameters**:
+- `file_path` (required): File containing symbol
+- `old_name` (required): Current symbol name
+- `new_name` (required): New symbol name
+- `line` (required): Line number (0-indexed)
+- `character` (required): Character position (0-indexed)
+
+**Usage**:
+```python
+# Rename variable
+rename_symbol(
+    file_path="src/utils.py",
+    old_name="process_data",
+    new_name="transform_data",
+    line=15,
+    character=4
+)
+
+# Rename class
+rename_symbol(
+    file_path="src/models.py",
+    old_name="UserModel",
+    new_name="User",
+    line=10,
+    character=6
+)
+
+# Rename function parameter
+rename_symbol(
+    file_path="src/api.py",
+    old_name="user_id",
+    new_name="userId",
+    line=25,
+    character=15
+)
+```
+
+**Features** (Metis runtime pattern):
+- **Auto-updates references**: All references across codebase
+- **Language-aware**: Understands scope and context
+- **Cross-file**: Updates imports and usages
+- **Safe**: Validates symbol exists
+
+**Position Guidelines**:
+- Line: 0-indexed (first line is 0)
+- Character: 0-indexed (first character is 0)
+- Position should point to START of symbol name
+
+**Example**:
+```python
+# File content (line 15):
+"    def process_data(input):"
+#    ^   ^
+#    0   4 (character position)
+
+rename_symbol(
+    file_path="utils.py",
+    old_name="process_data",
+    new_name="transform_data",
+    line=15,
+    character=8  # Points to 'p' in 'process_data'
+)
+```
+
+**After Execution**:
+- DO NOT search for changes
+- DO NOT verify with grep
+- DO NOT read files to check
+- Trust the tool's success message
+
+---
+
+## 6. extract_method
+**Purpose**: Extract code into new method/function (refactoring)
+
+**Parameters**:
+- `file_path` (required): File to refactor
+- `start_line` (required): Start of code to extract (1-indexed)
+- `end_line` (required): End of code to extract (1-indexed)
+- `new_method_name` (required): Name for new method
+- `access_modifier` (optional): public/private/protected
+
+**Usage**:
+```python
+# Extract method
+extract_method(
+    file_path="src/processor.py",
+    start_line=45,
+    end_line=60,
+    new_method_name="validate_input"
+)
+
+# With access modifier
+extract_method(
+    file_path="src/service.java",
+    start_line=100,
+    end_line=120,
+    new_method_name="processData",
+    access_modifier="private"
+)
+```
+
+**What It Does**:
+1. Extracts lines 45-60 into new method
+2. Analyzes variables used
+3. Determines parameters needed
+4. Determines return value
+5. Replaces original code with method call
+6. Inserts new method definition
+
+**Before**:
+```python
+def complex_function(data):
+    # ... lines 1-44 ...
+    
+    # Lines 45-60 (to be extracted)
+    if not data:
+        return None
+    cleaned = data.strip()
+    validated = validate(cleaned)
+    if not validated:
+        raise ValueError("Invalid")
+    return cleaned
+    
+    # ... lines 61+ ...
+```
+
+**After**:
+```python
+def complex_function(data):
+    # ... lines 1-44 ...
+    
+    return validate_input(data)
+    
+    # ... lines 61+ ...
+
+def validate_input(data):
+    if not data:
+        return None
+    cleaned = data.strip()
+    validated = validate(cleaned)
+    if not validated:
+        raise ValueError("Invalid")
+    return cleaned
+```
+
+**Features**:
+- **Auto-detects parameters**: Analyzes variable usage
+- **Auto-detects return**: Determines what to return
+- **Preserves behavior**: No functional changes
+- **Language-aware**: Works with multiple languages
+
+---
+
+## Comparison Table
+
+| Tool | Use Case | Precision | Speed | Scope |
+|------|----------|-----------|-------|-------|
+| robust_replace_in_file | Exact text replacement | Exact | Fast | Single file |
+| apply_patch | Multi-location changes | Exact | Fast | Multiple files |
+| editCode | Code transformations | AST | Medium | Single file |
+| edit_notebook | Jupyter notebooks | Exact | Fast | Single notebook |
+| rename_symbol | Symbol renaming | Semantic | Medium | Entire codebase |
+| extract_method | Refactoring | AST | Medium | Single file |
+
+---
+
+## Common Patterns
+
+### Pattern 1: Simple Fix
+```python
+# Read → Replace → Verify
+content = read_file(file_path="utils.py", explanation="Find bug")
+robust_replace_in_file(file_path="utils.py", search_text="...", replace_text="...")
+read_lints(paths="utils.py")
+```
+
+### Pattern 2: Refactoring
+```python
+# Rename → Extract → Verify
+rename_symbol(file_path="service.py", old_name="old", new_name="new", ...)
+extract_method(file_path="service.py", start_line=50, end_line=70, ...)
+execute_bash_command(command="pytest tests/test_service.py")
+```
+
+### Pattern 3: Batch Changes
+```python
+# Parallel replacements
+robust_replace_in_file(file_path="a.py", ...)
+robust_replace_in_file(file_path="b.py", ...)
+robust_replace_in_file(file_path="c.py", ...)
+```
+
+---
+
+## Metis runtime pattern
+- AST-based editing (editCode)
+- Semantic renaming (rename_symbol)
+- Intelligent refactoring (extract_method)
+- Post-edit linting
+
+## Metis tool discipline
+- StrReplace with replace_all
+- Exact matching requirements
+- Whitespace sensitivity
+- C-style aliases
+
+## From Metis
+- Unified interface
+- Comprehensive error messages
+- Path security
+- Configuration integration

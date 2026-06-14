@@ -1,0 +1,526 @@
+# Category 5: Search Operations (4 tools)
+
+## 1. search_in_files
+**Purpose**: Basic text search in files
+
+**Parameters**:
+- `query` (required): Search text (plain text, not regex)
+- `path` (optional): Directory to search (defaults to workspace root)
+- `case_sensitive` (optional): Case-sensitive search (default: false)
+
+**Usage**:
+```python
+# Basic search
+search_in_files(query="TODO")
+
+# Search in specific directory
+search_in_files(query="FIXME", path="src")
+
+# Case-sensitive search
+search_in_files(query="UserModel", case_sensitive=True)
+```
+
+**Note**: For advanced search, use `grep_search` instead (faster, more features).
+
+---
+
+## 2. grep_search
+**Alias**: Grep  
+**Purpose**: Advanced ripgrep-based search with regex, context, and filtering
+
+**Parameters**:
+- `pattern` (required): Regex pattern to search
+- `glob_pattern` (optional): File pattern (e.g., "**/*.py")
+- `case_sensitive` (optional): Case-sensitive search (default: false)
+- `max_results` (optional): Maximum results (default: 50)
+- `multiline` (optional): Enable multiline matching (default: false)
+- `context_lines` (optional): Lines of context around matches
+- `before_context` (optional): Lines before matches
+- `after_context` (optional): Lines after matches
+- `type_filter` (optional): File type filter (e.g., "py", "js")
+- `output_mode` (optional): Output format ("matches", "files", "count")
+
+**C-style aliases**:
+- `glob` → `glob_pattern`
+- `head_limit` → `max_results`
+
+**Usage Examples**:
+
+### Basic Search
+```python
+# Simple text search
+grep_search(pattern="function.*login")
+
+# Case-sensitive
+grep_search(pattern="UserModel", case_sensitive=True)
+
+# Limit results
+grep_search(pattern="TODO", max_results=20)
+```
+
+### File Filtering
+```python
+# Search in Python files only
+grep_search(pattern="class.*Model", glob_pattern="**/*.py")
+
+# Search in specific directory
+grep_search(pattern="import", glob_pattern="src/**/*.ts")
+
+# Type filter (shorthand)
+grep_search(pattern="export", type_filter="js")
+
+# C-style alias
+grep_search(pattern="def", glob="**/*.py")
+```
+
+### Context Lines (Enhanced Feature from Metis)
+```python
+# 3 lines of context (before and after)
+grep_search(
+    pattern="error",
+    context_lines=3,
+    glob_pattern="**/*.log"
+)
+
+# 2 lines before, 5 lines after
+grep_search(
+    pattern="Exception",
+    before_context=2,
+    after_context=5,
+    glob_pattern="**/*.py"
+)
+
+# Only lines after
+grep_search(
+    pattern="TODO",
+    after_context=2
+)
+```
+
+### Multiline Matching (Enhanced Feature from Metis)
+```python
+# Match across multiple lines
+grep_search(
+    pattern="def.*\\n.*return",
+    multiline=True,
+    glob_pattern="**/*.py"
+)
+
+# Match function with docstring
+grep_search(
+    pattern='def.*\\n.*""".*"""',
+    multiline=True,
+    type_filter="py"
+)
+```
+
+### Output Modes
+```python
+# Show matching lines (default)
+grep_search(pattern="import", output_mode="matches")
+
+# Show only file names
+grep_search(pattern="TODO", output_mode="files")
+
+# Show match counts
+grep_search(pattern="class", output_mode="count")
+```
+
+**Output Format**:
+
+**Matches mode** (default):
+```
+src/auth.py:45: def login(username, password):
+src/auth.py:67:     return authenticate(username, password)
+src/utils.py:23: def validate_login(data):
+```
+
+**With context**:
+```
+src/auth.py:43: # Authentication functions
+src/auth.py:44: 
+src/auth.py:45: def login(username, password):
+src/auth.py:46:     if not username:
+src/auth.py:47:         raise ValueError("Username required")
+```
+
+**Files mode**:
+```
+src/auth.py
+src/utils.py
+tests/test_auth.py
+```
+
+**Count mode**:
+```
+src/auth.py: 5 matches
+src/utils.py: 2 matches
+tests/test_auth.py: 8 matches
+Total: 15 matches
+```
+
+**Regex Patterns** (Rust regex syntax):
+
+```python
+# Word boundaries
+grep_search(pattern="\\bword\\b")  # Matches 'word' but not 'password'
+
+# Multiple words
+grep_search(pattern="auth.*failed")  # Matches 'auth failed', 'authentication failed'
+
+# Line starts with
+grep_search(pattern="^import")  # Lines starting with 'import'
+
+# Line ends with
+grep_search(pattern="};$")  # Lines ending with '};'
+
+# Numbers
+grep_search(pattern="\\d+\\.\\d+")  # Decimal numbers like 3.14
+
+# Function declarations
+grep_search(pattern="function\\s+\\w+")  # function followed by name
+```
+
+**Features**:
+- **Fast**: Uses ripgrep (faster than grep)
+- **Regex support**: Rust regex syntax
+- **Context lines**: See surrounding code
+- **Multiline**: Match across lines
+- **Type filtering**: By file extension
+- **Output modes**: Matches/files/count
+- **Intelligent pruning**: Large results are pruned
+
+**Best Practices**:
+
+1. **Use glob_pattern to narrow scope**:
+   ```python
+   # Bad: Searches everything (slow)
+   grep_search(pattern="TODO")
+   
+   # Good: Searches only Python files (fast)
+   grep_search(pattern="TODO", glob_pattern="**/*.py")
+   ```
+
+2. **Escape special regex characters**:
+   ```python
+   # Search for literal dot
+   grep_search(pattern="\\.")
+   
+   # Search for literal parentheses
+   grep_search(pattern="\\(.*\\)")
+   ```
+
+3. **Use context for understanding**:
+   ```python
+   # Without context: Hard to understand
+   grep_search(pattern="bug")
+   
+   # With context: See surrounding code
+   grep_search(pattern="bug", context_lines=3)
+   ```
+
+4. **Use output modes appropriately**:
+   ```python
+   # Need to see matches: use "matches" (default)
+   # Just need file list: use "files"
+   # Just need counts: use "count"
+   ```
+
+---
+
+## 3. glob_search
+**Alias**: Glob  
+**Purpose**: File path pattern matching
+
+**Parameters**:
+- `pattern` (required): Glob pattern
+- `root` (optional): Root directory to search (defaults to workspace root)
+
+**C-style aliases**:
+- `glob_pattern` → `pattern`
+- `target_directory` → `root`
+
+**Usage**:
+```python
+# Find all Python files
+glob_search(pattern="**/*.py")
+
+# Find test files
+glob_search(pattern="**/test_*.py")
+
+# Find in specific directory
+glob_search(pattern="*.json", root="config")
+
+# C-style aliases
+glob_search(glob_pattern="**/*.ts", target_directory="src")
+
+# Complex patterns
+glob_search(pattern="src/**/models/*.py")
+```
+
+**Glob Syntax**:
+- `*`: Matches any characters except /
+- `**`: Matches any characters including /
+- `?`: Matches single character
+- `[abc]`: Matches a, b, or c
+- `{a,b}`: Matches a or b
+
+**Examples**:
+```python
+# All JavaScript files
+glob_search(pattern="**/*.js")
+
+# All test files (multiple patterns)
+glob_search(pattern="**/{test_*,*_test}.py")
+
+# Files in specific directories
+glob_search(pattern="{src,tests}/**/*.ts")
+
+# Exclude patterns (use grep_search with exclude instead)
+```
+
+**Features**:
+- **Auto-adds **/ prefix**: For recursion
+- **Fast**: Optimized file system traversal
+- **Standard glob syntax**: Familiar patterns
+- **Path security**: Workspace boundary enforced
+
+**Auto-recursion**:
+```python
+# You write:
+glob_search(pattern="*.py")
+
+# Metis converts to:
+glob_search(pattern="**/*.py")  # Recursive search
+```
+
+**Best Practices**:
+
+1. **Be specific**:
+   ```python
+   # Bad: Too broad
+   glob_search(pattern="*")
+   
+   # Good: Specific extension
+   glob_search(pattern="**/*.py")
+   ```
+
+2. **Use for file path matching, not content**:
+   ```python
+   # For file paths: use glob_search
+   glob_search(pattern="**/models/*.py")
+   
+   # For file content: use grep_search
+   grep_search(pattern="class.*Model", glob_pattern="**/*.py")
+   ```
+
+---
+
+## 4. semantic_search
+**Alias**: SemanticSearch  
+**Purpose**: Semantic code search with optional deep learning embeddings
+
+**Parameters**:
+- `query` (required): Natural language query or keywords
+- `workspace_root` (optional): Directory to search
+- `top_k` / `num_results` (optional): Maximum results (default: 10)
+- `target_directories` (optional): Filter by subdirectories (C-style)
+- `hint_paths` (optional): Comma-separated path hints
+- `index_path` (optional): Custom index file path
+
+**Two Modes**:
+1. **TF Mode (default)**: Term frequency + cosine similarity
+   - Fast, lightweight, no extra dependencies
+   - Good for keyword/symbol searches
+   
+2. **Deep Vector Mode (optional)**: sentence-transformers embeddings
+   - True semantic understanding
+   - Better for natural language queries
+   - Requires: `pip install sentence-transformers`
+   - Enable: `export Metis_SEMANTIC_MODEL=sentence-transformers`
+
+**Index Management**:
+```bash
+# Full rebuild (TF mode - default)
+python -m backend.tools.coding.read_search.search.semantic_search build --root .
+
+# Incremental update (faster, only processes changed files)
+python -m backend.tools.coding.read_search.search.semantic_search build --root . --incremental
+
+# Build with deep vectors (if installed)
+export Metis_SEMANTIC_MODEL=sentence-transformers
+python -m backend.tools.coding.read_search.search.semantic_search build --root .
+
+# Incremental update with deep vectors
+export Metis_SEMANTIC_MODEL=sentence-transformers
+python -m backend.tools.coding.read_search.search.semantic_search build --root . --incremental
+```
+
+**Usage**:
+```python
+# Natural language search (works in both modes)
+semantic_search(query="authentication logic")
+
+# Keyword search (TF mode is faster)
+semantic_search(query="login validate password")
+
+# Limited results
+semantic_search(
+    query="database connection",
+    num_results=5
+)
+
+# Search in subdirectory (C-style)
+semantic_search(
+    query="user validation",
+    target_directories=["src/auth"]
+)
+
+# Multiple directories
+semantic_search(
+    query="payment processing",
+    target_directories=["src/payments", "src/billing"]
+)
+```
+
+**Honest Degradation**:
+- If no index exists: Returns build instructions
+- If query has no matches: Suggests grep_search alternative
+- If embeddings unavailable: Auto-fallback to TF mode
+
+**How It Works**:
+1. Checks for `.Metis_semantic_index.json` in workspace
+2. If found: Searches using TF or embeddings (based on index type)
+3. If not found: Returns honest message with build command
+4. Returns ranked results with scores and previews
+
+**Output Format**:
+```
+Results for "authentication logic":
+
+1. src/auth/login.py (score: 0.92)
+   def authenticate_user(username, password):
+       # Validates user credentials and returns auth token
+       ...
+
+2. src/auth/session.py (score: 0.87)
+   class SessionManager:
+       # Manages user authentication sessions
+       ...
+
+3. src/middleware/auth.py (score: 0.81)
+   def check_authentication(request):
+       # Middleware to verify user is authenticated
+       ...
+```
+
+**Use Cases**:
+- Find conceptually related code
+- Discover similar implementations
+- Locate relevant functions by description
+- Understand code organization
+
+**Requirements**:
+- Embedding index must be built first
+- Requires embedding model (e.g., sentence-transformers)
+- Index updated periodically
+
+**Best Practices**:
+
+1. **Use natural language**:
+   ```python
+   # Good: Natural description
+   semantic_search(query="code that handles user login")
+   
+   # Also good: Technical terms
+   semantic_search(query="JWT token validation")
+   ```
+
+2. **Combine with other searches**:
+   ```python
+   # 1. Semantic search to find relevant files
+   results = semantic_search(query="payment processing")
+   
+   # 2. Grep search for specific patterns
+   grep_search(pattern="def.*payment", glob_pattern="src/payments/**/*.py")
+   ```
+
+3. **Adjust max_results**:
+   ```python
+   # Broad exploration: more results
+   semantic_search(query="error handling", max_results=20)
+   
+   # Focused search: fewer results
+   semantic_search(query="specific function", max_results=5)
+   ```
+
+**Note**: This is a long-term feature. Current implementation may be basic.
+
+---
+
+## Search Tool Comparison
+
+| Tool | Search Type | Speed | Best For |
+|------|-------------|-------|----------|
+| search_in_files | Plain text | Fast | Simple searches |
+| grep_search | Regex + context | Very Fast | Code patterns, debugging |
+| glob_search | File paths | Very Fast | Finding files by name |
+| semantic_search | Semantic/AI | Medium | Conceptual searches |
+
+---
+
+## Common Search Patterns
+
+### Pattern 1: Find and Fix
+```python
+# 1. Find all occurrences
+results = grep_search(pattern="old_function", glob_pattern="**/*.py")
+
+# 2. Read each file
+for file in results:
+    content = read_file(file_path=file, explanation="Check old_function usage")
+
+# 3. Fix
+robust_replace_in_file(file_path=file, search_text="old_function", replace_text="new_function")
+```
+
+### Pattern 2: Explore Related Code
+```python
+# 1. Semantic search
+results = semantic_search(query="user authentication")
+
+# 2. Read top results
+read_multiple_files(
+    file_paths=[r["file"] for r in results[:3]],
+    explanation="Understand authentication implementation"
+)
+```
+
+### Pattern 3: Find Files Then Search Content
+```python
+# 1. Find Python files
+files = glob_search(pattern="**/*.py")
+
+# 2. Search in those files
+grep_search(pattern="TODO", glob_pattern="**/*.py")
+```
+
+---
+
+## Metis runtime pattern
+- Intelligent pruning for large results
+- Context-aware search
+- LLM-based relevance
+- Semantic search capability
+
+## Metis tool discipline
+- C-style aliases (Grep, Glob)
+- Clear output formats
+- Consistent interface
+- head_limit parameter
+
+## From Metis (Enhanced)
+- Multiline matching
+- Context lines (before/after/around)
+- Type filtering
+- Output modes (matches/files/count)

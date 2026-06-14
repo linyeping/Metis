@@ -1,0 +1,633 @@
+# Category 10: User Interaction & Context (3 tools)
+
+## 1. ask_question
+**Alias**: AskQuestion  
+**Purpose**: Collect structured multiple-choice answers from the user
+
+**Parameters**:
+- `title` (optional): Question form title
+- `questions` (required): Array of question objects (minimum 1)
+  - `id` (required): Unique identifier
+  - `prompt` (required): Question text
+  - `options` (required): Array of options (minimum 2)
+    - `id` (required): Option identifier
+    - `label` (required): Option text
+  - `allow_multiple` (optional): Allow multi-select (default: false)
+
+**Usage**:
+```python
+# Single question
+ask_question(
+    title="Choose Implementation",
+    questions=[
+        {
+            "id": "approach",
+            "prompt": "Which authentication approach should we use?",
+            "options": [
+                {"id": "jwt", "label": "JWT tokens"},
+                {"id": "session", "label": "Session-based"},
+                {"id": "oauth", "label": "OAuth 2.0"}
+            ],
+            "allow_multiple": False
+        }
+    ]
+)
+
+# Multiple questions
+ask_question(
+    title="Project Configuration",
+    questions=[
+        {
+            "id": "framework",
+            "prompt": "Which framework?",
+            "options": [
+                {"id": "fastapi", "label": "FastAPI"},
+                {"id": "flask", "label": "Flask"},
+                {"id": "django", "label": "Django"}
+            ]
+        },
+        {
+            "id": "database",
+            "prompt": "Which database?",
+            "options": [
+                {"id": "postgres", "label": "PostgreSQL"},
+                {"id": "mysql", "label": "MySQL"},
+                {"id": "mongo", "label": "MongoDB"}
+            ]
+        }
+    ]
+)
+
+# Multi-select question
+ask_question(
+    questions=[
+        {
+            "id": "features",
+            "prompt": "Which features to implement?",
+            "options": [
+                {"id": "auth", "label": "Authentication"},
+                {"id": "cache", "label": "Caching"},
+                {"id": "logging", "label": "Logging"},
+                {"id": "metrics", "label": "Metrics"}
+            ],
+            "allow_multiple": True
+        }
+    ]
+)
+```
+
+**When to Use**:
+
+1. **Multiple valid approaches**:
+   ```python
+   # When there are trade-offs
+   ask_question(
+       title="Caching Strategy",
+       questions=[{
+           "id": "cache",
+           "prompt": "Which caching approach?",
+           "options": [
+               {"id": "redis", "label": "Redis (distributed, complex)"},
+               {"id": "memory", "label": "In-memory (simple, single-server)"},
+               {"id": "file", "label": "File-based (persistent, slower)"}
+           ]
+       }]
+   )
+   ```
+
+2. **Unclear requirements**:
+   ```python
+   # When user intent is ambiguous
+   ask_question(
+       title="Clarify Requirements",
+       questions=[{
+           "id": "scope",
+           "prompt": "What should the API support?",
+           "options": [
+               {"id": "crud", "label": "Basic CRUD operations"},
+               {"id": "auth", "label": "With authentication"},
+               {"id": "full", "label": "Full REST API with auth and validation"}
+           ]
+       }]
+   )
+   ```
+
+3. **Configuration choices**:
+   ```python
+   # When setup requires decisions
+   ask_question(
+       title="Project Setup",
+       questions=[
+           {
+               "id": "env",
+               "prompt": "Target environment?",
+               "options": [
+                   {"id": "dev", "label": "Development"},
+                   {"id": "staging", "label": "Staging"},
+                   {"id": "prod", "label": "Production"}
+               ]
+           },
+           {
+               "id": "features",
+               "prompt": "Enable features?",
+               "options": [
+                   {"id": "debug", "label": "Debug mode"},
+                   {"id": "profiling", "label": "Profiling"},
+                   {"id": "monitoring", "label": "Monitoring"}
+               ],
+               "allow_multiple": True
+           }
+       ]
+   )
+   ```
+
+**Response Handling**:
+```python
+# Tool returns user's selections
+response = ask_question(...)
+
+# Response format:
+{
+    "approach": "jwt",
+    "database": "postgres",
+    "features": ["auth", "cache", "logging"]
+}
+
+# Use responses to guide implementation
+if response["approach"] == "jwt":
+    # Implement JWT authentication
+    pass
+elif response["approach"] == "session":
+    # Implement session-based auth
+    pass
+```
+
+**Best Practices**:
+
+1. **Clear options**:
+   ```python
+   # Bad: Vague
+   {"id": "opt1", "label": "Option 1"}
+   
+   # Good: Descriptive
+   {"id": "jwt", "label": "JWT tokens (stateless, scalable)"}
+   ```
+
+2. **Reasonable number of options**:
+   ```python
+   # Bad: Too many options (overwhelming)
+   options=[...20 options...]
+   
+   # Good: 2-5 options
+   options=[
+       {"id": "simple", "label": "Simple approach"},
+       {"id": "advanced", "label": "Advanced approach"}
+   ]
+   ```
+
+3. **Use multi-select appropriately**:
+   ```python
+   # Single-select: Mutually exclusive
+   "Which framework?" → allow_multiple=False
+   
+   # Multi-select: Can combine
+   "Which features?" → allow_multiple=True
+   ```
+
+**Features**:
+- **Structured input**: Prevents ambiguous responses
+- **Multiple questions**: Batch related questions
+- **Multi-select**: For non-exclusive options
+- **Validation**: Ensures valid selections
+
+---
+
+## 2. populate_steering
+**Purpose**: Load steering files (context/guidelines) into conversation
+
+**Parameters**:
+- `steering_name` (required): Name of steering file to load
+- `scope` (optional): Scope (workspace/user/global)
+
+**Usage**:
+```python
+# Load workspace steering
+populate_steering(steering_name="coding_standards")
+
+# Load user-level steering
+populate_steering(steering_name="preferences", scope="user")
+
+# Load global steering
+populate_steering(steering_name="security_guidelines", scope="global")
+```
+
+**Steering Files**:
+
+Steering files provide context and guidelines:
+- Coding standards
+- Project conventions
+- Team preferences
+- Security policies
+- Best practices
+
+**Location**:
+- Workspace: `.metis/steering/*.md`
+- User: `METIS_HOME/steering/*.md`
+- Global: System-level steering
+
+**Steering File Format**:
+```markdown
+---
+inclusion: auto|manual|fileMatch
+fileMatchPattern: "*.py"
+---
+
+# Coding Standards
+
+## Python Style
+- Use Black for formatting
+- Max line length: 88
+- Use type hints
+
+## Testing
+- Minimum 80% coverage
+- Use pytest
+- Mock external services
+```
+
+**Inclusion Types**:
+
+1. **auto**: Always included
+   ```markdown
+   ---
+   inclusion: auto
+   ---
+   ```
+
+2. **manual**: Load via populate_steering or #context
+   ```markdown
+   ---
+   inclusion: manual
+   ---
+   ```
+
+3. **fileMatch**: Auto-load when matching files read
+   ```markdown
+   ---
+   inclusion: fileMatch
+   fileMatchPattern: "*.py"
+   ---
+   ```
+
+**Use Cases**:
+
+1. **Project-specific guidelines**:
+   ```python
+   # Load project standards
+   populate_steering(steering_name="project_standards")
+   
+   # Then implement following standards
+   robust_replace_in_file(...)
+   ```
+
+2. **Security policies**:
+   ```python
+   # Load security guidelines
+   populate_steering(steering_name="security")
+   
+   # Implement with security in mind
+   write_file(...)
+   ```
+
+3. **Team conventions**:
+   ```python
+   # Load team conventions
+   populate_steering(steering_name="team_conventions")
+   
+   # Follow conventions
+   editCode(...)
+   ```
+
+**Features**:
+- **Context injection**: Adds guidelines to conversation
+- **Scoped**: Workspace/user/global levels
+- **Conditional**: Can auto-load based on file patterns
+- **Persistent**: Remains in context
+
+---
+
+## 3. todo_write
+**Alias**: TodoWrite  
+**Purpose**: Create and manage structured task lists
+
+**Parameters**:
+- `todos` (required): Array of TODO items (minimum 2)
+  - `id` (required): Unique identifier
+  - `content` (required): Task description
+  - `status` (required): pending/in_progress/completed/cancelled
+- `merge` (required): Merge with existing (true) or replace (false)
+
+**Task States**:
+- `pending`: Not yet started
+- `in_progress`: Currently working on
+- `completed`: Finished successfully
+- `cancelled`: No longer needed
+
+**Usage**:
+```python
+# Create new TODO list
+todo_write(
+    todos=[
+        {"id": "1", "content": "Implement authentication", "status": "pending"},
+        {"id": "2", "content": "Add input validation", "status": "pending"},
+        {"id": "3", "content": "Write tests", "status": "pending"}
+    ],
+    merge=False
+)
+
+# Update existing TODOs (merge)
+todo_write(
+    todos=[
+        {"id": "1", "status": "completed"},
+        {"id": "2", "status": "in_progress"}
+    ],
+    merge=True
+)
+
+# Add new TODOs to existing list
+todo_write(
+    todos=[
+        {"id": "4", "content": "Add logging", "status": "pending"},
+        {"id": "5", "content": "Deploy to staging", "status": "pending"}
+    ],
+    merge=True
+)
+```
+
+**When to Use** (Metis tool discipline):
+
+1. **Complex multi-step tasks** (3+ steps):
+   ```python
+   todo_write(
+       todos=[
+           {"id": "1", "content": "Design database schema", "status": "pending"},
+           {"id": "2", "content": "Create migration", "status": "pending"},
+           {"id": "3", "content": "Implement models", "status": "pending"},
+           {"id": "4", "content": "Add relationships", "status": "pending"},
+           {"id": "5", "content": "Write tests", "status": "pending"}
+       ],
+       merge=False
+   )
+   ```
+
+2. **Non-trivial tasks requiring planning**:
+   ```python
+   todo_write(
+       todos=[
+           {"id": "1", "content": "Research caching strategies", "status": "pending"},
+           {"id": "2", "content": "Choose Redis vs in-memory", "status": "pending"},
+           {"id": "3", "content": "Implement cache layer", "status": "pending"},
+           {"id": "4", "content": "Add cache invalidation", "status": "pending"}
+       ],
+       merge=False
+   )
+   ```
+
+3. **User provides multiple tasks**:
+   ```python
+   # User: "Add auth, caching, and logging"
+   todo_write(
+       todos=[
+           {"id": "1", "content": "Implement authentication", "status": "pending"},
+           {"id": "2", "content": "Add caching layer", "status": "pending"},
+           {"id": "3", "content": "Set up logging", "status": "pending"}
+       ],
+       merge=False
+   )
+   ```
+
+**When NOT to Use**:
+
+1. **Single, straightforward tasks**:
+   ```python
+   # Don't create TODO for simple tasks
+   # Just do it:
+   robust_replace_in_file(...)
+   ```
+
+2. **Trivial tasks** (< 3 steps):
+   ```python
+   # Don't create TODO
+   # Just implement:
+   write_file(...)
+   read_lints(...)
+   ```
+
+3. **Purely conversational requests**:
+   ```python
+   # User: "Explain how authentication works"
+   # Don't create TODO - just explain
+   ```
+
+**Task Management Rules**:
+
+1. **Update in real-time**:
+   ```python
+   # Start task
+   todo_write(todos=[{"id": "1", "status": "in_progress"}], merge=True)
+   
+   # Do work
+   robust_replace_in_file(...)
+   
+   # Complete immediately after finishing
+   todo_write(todos=[{"id": "1", "status": "completed"}], merge=True)
+   ```
+
+2. **Only ONE task in_progress at a time**:
+   ```python
+   # Bad: Multiple in_progress
+   todo_write(todos=[
+       {"id": "1", "status": "in_progress"},
+       {"id": "2", "status": "in_progress"}
+   ], merge=True)
+   
+   # Good: One at a time
+   todo_write(todos=[{"id": "1", "status": "in_progress"}], merge=True)
+   # ... complete task 1 ...
+   todo_write(todos=[
+       {"id": "1", "status": "completed"},
+       {"id": "2", "status": "in_progress"}
+   ], merge=True)
+   ```
+
+3. **Complete current before starting new**:
+   ```python
+   # Complete current
+   todo_write(todos=[{"id": "1", "status": "completed"}], merge=True)
+   
+   # Then start next
+   todo_write(todos=[{"id": "2", "status": "in_progress"}], merge=True)
+   ```
+
+**Parallel TODO Writes** (Metis tool discipline):
+
+```python
+# Prefer creating first TODO as in_progress
+todo_write(
+    todos=[
+        {"id": "1", "content": "Implement auth", "status": "in_progress"},
+        {"id": "2", "content": "Add validation", "status": "pending"}
+    ],
+    merge=False
+)
+
+# Start working immediately in same batch
+robust_replace_in_file(...)
+```
+
+**Best Practices**:
+
+1. **Specific, actionable items**:
+   ```python
+   # Bad: Vague
+   {"id": "1", "content": "Fix stuff", "status": "pending"}
+   
+   # Good: Specific
+   {"id": "1", "content": "Fix authentication timeout in login endpoint", "status": "pending"}
+   ```
+
+2. **Break complex tasks**:
+   ```python
+   # Instead of:
+   {"id": "1", "content": "Implement entire API", "status": "pending"}
+   
+   # Break down:
+   todos=[
+       {"id": "1", "content": "Create API routes", "status": "pending"},
+       {"id": "2", "content": "Add authentication", "status": "pending"},
+       {"id": "3", "content": "Implement validation", "status": "pending"},
+       {"id": "4", "content": "Add error handling", "status": "pending"}
+   ]
+   ```
+
+3. **Don't add testing unless asked**:
+   ```python
+   # Don't automatically add:
+   {"id": "5", "content": "Write tests", "status": "pending"}
+   
+   # Only add if user requests testing
+   ```
+
+**Silent Updates** (Metis tool discipline):
+```python
+# Don't tell user you're updating TODOs
+# Just do it silently
+todo_write(todos=[{"id": "1", "status": "completed"}], merge=True)
+
+# Exception: When first creating TODOs, you can mention it
+```
+
+---
+
+## Common Workflows
+
+### Workflow 1: Clarify Then Implement
+```python
+# 1. Ask for clarification
+response = ask_question(
+    title="Implementation Approach",
+    questions=[{
+        "id": "auth",
+        "prompt": "Which authentication method?",
+        "options": [
+            {"id": "jwt", "label": "JWT tokens"},
+            {"id": "session", "label": "Session-based"}
+        ]
+    }]
+)
+
+# 2. Create TODOs based on response
+if response["auth"] == "jwt":
+    todo_write(
+        todos=[
+            {"id": "1", "content": "Install PyJWT", "status": "pending"},
+            {"id": "2", "content": "Create JWT utilities", "status": "pending"},
+            {"id": "3", "content": "Add auth endpoints", "status": "pending"}
+        ],
+        merge=False
+    )
+
+# 3. Implement
+auto_install_package(package_name="PyJWT")
+todo_write(todos=[{"id": "1", "status": "completed"}], merge=True)
+```
+
+### Workflow 2: Complex Task with TODOs
+```python
+# 1. Create TODO list
+todo_write(
+    todos=[
+        {"id": "1", "content": "Design database schema", "status": "in_progress"},
+        {"id": "2", "content": "Create models", "status": "pending"},
+        {"id": "3", "content": "Add relationships", "status": "pending"},
+        {"id": "4", "content": "Create migration", "status": "pending"}
+    ],
+    merge=False
+)
+
+# 2. Work through tasks
+write_file(path="schema.sql", content="...")
+todo_write(todos=[
+    {"id": "1", "status": "completed"},
+    {"id": "2", "status": "in_progress"}
+], merge=True)
+
+write_file(path="models.py", content="...")
+todo_write(todos=[
+    {"id": "2", "status": "completed"},
+    {"id": "3", "status": "in_progress"}
+], merge=True)
+
+# ... continue ...
+```
+
+### Workflow 3: Load Context and Implement
+```python
+# 1. Load project guidelines
+populate_steering(steering_name="coding_standards")
+
+# 2. Ask for preferences
+response = ask_question(
+    questions=[{
+        "id": "style",
+        "prompt": "Code style preference?",
+        "options": [
+            {"id": "strict", "label": "Strict (follow all rules)"},
+            {"id": "relaxed", "label": "Relaxed (pragmatic)"}
+        ]
+    }]
+)
+
+# 3. Implement following guidelines
+robust_replace_in_file(...)
+```
+
+---
+
+## Metis runtime pattern
+- Structured user interaction
+- Steering file system
+- Context management
+- TODO tracking
+
+## Metis tool discipline
+- AskQuestion for clarification
+- TodoWrite for task management
+- Task state management
+- Silent TODO updates
+
+## From Metis
+- Unified interaction interface
+- Enhanced validation
+- Configuration integration
+- Error handling

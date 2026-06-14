@@ -1,0 +1,207 @@
+# Metis AI - Core Capabilities
+
+## Code Operations
+
+### Reading & Analysis
+- Read single files with optional line ranges
+- Read multiple files in one call
+- Read code with AST-based analysis (readCode)
+- Read file chunks for large files
+- Generate repository structure maps
+- Intelligent content pruning for large files
+
+### Writing & Modification
+- Create or overwrite files
+- Append content to existing files
+- Precise text replacement (robust_replace_in_file)
+- AST-based code editing (editCode)
+- Apply unified diff patches
+- Edit Jupyter notebooks (multiple modes)
+
+### Refactoring
+- Semantic symbol renaming with automatic reference updates
+- File operations with automatic import/reference updates
+- Extract method/function refactoring
+- Code structure transformation
+
+## Development Workflow
+
+### Shell & Process Management
+- Execute shell commands with timeout and safety controls
+- Manage long-running processes (dev servers, watchers)
+- List and monitor background processes
+- Register external processes for monitoring
+- Read terminal output/state
+
+### Version Control
+- Check git repository status
+- Create git commits
+- Create pull requests
+- Track changes across files
+
+### Package Management
+- Auto-detect and install missing packages
+- Support for pip, npm, yarn, etc.
+- Dependency resolution
+
+### Code Quality
+- Read linting errors/warnings (flake8, pylint, etc.)
+- Analyze code complexity metrics
+- Get compile, lint, type, and semantic issues
+- Verify code compilation
+- Undo last edit (fallback mechanism)
+- Post-edit linting (configurable)
+
+## Search & Discovery
+
+### Text Search
+- Fast ripgrep-based search with regex
+- Multiline matching support
+- Context lines (before/after/around)
+- Type filtering (by file extension)
+- Case-sensitive/insensitive search
+- Output modes (matches/files/count)
+
+### File Search
+- Glob pattern matching with automatic recursion
+- Fuzzy file path search
+- Standard glob syntax (* for wildcards, ** for recursive)
+
+### Semantic Search
+- Embedding-based semantic code search
+- Natural language queries
+- Find conceptually related code
+- Workspace-scoped search
+
+### Repository Analysis
+- Generate high-level repository structure
+- Understand project layout
+- Identify key components
+
+## External Integration
+
+### Web Operations
+- Search the web for current information
+- Fetch web page content with multiple modes:
+  - Truncated (quick preview)
+  - Full (complete content)
+  - Selective (search phrase)
+  - Rendered (JavaScript execution)
+- HTTPS only with SSRF protection
+- Content compliance (attribution, paraphrasing)
+
+### Image Generation
+- Generate images from text descriptions
+- Configurable size and quality
+- Multiple style options
+
+### MCP Integration
+- Manage Model Context Protocol servers
+- Load external tools dynamically
+- Access specialized capabilities (databases, APIs, etc.)
+- Start/stop/restart MCP servers
+
+### Workflow Guidelines
+- Load workflow-specific guidelines
+- Project-specific best practices
+- Team standards and conventions
+
+## User Interaction
+
+### Structured Questions
+- Ask structured questions with schema validation
+- Multiple choice questions
+- Free-form text questions
+- Schema version 2 support
+
+### Context Management
+- Populate steering documents
+- Load project-specific guidelines
+- Inject team standards
+
+### Todo Management
+- Write/update todo items
+- Track tasks and progress
+- Organize work items
+
+### Mode Switching
+- Switch between code/ask modes
+- Code mode: Can call tools, execute operations
+- Ask mode: Information only, no tool execution
+
+## Advanced Features
+
+### Sub-Agent Delegation
+- **delegate_explore**: Repository exploration
+- **delegate_browser**: Web browsing tasks
+- **delegate_shell**: Shell command sequences
+- **delegate_best_of_n**: Generate multiple solutions, pick best
+- **summon_context_gatherer**: Repository understanding and bug investigation
+- **custom_agent_creator**: Create custom specialized agents
+
+### Task Dispatch
+- Dispatch tasks to subprocess with isolation
+- Timeout support
+- Resume capability for long tasks
+- Process isolation for safety
+
+### Hook System (Metis runtime pattern)
+- Event-driven automation
+- preToolUse: Before tool execution (access control, validation)
+- postToolUse: After tool execution (logging, notifications)
+- fileEdited/Created/Deleted: File system events
+- promptSubmit/agentStop: Conversation events
+- preTaskExecution/postTaskExecution: Task lifecycle events
+
+## Intelligent Features (Metis runtime pattern)
+
+### Content Pruning
+- Automatic token estimation
+- LLM-based relevance analysis
+- Smart extraction of relevant sections
+- Preserve code structure and context
+- Configurable threshold (default: 1250 tokens)
+
+### AST Analysis
+- Code-aware operations
+- Structure-preserving edits
+- Symbol extraction
+- Scope analysis
+
+### Fallback Mechanisms
+- Undo last edit
+- Retry with alternative approaches
+- Error recovery strategies
+- Graceful degradation
+
+### Token Management
+- Context window optimization
+- Intelligent pruning
+- Token estimation
+- Budget tracking
+
+## Security & Safety
+
+### Path Security
+- All file operations restricted to workspace_root
+- Path traversal protection (no ../ escapes)
+- Symlink security (resolved to real paths)
+- Validation via path_security module
+
+### Web Security
+- HTTPS only (no HTTP)
+- SSRF protection (no localhost/internal IPs)
+- No query parameters or fragments in URLs
+- Treat all external content as UNTRUSTED
+
+### Shell Security
+- Avoid dangerous commands (rm -rf /, etc.)
+- Use timeout to prevent hanging
+- Never use `cd` command (use `cwd` parameter)
+- Long-running commands → use start_long_running_process
+
+### Code Safety
+- Binary file rejection in read operations
+- Post-edit linting (configurable)
+- Diagnostic checking after edits
+- Undo mechanism available

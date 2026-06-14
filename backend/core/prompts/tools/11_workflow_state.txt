@@ -1,0 +1,592 @@
+# Category 11: Workflow & State Management
+
+## write_open_files_context
+
+Persist open file paths to **`.Metis_open_files.json`** so the host injects `[Metis open files]` into system messages (same contract as `open_files_context`).
+
+```python
+write_open_files_context(
+    paths=["src/app.py", "tests/test_app.py"],
+    focus="src/app.py",
+    merge=False,
+)
+```
+
+- **`merge=True`**: union with existing `paths` on disk; omit or pass empty `paths` to only update `focus`.
+- **`open_files_storage_path`**: optional; maps to output file path (default `.Metis_open_files.json`).
+
+---
+
+## 1. switch_mode
+**Alias**: SwitchMode  
+**Purpose**: Switch interaction mode to match current task type
+
+**Parameters**:
+- `target_mode_id` (required): Target mode ('plan' only currently)
+- `explanation` (optional): Reason for switching
+
+**Available Modes**:
+
+### Agent Mode (default, cannot switch to)
+- Full implementation mode
+- Access to all tools
+- Can make changes
+- Default mode
+
+### Plan Mode (switchable)
+- Read-only collaborative mode
+- Design before coding
+- Discuss approaches
+- No file modifications
+
+### Debug Mode (cannot switch to)
+- Systematic troubleshooting
+- Runtime evidence investigation
+- Bug analysis
+
+### Ask Mode (cannot switch to)
+- Read-only exploration
+- Answer questions
+- No changes
+
+**Usage**:
+```python
+# Switch to Plan mode
+switch_mode(
+    target_mode_id="plan",
+    explanation="Need to discuss architecture before implementing"
+)
+
+# With detailed explanation
+switch_mode(
+    target_mode_id="plan",
+    explanation="Multiple valid approaches with significant trade-offs - need to design first"
+)
+```
+
+**When to Switch to Plan Mode**:
+
+1. **Multiple valid approaches with trade-offs**:
+   ```python
+   # User: "Add caching"
+   # Multiple options: Redis, in-memory, file-based
+   switch_mode(
+       target_mode_id="plan",
+       explanation="Caching has multiple approaches (Redis vs in-memory vs file) with different trade-offs"
+   )
+   ```
+
+2. **Architectural decisions needed**:
+   ```python
+   # User: "Refactor the authentication system"
+   switch_mode(
+       target_mode_id="plan",
+       explanation="Authentication refactor requires architectural decisions about session management and token storage"
+   )
+   ```
+
+3. **Large scope touching many files**:
+   ```python
+   # User: "Migrate from REST to GraphQL"
+   switch_mode(
+       target_mode_id="plan",
+       explanation="Migration affects many files and requires careful planning of schema and resolvers"
+   )
+   ```
+
+4. **Unclear requirements**:
+   ```python
+   # User: "Improve performance"
+   switch_mode(
+       target_mode_id="plan",
+       explanation="Performance improvement needs clarification on bottlenecks and acceptable trade-offs"
+   )
+   ```
+
+5. **Would otherwise ask multiple clarifying questions**:
+   ```python
+   # Instead of asking 5 questions
+   switch_mode(
+       target_mode_id="plan",
+       explanation="Need to explore requirements and constraints before implementation"
+   )
+   ```
+
+**When NOT to Switch**:
+
+1. **Simple, clear tasks**:
+   ```python
+   # User: "Fix the typo in line 45"
+   # Just fix it - don't switch modes
+   robust_replace_in_file(...)
+   ```
+
+2. **Making good progress**:
+   ```python
+   # Mid-implementation, things working well
+   # Don't switch - keep going
+   ```
+
+3. **Minor clarifying questions**:
+   ```python
+   # Just ask the question
+   # Don't switch modes for one question
+   ```
+
+4. **Current mode working well**:
+   ```python
+   # If Agent mode is appropriate
+   # Stay in it
+   ```
+
+**Proactive Switching**:
+
+Be proactive - don't wait for user to ask:
+
+```python
+# User: "Add authentication and authorization with role-based access control"
+
+# This is complex with many decisions
+# Switch proactively:
+switch_mode(
+    target_mode_id="plan",
+    explanation="Auth system with RBAC requires decisions on: token storage, role hierarchy, permission model, and session management"
+)
+```
+
+**User Approval Required**:
+
+Mode switches require user consent:
+- User can approve
+- User can reject
+- User can modify
+
+**Features**:
+- **Context preservation**: Maintains conversation context
+- **Reversible**: Can switch back
+- **Collaborative**: User must approve
+- **Appropriate**: Matches task to mode
+
+**Best Practices**:
+
+1. **Explain clearly**:
+   ```python
+   # Bad: Vague
+   switch_mode(target_mode_id="plan", explanation="Need to plan")
+   
+   # Good: Specific
+   switch_mode(
+       target_mode_id="plan",
+       explanation="Microservices architecture requires decisions on service boundaries, communication patterns, and data consistency"
+   )
+   ```
+
+2. **Be proactive**:
+   ```python
+   # Don't wait for user to ask
+   # Switch when you recognize the need
+   ```
+
+3. **Don't over-switch**:
+   ```python
+   # If current mode works, stay in it
+   # Only switch when truly beneficial
+   ```
+
+---
+
+## 2. manage_mcp_servers
+**Purpose**: Manage Model Context Protocol (MCP) servers
+
+**Parameters**:
+- `action` (required): Action to perform (list/start/stop/restart/configure)
+- `server_name` (optional): Specific server name
+- `config` (optional): Configuration object
+
+**Actions**:
+
+### 1. list
+List all configured MCP servers
+
+```python
+# List all servers
+manage_mcp_servers(action="list")
+```
+
+**Returns**:
+```json
+{
+  "servers": [
+    {
+      "name": "aws-docs",
+      "status": "running",
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "disabled": false
+    },
+    {
+      "name": "database",
+      "status": "stopped",
+      "command": "python",
+      "args": ["mcp_server.py"],
+      "disabled": true
+    }
+  ]
+}
+```
+
+### 2. start
+Start an MCP server
+
+```python
+# Start specific server
+manage_mcp_servers(action="start", server_name="aws-docs")
+```
+
+### 3. stop
+Stop an MCP server
+
+```python
+# Stop specific server
+manage_mcp_servers(action="stop", server_name="aws-docs")
+```
+
+### 4. restart
+Restart an MCP server
+
+```python
+# Restart specific server
+manage_mcp_servers(action="restart", server_name="aws-docs")
+```
+
+### 5. configure
+Configure MCP server
+
+```python
+# Add new server
+manage_mcp_servers(
+    action="configure",
+    server_name="custom-server",
+    config={
+        "command": "python",
+        "args": ["server.py"],
+        "env": {"API_KEY": "xxx"},
+        "disabled": false,
+        "autoApprove": ["tool1", "tool2"]
+    }
+)
+
+# Update existing server
+manage_mcp_servers(
+    action="configure",
+    server_name="aws-docs",
+    config={
+        "disabled": true
+    }
+)
+```
+
+**MCP Configuration**:
+
+Configuration files:
+- User level: `METIS_HOME/settings/mcp.json`
+- Workspace level: `.metis/settings/mcp.json`
+
+**Configuration Format**:
+```json
+{
+  "mcpServers": {
+    "server-name": {
+      "command": "uvx",
+      "args": ["package@latest"],
+      "env": {
+        "ENV_VAR": "value"
+      },
+      "disabled": false,
+      "autoApprove": ["tool_name"]
+    }
+  }
+}
+```
+
+**Configuration Precedence**:
+```
+user config < workspace1 < workspace2 < ...
+```
+
+Later workspace folders override earlier ones.
+
+**Use Cases**:
+
+1. **Check available servers**:
+   ```python
+   # List all servers
+   servers = manage_mcp_servers(action="list")
+   
+   # Check which are running
+   for server in servers["servers"]:
+       if server["status"] == "running":
+           print(f"{server['name']} is running")
+   ```
+
+2. **Enable/disable servers**:
+   ```python
+   # Disable server
+   manage_mcp_servers(
+       action="configure",
+       server_name="aws-docs",
+       config={"disabled": true}
+   )
+   
+   # Enable server
+   manage_mcp_servers(
+       action="configure",
+       server_name="aws-docs",
+       config={"disabled": false}
+   )
+   ```
+
+3. **Add custom server**:
+   ```python
+   # Add new MCP server
+   manage_mcp_servers(
+       action="configure",
+       server_name="my-server",
+       config={
+           "command": "python",
+           "args": ["mcp_server.py"],
+           "env": {
+               "API_KEY": "secret"
+           },
+           "autoApprove": ["safe_tool"]
+       }
+   )
+   
+   # Start it
+   manage_mcp_servers(action="start", server_name="my-server")
+   ```
+
+4. **Troubleshoot server**:
+   ```python
+   # Check status
+   servers = manage_mcp_servers(action="list")
+   
+   # Restart if needed
+   manage_mcp_servers(action="restart", server_name="problematic-server")
+   ```
+
+**Auto-Approval**:
+
+Configure tools that don't need approval:
+
+```python
+manage_mcp_servers(
+    action="configure",
+    server_name="database",
+    config={
+        "autoApprove": [
+            "read_query",
+            "list_tables",
+            "describe_table"
+        ]
+    }
+)
+```
+
+**Environment Variables**:
+
+Pass environment variables to servers:
+
+```python
+manage_mcp_servers(
+    action="configure",
+    server_name="api-server",
+    config={
+        "command": "python",
+        "args": ["server.py"],
+        "env": {
+            "API_KEY": "xxx",
+            "API_URL": "https://api.example.com",
+            "FASTMCP_LOG_LEVEL": "ERROR"
+        }
+    }
+)
+```
+
+**Server Installation**:
+
+MCP servers using `uvx`:
+- Requires `uv` and `uvx` installed
+- Install via pip, homebrew, or https://docs.astral.sh/uv/getting-started/installation/
+- `uvx` downloads and runs servers automatically
+- No separate installation needed per server
+
+**Auto-Reconnection**:
+
+Servers reconnect automatically:
+- On config changes
+- On restart
+- Can also reconnect from MCP Server view in Metis runtime
+
+**Features**:
+- **Centralized management**: All servers in one place
+- **Auto-reconnection**: Servers reconnect on config changes
+- **Environment variables**: Pass config to servers
+- **Auto-approval**: Configure trusted tools
+- **Multi-workspace**: Different configs per workspace
+
+---
+
+## Common Workflows
+
+### Workflow 1: Switch to Plan for Complex Task
+```python
+# User: "Redesign the database schema and migrate data"
+
+# 1. Recognize complexity
+switch_mode(
+    target_mode_id="plan",
+    explanation="Database redesign requires decisions on schema structure, migration strategy, and data transformation"
+)
+
+# 2. In Plan mode, discuss:
+# - Current schema issues
+# - Proposed new schema
+# - Migration approach
+# - Rollback strategy
+# - Testing plan
+
+# 3. User approves plan
+
+# 4. Switch back to Agent mode (automatic)
+
+# 5. Implement the plan
+write_file(path="migration.sql", content="...")
+execute_bash_command(command="python migrate.py")
+```
+
+### Workflow 2: MCP Server Setup
+```python
+# 1. List available servers
+servers = manage_mcp_servers(action="list")
+
+# 2. Add custom server
+manage_mcp_servers(
+    action="configure",
+    server_name="database",
+    config={
+        "command": "python",
+        "args": ["db_mcp_server.py"],
+        "env": {"DB_URL": "postgresql://localhost/db"},
+        "autoApprove": ["read_query", "list_tables"]
+    }
+)
+
+# 3. Start server
+manage_mcp_servers(action="start", server_name="database")
+
+# 4. Use server tools (via Metis MCP tools or direct MCP)
+# ...
+```
+
+### Workflow 3: Mode Switching for Architecture
+```python
+# User: "Add real-time notifications"
+
+# 1. Switch to Plan mode
+switch_mode(
+    target_mode_id="plan",
+    explanation="Real-time notifications require architectural decisions: WebSockets vs SSE vs polling, message queue, scaling strategy"
+)
+
+# 2. Discuss in Plan mode:
+# - WebSockets vs Server-Sent Events
+# - Message queue (Redis, RabbitMQ)
+# - Scaling considerations
+# - Client reconnection strategy
+
+# 3. User chooses WebSockets + Redis
+
+# 4. Back to Agent mode, implement
+auto_install_package(package_name="websockets")
+auto_install_package(package_name="redis")
+write_file(path="websocket_server.py", content="...")
+```
+
+### Workflow 4: MCP Server Troubleshooting
+```python
+# 1. Check server status
+servers = manage_mcp_servers(action="list")
+
+# 2. Server not responding
+# Restart it
+manage_mcp_servers(action="restart", server_name="problematic-server")
+
+# 3. Still issues
+# Check configuration
+# Update if needed
+manage_mcp_servers(
+    action="configure",
+    server_name="problematic-server",
+    config={
+        "env": {
+            "FASTMCP_LOG_LEVEL": "DEBUG"
+        }
+    }
+)
+
+# 4. Restart with debug logging
+manage_mcp_servers(action="restart", server_name="problematic-server")
+```
+
+---
+
+## Integration Patterns
+
+### With Planning:
+```python
+# Complex task → Plan → Implement
+switch_mode(target_mode_id="plan", explanation="...")
+# ... discuss ...
+# ... back to Agent mode ...
+robust_replace_in_file(...)
+write_file(...)
+```
+
+### With MCP Tools:
+```python
+# Setup MCP → Use tools
+manage_mcp_servers(action="start", server_name="database")
+# Use MCP tools via Metis MCP tools
+# ...
+manage_mcp_servers(action="stop", server_name="database")
+```
+
+### With User Interaction:
+```python
+# Ask → Plan → Implement
+response = ask_question(...)
+switch_mode(target_mode_id="plan", explanation="...")
+# ... discuss based on response ...
+# ... implement ...
+```
+
+---
+
+## Metis runtime pattern
+- Mode switching system
+- MCP server management
+- Configuration hierarchy
+- Auto-reconnection
+
+## Metis tool discipline
+- SwitchMode to Plan
+- Proactive mode switching
+- User approval required
+- Clear explanations
+
+## From Metis
+- Unified workflow interface
+- Enhanced MCP management
+- Configuration integration
+- State tracking

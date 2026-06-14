@@ -1,0 +1,14 @@
+# Miro 可选 / 验收依赖（钉版本便于复现）
+# LangGraph 深集成：设置 MIRO_USE_LANGGRAPH=1 时使用；未设置时不导入 langgraph。
+langgraph==0.2.76
+langchain-core==0.3.83
+langgraph-checkpoint==2.1.2
+langgraph-sdk==0.1.74
+
+# Rich file parsing (optional)
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+
+# Desktop tray integration
+pystray>=0.19.5

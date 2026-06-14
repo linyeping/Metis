@@ -1,0 +1,873 @@
+# 工具协作与配合指南
+
+> 本文档详细说明50个工具如何协作配合，基于K和C的最佳实践
+
+---
+
+## 🎯 核心原则
+
+工具不是平铺乱用的，而是有优先级链和协作模式：
+
+1. **先判断任务类型**
+2. **选最专用的工具**
+3. **能并行就并行**
+4. **改完必验证**
+5. **涉及git/长进程走专门流程**
+
+---
+
+## 📋 工具决策树
+
+### 第一步：判断任务类型
+
+```
+用户请求
+    │
+    ├─ 明确文件路径？
+    │   └─ YES → read_file
+    │
+    ├─ 知道文件名但不知道位置？
+    │   └─ YES → glob_search
+    │
+    ├─ 知道关键词/符号？
+    │   └─ YES → grep_search
+    │
+    ├─ 只知道功能描述？
+    │   └─ YES → semantic_search
+    │
+    ├─ 需要修改代码？
+    │   └─ YES → 先read，再robust_replace_in_file或editCode
+    │
+    ├─ 需要运行命令？
+    │   └─ YES → execute_bash_command或start_long_running_process
+    │
+    ├─ 需要网络资料？
+    │   └─ YES → web_search → web_fetch
+    │
+    ├─ 任务大且复杂？
+    │   └─ YES → summon_context_gatherer或task_dispatch
+    │
+    └─ 需要规划方案？
+        └─ YES → switch_mode(plan)
+```
+
+---
+
+## 🔗 工具协作链
+
+### 1. 搜索链：从不知道到知道
+
+#### 链路1：文件名搜索
+```
+glob_search → read_file
+```
+
+**适用场景**：
+- 知道文件名或模式
+- 不知道具体位置
+
+**示例**：
+```python
+# 找配置文件
+glob_search(pattern="**/config*.json")
+# 返回：["src/config.json", "tests/config.test.json"]
+
+# 读取找到的文件
+read_file(file_path="src/config.json", explanation="查看配置")
+```
+
+#### 链路2：精确文本搜索
+```
+grep_search → read_file
+```
+
+**适用场景**：
+- 知道精确的关键词、符号、函数名
+- 想快速定位
+
+**示例**：
+```python
+# 搜索函数定义
+grep_search(query="def create_user", includePattern="**/*.py")
+# 返回：src/auth.py:45, src/admin.py:120
+
+# 读取相关文件
+read_file(file_path="src/auth.py", explanation="查看用户创建逻辑")
+```
+
+#### 链路3：语义搜索（最强大）
+```
+semantic_search → grep_search → read_file
+```
+
+**适用场景**：
+- 不知道精确名称
+- 问"怎么做"、"在哪里"的问题
+- 代码库陌生
+
+**示例**：
+```python
+# 语义搜索找方向
+semantic_search(
+    query="How is user authentication handled?",
+    target_directories=[]
+)
+# 返回：相关文件列表和代码片段
+
+# 精确搜索具体符号
+grep_search(query="authenticate|login|session", includePattern="**/*.py")
+
+# 读取确认
+read_file(file_path="src/auth/login.py", explanation="确认认证逻辑")
+```
+
+**三种搜索的选择**：
+- **glob_search**：找文件名
+- **grep_search**：找精确文本
+- **semantic_search**：找功能/行为
+
+---
+
+### 2. 修改链：从定位到落地
+
+#### 标准修改流程
+```
+read_file → robust_replace_in_file → read_lints → execute_bash_command(test)
+```
+
+**示例**：
+```python
+# 1. 读取原文
+read_file(file_path="src/utils.py", explanation="查看需要修改的函数")
+
+# 2. 精确替换
+robust_replace_in_file(
+    file_path="src/utils.py",
+    search_text="def old_function():\n    return 'old'",
+    replace_text="def old_function():\n    return 'new'"
+)
+
+# 3. 检查错误
+read_lints(paths="src/utils.py")
+
+# 4. 运行测试
+execute_bash_command(command="pytest tests/test_utils.py")
+```
+
+#### Notebook修改流程
+```
+read_file → edit_notebook → read_lints
+```
+
+**示例**：
+```python
+# 1. 读取notebook
+read_file(file_path="analysis.ipynb", explanation="查看notebook结构")
+
+# 2. 编辑cell
+edit_notebook(
+    path="analysis.ipynb",
+    cell_index=3,
+    old_string="old code",
+    new_string="new code"
+)
+
+# 3. 验证
+read_lints(paths="analysis.ipynb")
+```
+
+#### AST感知编辑（更安全）
+```
+read_file → editCode → read_lints
+```
+
+**示例**：
+```python
+# 1. 读取代码
+read_file(file_path="src/service.py", explanation="查看服务代码")
+
+# 2. AST编辑
+editCode(
+    file_path="src/service.py",
+    target_symbol="process_data",
+    edit_instructions="Add input validation at the beginning"
+)
+
+# 3. 验证
+read_lints(paths="src/service.py")
+```
+
+---
+
+### 3. Git链：版本控制流程
+
+#### Commit流程
+```
+并行：check_git_status + execute_bash_command(git diff) + execute_bash_command(git log)
+↓
+execute_bash_command(git add)
+↓
+git_commit_pr(message="...")
+↓
+execute_bash_command(git status)
+```
+
+**示例**：
+```python
+# 1. 并行检查状态（最重要！）
+check_git_status()
+execute_bash_command(command="git diff")
+execute_bash_command(command="git log --oneline -5")
+
+# 2. 分析变更，形成commit message
+
+# 3. 提交
+git_commit_pr(message="feat: add user authentication")
+
+# 4. 确认
+check_git_status()
+```
+
+**为什么要并行看三个**：
+- `git status`：看有哪些文件变了
+- `git diff`：看改了什么内容
+- `git log`：看仓库的提交风格
+
+#### PR流程
+```
+并行：git status + git diff + git log + git diff base...HEAD
+↓
+execute_bash_command(git push)
+↓
+git_commit_pr(create_pr=True, pr_title="...", pr_body="...")
+```
+
+**示例**：
+```python
+# 1. 全面检查
+check_git_status()
+execute_bash_command(command="git diff")
+execute_bash_command(command="git log --oneline -10")
+execute_bash_command(command="git diff main...HEAD")
+
+# 2. Push
+execute_bash_command(command="git push -u origin feature-branch")
+
+# 3. 创建PR
+git_commit_pr(
+    message="feat: implement caching",
+    create_pr=True,
+    pr_title="Add Redis caching layer",
+    pr_body="Implements caching with Redis...",
+    target_branch="main"
+)
+```
+
+---
+
+### 4. 调试链：从报错到修复
+
+#### 静态错误调试
+```
+read_lints → read_file → robust_replace_in_file → read_lints
+```
+
+**示例**：
+```python
+# 1. 查看错误
+read_lints(paths="src/")
+
+# 2. 读取问题代码
+read_file(file_path="src/utils.py", explanation="查看报错的代码")
+
+# 3. 修复
+robust_replace_in_file(
+    file_path="src/utils.py",
+    search_text="错误代码",
+    replace_text="修复后代码"
+)
+
+# 4. 再次检查
+read_lints(paths="src/utils.py")
+```
+
+#### 运行时错误调试
+```
+execute_bash_command(运行) → grep_search(搜异常) → read_file → robust_replace_in_file → execute_bash_command(复测)
+```
+
+**示例**：
+```python
+# 1. 运行程序获取错误
+execute_bash_command(command="python main.py")
+# 输出：KeyError: 'user_id' at line 45 in auth.py
+
+# 2. 搜索相关代码
+grep_search(query="user_id", includePattern="**/auth.py")
+
+# 3. 读取上下文
+read_file(file_path="src/auth.py", start_line=40, end_line=50)
+
+# 4. 修复
+robust_replace_in_file(...)
+
+# 5. 复测
+execute_bash_command(command="python main.py")
+```
+
+---
+
+### 5. 网络资料链
+
+```
+web_search → web_fetch → 应用到代码
+```
+
+**示例**：
+```python
+# 1. 搜索
+results = web_search(query="FastAPI JWT authentication 2026")
+
+# 2. 获取详细内容
+content = web_fetch(url=results[0]["url"])
+
+# 3. 基于资料实现
+robust_replace_in_file(
+    file_path="src/auth.py",
+    search_text="old auth",
+    replace_text="new JWT auth based on documentation"
+)
+
+# 4. 在代码注释中引用来源
+# 遵守内容合规要求
+```
+
+---
+
+### 6. 大任务探索链
+
+```
+summon_context_gatherer → read_file → robust_replace_in_file
+```
+
+**示例**：
+```python
+# 1. 探索陌生代码库
+context = summon_context_gatherer(
+    task_description="Find all authentication and session management code"
+)
+
+# 2. 读取识别的文件
+read_file(path="src/auth/login.py", explanation="查看登录逻辑")
+read_file(path="src/auth/session.py", explanation="查看会话管理")
+
+# 3. 修改
+robust_replace_in_file(...)
+```
+
+---
+
+## ⚡ 并行 vs 串行规则
+
+### 何时并行（使用multi_tool_use.parallel）
+
+#### 场景1：独立信息收集
+```python
+# ✅ 可以并行
+glob_search(pattern="**/*.py")
+grep_search(query="class User")
+read_file(path="README.md")
+```
+
+#### 场景2：Git状态检查
+```python
+# ✅ 可以并行
+check_git_status()
+execute_bash_command(command="git diff")
+execute_bash_command(command="git log")
+```
+
+#### 场景3：多文件读取
+```python
+# ✅ 可以并行
+read_file(path="src/auth.py")
+read_file(path="src/user.py")
+read_file(path="src/session.py")
+```
+
+#### 场景4：多方向探索
+```python
+# ✅ 可以并行
+semantic_search(query="authentication")
+grep_search(query="login")
+glob_search(pattern="**/auth*.py")
+```
+
+### 何时串行（必须等待前一步）
+
+#### 场景1：修改代码
+```python
+# ❌ 不能并行，必须串行
+read_file(path="utils.py")          # 第1步
+# 等待结果
+robust_replace_in_file(...)         # 第2步（依赖第1步）
+# 等待结果
+read_lints(paths="utils.py")        # 第3步（依赖第2步）
+```
+
+#### 场景2：测试修复循环
+```python
+# ❌ 不能并行
+execute_bash_command(command="pytest")  # 第1步
+# 看到错误
+read_file(path="test_file.py")          # 第2步
+# 理解问题
+robust_replace_in_file(...)             # 第3步
+# 修复
+execute_bash_command(command="pytest")  # 第4步（复测）
+```
+
+#### 场景3：Git提交
+```python
+# ❌ 不能并行
+execute_bash_command(command="git add .")     # 第1步
+# 等待
+git_commit_pr(message="...")                  # 第2步（依赖第1步）
+# 等待
+execute_bash_command(command="git push")      # 第3步（依赖第2步）
+```
+
+### 关键规则
+
+1. **robust_replace_in_file 永远不能并行**
+   - 一次只能改一个文件
+   - 必须等待完成
+
+2. **读取可以并行，修改必须串行**
+   - 多个read_file可以并行
+   - 多个robust_replace_in_file必须串行
+
+3. **搜索可以并行，应用结果必须串行**
+   - 多个grep_search可以并行
+   - 基于结果的操作必须串行
+
+---
+
+## 🎭 30种真实场景的完整工作流
+
+### 场景1：修复Bug
+
+```python
+# 1. 定位问题
+execute_bash_command(command="pytest")  # 运行测试，发现错误
+
+# 2. 搜索相关代码
+grep_search(query="function_with_bug", includePattern="**/*.py")
+
+# 3. 读取上下文
+read_file(file_path="src/module.py", explanation="查看bug代码")
+
+# 4. 修复
+robust_replace_in_file(
+    file_path="src/module.py",
+    search_text="buggy code",
+    replace_text="fixed code"
+)
+
+# 5. 验证
+read_lints(paths="src/module.py")
+execute_bash_command(command="pytest")
+
+# 6. 提交
+check_git_status()
+git_commit_pr(message="fix: resolve bug in module")
+```
+
+### 场景2：添加新功能
+
+```python
+# 1. 理解现有代码
+semantic_search(query="How is feature X implemented?")
+
+# 2. 读取相关文件
+read_file(path="src/feature.py", explanation="理解现有实现")
+
+# 3. 创建新文件
+write_file(
+    file_path="src/new_feature.py",
+    content="# New feature implementation"
+)
+
+# 4. 追加内容
+append_to_file(
+    path="src/new_feature.py",
+    text="def new_function():\n    pass"
+)
+
+# 5. 测试
+execute_bash_command(command="pytest tests/test_new_feature.py")
+
+# 6. 提交
+git_commit_pr(message="feat: add new feature")
+```
+
+### 场景3：重构代码
+
+```python
+# 1. 分析复杂度
+analyze_complexity(file_path="src/complex.py", threshold=10)
+
+# 2. 读取代码
+read_file(path="src/complex.py", explanation="查看需要重构的代码")
+
+# 3. 提取方法
+extract_method(
+    file_path="src/complex.py",
+    start_line=45,
+    end_line=70,
+    new_method_name="extracted_logic"
+)
+
+# 4. 重命名符号
+rename_symbol(
+    file_path="src/complex.py",
+    old_name="old_name",
+    new_name="better_name",
+    line=10,
+    character=4
+)
+
+# 5. 验证
+read_lints(paths="src/complex.py")
+execute_bash_command(command="pytest")
+
+# 6. 再次检查复杂度
+analyze_complexity(file_path="src/complex.py")
+```
+
+### 场景4：探索陌生代码库
+
+```python
+# 1. 使用context-gatherer探索
+context = summon_context_gatherer(
+    task_description="Understand the authentication system",
+    thoroughness="very thorough"
+)
+
+# 2. 生成仓库地图
+repo_map = generate_repo_map(root_path="src/")
+
+# 3. 语义搜索关键功能
+semantic_search(query="How does user login work?")
+
+# 4. 读取关键文件
+read_file(path="src/auth/login.py", explanation="理解登录流程")
+read_file(path="src/auth/session.py", explanation="理解会话管理")
+
+# 5. 总结理解
+```
+
+### 场景5：创建Pull Request
+
+```python
+# 1. 并行检查状态
+check_git_status()
+execute_bash_command(command="git diff")
+execute_bash_command(command="git log --oneline -10")
+execute_bash_command(command="git diff main...HEAD")
+
+# 2. 确保在正确分支
+execute_bash_command(command="git branch --show-current")
+
+# 3. Push到远程
+execute_bash_command(command="git push -u origin feature-branch")
+
+# 4. 创建PR
+git_commit_pr(
+    message="feat: implement feature",
+    create_pr=True,
+    pr_title="Implement Feature X",
+    pr_body="""
+## Changes
+- Added feature X
+- Updated tests
+- Updated documentation
+
+## Testing
+- All tests pass
+- Manual testing completed
+
+## Related Issues
+Closes #123
+    """,
+    target_branch="main"
+)
+```
+
+### 场景6：安装依赖并配置
+
+```python
+# 1. 读取requirements
+read_file(path="requirements.txt", explanation="查看依赖列表")
+
+# 2. 自动安装缺失的包
+auto_install_package(package_name="requests", language="python")
+auto_install_package(package_name="fastapi", language="python")
+
+# 3. 更新requirements
+execute_bash_command(command="pip freeze > requirements.txt")
+
+# 4. 提交
+git_commit_pr(
+    message="chore: add dependencies",
+    files=["requirements.txt"]
+)
+```
+
+### 场景7：性能优化
+
+```python
+# 1. 分析复杂度
+analyze_complexity(file_path="src/slow_module.py")
+
+# 2. 读取代码
+read_file(path="src/slow_module.py", explanation="查看性能瓶颈")
+
+# 3. 优化代码
+robust_replace_in_file(
+    file_path="src/slow_module.py",
+    search_text="slow implementation",
+    replace_text="optimized implementation"
+)
+
+# 4. 基准测试
+execute_bash_command(command="python benchmark.py")
+
+# 5. 验证改进
+```
+
+### 场景8：编写测试
+
+```python
+# 1. 读取要测试的代码
+read_file(path="src/module.py", explanation="理解要测试的功能")
+
+# 2. 创建测试文件
+write_file(
+    file_path="tests/test_module.py",
+    content="""
+import pytest
+from src.module import function_to_test
+
+def test_function():
+    result = function_to_test()
+    assert result == expected
+"""
+)
+
+# 3. 运行测试
+execute_bash_command(command="pytest tests/test_module.py -v")
+
+# 4. 检查覆盖率
+execute_bash_command(command="pytest --cov=src tests/")
+```
+
+### 场景9：更新文档
+
+```python
+# 1. 读取代码
+read_file(path="src/api.py", explanation="理解API接口")
+
+# 2. 搜索现有文档
+glob_search(pattern="**/README*.md")
+
+# 3. 更新文档
+robust_replace_in_file(
+    file_path="README.md",
+    search_text="## API\nOld description",
+    replace_text="## API\nUpdated description with new endpoints"
+)
+
+# 4. 提交
+git_commit_pr(message="docs: update API documentation")
+```
+
+### 场景10：处理Merge冲突
+
+```python
+# 1. 检查状态
+check_git_status()
+execute_bash_command(command="git diff")
+
+# 2. 查看冲突文件
+read_file(path="src/conflicted.py", explanation="查看冲突内容")
+
+# 3. 解决冲突
+robust_replace_in_file(
+    file_path="src/conflicted.py",
+    search_text="<<<<<<< HEAD\nconflict\n=======\nother\n>>>>>>> branch",
+    replace_text="resolved code"
+)
+
+# 4. 标记为已解决
+execute_bash_command(command="git add src/conflicted.py")
+
+# 5. 继续merge
+execute_bash_command(command="git merge --continue")
+```
+
+---
+
+## 🚫 避免的组合
+
+### 1. 不要用Shell替代专用工具
+
+❌ **错误**：
+```python
+execute_bash_command(command="cat file.py")
+execute_bash_command(command="grep 'pattern' *.py")
+execute_bash_command(command="find . -name '*.py'")
+```
+
+✅ **正确**：
+```python
+read_file(path="file.py")
+grep_search(query="pattern", includePattern="**/*.py")
+glob_search(pattern="**/*.py")
+```
+
+### 2. 不要并行调用robust_replace_in_file
+
+❌ **错误**：
+```python
+# 同时修改多个文件
+robust_replace_in_file(file_path="a.py", ...)
+robust_replace_in_file(file_path="b.py", ...)
+robust_replace_in_file(file_path="c.py", ...)
+```
+
+✅ **正确**：
+```python
+# 串行修改
+robust_replace_in_file(file_path="a.py", ...)
+# 等待完成
+robust_replace_in_file(file_path="b.py", ...)
+# 等待完成
+robust_replace_in_file(file_path="c.py", ...)
+```
+
+### 3. 不要用semantic_search做精确搜索
+
+❌ **错误**：
+```python
+semantic_search(query="class UserModel")
+```
+
+✅ **正确**：
+```python
+grep_search(query="class UserModel", includePattern="**/*.py")
+```
+
+### 4. 不要用glob_search搜索代码内容
+
+❌ **错误**：
+```python
+glob_search(pattern="**/function_name*")  # glob只能找文件名
+```
+
+✅ **正确**：
+```python
+grep_search(query="function_name", includePattern="**/*.py")
+```
+
+### 5. 不要直接修改Notebook为普通文本
+
+❌ **错误**：
+```python
+robust_replace_in_file(file_path="notebook.ipynb", ...)
+```
+
+✅ **正确**：
+```python
+edit_notebook(path="notebook.ipynb", cell_index=3, ...)
+```
+
+---
+
+## 📊 工具角色定位
+
+| 工具 | 角色 | 何时使用 | 通常前置 | 通常后置 |
+|------|------|----------|----------|----------|
+| read_file | 精读器 | 已知路径，要看完整内容 | glob/grep/semantic | replace/edit |
+| grep_search | 精确定位器 | 知道关键词，快速定位 | - | read_file |
+| glob_search | 文件发现器 | 知道文件名模式 | - | read_file |
+| semantic_search | 语义侦察兵 | 问"怎么做"，代码库陌生 | - | grep/read |
+| robust_replace_in_file | 精确编辑器 | 单文件精修 | read_file | read_lints |
+| editCode | AST编辑器 | 代码转换，保持结构 | read_file | read_lints |
+| edit_notebook | Notebook编辑器 | .ipynb变更 | read_file | read_lints |
+| read_lints | 静态检查器 | 改完代码后 | replace/edit | - |
+| execute_bash_command | 运行器 | git/测试/构建 | - | - |
+| summon_context_gatherer | 探索助手 | 大范围探索 | - | read_file |
+
+---
+
+## 🎯 速查决策表
+
+| 需求 | 首选工具 | 备选工具 |
+|------|----------|----------|
+| 已知文件路径 | read_file | - |
+| 找文件名 | glob_search | - |
+| 找精确符号/字符串 | grep_search | - |
+| 找"功能在哪/怎么做" | semantic_search | grep_search |
+| 改单文件 | robust_replace_in_file | editCode |
+| 改notebook | edit_notebook | - |
+| 改后查错 | read_lints | execute_bash_command |
+| 跑测试/构建 | execute_bash_command | - |
+| Git操作 | check_git_status + execute_bash_command | git_commit_pr |
+| 查网络资料 | web_search → web_fetch | - |
+| 需求有分歧 | ask_question | - |
+| 任务长要跟踪 | todo_write | - |
+| 任务大要探索 | summon_context_gatherer | task_dispatch |
+| 需要先设计 | switch_mode(plan) | - |
+
+---
+
+## 💡 最佳实践总结
+
+### 1. 标准安全工作流
+
+```
+理解目标 → 找位置 → 核实上下文 → 修改 → 检查 → 交付
+```
+
+### 2. 速度优先策略
+
+- 并行所有独立的读取操作
+- 使用context-gatherer做大范围探索
+- 但不能突破：replace不并行、git不乱序、notebook只用专用工具
+
+### 3. 稳定优先策略
+
+- 先read再replace
+- 改后必read_lints
+- 重要操作前check_git_status
+- 测试通过再提交
+
+---
+
+## 🎉 总结
+
+工具协作的本质是**分层协作系统**：
+
+- **搜索层**：glob/grep/semantic负责"找"
+- **读取层**：read_file负责"看"
+- **修改层**：replace/editCode/edit_notebook负责"改"
+- **验证层**：read_lints/execute_bash_command负责"验"
+- **协调层**：ask_question/todo_write/switch_mode/subagents负责"组织"
+
+掌握这些协作模式，就能高效、安全地完成任何任务！
+
+---
+
+*基于Metis runtime和Metis tool discipline的最佳实践*  
+*Metis = Metis 工程能力 + Metis 工具纪律*

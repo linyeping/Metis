@@ -1,0 +1,425 @@
+# Metis AI - Common Workflow Patterns
+
+## Pattern 1: Read → Analyze → Modify
+
+### Use Case
+Understanding existing code before making changes
+
+### Steps
+```
+1. read_file or readCode
+   - Understand current state
+   - Identify what needs to change
+   - Plan the modification
+
+2. Analyze
+   - Review the code structure
+   - Identify dependencies
+   - Plan safe changes
+
+3. robust_replace_in_file or editCode
+   - Make the changes
+   - Ensure exact matching
+   - Include context for uniqueness
+
+4. read_lints
+   - Verify no errors introduced
+   - Check for warnings
+   - Fix any issues
+```
+
+### Example
+```python
+# 1. Read
+content = read_file(
+    file_path="src/auth.py",
+    explanation="Understand authentication logic"
+)
+
+# 2. Analyze (in your reasoning)
+# - Found login function at line 45
+# - Missing input validation
+# - Need to add checks before authenticate call
+
+# 3. Modify
+robust_replace_in_file(
+    file_path="src/auth.py",
+    search_text="def login(username, password):\n    return authenticate(username, password)",
+    replace_text="def login(username, password):\n    if not username or not password:\n        raise ValueError('Username and password required')\n    return authenticate(username, password)"
+)
+
+# 4. Verify
+lints = read_lints(paths="src/auth.py")
+```
+
+## Pattern 2: Search → Read → Fix
+
+### Use Case
+Finding and fixing issues across the codebase
+
+### Steps
+```
+1. grep_search
+   - Find relevant code locations
+   - Identify all occurrences
+   - Understand scope of issue
+
+2. read_file
+   - Read each relevant file
+   - Understand context
+   - Plan fixes
+
+3. robust_replace_in_file
+   - Fix each occurrence
+   - Ensure consistency
+   - Maintain code style
+
+4. execute_bash_command
+   - Run tests
+   - Verify fixes work
+   - Check for regressions
+```
+
+### Example
+```python
+# 1. Search
+results = grep_search(
+    pattern="TODO.*security",
+    glob_pattern="**/*.py"
+)
+
+# 2. Read
+for file in results:
+    content = read_file(
+        file_path=file,
+        explanation="Check security TODO"
+    )
+
+# 3. Fix
+robust_replace_in_file(
+    file_path="src/utils.py",
+    search_text="# TODO: Add security check",
+    replace_text="# Security check implemented\nif not is_authorized(user):\n    raise PermissionError('Unauthorized')"
+)
+
+# 4. Test
+execute_bash_command(command="pytest tests/test_security.py")
+```
+
+## Pattern 3: Explore → Understand → Implement
+
+### Use Case
+Working with unfamiliar codebase or implementing new features
+
+### Steps
+```
+1. summon_context_gatherer
+   - Understand repository structure
+   - Identify relevant files
+   - Map component interactions
+
+2. read_file (identified files)
+   - Read key files
+   - Understand patterns
+   - Learn conventions
+
+3. write_file
+   - Implement new feature
+   - Follow existing patterns
+   - Maintain consistency
+
+4. rename_file_update_refs (if needed)
+   - Organize code
+   - Update imports automatically
+   - Maintain references
+```
+
+### Example
+```python
+# 1. Explore
+summon_context_gatherer(
+    goal="Understand payment processing flow"
+)
+
+# 2. Read identified files
+read_multiple_files(
+    file_paths=["src/payment.py", "src/stripe_integration.py", "src/models/transaction.py"],
+    explanation="Understand payment implementation"
+)
+
+# 3. Implement
+write_file(
+    file_path="src/payment_v2.py",
+    content="# New payment implementation\n..."
+)
+
+# 4. Organize
+rename_file_update_refs(
+    old_path="src/payment.py",
+    new_path="src/payment_legacy.py"
+)
+```
+
+## Pattern 4: Parallel Modifications
+
+### Use Case
+Making independent changes to multiple files simultaneously
+
+### Steps
+```
+1. Identify independent changes
+   - Changes don't depend on each other
+   - Each file can be modified separately
+   - No shared state
+
+2. Invoke tools in parallel
+   - Call robust_replace_in_file multiple times
+   - All execute simultaneously
+   - Dramatically faster than sequential
+
+3. Verify all changes
+   - Check each file
+   - Run tests
+   - Ensure consistency
+```
+
+### Example
+```python
+# All execute in parallel (Promise.all)
+robust_replace_in_file(
+    file_path="src/models/user.py",
+    search_text="old_field",
+    replace_text="new_field"
+)
+robust_replace_in_file(
+    file_path="src/models/post.py",
+    search_text="old_field",
+    replace_text="new_field"
+)
+robust_replace_in_file(
+    file_path="src/models/comment.py",
+    search_text="old_field",
+    replace_text="new_field"
+)
+
+# Then verify
+read_lints(paths="src/models/user.py,src/models/post.py,src/models/comment.py")
+```
+
+## Pattern 5: Web Research → Implementation
+
+### Use Case
+Implementing features based on current best practices or documentation
+
+### Steps
+```
+1. web_search
+   - Find current information
+   - Identify best practices
+   - Locate official documentation
+
+2. web_fetch
+   - Read detailed documentation
+   - Understand API details
+   - Learn implementation patterns
+
+3. write_file
+   - Implement based on research
+   - Follow best practices
+   - Include attribution
+
+4. read_lints
+   - Verify correctness
+   - Check for issues
+   - Ensure quality
+```
+
+### Example
+```python
+# 1. Search
+results = web_search(query="Python asyncio best practices 2026")
+
+# 2. Fetch details
+content = web_fetch(url=results[0]["url"])
+
+# 3. Implement
+write_file(
+    file_path="src/async_utils.py",
+    content="""# Async utilities
+# Based on: [Python asyncio best practices](https://example.com/asyncio)
+# Content was rephrased for compliance with licensing restrictions
+
+import asyncio
+
+async def fetch_data(url):
+    # Implementation following best practices
+    ...
+"""
+)
+
+# 4. Verify
+read_lints(paths="src/async_utils.py")
+```
+
+## Pattern 6: Refactoring
+
+### Use Case
+Improving code structure without changing behavior
+
+### Steps
+```
+1. Read and understand
+   - Read the code to refactor
+   - Identify improvement opportunities
+   - Plan refactoring steps
+
+2. Extract methods
+   - Use extract_method for complex functions
+   - Break down large functions
+   - Improve readability
+
+3. Rename symbols
+   - Use rename_symbol for better names
+   - Auto-updates all references
+   - Maintains consistency
+
+4. Verify behavior
+   - Run tests
+   - Ensure no behavior changes
+   - Check performance
+```
+
+### Example
+```python
+# 1. Read
+content = readCode(
+    path="src/processor.py",
+    explanation="Identify refactoring opportunities"
+)
+
+# 2. Extract
+extract_method(
+    file_path="src/processor.py",
+    start_line=45,
+    end_line=60,
+    new_method_name="validate_input"
+)
+
+# 3. Rename
+rename_symbol(
+    file_path="src/processor.py",
+    old_name="process_data",
+    new_name="transform_data",
+    line=15,
+    character=4
+)
+
+# 4. Verify
+execute_bash_command(command="pytest tests/test_processor.py")
+```
+
+## Pattern 7: Debugging
+
+### Use Case
+Finding and fixing bugs
+
+### Steps
+```
+1. Reproduce issue
+   - Run failing test
+   - Understand error message
+   - Identify affected code
+
+2. Investigate
+   - Read relevant files
+   - Check diagnostics
+   - Analyze complexity
+
+3. Fix
+   - Make targeted changes
+   - Add error handling
+   - Improve robustness
+
+4. Verify fix
+   - Run tests
+   - Check edge cases
+   - Ensure no regressions
+```
+
+### Example
+```python
+# 1. Reproduce
+execute_bash_command(command="pytest tests/test_auth.py::test_login -v")
+
+# 2. Investigate
+content = read_file(
+    file_path="src/auth.py",
+    explanation="Understand login failure"
+)
+diagnostics = read_lints(paths="src/auth.py")
+
+# 3. Fix
+robust_replace_in_file(
+    file_path="src/auth.py",
+    search_text="if user.password == password:",
+    replace_text="if user and user.password == password:"
+)
+
+# 4. Verify
+execute_bash_command(command="pytest tests/test_auth.py -v")
+```
+
+## Pattern 8: Documentation
+
+### Use Case
+Adding or updating documentation
+
+### Steps
+```
+1. Read code
+   - Understand functionality
+   - Identify undocumented parts
+   - Plan documentation
+
+2. Write documentation
+   - Add docstrings
+   - Update README
+   - Create examples
+
+3. Verify
+   - Check formatting
+   - Ensure accuracy
+   - Test examples
+```
+
+### Example
+```python
+# 1. Read
+content = readCode(
+    path="src/api.py",
+    explanation="Understand API functions"
+)
+
+# 2. Document
+robust_replace_in_file(
+    file_path="src/api.py",
+    search_text="def create_user(username, email):",
+    replace_text='''def create_user(username, email):
+    """Create a new user account.
+    
+    Args:
+        username: Unique username for the account
+        email: User's email address
+        
+    Returns:
+        User: The created user object
+        
+    Raises:
+        ValueError: If username or email is invalid
+        DuplicateError: If username already exists
+    """'''
+)
+
+# 3. Verify
+read_lints(paths="src/api.py")
+```

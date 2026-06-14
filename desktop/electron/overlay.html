@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+<title>Metis takeover</title>
+<style>
+  /* FABLEADV-21 接管覆盖层 — 金色四边光晕。
+     标准做法是复用 app 的 --accent；本窗口独立加载，故就近写一组贴近 Metis 品牌的暖金。
+     全程仅用 CSS transform/opacity（GPU 合成），零逐帧 JS。 */
+  :root {
+    --gold-bright: rgba(245, 215, 140, 0.95);
+    --gold-strong: rgba(226, 184, 87, 0.85);
+    --gold:        rgba(214, 170, 74, 0.55);
+    --gold-soft:   rgba(200, 158, 66, 0.28);
+    --border-w: 3px;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    pointer-events: none;
+    user-select: none;
+  }
+  .glow {
+    position: fixed;
+    inset: 0;
+  }
+  /* 四边深、向内极淡：层叠 inset 阴影，越向内越透明 */
+  .glow::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    box-shadow:
+      inset 0 0 2px 1px var(--gold-bright),
+      inset 0 0 22px 2px var(--gold-strong),
+      inset 0 0 70px 6px var(--gold),
+      inset 0 0 150px 24px var(--gold-soft);
+    animation: breathe 3.6s ease-in-out infinite;
+  }
+  /* 一道更亮高光沿边框缓慢绕行：旋转的 conic-gradient + 仅保留边框带的 mask */
+  .shimmer {
+    position: absolute;
+    inset: 0;
+    padding: var(--border-w);
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent 28deg,
+      var(--gold-bright) 52deg,
+      rgba(255, 240, 200, 0.9) 60deg,
+      var(--gold-bright) 68deg,
+      transparent 92deg,
+      transparent 360deg
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    animation: orbit 6s linear infinite;
+    opacity: 0.9;
+    filter: blur(0.4px);
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.62; }
+    50%      { opacity: 1; }
+  }
+  @keyframes orbit {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .glow::before { animation: none; opacity: 0.8; }
+    .shimmer { animation: none; opacity: 0.5; }
+  }
+</style>
+</head>
+<body>
+  <div class="glow">
+    <div class="shimmer"></div>
+  </div>
+</body>
+</html>

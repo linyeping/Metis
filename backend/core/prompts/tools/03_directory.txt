@@ -1,0 +1,198 @@
+# Category 3: Directory Operations (1 tool)
+
+## 1. list_directory
+**Purpose**: List directory contents in long format (similar to `ls -la`)
+
+**Parameters**:
+- `path` (required): Directory path to list
+- `depth` (optional): Recursive depth (default: 1, max recommended: 3)
+- `explanation` (required): Why listing this directory (for intelligent pruning)
+- `skipPruning` (optional): Disable intelligent pruning (default: false)
+
+**Usage**:
+```python
+# List current directory
+list_directory(path=".", explanation="See project structure")
+
+# List specific directory
+list_directory(path="src", explanation="Explore source code organization")
+
+# Recursive listing (depth=2)
+list_directory(
+    path="src",
+    depth=2,
+    explanation="Understand nested module structure"
+)
+
+# Deep recursive (depth=3, use carefully)
+list_directory(
+    path="tests",
+    depth=3,
+    explanation="Map complete test hierarchy"
+)
+
+# Full listing without pruning (for small directories)
+list_directory(
+    path="config",
+    explanation="Need complete config directory",
+    skipPruning=True
+)
+```
+
+**Output Format** (long format like `ls -la`):
+```
+Directory: src/
+drwxr-xr-x  5 user group  4096 2026-03-28 10:30 components/
+drwxr-xr-x  3 user group  4096 2026-03-28 10:25 utils/
+-rw-r--r--  1 user group  2048 2026-03-28 10:20 main.py
+-rw-r--r--  1 user group  1024 2026-03-28 10:15 config.py
+```
+
+**Features**:
+- **Long format**: Shows permissions, owner, size, modified time
+- **Recursive**: Can explore subdirectories with depth control
+- **Intelligent pruning**: Large directories are pruned based on explanation
+- **Path security**: Restricted to workspace boundary
+
+**Intelligent Pruning** (Metis runtime pattern):
+When directory has many files (>100):
+1. Estimates token usage
+2. Uses LLM to identify relevant files based on `explanation`
+3. Shows relevant files + summary of pruned content
+4. Preserves directory structure
+
+**Example with Pruning**:
+```python
+# Large node_modules directory
+list_directory(
+    path="node_modules",
+    depth=2,
+    explanation="Find react and react-dom packages"
+)
+
+# Output (pruned):
+"""
+Directory: node_modules/
+drwxr-xr-x  react/
+  -rw-r--r--  package.json
+  -rw-r--r--  index.js
+drwxr-xr-x  react-dom/
+  -rw-r--r--  package.json
+  -rw-r--r--  index.js
+... [pruned: 995 other packages]
+"""
+```
+
+**Best Practices**:
+
+1. **Use appropriate depth**:
+   - depth=1: Current directory only (fast)
+   - depth=2: One level of subdirectories (recommended)
+   - depth=3: Two levels (use sparingly)
+   - depth>3: Avoid (very slow, huge output)
+
+2. **Provide good explanations**:
+   ```python
+   # Bad: Vague
+   list_directory(path="src", explanation="Check files")
+   
+   # Good: Specific
+   list_directory(
+       path="src",
+       explanation="Find all Python test files to understand test structure"
+   )
+   ```
+
+3. **Use skipPruning wisely**:
+   - Small directories (<50 files): Can use skipPruning=True
+   - Large directories: Let pruning work
+   - Need exact listing: Use skipPruning=True
+
+4. **Combine with other tools**:
+   ```python
+   # Pattern: List → Identify → Read
+   # 1. List directory
+   listing = list_directory(path="src/models", explanation="Find model files")
+   
+   # 2. Identify interesting files from listing
+   # (You see: user.py, post.py, comment.py)
+   
+   # 3. Read specific files
+   read_file(file_path="src/models/user.py", explanation="Understand User model")
+   ```
+
+**Common Use Cases**:
+
+1. **Project exploration**:
+   ```python
+   list_directory(path=".", depth=2, explanation="Understand project structure")
+   ```
+
+2. **Find test files**:
+   ```python
+   list_directory(
+       path="tests",
+       depth=2,
+       explanation="Locate all test files for feature X"
+   )
+   ```
+
+3. **Check build output**:
+   ```python
+   list_directory(path="build", explanation="Verify build artifacts")
+   ```
+
+4. **Explore package structure**:
+   ```python
+   list_directory(
+       path="src/components",
+       depth=2,
+       explanation="Map React component hierarchy"
+   )
+   ```
+
+**Performance Considerations**:
+- Depth=1: Very fast (~10ms)
+- Depth=2: Fast (~50ms for typical project)
+- Depth=3: Slower (~200ms, depends on file count)
+- Large directories: Pruning adds ~1s for LLM analysis
+
+**Troubleshooting**:
+
+1. **"Permission denied"**:
+   - Check directory permissions
+   - Ensure path is within workspace_root
+
+2. **"Path not found"**:
+   - Verify path exists
+   - Check path is relative to workspace_root
+   - Use forward slashes (/) not backslashes (\)
+
+3. **Output too large**:
+   - Reduce depth
+   - Provide more specific explanation for better pruning
+   - Use glob_search or grep_search for targeted file finding
+
+4. **Missing files in output**:
+   - Check if pruning removed them
+   - Use skipPruning=True to see all files
+   - Improve explanation to include relevant keywords
+
+**Comparison with Other Tools**:
+
+| Tool | Purpose | When to Use |
+|------|---------|-------------|
+| list_directory | Browse directory structure | Exploring, understanding layout |
+| glob_search | Find files by pattern | Know file pattern (*.py, test_*) |
+| grep_search | Find files by content | Know content pattern (class User) |
+| file_search | Fuzzy file path search | Know part of filename |
+
+**Metis runtime pattern**: 
+- Intelligent pruning for large directories
+- LLM-based relevance extraction
+- Explanation-driven filtering
+
+**Metis tool discipline**:
+- Clear, actionable output format
+- Consistent with Unix ls -la
+- Predictable behavior

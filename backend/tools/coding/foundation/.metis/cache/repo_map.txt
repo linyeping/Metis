@@ -1,0 +1,177 @@
+__init__.py
+repo_map.py
+  def _should_skip_dir(dirname: str) -> bool
+  def _collect_source_files(workspace_root: str) -> List[str]
+  def _compute_files_hash(workspace_root: str, files: List[str]) -> str
+  def _format_signature_node(node: SignatureNode, indent: int) -> str
+  def _format_repo_map(
+    workspace_root: str,
+    file_signatures: Dict[str, List[SignatureNode]],
+    source_files: List[str],
+) -> str
+  def _truncate_to_budget(text: str, max_tokens: int) -> str
+  def _cache_dir(workspace_root: str) -> str
+  def _read_cache(workspace_root: str, current_hash: str) -> Optional[str]
+  def _write_cache(workspace_root: str, content: str, file_hash: str) -> None
+  def generate_repo_map(workspace_root: str = ".", max_tokens: int = _DEFAULT_MAX_TOKENS) -> str
+  def invalidate_cache(workspace_root: str) -> None
+tree_sitter_parser.py
+  def _check_tree_sitter() -> bool
+  class SignatureNode
+  def _get_language(lang_name: str)
+  def _node_text(node, source_bytes: bytes) -> str
+  def _extract_python_signatures(root, source_bytes: bytes) -> List[SignatureNode]
+  def _extract_python_signatures_node(class_node, source_bytes: bytes) -> List[SignatureNode]
+  def _python_func_sig(node, source_bytes: bytes) -> Tuple[str, str]
+  def _extract_js_ts_signatures(root, source_bytes: bytes, lang: str) -> List[SignatureNode]
+  def _extract_js_ts_node(
+    node, source_bytes: bytes, results: List[SignatureNode], lang: str, top_level: bool = False
+)
+  def detect_language(file_path: str) -> Optional[str]
+  def parse_file_signatures(file_path: str, language: Optional[str] = None) -> List[SignatureNode]
+cli/
+  __init__.py
+  execute_shell.py
+    def _runtime_precheck_message(command: str) -> str
+    def _runtime_not_found_hint(command: str) -> str
+    def _kill_process_tree(process: subprocess.Popen) -> None
+    def _validated_shell_cwd(cwd: str) -> str
+    def execute_bash_command(
+    command: str,
+    timeout: int = 60,
+    cwd: str = ".",
+    description: str = "",
+) -> str
+  manage_long_running.py
+    def start_long_running_process(
+    command: str,
+    name: Optional[str] = None,
+    cwd: str = ".",
+    env: Optional[Dict[str, str]] = None,
+) -> str
+    def stop_long_running_process(
+    pid: int,
+    graceful_timeout_sec: float = 5.0,
+    force_kill: bool = True,
+) -> str
+    def list_long_running_processes() -> str
+    def get_long_running_status(pid: int) -> Optional[Dict[str, Any]]
+    def register_external_process(pid: int, name: str, command: str) -> str
+core_mechanisms/
+  __init__.py
+  colored_logger.py
+    class ColoredLogger
+  config.py
+    class MiroConfig
+      def __new__(cls)
+      def __init__(self)
+      def _load_config(self)
+      def get(self, key: str, default: Any = None) -> Any
+      def set(self, key: str, value: Any)
+      def reload(self)
+      def to_dict(self) -> Dict[str, Any]
+      def save(self, path: Optional[str] = None)
+    def get_config() -> MiroConfig
+  context_manager.py
+    class ContextManager
+      def __init__(self, workspace: str = ".")
+      def get_file_hash(self, file_path: str) -> str
+      def generate_repo_map(self, max_depth: int = 3) -> str
+      def _extract_python_structure(self, file_path: str, depth: int) -> str
+  enums.py
+    class OperationType(Enum)
+    class FallbackStrategy(Enum)
+  execution_boundary_context.py
+    def _config_get_bool(key: str) -> bool
+    def _merged_raw() -> Dict[str, bool]
+    def get_effective_full_unrestricted() -> bool
+    def get_effective_sub_allow(key: str) -> bool
+    def set_boundary_overrides(updates: Dict[str, bool]) -> None
+    def clear_boundary_overrides() -> None
+    def get_context_workspace_root() -> Optional[str]
+    def boundary_override(**kwargs: bool) -> Iterator[None]
+    def workspace_root_override(workspace_root: str) -> Iterator[None]
+  fallback_manager.py
+    class FallbackManager
+      def __init__(self)
+      def execute_with_fallback(self,
+                            file_path: str,
+                            old_str: str,
+                            new_str: str) -> Dict[str, Any]
+      def _strategy_exact_match(self, file_path: str, old_str: str, new_str: str) -> Dict[str, Any]
+      def _strategy_fuzzy_match(self, file_path: str, old_str: str, new_str: str,
+                             threshold: float = 0.80) -> Dict[str, Any]
+      def _strategy_ast_edit(self, file_path: str, old_str: str, new_str: str) -> Dict[str, Any]
+      def _extract_selector_from_code(self, code: str) -> Optional[str]
+  log_config.py
+  path_security.py
+    class PathSecurityError(Exception)
+    def _allow_outside_workspace(
+    explicit: Optional[bool],
+    path_profile: PathProfile,
+) -> bool
+    def get_workspace_root() -> Path
+    def validate_path(
+    path: str,
+    *,
+    workspace_root: Optional[str] = None,
+    allow_create: bool = True,
+    must_exist: bool = False,
+    allow_paths_outside_workspace: Optional[bool] = None,
+    path_profile: PathProfile = "file",
+) -> Tuple[Path, str]
+    def validate_search_scope(
+    path: str,
+    *,
+    must_exist: bool = True,
+    allow_create: bool = False,
+) -> Path
+    def safe_path_for_read(
+    path: str,
+    workspace_root: Optional[str] = None,
+    *,
+    allow_paths_outside_workspace: Optional[bool] = None,
+    path_profile: PathProfile = "file",
+) -> Path
+    def safe_path_for_write(
+    path: str,
+    workspace_root: Optional[str] = None,
+    *,
+    allow_paths_outside_workspace: Optional[bool] = None,
+    path_profile: PathProfile = "file",
+) -> Path
+    def safe_path_for_delete(
+    path: str,
+    workspace_root: Optional[str] = None,
+    *,
+    allow_paths_outside_workspace: Optional[bool] = None,
+    path_profile: PathProfile = "file",
+) -> Path
+  shell_security.py
+    class ShellSecurityError(Exception)
+    def check_shell_command(
+    command: str,
+    *,
+    enabled: bool = True,
+    level: str = "confirm",
+    blacklist: List[str] = None,
+    whitelist: List[str] = None,
+    allow_sudo: bool = False,
+) -> Tuple[bool, str, str]
+    def format_security_error(
+    command: str,
+    reason: str,
+    severity: str,
+    level: str = "confirm",
+) -> str
+    def get_shell_security_config()
+  token_pruner.py
+    class ContentPruner
+      def __init__(self, max_tokens: int = 5000)
+      def prune(self, content: str, explanation: str = "") -> Tuple[str, bool]
+      def _extract_keywords(self, explanation: str) -> List[str]
+      def _score_lines(self, lines: List[str], keywords: List[str]) -> List[Tuple[int, float, str]]
+      def _select_top_lines(self, scored_lines: List[Tuple[int, float, str]], max_tokens: int) -> List[int]
+      def _rebuild_content(self, all_lines: List[str], selected_indices: List[int]) -> str
+  trace_execution.py
+    def trace_execution(func: Callable) -> Callable

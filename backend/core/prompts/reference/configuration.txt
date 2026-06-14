@@ -1,0 +1,272 @@
+# Metis AI - Configuration System
+
+## Overview
+
+Metis uses a unified configuration system with clear priority:
+
+**Priority**: Environment Variables > JSON File > Defaults
+
+This allows:
+- System administrators to enforce settings via environment
+- Projects to customize via JSON file
+- Sensible defaults for quick start
+
+## Configuration File
+
+### Location
+- `Metis_config.json` in workspace root
+- Example: `Metis_config.example.json`
+
+### Format
+```json
+{
+  "workspace_root": "/path/to/workspace",
+  "post_edit_lint": true,
+  "prune_threshold": 1250,
+  "shell_timeout": 30,
+  "max_file_size_mb": 10,
+  "enable_web_search": true,
+  "enable_mcp": true
+}
+```
+
+## Configuration Keys
+
+### workspace_root
+**Type**: string  
+**Default**: Current working directory  
+**Purpose**: Root directory for all file operations
+
+**Environment Variable**: `Metis_WORKSPACE_ROOT`
+
+**Usage**:
+- All file paths are relative to this
+- Path security enforced at this boundary
+- Cannot access files outside this directory
+
+### post_edit_lint
+**Type**: boolean  
+**Default**: false  
+**Purpose**: Automatically run linting after file edits
+
+**Environment Variable**: `Metis_POST_EDIT_LINT` (true/false)
+
+**Usage**:
+- Applies to write-like operations
+- Only for Python files (.py) by default
+- Results appended to tool output
+
+### prune_threshold
+**Type**: integer  
+**Default**: 1250  
+**Purpose**: Token threshold for intelligent pruning
+
+**Environment Variable**: `Metis_PRUNE_THRESHOLD`
+
+**Usage**:
+- Files > threshold tokens are pruned
+- ~1250 tokens ≈ 5000 characters
+- LLM-based relevance extraction
+
+### shell_timeout
+**Type**: integer  
+**Default**: 30  
+**Purpose**: Timeout for shell commands in seconds
+
+**Environment Variable**: `Metis_SHELL_TIMEOUT`
+
+**Usage**:
+- Prevents hanging processes
+- Returns latest output if exceeded
+- 0 = no timeout (use with caution)
+
+### max_file_size_mb
+**Type**: integer  
+**Default**: 10  
+**Purpose**: Maximum file size for read operations
+
+**Environment Variable**: `Metis_MAX_FILE_SIZE_MB`
+
+**Usage**:
+- Prevents reading huge files
+- Protects memory
+- Suggests chunked reading for large files
+
+### enable_web_search
+**Type**: boolean  
+**Default**: true  
+**Purpose**: Enable/disable web search capability
+
+**Environment Variable**: `Metis_ENABLE_WEB_SEARCH` (true/false)
+
+**Usage**:
+- Can disable for offline environments
+- Security consideration
+
+### enable_mcp
+**Type**: boolean  
+**Default**: true  
+**Purpose**: Enable/disable MCP server integration
+
+**Environment Variable**: `Metis_ENABLE_MCP` (true/false)
+
+**Usage**:
+- Can disable for security
+- Reduces attack surface
+
+## Environment Variables
+
+### Priority
+Environment variables have highest priority:
+- Override JSON configuration
+- Cannot be overridden by config file
+- System administrator can enforce settings
+
+### Format
+All environment variables start with `Metis_`:
+- `Metis_WORKSPACE_ROOT`
+- `Metis_POST_EDIT_LINT`
+- `Metis_PRUNE_THRESHOLD`
+- `Metis_SHELL_TIMEOUT`
+- `Metis_MAX_FILE_SIZE_MB`
+- `Metis_ENABLE_WEB_SEARCH`
+- `Metis_ENABLE_MCP`
+
+### Type Conversion
+- Strings: Used as-is
+- Booleans: "true"/"false" (case-insensitive)
+- Integers: Parsed as int
+- Floats: Parsed as float
+
+### Example
+```bash
+# Linux/Mac
+export Metis_WORKSPACE_ROOT="/home/user/project"
+export Metis_POST_EDIT_LINT="true"
+export Metis_PRUNE_THRESHOLD="2000"
+
+# Windows PowerShell
+$env:Metis_WORKSPACE_ROOT="C:\Projects\metis-workspace"
+$env:Metis_POST_EDIT_LINT="true"
+$env:Metis_PRUNE_THRESHOLD="2000"
+```
+
+## Access in Code
+
+### Python
+```python
+from backend.tools.coding.foundation.core_mechanisms.config import config
+
+# Access configuration
+workspace = config.workspace_root
+lint_enabled = config.post_edit_lint
+threshold = config.prune_threshold
+timeout = config.shell_timeout
+
+# Check if feature enabled
+if config.enable_web_search:
+    result = web_search(query="...")
+```
+
+### Configuration Object
+```python
+class MetisConfig:
+    def __init__(self):
+        self.workspace_root = self._get_config("workspace_root", os.getcwd())
+        self.post_edit_lint = self._get_config("post_edit_lint", False)
+        self.prune_threshold = self._get_config("prune_threshold", 1250)
+        self.shell_timeout = self._get_config("shell_timeout", 30)
+        self.max_file_size_mb = self._get_config("max_file_size_mb", 10)
+        self.enable_web_search = self._get_config("enable_web_search", True)
+        self.enable_mcp = self._get_config("enable_mcp", True)
+    
+    def _get_config(self, key, default):
+        # 1. Check environment variable
+        env_key = f"Metis_{key.upper()}"
+        if env_key in os.environ:
+            return self._convert_type(os.environ[env_key], type(default))
+        
+        # 2. Check JSON file
+        if self.config_file_exists():
+            value = self.config_data.get(key)
+            if value is not None:
+                return value
+        
+        # 3. Return default
+        return default
+```
+
+## Configuration Scenarios
+
+### Scenario 1: Development
+```json
+{
+  "workspace_root": "./",
+  "post_edit_lint": true,
+  "prune_threshold": 1250,
+  "shell_timeout": 60,
+  "enable_web_search": true,
+  "enable_mcp": true
+}
+```
+
+### Scenario 2: Production
+```json
+{
+  "workspace_root": "/app",
+  "post_edit_lint": true,
+  "prune_threshold": 2000,
+  "shell_timeout": 30,
+  "enable_web_search": false,
+  "enable_mcp": false
+}
+```
+
+### Scenario 3: CI/CD
+```bash
+# Environment variables only
+export Metis_WORKSPACE_ROOT="/build"
+export Metis_POST_EDIT_LINT="true"
+export Metis_SHELL_TIMEOUT="120"
+export Metis_ENABLE_WEB_SEARCH="false"
+export Metis_ENABLE_MCP="false"
+```
+
+## Best Practices
+
+### Security
+1. Use environment variables for sensitive settings
+2. Don't commit secrets to config file
+3. Use restrictive workspace_root
+4. Disable unnecessary features
+
+### Performance
+1. Adjust prune_threshold based on needs
+2. Set appropriate shell_timeout
+3. Limit max_file_size_mb
+
+### Maintenance
+1. Document custom settings
+2. Use example config as template
+3. Version control config file
+4. Test configuration changes
+
+## Troubleshooting
+
+### Configuration Not Loading
+1. Check file location (workspace root)
+2. Check JSON syntax
+3. Check file permissions
+4. Check environment variables
+
+### Settings Not Applied
+1. Check priority (env > JSON > default)
+2. Check type conversion
+3. Check spelling of keys
+4. Restart application
+
+### Performance Issues
+1. Adjust prune_threshold
+2. Increase shell_timeout
+3. Reduce max_file_size_mb
+4. Disable unused features

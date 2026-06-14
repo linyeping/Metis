@@ -1,0 +1,189 @@
+# Category 2: File System Operations (5 tools)
+
+## 1. write_file
+**Alias**: Write  
+**Purpose**: Create or overwrite files
+
+**Parameters**:
+- `file_path` (required): Path to file (relative to workspace root)
+- `content` (required): File content
+
+**C-style aliases**:
+- `path` → `file_path`
+- `contents` → `content`
+
+**Usage**:
+```python
+# Create new file
+write_file(file_path="src/utils.py", content="def hello():\n    return 'world'")
+
+# Overwrite existing file
+write_file(path="config.json", contents='{"debug": true}')
+
+# Multi-line content
+write_file(
+    file_path="README.md",
+    content="""# My Project
+
+This is a sample project.
+"""
+)
+```
+
+**Features**:
+- Auto-creates parent directories
+- Post-edit linting (if enabled and file is .py)
+- Path security enforced (workspace boundary)
+- Overwrites existing files
+
+**Best practice**: 
+- For large files (>50 lines), write initial content then use append_to_file
+- This improves velocity dramatically
+
+---
+
+## 2. append_to_file
+**Purpose**: Append content to existing files
+
+**Parameters**:
+- `path` (required): Path to existing file
+- `text` (required): Content to append
+
+**Usage**:
+```python
+# Append to file
+append_to_file(path="log.txt", text="New log entry\n")
+
+# Add function to module
+append_to_file(
+    path="src/utils.py",
+    text="\n\ndef goodbye():\n    return 'farewell'\n"
+)
+
+# Add multiple lines
+append_to_file(
+    path="config.py",
+    text="""
+# Additional configuration
+DEBUG = False
+LOG_LEVEL = 'INFO'
+"""
+)
+```
+
+**Features**:
+- Auto-handles newline formatting
+- Adds newline before content if file doesn't end with one
+- Fails if file doesn't exist (use write_file first)
+- Path security enforced
+
+**Workflow**:
+```python
+# 1. Create file with initial content
+write_file(file_path="module.py", content="# Module\n\ndef first():\n    pass")
+
+# 2. Append additional functions
+append_to_file(path="module.py", text="\n\ndef second():\n    pass")
+append_to_file(path="module.py", text="\n\ndef third():\n    pass")
+```
+
+---
+
+## 3. delete_file
+**Alias**: Delete  
+**Purpose**: Delete a single file
+
+**Parameters**:
+- `path` (required): Path to file to delete
+
+**C-style aliases**:
+- `file_path` → `path`
+
+**Usage**:
+```python
+# Delete file
+delete_file(path="temp.txt")
+
+# C-style
+delete_file(file_path="old_config.json")
+
+# Delete generated file
+delete_file(path="build/output.js")
+```
+
+**Safety**:
+- Path security enforced (workspace boundary)
+- Fails gracefully if file doesn't exist
+- Cannot delete directories (use delete_directory)
+- Cannot delete files outside workspace
+
+---
+
+## 4. delete_directory
+**Purpose**: Recursively delete a directory
+
+**Parameters**:
+- `path` (required): Path to directory
+
+**Usage**:
+```python
+# Delete build directory
+delete_directory(path="build")
+
+# Delete node_modules
+delete_directory(path="node_modules")
+
+# Delete cache
+delete_directory(path=".cache")
+```
+
+**Warning**: 
+- Use with caution - recursive deletion
+- Cannot be undone
+- Deletes all contents
+- Path security enforced
+
+---
+
+## 5. rename_file_update_refs
+**Purpose**: Rename/move file with automatic import updates
+
+**Parameters**:
+- `old_path` (required): Current file path
+- `new_path` (required): New file path
+
+**Usage**:
+```python
+# Rename file
+rename_file_update_refs(old_path="utils.py", new_path="helpers.py")
+
+# Move file
+rename_file_update_refs(
+    old_path="src/utils.py",
+    new_path="src/lib/helpers.py"
+)
+
+# Reorganize
+rename_file_update_refs(
+    old_path="components/Button.tsx",
+    new_path="components/ui/Button.tsx"
+)
+```
+
+**Features**:
+- Like VS Code's smart rename
+- Auto-updates import statements across codebase
+- Auto-updates references in other files
+- Creates destination directory if needed
+- All changes saved automatically
+
+**Example**:
+```python
+# Before: import { Button } from './components/Button'
+rename_file_update_refs(
+    old_path="components/Button.tsx",
+    new_path="components/ui/Button.tsx"
+)
+# After: import { Button } from './components/ui/Button'
+# All imports automatically updated!
+```

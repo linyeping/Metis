@@ -1,0 +1,445 @@
+# Category 7: Package Management & Version Control (3 tools)
+
+## 1. auto_install_package
+**Purpose**: Automatically install missing packages when import errors occur
+
+**Parameters**:
+- `package_name` (required): Package to install
+- `language` (optional): Programming language (python/javascript/etc)
+- `install_command` (optional): Custom install command
+
+**Usage**:
+```python
+# Auto-install Python package
+auto_install_package(package_name="requests", language="python")
+
+# Auto-install npm package
+auto_install_package(package_name="axios", language="javascript")
+
+# Custom install command
+auto_install_package(
+    package_name="tensorflow",
+    install_command="pip install tensorflow-gpu"
+)
+```
+
+**Features**:
+- **Auto-detection**: Detects language from context
+- **Smart installation**: Uses appropriate package manager
+- **Error handling**: Graceful failure with suggestions
+- **Verification**: Confirms successful installation
+
+**Supported Languages**:
+- Python: pip, conda, poetry
+- JavaScript/TypeScript: npm, yarn, pnpm
+- Ruby: gem, bundler
+- Go: go get
+- Rust: cargo
+
+**Workflow**:
+1. Detects missing package from error
+2. Determines language and package manager
+3. Runs installation command
+4. Verifies installation
+5. Returns result
+
+**Example Workflow**:
+```python
+# 1. Code fails with import error
+execute_bash_command(command="python script.py")
+# Error: ModuleNotFoundError: No module named 'requests'
+
+# 2. Auto-install
+auto_install_package(package_name="requests", language="python")
+
+# 3. Retry
+execute_bash_command(command="python script.py")
+# Success!
+```
+
+**Best Practices**:
+
+1. **Check before install**:
+   ```python
+   # Read requirements first
+   content = read_file(path="requirements.txt", explanation="Check dependencies")
+   
+   # Install if missing
+   auto_install_package(package_name="requests")
+   ```
+
+2. **Specify version**:
+   ```python
+   auto_install_package(
+       package_name="requests",
+       install_command="pip install requests==2.28.0"
+   )
+   ```
+
+3. **Handle errors**:
+   ```python
+   result = auto_install_package(package_name="package")
+   if "error" in result.lower():
+       # Fallback or alternative
+       pass
+   ```
+
+---
+
+## 2. check_git_status
+**Purpose**: Check git repository status (changes, branch, commits)
+
+**Parameters**:
+- `path` (optional): Repository path (defaults to workspace root)
+- `verbose` (optional): Include detailed information
+
+**Returns**:
+- Current branch
+- Modified files
+- Staged files
+- Untracked files
+- Commits ahead/behind remote
+
+**Usage**:
+```python
+# Check current repo
+status = check_git_status()
+
+# Check specific repo
+status = check_git_status(path="submodule/")
+
+# Verbose output
+status = check_git_status(verbose=True)
+```
+
+**Output Format**:
+```
+Branch: main
+Ahead: 2 commits
+Behind: 0 commits
+
+Modified files (3):
+  - src/utils.py
+  - src/main.py
+  - README.md
+
+Staged files (1):
+  - src/config.py
+
+Untracked files (2):
+  - temp.txt
+  - .env.local
+```
+
+**Use Cases**:
+
+1. **Before committing**:
+   ```python
+   # Check what changed
+   status = check_git_status()
+   
+   # Review changes
+   execute_bash_command(command="git diff")
+   
+   # Commit
+   git_commit_pr(message="Fix bug")
+   ```
+
+2. **Before pulling**:
+   ```python
+   # Check for conflicts
+   status = check_git_status()
+   
+   if "modified" in status:
+       # Stash or commit first
+       execute_bash_command(command="git stash")
+   
+   execute_bash_command(command="git pull")
+   ```
+
+3. **Branch management**:
+   ```python
+   # Check current branch
+   status = check_git_status()
+   
+   # Switch if needed
+   execute_bash_command(command="git checkout feature-branch")
+   ```
+
+**Features**:
+- **Fast**: Uses git status --porcelain
+- **Comprehensive**: All git status information
+- **Formatted**: Human-readable output
+- **Remote tracking**: Shows ahead/behind
+
+---
+
+## 3. git_commit_pr
+**Purpose**: Commit changes and optionally create pull request
+
+**Parameters**:
+- `message` (required): Commit message
+- `files` (optional): Specific files to commit (defaults to all)
+- `create_pr` (optional): Create pull request (default: false)
+- `pr_title` (optional): PR title (defaults to commit message)
+- `pr_body` (optional): PR description
+- `target_branch` (optional): PR target branch (default: main)
+
+**Usage**:
+```python
+# Simple commit
+git_commit_pr(message="Fix authentication bug")
+
+# Commit specific files
+git_commit_pr(
+    message="Update configuration",
+    files=["config.py", "settings.json"]
+)
+
+# Commit and create PR
+git_commit_pr(
+    message="Add new feature",
+    create_pr=True,
+    pr_title="Feature: User authentication",
+    pr_body="Implements JWT-based authentication",
+    target_branch="develop"
+)
+```
+
+**Commit Message Best Practices**:
+
+1. **Conventional Commits**:
+   ```python
+   # Feature
+   git_commit_pr(message="feat: add user login")
+   
+   # Bug fix
+   git_commit_pr(message="fix: resolve memory leak")
+   
+   # Documentation
+   git_commit_pr(message="docs: update API guide")
+   
+   # Refactor
+   git_commit_pr(message="refactor: simplify auth logic")
+   ```
+
+2. **Descriptive messages**:
+   ```python
+   # Bad
+   git_commit_pr(message="fix")
+   
+   # Good
+   git_commit_pr(message="fix: handle null user in authentication")
+   ```
+
+3. **Multi-line messages**:
+   ```python
+   git_commit_pr(
+       message="""feat: add user authentication
+
+Implements JWT-based authentication with:
+- Login endpoint
+- Token refresh
+- Password hashing
+- Session management
+
+Closes #123"""
+   )
+   ```
+
+**Pull Request Workflow**:
+
+```python
+# 1. Check status
+status = check_git_status()
+
+# 2. Review changes
+execute_bash_command(command="git diff")
+
+# 3. Commit and create PR
+git_commit_pr(
+    message="feat: implement caching layer",
+    create_pr=True,
+    pr_title="Add Redis caching",
+    pr_body="""
+## Changes
+- Add Redis client
+- Implement cache decorators
+- Add cache invalidation
+
+## Testing
+- Unit tests pass
+- Integration tests pass
+- Performance improved by 40%
+
+## Related Issues
+Closes #456
+    """,
+    target_branch="main"
+)
+```
+
+**Features**:
+- **Auto-staging**: Stages files automatically
+- **Validation**: Checks for conflicts
+- **PR creation**: Integrated with GitHub/GitLab
+- **Branch detection**: Auto-detects current branch
+
+**Safety Checks**:
+
+1. **Pre-commit validation**:
+   - Checks for uncommitted changes
+   - Validates commit message format
+   - Runs pre-commit hooks
+
+2. **PR validation**:
+   - Checks target branch exists
+   - Validates PR title/body
+   - Checks for merge conflicts
+
+3. **Error handling**:
+   - Graceful failure
+   - Detailed error messages
+   - Rollback on failure
+
+---
+
+## Common Workflows
+
+### Workflow 1: Install Dependencies
+```python
+# 1. Read requirements
+content = read_file(path="requirements.txt", explanation="Check dependencies")
+
+# 2. Install all
+execute_bash_command(command="pip install -r requirements.txt")
+
+# 3. Or install individually
+auto_install_package(package_name="requests")
+auto_install_package(package_name="numpy")
+```
+
+### Workflow 2: Commit Changes
+```python
+# 1. Check status
+status = check_git_status()
+
+# 2. Review changes
+execute_bash_command(command="git diff")
+
+# 3. Run tests
+execute_bash_command(command="pytest")
+
+# 4. Commit
+git_commit_pr(message="fix: resolve authentication issue")
+```
+
+### Workflow 3: Create Feature PR
+```python
+# 1. Create feature branch
+execute_bash_command(command="git checkout -b feature/new-api")
+
+# 2. Make changes
+robust_replace_in_file(...)
+
+# 3. Test
+execute_bash_command(command="npm test")
+
+# 4. Commit and PR
+git_commit_pr(
+    message="feat: add new API endpoint",
+    create_pr=True,
+    pr_title="New API: User Management",
+    pr_body="Implements CRUD operations for users",
+    target_branch="develop"
+)
+```
+
+### Workflow 4: Fix and Deploy
+```python
+# 1. Check current state
+status = check_git_status()
+
+# 2. Fix issue
+robust_replace_in_file(...)
+
+# 3. Install if needed
+auto_install_package(package_name="missing-package")
+
+# 4. Test
+execute_bash_command(command="pytest tests/")
+
+# 5. Commit
+git_commit_pr(message="fix: resolve deployment issue")
+
+# 6. Push
+execute_bash_command(command="git push origin main")
+```
+
+---
+
+## Integration with Other Tools
+
+### With Diagnostics:
+```python
+# 1. Check for errors
+diagnostics = read_lints(paths="src/")
+
+# 2. Fix errors
+robust_replace_in_file(...)
+
+# 3. Verify fix
+diagnostics = read_lints(paths="src/")
+
+# 4. Commit if clean
+if "no issues" in diagnostics:
+    git_commit_pr(message="fix: resolve linting errors")
+```
+
+### With Testing:
+```python
+# 1. Make changes
+robust_replace_in_file(...)
+
+# 2. Run tests
+test_result = execute_bash_command(command="pytest")
+
+# 3. Commit if passing
+if "passed" in test_result:
+    git_commit_pr(message="feat: add new feature")
+```
+
+### With Package Management:
+```python
+# 1. Add dependency
+auto_install_package(package_name="requests")
+
+# 2. Update requirements
+execute_bash_command(command="pip freeze > requirements.txt")
+
+# 3. Commit
+git_commit_pr(
+    message="chore: add requests dependency",
+    files=["requirements.txt"]
+)
+```
+
+---
+
+## Metis runtime pattern
+- Intelligent package detection
+- Auto-installation with verification
+- Git status with remote tracking
+- Integrated PR creation
+
+## Metis tool discipline
+- Simple commit workflow
+- Conventional commit support
+- Multi-file staging
+- Branch management
+
+## From Metis
+- Unified VCS interface
+- Enhanced error handling
+- Configuration integration
+- Security validation

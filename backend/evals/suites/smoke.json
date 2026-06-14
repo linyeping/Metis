@@ -1,0 +1,102 @@
+{
+  "name": "smoke",
+  "description": "Twelve small fixed tasks that exercise edit, search, verify, create, planning, and web behavior.",
+  "tasks": [
+    {
+      "id": "fix-off-by-one",
+      "prompt": "In this small Python project, `pybuggy.stats.adjacent_pairs([1, 2, 3, 4])` drops the final pair. Fix the off-by-one bug. Keep the behavior covered by tests.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_fix_off_by_one.py",
+      "max_turns": 20,
+      "tags": ["edit", "python"]
+    },
+    {
+      "id": "fix-import-cycle",
+      "prompt": "Importing `pybuggy.cycle_a` currently fails because of a circular import. Refactor the tiny cycle module pair so `from pybuggy.cycle_a import combined; combined()` works.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_fix_import_cycle.py",
+      "max_turns": 20,
+      "tags": ["edit", "python", "imports"]
+    },
+    {
+      "id": "add-function",
+      "prompt": "Add the missing function described by the existing code comments/docstrings in `pybuggy.math_tools`. It should satisfy the checker without changing unrelated behavior.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_add_function.py",
+      "max_turns": 20,
+      "tags": ["edit", "python"]
+    },
+    {
+      "id": "rename-config-key",
+      "prompt": "Rename the configuration key `retry_count` to `max_retries` everywhere it is used. Keep callers working and remove the old key from source.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_rename_config_key.py",
+      "max_turns": 25,
+      "tags": ["multi-edit", "python"]
+    },
+    {
+      "id": "answer-arch",
+      "prompt": "Inspect the project and write `answer.md` explaining the main entry point and how order data flows through the code.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_answer_arch.py",
+      "max_turns": 15,
+      "tags": ["search", "answer"]
+    },
+    {
+      "id": "find-dead-code",
+      "prompt": "Find the two functions in the project that are not called by the rest of the fixture. Write their names to `answer.md`.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_find_dead_code.py",
+      "max_turns": 15,
+      "tags": ["search", "analysis"]
+    },
+    {
+      "id": "run-and-fix-test",
+      "prompt": "Run the tests in this fixture and fix the failing behavior until the test suite passes.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_run_and_fix_test.py",
+      "max_turns": 25,
+      "tags": ["verify", "edit", "python"]
+    },
+    {
+      "id": "ts-add-type",
+      "prompt": "In the TypeScript mini-project, add a proper User type for `parseUser` and fix the type bug this exposes. Keep `tsc --noEmit` clean.",
+      "fixture": "tsmini",
+      "checker": "checks/check_ts_add_type.py",
+      "max_turns": 20,
+      "tags": ["edit", "typescript"]
+    },
+    {
+      "id": "create-script",
+      "prompt": "Create `scripts/summarize_orders.py`. It should read `data/orders.csv` and print category totals as `category,total` lines.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_create_script.py",
+      "max_turns": 25,
+      "tags": ["create", "python", "data"]
+    },
+    {
+      "id": "long-plan",
+      "prompt": "Complete a small multi-step feature: create `docs/roadmap.md` with a Phase 1 section, create `pybuggy/features.py` with feature flag helpers, and add `tests/test_features.py` covering them.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_long_plan.py",
+      "max_turns": 35,
+      "tags": ["plan", "multi-edit", "python"]
+    },
+    {
+      "id": "web-static-summary",
+      "prompt": "Use web_fetch to read https://www.python.org/. Write `answer.md` with the page title and one current news, release, event, or download item mentioned on the page.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_web_static_summary.py",
+      "max_turns": 12,
+      "tags": ["web", "web_fetch", "answer"]
+    },
+    {
+      "id": "web-spa-browser",
+      "prompt": "Use browse_web to inspect the TodoMVC React demo at https://todomvc.com/examples/react/dist/. Write `answer.md` describing the visible page title/app name and one visible UI label or placeholder.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_web_spa_browser.py",
+      "max_turns": 18,
+      "tags": ["web", "browser", "spa", "answer"]
+    }
+  ]
+}

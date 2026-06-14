@@ -1,0 +1,13 @@
+# 可选依赖（按需安装）
+mss>=9.0.0
+Pillow>=10.0.0
+pyautogui>=0.9.54
+pynput>=1.7.6
+# human 模式 OCR 定位 — 双引擎，按需任选一个或两个都装
+# 引擎 1: Tesseract（另需系统安装 Tesseract-OCR，本机路径 E:\apps\AOCR\tesseract.exe）
+pytesseract>=0.3.10
+# 引擎 2: PaddleOCR（纯 pip 安装，中文识别更强）
+paddleocr>=2.7.0
+# PaddleOCR 依赖 opencv
+opencv-python>=4.8.0
+numpy>=1.24.0

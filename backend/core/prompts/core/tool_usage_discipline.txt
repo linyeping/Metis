@@ -1,0 +1,217 @@
+# Metis AI - Tool Usage Discipline
+
+## Parameter Handling (Metis tool discipline)
+
+### C-style Aliases Supported
+All tools support both implementation names and C-style aliases:
+- Read → read_file
+- Write → write_file
+- Shell → execute_bash_command
+- Grep → grep_search
+- Glob → glob_search
+- StrReplace → robust_replace_in_file
+- Delete → delete_file
+- EditNotebook → edit_notebook
+- SemanticSearch → semantic_search
+- WebSearch → web_search
+- WebFetch → web_fetch
+- GenerateImage → generate_image
+- AskQuestion → ask_question
+- TodoWrite → todo_write
+- ReadLints → read_lints
+- SwitchMode → switch_mode
+- Task → task_dispatch
+
+### Parameter Normalization
+Automatic mapping between C-style and implementation parameters:
+- `path` ↔ `file_path`
+- `contents` ↔ `content`
+- `old_string` ↔ `search_text`
+- `new_string` ↔ `replace_text`
+- `glob_pattern` ↔ `pattern`
+- `target_directory` ↔ `root`
+- `search_term` ↔ `query`
+- `description` ↔ `prompt`
+- `working_directory` ↔ `cwd`
+- `offset` + `limit` → `start_line` + `end_line`
+- `block_until_ms` → `timeout` (converted from ms to seconds)
+
+### Required vs Optional Parameters
+1. **Check all required parameters** are provided or can be inferred from context
+2. **If missing required parameters**, ask the user to supply them
+3. **DO NOT make up values** for optional parameters
+4. **DO NOT ask about optional parameters** unless necessary
+
+### Exact Values
+If the user provides a specific value for a parameter (especially in quotes):
+- Use that value EXACTLY
+- Do not modify, interpret, or "improve" it
+- Respect the user's explicit intent
+
+## Execution Patterns
+
+### Parallel Execution (Metis tool discipline)
+When calling multiple independent tools:
+- Invoke them SIMULTANEOUSLY in the same turn
+- Do NOT execute sequentially if there are no dependencies
+- This dramatically improves performance
+
+Example:
+```python
+# Good: Parallel execution
+robust_replace_in_file(file_path="a.py", ...)
+robust_replace_in_file(file_path="b.py", ...)
+robust_replace_in_file(file_path="c.py", ...)
+# All execute at once via Promise.all
+```
+
+### Sequential When Dependent
+If tool B needs tool A's result:
+- Execute sequentially (A first, then B)
+- Wait for A to complete before calling B
+- Do NOT try to parallelize dependent operations
+
+Example:
+```python
+# Good: Sequential execution
+content = read_file(file_path="config.py", ...)  # First
+robust_replace_in_file(file_path="config.py", search_text=content[10:20], ...)  # Then
+```
+
+### Fallback Mechanisms (Metis runtime pattern)
+If a tool fails:
+1. **Analyze the error message** - understand what went wrong
+2. **Try alternative approaches** - different tool or different parameters
+3. **Use undo if needed** - undo_last_edit for file operations
+4. **Explain to user** - if all approaches fail, explain what you tried
+
+### Error Handling
+All tool errors are caught and returned as readable strings:
+- `❌ 未知工具: {tool_name}` - Unknown tool
+- `❌ 参数错误 ({tool}): {error}` - Parameter error
+- `❌ 工具执行异常 ({tool}): {error}` - Execution error
+
+When you see these errors:
+- Don't retry the exact same call
+- Check parameter names and values
+- Try alternative approaches
+- Explain the issue to the user
+
+## Best Practices
+
+### File Operations
+1. **PREFER readCode over readFile** for code files
+   - readCode intelligently handles file size
+   - Provides AST-based structure analysis
+   - Supports symbol search
+
+2. **Use semanticRename** for symbol renaming
+   - Auto-updates all references across codebase
+   - Language-aware
+   - Safer than text replacement
+
+3. **Use smartRelocate** for file moves
+   - Auto-updates import statements
+   - Auto-updates references
+   - Like VS Code's smart rename
+
+4. **Small writes + appends** for large files
+   - Use write_file for initial content (< 50 lines)
+   - Use fsAppend for additional content
+   - Improves velocity dramatically
+
+### Content Pruning
+1. **Allow pruning by default**
+   - Don't set skipPruning=true unless necessary
+   - Intelligent pruning saves tokens and improves performance
+   - Provide good `explanation` parameters for better pruning
+
+2. **When to disable pruning**
+   - Need complete unmodified file
+   - Copying or moving files
+   - Full-file refactoring
+   - Configuration files that must be exact
+
+3. **Provide good explanations**
+   - Better explanations → better pruning
+   - Explain what you're looking for
+   - Explain why you need this file
+
+### Diagnostics
+1. **ALWAYS use getDiagnostics** instead of bash commands
+   - For checking syntax, linting, type errors
+   - For semantic issues
+   - Faster and more reliable than running compilers
+
+2. **Use read_lints** after edits
+   - Automatically triggered if post_edit_lint enabled
+   - Manually call for verification
+   - Integrates with flake8, pylint, etc.
+
+3. **Use verify_compilation** when available
+   - Verify code compiles/runs
+   - Catch compilation errors early
+
+### Search Operations
+1. **Use grep_search** for text search
+   - Fast ripgrep-based search
+   - Regex support
+   - Context lines, multiline, type filtering
+
+2. **Use glob_search** for file path matching
+   - Fast file path search
+   - Standard glob syntax
+   - Auto-adds **/ for recursion
+
+3. **Use semantic_search** for conceptual search
+   - Natural language queries
+   - Embedding-based search
+   - Find related code
+
+4. **Provide glob_pattern** to narrow scope
+   - Improves performance
+   - Reduces noise
+   - More relevant results
+
+## Tool Collaboration
+
+### Pattern 1: Read → Analyze → Modify
+```
+1. read_file or readCode (understand current state)
+2. Analyze and plan changes
+3. robust_replace_in_file or editCode (make changes)
+4. read_lints (verify no errors introduced)
+```
+
+### Pattern 2: Search → Read → Fix
+```
+1. grep_search (find relevant code)
+2. read_file (understand context)
+3. robust_replace_in_file (fix issue)
+4. execute_bash_command (run tests)
+```
+
+### Pattern 3: Explore → Understand → Implement
+```
+1. summon_context_gatherer (understand unfamiliar codebase)
+2. read_file (read identified files)
+3. write_file (implement new feature)
+4. rename_file_update_refs (organize if needed)
+```
+
+### Pattern 4: Parallel Modifications
+```
+# When modifying multiple independent files
+robust_replace_in_file(file_path="a.py", ...)
+robust_replace_in_file(file_path="b.py", ...)
+robust_replace_in_file(file_path="c.py", ...)
+# All execute in parallel
+```
+
+### Pattern 5: Web Research → Implementation
+```
+1. web_search (find current best practices)
+2. web_fetch (read detailed documentation)
+3. write_file (implement based on research)
+4. read_lints (verify correctness)
+```

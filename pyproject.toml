@@ -1,0 +1,24 @@
+[tool.ruff]
+line-length = 120
+extend-exclude = [
+    "backend/assets",
+    "backend/build",
+    "backend/metis_backend.egg-info",
+    "backend/others",
+    "backend/output",
+    "backend/packaging_blueprint",
+    "backend/var",
+    "desktop/dist",
+    "desktop/out",
+    "desktop/release",
+    "desktop/release-new*",
+    "desktop/data",
+    "desktop/.dev-data",
+    "desktop/resources/backend-build",
+    "desktop/resources/backend-dist",
+    "docs/dev-log",
+]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I"]
+ignore = ["E501", "W291", "W292", "W293"]

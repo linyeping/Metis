@@ -1,0 +1,283 @@
+# Metis AI - Intelligent Content Pruning (Metis runtime pattern)
+
+## Overview
+
+Intelligent pruning is a core Metis runtime capability that allows Metis to work efficiently with large files and outputs by extracting only the most relevant content.
+
+## Why Pruning?
+
+### Token Limits
+- LLM context windows have limits (e.g., 200K tokens)
+- Large files can consume significant tokens
+- Need to preserve tokens for conversation and reasoning
+
+### Performance
+- Smaller context = faster processing
+- Reduced token usage = lower cost
+- Better focus on relevant content
+
+### Quality
+- Too much irrelevant content = confusion
+- Focused content = better understanding
+- Relevant sections = better decisions
+
+## When Pruning Happens
+
+### Automatic Triggers
+1. **Files > 1250 tokens** (~5000 characters)
+2. **Large directory listings**
+3. **Extensive search results**
+4. **Long command outputs**
+5. **Large process outputs**
+
+### Configurable Threshold
+```json
+{
+  "prune_threshold": 1250  // tokens
+}
+```
+
+Or via environment:
+```bash
+export Metis_PRUNE_THRESHOLD=2000
+```
+
+## How Pruning Works
+
+### Step 1: Token Estimation
+```python
+def estimate_tokens(content):
+    # Rough estimation: 1 token ≈ 4 characters
+    return len(content) / 4
+```
+
+### Step 2: Relevance Analysis
+Uses LLM to identify relevant sections based on `explanation` parameter:
+
+```python
+def prune_content(content, explanation):
+    # 1. Estimate tokens
+    tokens = estimate_tokens(content)
+    
+    # 2. Check threshold
+    if tokens <= prune_threshold:
+        return content  # No pruning needed
+    
+    # 3. LLM-based relevance extraction
+    prompt = f"""
+    Given this content and the user's goal, extract only the most relevant sections.
+    
+    User's goal: {explanation}
+    
+    Content:
+    {content}
+    
+    Extract relevant sections while preserving structure.
+    """
+    
+    relevant_sections = llm.extract(prompt)
+    return relevant_sections
+```
+
+### Step 3: Smart Extraction
+- Preserves code structure (function signatures, class definitions)
+- Maintains context (surrounding lines)
+- Keeps important markers (comments, docstrings)
+- Indicates pruning with markers
+
+### Step 4: Structure Preservation
+```python
+# Before pruning
+def function1():
+    # 100 lines of code
+    pass
+
+def function2():
+    # 100 lines of code
+    pass
+
+# After pruning (if only function1 is relevant)
+def function1():
+    # 100 lines of code
+    pass
+
+# ... [pruned: function2 and other content] ...
+```
+
+## Controlling Pruning
+
+### Allow Pruning (Default)
+```python
+# Allows intelligent pruning
+read_file(
+    file_path="large_module.py",
+    explanation="Find the User class definition"
+)
+```
+
+### Disable Pruning
+```python
+# Gets full file
+read_file(
+    file_path="config.py",
+    explanation="Need complete configuration",
+    skipPruning=True
+)
+```
+
+### Provide Good Explanations
+Better explanations → better pruning:
+
+```python
+# Bad: Vague explanation
+read_file(file_path="utils.py", explanation="Check file")
+
+# Good: Specific explanation
+read_file(
+    file_path="utils.py",
+    explanation="Find the validate_email function to understand email validation logic"
+)
+```
+
+## Pruning Strategies
+
+### For Code Files
+1. **Extract signatures**: Function/class signatures with minimal body
+2. **Preserve structure**: Maintain file organization
+3. **Keep relevant**: Focus on explanation-related code
+4. **Indicate pruning**: Show what was removed
+
+### For Text Files
+1. **Extract sections**: Relevant paragraphs or sections
+2. **Maintain flow**: Keep logical connections
+3. **Preserve formatting**: Maintain structure
+4. **Indicate pruning**: Show gaps
+
+### For Search Results
+1. **Limit matches**: Cap at 50 matches
+2. **Truncate lines**: Long lines truncated
+3. **Context lines**: Keep surrounding context
+4. **Indicate truncation**: Show when truncated
+
+### For Command Output
+1. **Recent output**: Prioritize recent lines
+2. **Error messages**: Always include errors
+3. **Summary info**: Keep important summaries
+4. **Indicate truncation**: Show if truncated
+
+## Examples
+
+### Example 1: Large Python File
+```python
+# Input: 500-line file
+read_file(
+    file_path="models.py",
+    explanation="Find the User model class"
+)
+
+# Output: Pruned to ~200 lines
+"""
+# models.py
+
+from django.db import models
+
+class User(models.Model):
+    username = models.CharField(max_length=100)
+    email = models.EmailField()
+    # ... full User class ...
+
+# ... [pruned: 15 other model classes] ...
+
+# End of models.py
+"""
+```
+
+### Example 2: Search Results
+```python
+# Input: 200 matches
+grep_search(pattern="TODO", glob_pattern="**/*.py")
+
+# Output: Pruned to 50 matches
+"""
+src/auth.py:45: # TODO: Add rate limiting
+src/auth.py:67: # TODO: Improve error messages
+...
+[truncated: 150 more matches]
+"""
+```
+
+### Example 3: Directory Listing
+```python
+# Input: 1000 files
+list_directory(path="node_modules", depth=2)
+
+# Output: Pruned to key directories
+"""
+node_modules/
+├── react/
+│   ├── package.json
+│   └── index.js
+├── react-dom/
+│   ├── package.json
+│   └── index.js
+...
+[pruned: 995 other packages]
+"""
+```
+
+## Best Practices
+
+### When to Allow Pruning
+1. **Exploring unfamiliar code**: Let pruning focus on relevant parts
+2. **Large files**: Pruning makes them manageable
+3. **Search results**: Pruning reduces noise
+4. **Initial investigation**: Get overview first
+
+### When to Disable Pruning
+1. **Complete file needed**: Copying, moving, or full refactoring
+2. **Configuration files**: Must be exact
+3. **Small files**: No benefit from pruning
+4. **Debugging**: Need complete context
+
+### Explanation Guidelines
+1. **Be specific**: "Find X function" not "Check file"
+2. **State purpose**: "To understand Y" not just "Read file"
+3. **Mention context**: "For implementing Z feature"
+4. **Include keywords**: Mention specific names or concepts
+
+## Performance Impact
+
+### Token Savings
+- Large file (10K tokens) → Pruned (2K tokens) = 80% savings
+- Search results (5K tokens) → Pruned (1K tokens) = 80% savings
+- Directory listing (3K tokens) → Pruned (500 tokens) = 83% savings
+
+### Time Savings
+- Smaller context = faster LLM processing
+- Less data transfer = faster network
+- Focused content = faster understanding
+
+### Quality Improvement
+- Relevant content = better decisions
+- Less noise = clearer reasoning
+- Focused analysis = better results
+
+## Troubleshooting
+
+### Pruning Too Aggressive
+1. Provide more specific explanation
+2. Increase prune_threshold
+3. Use skipPruning=True for specific calls
+4. Read file in chunks with line ranges
+
+### Pruning Not Working
+1. Check file size (must exceed threshold)
+2. Check skipPruning parameter
+3. Check configuration
+4. Verify explanation parameter provided
+
+### Missing Important Content
+1. Improve explanation specificity
+2. Mention specific symbols/keywords
+3. Use skipPruning=True
+4. Read file in multiple passes

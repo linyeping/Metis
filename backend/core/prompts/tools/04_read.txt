@@ -1,0 +1,459 @@
+# Category 4: Read Operations (5 tools)
+
+## 1. read_file
+**Alias**: Read  
+**Purpose**: Read single file with optional line ranges and intelligent pruning
+
+**Parameters**:
+- `file_path` (required): Path to file (relative to workspace root)
+- `start_line` (optional): Starting line number (1-indexed)
+- `end_line` (optional): Ending line number (1-indexed)
+- `explanation` (required): Why reading this file (for intelligent pruning)
+- `skipPruning` (optional): Disable intelligent pruning (default: false)
+
+**C-style aliases**:
+- `path` → `file_path`
+- `offset` + `limit` → `start_line` + `end_line`
+
+**Usage**:
+```python
+# Read entire file
+read_file(file_path="src/main.py", explanation="Understand main application logic")
+
+# C-style alias
+read_file(path="config.py", explanation="Check configuration settings")
+
+# Read specific lines
+read_file(
+    file_path="src/utils.py",
+    start_line=10,
+    end_line=50,
+    explanation="Check utility functions in middle section"
+)
+
+# C-style with offset/limit
+read_file(
+    path="data.txt",
+    offset=100,
+    limit=50,
+    explanation="Read 50 lines starting from line 100"
+)
+# Converts to: start_line=100, end_line=149
+
+# Full file without pruning
+read_file(
+    file_path="schema.json",
+    explanation="Need complete schema definition",
+    skipPruning=True
+)
+```
+
+**Intelligent Pruning** (Metis runtime pattern):
+
+**When**: Files > 1250 tokens (~5000 characters)
+
+**How**:
+1. Estimate token count
+2. If exceeds threshold, use LLM to extract relevant sections
+3. Preserve code structure (function signatures, class definitions)
+4. Maintain context (surrounding lines)
+5. Indicate pruning with markers
+
+**Example**:
+```python
+# Large file (500 lines)
+read_file(
+    file_path="models.py",
+    explanation="Find the User model class definition"
+)
+
+# Output (pruned to ~200 lines):
+"""
+# models.py
+
+from django.db import models
+
+class User(models.Model):
+    username = models.CharField(max_length=100)
+    email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def save(self, *args, **kwargs):
+        # Full implementation shown
+        ...
+
+# ... [pruned: 15 other model classes] ...
+
+# End of models.py
+"""
+```
+
+**Binary File Rejection** (Security):
+- Automatically detects binary files
+- Refuses to read compiled binaries, images, videos, archives
+- Returns error message instead
+- Protects from reading non-text data
+
+**Features**:
+- **Intelligent pruning**: Saves tokens, maintains quality
+- **Line ranges**: Focus on specific sections
+- **Binary rejection**: Security protection
+- **Path security**: Workspace boundary enforced
+- **Explanation-driven**: Better explanation → better pruning
+
+**Best Practices**:
+
+1. **Prefer readCode for code files** (unless you need line ranges):
+   ```python
+   # For code files, prefer:
+   readCode(path="utils.py", explanation="Find validation functions")
+   
+   # Use read_file when:
+   # - Need specific line ranges
+   # - Reading non-code files (txt, json, md)
+   # - Reading multiple files (use read_multiple_files)
+   ```
+
+2. **Provide specific explanations**:
+   ```python
+   # Bad: Vague
+   read_file(file_path="app.py", explanation="Check file")
+   
+   # Good: Specific
+   read_file(
+       file_path="app.py",
+       explanation="Find the Flask app initialization and route definitions"
+   )
+   ```
+
+3. **Use line ranges for large files**:
+   ```python
+   # Instead of reading entire 1000-line file:
+   read_file(file_path="large.py", start_line=500, end_line=600, ...)
+   ```
+
+4. **Control pruning appropriately**:
+   ```python
+   # Allow pruning (default) - recommended
+   read_file(file_path="module.py", explanation="...")
+   
+   # Disable only when necessary
+   read_file(file_path="config.json", explanation="...", skipPruning=True)
+   ```
+
+---
+
+## 2. read_file_chunk
+**Purpose**: Read specific chunk of large file by byte offset
+
+**Parameters**:
+- `file_path` (required): Path to file
+- `chunk_size` (required): Size of chunk in bytes
+- `offset` (required): Starting offset in bytes
+
+**Usage**:
+```python
+# Read 1MB chunk starting at 5MB
+read_file_chunk(
+    file_path="large.log",
+    chunk_size=1048576,  # 1MB
+    offset=5242880       # 5MB
+)
+
+# Read first 10KB
+read_file_chunk(
+    file_path="data.bin",
+    chunk_size=10240,
+    offset=0
+)
+
+# Read chunk in middle
+read_file_chunk(
+    file_path="database.sql",
+    chunk_size=102400,   # 100KB
+    offset=1024000       # Start at 1MB
+)
+```
+
+**Use Cases**:
+- Very large log files (>100MB)
+- Large data files
+- Streaming file content
+- Memory-efficient reading
+
+**Note**: For most files, use `read_file` with line ranges instead.
+
+---
+
+## 3. read_multiple_files
+**Purpose**: Read multiple files in one call (preferred over multiple read_file calls)
+
+**Parameters**:
+- `file_paths` (required): List of file paths
+- `start_line` (optional): Starting line for all files
+- `end_line` (optional): Ending line for all files
+- `explanation` (required): Why reading these files
+- `skipPruning` (optional): Disable pruning (default: false)
+
+**C-style aliases**:
+- `paths` → `file_paths`
+
+**Usage**:
+```python
+# Read multiple files
+read_multiple_files(
+    file_paths=["src/a.py", "src/b.py", "src/c.py"],
+    explanation="Understand module interactions between a, b, and c"
+)
+
+# C-style alias
+read_multiple_files(
+    paths=["test1.py", "test2.py"],
+    explanation="Review test coverage"
+)
+
+# With line ranges (applies to all files)
+read_multiple_files(
+    file_paths=["header1.h", "header2.h"],
+    start_line=1,
+    end_line=50,
+    explanation="Check header file declarations"
+)
+
+# Without pruning
+read_multiple_files(
+    file_paths=["config.json", "settings.json"],
+    explanation="Need complete configuration",
+    skipPruning=True
+)
+```
+
+**Features**:
+- **Parallel reading**: Reads files concurrently (faster)
+- **Batch pruning**: Prunes all files together for consistency
+- **Unified output**: All files in one response
+
+**Output Format**:
+```
+=== File: src/a.py ===
+# Content of a.py
+...
+
+=== File: src/b.py ===
+# Content of b.py
+...
+
+=== File: src/c.py ===
+# Content of c.py
+...
+```
+
+**Best Practice**: Always prefer this over multiple `read_file` calls:
+```python
+# Bad: Sequential reads
+content_a = read_file(file_path="a.py", ...)
+content_b = read_file(file_path="b.py", ...)
+content_c = read_file(file_path="c.py", ...)
+
+# Good: Batch read
+contents = read_multiple_files(
+    file_paths=["a.py", "b.py", "c.py"],
+    explanation="..."
+)
+```
+
+---
+
+## 4. generate_repo_map
+**Purpose**: Generate high-level repository structure map
+
+**Parameters**:
+- `root` (optional): Root directory (defaults to workspace root)
+- `max_depth` (optional): Maximum depth (default: 3)
+- `include_files` (optional): Include file names (default: true)
+
+**Usage**:
+```python
+# Generate full repo map
+repo_map = generate_repo_map()
+
+# Generate for subdirectory
+repo_map = generate_repo_map(root="src")
+
+# Directories only (no files)
+repo_map = generate_repo_map(include_files=False)
+
+# Shallow map
+repo_map = generate_repo_map(max_depth=2)
+```
+
+**Output Format**:
+```
+Repository Structure:
+src/
+├── components/
+│   ├── Button.tsx
+│   ├── Input.tsx
+│   └── Form.tsx
+├── utils/
+│   ├── validation.ts
+│   └── formatting.ts
+├── models/
+│   ├── User.ts
+│   └── Post.ts
+└── main.ts
+
+tests/
+├── components/
+│   └── Button.test.tsx
+└── utils/
+    └── validation.test.ts
+```
+
+**Use Cases**:
+- Understanding project layout
+- Documenting structure
+- Planning refactoring
+- Onboarding new developers
+
+**Metis runtime pattern**: 
+- AST-based analysis for code files
+- Intelligent summarization
+- Focus on important files
+
+---
+
+## 5. read_terminal_state
+**Purpose**: Read current terminal output/state
+
+**Parameters**:
+- `terminalId` (optional): Specific terminal to read
+- `lines` (optional): Number of lines to read (default: 100)
+
+**Usage**:
+```python
+# Read active terminal
+terminal_output = read_terminal_state()
+
+# Read specific terminal
+terminal_output = read_terminal_state(terminalId="term_abc123")
+
+# Read last 50 lines
+terminal_output = read_terminal_state(lines=50)
+
+# Read specific terminal, last 200 lines
+terminal_output = read_terminal_state(
+    terminalId="term_xyz789",
+    lines=200
+)
+```
+
+**Use Cases**:
+- Check command output
+- Monitor long-running process
+- Debug shell commands
+- Verify test results
+
+**Example Workflow**:
+```python
+# 1. Start long-running process
+result = start_long_running_process(command="npm run dev")
+terminal_id = result["terminalId"]
+
+# 2. Wait a bit...
+
+# 3. Check if started successfully
+output = read_terminal_state(terminalId=terminal_id, lines=50)
+if "Server running on port 3000" in output:
+    print("Dev server started successfully!")
+```
+
+**Features**:
+- Reads both stdout and stderr
+- Returns recent output (configurable lines)
+- Works with background processes
+- Intelligent pruning for large outputs
+
+---
+
+## Common Patterns
+
+### Pattern 1: Read → Understand → Modify
+```python
+# 1. Read file
+content = read_file(
+    file_path="src/auth.py",
+    explanation="Understand authentication logic"
+)
+
+# 2. Analyze (in your reasoning)
+# Found issue at line 45...
+
+# 3. Modify
+robust_replace_in_file(
+    file_path="src/auth.py",
+    search_text="old_code",
+    replace_text="new_code"
+)
+```
+
+### Pattern 2: Read Multiple Related Files
+```python
+# Read all related files at once
+read_multiple_files(
+    file_paths=[
+        "src/models/user.py",
+        "src/views/user.py",
+        "src/serializers/user.py"
+    ],
+    explanation="Understand complete user feature implementation"
+)
+```
+
+### Pattern 3: Targeted Reading with Line Ranges
+```python
+# Read specific section
+read_file(
+    file_path="large_module.py",
+    start_line=100,
+    end_line=200,
+    explanation="Check middleware implementation in middle section"
+)
+```
+
+### Pattern 4: Monitor Process Output
+```python
+# Start process
+result = start_long_running_process(command="pytest")
+
+# Check output
+output = read_terminal_state(terminalId=result["terminalId"])
+```
+
+---
+
+## Comparison Table
+
+| Tool | Best For | Speed | Pruning |
+|------|----------|-------|---------|
+| read_file | Single file, any type | Fast | Yes |
+| read_file_chunk | Very large files (>100MB) | Fast | No |
+| read_multiple_files | Multiple related files | Fast | Yes |
+| generate_repo_map | Project structure overview | Medium | Yes |
+| read_terminal_state | Process output | Fast | Yes |
+| readCode | Code files with AST | Medium | Yes |
+
+---
+
+## Metis runtime pattern
+- Intelligent pruning mechanism
+- LLM-based relevance extraction
+- Explanation-driven filtering
+- Token management
+- Binary file rejection
+
+## Metis tool discipline
+- C-style aliases (Read, path, offset/limit)
+- Clear parameter names
+- Consistent interface
+- Predictable behavior

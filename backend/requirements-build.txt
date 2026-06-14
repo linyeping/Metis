@@ -1,0 +1,24 @@
+# Runtime dependencies for the packaged desktop backend.
+# Keep this list intentionally lean; heavyweight optional stacks such as
+# notebook, bokeh, dask, torch, paddleocr, and browser-use are excluded from
+# the PyInstaller bundle and should be installed only in managed tool envs.
+PyInstaller>=6.0
+flask>=3.0
+requests>=2.28
+Pillow>=9.0
+PyPDF2>=3.0.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+mcp>=1.0
+langgraph>=0.2
+langchain-core>=0.3
+pyautogui>=0.9
+pynput>=1.7
+pystray>=0.19.5
+pywebview>=5.0
+mss>=9.0
+pyperclip>=1.8
+tree-sitter>=0.21
+tree-sitter-python>=0.21
+tree-sitter-javascript>=0.21
+tree-sitter-typescript>=0.21

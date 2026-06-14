@@ -1,0 +1,118 @@
+__init__.py
+attempt_ledger.py
+  def _deque_maxlen() -> int
+  def ledger_enabled() -> bool
+  def clear_ledger() -> None
+  def _is_failure_result(result: str) -> bool
+  def _consecutive_failure_streak(canonical: str) -> int
+  def _append_record(canonical: str, ok: bool) -> None
+  def _maybe_persist(canonical: str, ok: bool, result: str) -> None
+  def finalize_tool_result(canonical: str, result: str) -> str
+constants.py
+context_builder.py
+  def build_llm_message_list(
+    system_prompt: str,
+    history_turns: List[Dict[str, Any]],
+    *,
+    workspace_root: Optional[str] = None,
+    include_workspace_hint: Optional[bool] = None,
+    include_agent_state_hint: Optional[bool] = None,
+    include_open_files_hint: Optional[bool] = None,
+    include_terminal_hint: Optional[bool] = None,
+    include_mode_router_hint: Optional[bool] = None,
+    include_workflow_hint: Optional[bool] = None,
+) -> List[Dict[str, Any]]
+llm_client.py
+  class LLMClient
+    def __init__(self, api_url: str, api_key: str, model: str = DEFAULT_MODEL) -> None
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: float,
+        max_tokens: int,
+        tools: Optional[List[Any]] = None,
+        timeout: float = REQUEST_TIMEOUT,
+    ) -> Dict[str, Any]
+    def chat_text(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        temperature: float,
+        max_tokens: int,
+        timeout: float = 60.0,
+    ) -> str
+open_files_context.py
+  def parse_open_files_payload(data: Any) -> tuple[List[str], Optional[str]]
+  def _open_files_hint_enabled() -> bool
+  def _read_open_files_raw(workspace_root: str) -> tuple[List[str], Optional[str]]
+  def _shorten_path(p: str, root: str) -> str
+  def open_files_context_block(workspace_root: Optional[str]) -> str
+open_files_http_cache.py
+  def clear_http_open_files() -> None
+  def set_http_open_files(workspace_root: str, payload: Any) -> None
+  def get_http_open_files(workspace_root: str) -> Optional[Tuple[List[str], Optional[str]]]
+prompt_runtime.py
+  class PromptRuntimeLayer
+  class PromptRuntimeSnapshot
+    def layer_names(self) -> List[str]
+  def _env_flag(name: str, default: str = "1") -> bool
+  def _workspace_hint_enabled() -> bool
+  def _agent_state_hint_enabled() -> bool
+  def _terminal_hint_enabled() -> bool
+  def _open_files_hint_enabled() -> bool
+  def _repo_map_hint_enabled() -> bool
+  def _mode_router_hint_enabled() -> bool
+  def _workflow_hint_enabled() -> bool
+  def resolve_runtime_flags(
+    *,
+    include_workspace_hint: Optional[bool] = None,
+    include_agent_state_hint: Optional[bool] = None,
+    include_open_files_hint: Optional[bool] = None,
+    include_terminal_hint: Optional[bool] = None,
+    include_mode_router_hint: Optional[bool] = None,
+    include_workflow_hint: Optional[bool] = None,
+    include_repo_map_hint: Optional[bool] = None,
+) -> Dict[str, bool]
+  def _build_workspace_block(workspace_root: Optional[str]) -> str
+  def _approx_tokens(text: str) -> int
+  def _truncate_user_memory(text: str) -> str
+  def _lean_prompt(base_system_prompt: str) -> str
+  def _verbose_prompt(base_system_prompt: str) -> str
+  def compile_prompt_runtime(
+    base_system_prompt: str,
+    *,
+    user_memory_text: str = "",
+    model_tier: int = 2,
+    workspace_root: Optional[str] = None,
+    include_workspace_hint: Optional[bool] = None,
+    include_agent_state_hint: Optional[bool] = None,
+    include_open_files_hint: Optional[bool] = None,
+    include_terminal_hint: Optional[bool] = None,
+    include_mode_router_hint: Optional[bool] = None,
+    include_workflow_hint: Optional[bool] = None,
+    include_repo_map_hint: Optional[bool] = None,
+) -> PromptRuntimeSnapshot
+  def build_runtime_messages(
+    base_system_prompt: str,
+    history_turns: List[Dict[str, Any]],
+    *,
+    user_memory_text: str = "",
+    model_tier: int = 2,
+    workspace_root: Optional[str] = None,
+    include_workspace_hint: Optional[bool] = None,
+    include_agent_state_hint: Optional[bool] = None,
+    include_open_files_hint: Optional[bool] = None,
+    include_terminal_hint: Optional[bool] = None,
+    include_mode_router_hint: Optional[bool] = None,
+    include_workflow_hint: Optional[bool] = None,
+    include_repo_map_hint: Optional[bool] = None,
+) -> List[Dict[str, Any]]
+terminal_context.py
+  def _terminal_hint_enabled() -> bool
+  def terminal_context_block(workspace_root: Optional[str]) -> str
+thought_parser.py
+  class ThoughtProcessParser
+workflow_context.py
+  def workflow_guidelines_enabled() -> bool
+  def workflow_guidelines_block(workspace_root: Optional[str]) -> str

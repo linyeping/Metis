@@ -1,0 +1,81 @@
+{
+  "name": "capability",
+  "description": "Lightweight model behavior probes for provider-specific eval notes. Success checks only require a non-empty probe answer; analysis comes from recorded events.",
+  "kind": "capability-probes",
+  "probes": [
+    {
+      "id": "parallel-tool-calls",
+      "question": "Does the model request two independent reads in one assistant turn when both are needed?"
+    },
+    {
+      "id": "malformed-arguments",
+      "question": "How often do tool arguments fail schema parsing at different temperatures?"
+    },
+    {
+      "id": "tool-language",
+      "question": "Do Chinese and English tool descriptions change success rate or tool error rate?"
+    },
+    {
+      "id": "schema-complexity",
+      "question": "Does nested schema shape increase argument mistakes compared with flat schema shape?"
+    },
+    {
+      "id": "skills-debug-auto-load",
+      "question": "Does the model call load_skill(debug-workflow) for a bug-fix task when the skills index is present?"
+    },
+    {
+      "id": "skills-frontend-self-verify",
+      "question": "Does the model call load_skill(frontend-app) for a frontend task and attempt a local verification loop?"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "parallel-tool-calls",
+      "prompt": "Read both `pybuggy/app.py` and `pybuggy/pipeline.py`, then write `answer.md` with one short sentence about how data reaches the pipeline. Prefer independent reads when possible.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_probe_answer.py",
+      "max_turns": 12,
+      "tags": ["capability", "parallel-tools"]
+    },
+    {
+      "id": "malformed-arguments",
+      "prompt": "Create `answer.md` containing the names of exactly two files under `pybuggy/` that you inspected.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_probe_answer.py",
+      "max_turns": 12,
+      "tags": ["capability", "tool-arguments"]
+    },
+    {
+      "id": "tool-language",
+      "prompt": "用中文检查这个小项目的入口文件，并把结论写入 `answer.md`。",
+      "fixture": "pybuggy",
+      "checker": "checks/check_probe_answer.py",
+      "max_turns": 12,
+      "tags": ["capability", "language"]
+    },
+    {
+      "id": "schema-complexity",
+      "prompt": "Inspect `pybuggy/config.py` and `pybuggy/service.py`, then write `answer.md` describing the config key used by the service.",
+      "fixture": "pybuggy",
+      "checker": "checks/check_probe_answer.py",
+      "max_turns": 12,
+      "tags": ["capability", "schema"]
+    },
+    {
+      "id": "skills-debug-auto-load",
+      "prompt": "帮我修这个 bug：`pybuggy/math_tools.py` 的一个边界用例失败。先使用合适的技能，再定位并把结论写入 `answer.md`。",
+      "fixture": "pybuggy",
+      "checker": "checks/check_probe_answer.py",
+      "max_turns": 12,
+      "tags": ["capability", "skills", "debug-workflow"]
+    },
+    {
+      "id": "skills-frontend-self-verify",
+      "prompt": "创建一个很小的前端页面验证说明，先使用合适的前端技能，然后把你会如何启动本地预览和自测写入 `answer.md`。",
+      "fixture": "tsmini",
+      "checker": "checks/check_probe_answer.py",
+      "max_turns": 12,
+      "tags": ["capability", "skills", "frontend-app"]
+    }
+  ]
+}

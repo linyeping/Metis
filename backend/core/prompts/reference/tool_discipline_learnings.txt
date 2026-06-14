@@ -1,0 +1,294 @@
+# Metis Tool Discipline Learnings
+
+## Tool Discipline
+
+### 17 Core Tools
+Metis tool discipline's focused tool set:
+1. Read
+2. Write
+3. Shell
+4. Grep
+5. Glob
+6. StrReplace
+7. Delete
+8. EditNotebook
+9. SemanticSearch
+10. WebSearch
+11. WebFetch
+12. GenerateImage
+13. AskQuestion
+14. TodoWrite
+15. ReadLints
+16. SwitchMode
+17. Task
+
+### Tool Characteristics
+- **Clear naming**: Descriptive, action-oriented
+- **Focused purpose**: Each tool does one thing well
+- **Consistent interface**: Similar parameter patterns
+- **Well-documented**: Complete descriptions
+
+## Parameter Discipline
+
+### Required vs Optional
+**Strict distinction**:
+- Required parameters: Must be provided
+- Optional parameters: Have sensible defaults
+- Never make up values for optional parameters
+- Never ask about optional parameters unless necessary
+
+### Exact Values
+**User intent respected**:
+- If user provides value in quotes, use EXACTLY
+- Don't modify, interpret, or "improve"
+- Respect explicit intent
+- Maintain user control
+
+### Parameter Validation
+**Before execution**:
+- Check all required parameters provided
+- Validate parameter types
+- Check parameter values
+- Clear error messages if invalid
+
+## C-Style Aliases
+
+### Short Names
+**Convenience aliases**:
+- Read → read_file
+- Write → write_file
+- Shell → execute_bash_command
+- Grep → grep_search
+- Glob → glob_search
+- StrReplace → robust_replace_in_file
+- Delete → delete_file
+
+### Benefits
+- Faster to type
+- Easier to remember
+- Consistent with Metis tool discipline
+- Backward compatible
+
+### Implementation
+```python
+TOOL_NAME_ALIASES = {
+    "Read": "read_file",
+    "Write": "write_file",
+    "Shell": "execute_bash_command",
+    # ... more aliases
+}
+
+def canonical_tool_name(name):
+    return TOOL_NAME_ALIASES.get(name, name)
+```
+
+## Parameter Mapping
+
+### Automatic Normalization
+**C-style to implementation**:
+- `path` ↔ `file_path`
+- `contents` ↔ `content`
+- `old_string` ↔ `search_text`
+- `new_string` ↔ `replace_text`
+- `glob_pattern` ↔ `pattern`
+- `target_directory` ↔ `root`
+- `search_term` ↔ `query`
+- `description` ↔ `prompt`
+- `working_directory` ↔ `cwd`
+- `offset` + `limit` → `start_line` + `end_line`
+- `block_until_ms` → `timeout` (ms to seconds)
+
+### Benefits
+- Supports both naming conventions
+- Smooth migration Metis tool discipline
+- Maintains compatibility
+- User choice
+
+## Structured Workflows
+
+### Tool Collaboration
+**Designed to work together**:
+
+1. **Read → Analyze → Modify**
+   ```
+   Read file → Understand → StrReplace
+   ```
+
+2. **Search → Read → Fix**
+   ```
+   Grep → Read → StrReplace → Shell (test)
+   ```
+
+3. **Parallel Modifications**
+   ```
+   StrReplace(file1) + StrReplace(file2) + StrReplace(file3)
+   All execute simultaneously
+   ```
+
+### Clear Patterns
+- Sequential when dependent
+- Parallel when independent
+- Verify after modifications
+- Test after changes
+
+## Execution Patterns
+
+### Parallel Execution
+**Key insight Metis tool discipline**:
+- When tools are independent, execute in parallel
+- Dramatically improves performance
+- Claude decides, system executes
+- Use Promise.all or equivalent
+
+**Example**:
+```python
+# All execute simultaneously
+robust_replace_in_file(file_path="a.py", ...)
+robust_replace_in_file(file_path="b.py", ...)
+robust_replace_in_file(file_path="c.py", ...)
+```
+
+### Sequential Execution
+**When needed**:
+- Tool B depends on Tool A's result
+- Order matters
+- State changes between calls
+
+**Example**:
+```python
+# Sequential
+content = read_file(file_path="config.py", ...)
+robust_replace_in_file(file_path="config.py", search_text=content[10:20], ...)
+```
+
+## Error Handling
+
+### Clear Error Messages
+**Actionable feedback**:
+- What went wrong
+- Why it went wrong
+- How to fix it
+- Alternative approaches
+
+**Example**:
+```
+❌ 参数错误 (robust_replace_in_file): oldStr not found in file
+传入键: ['file_path', 'search_text', 'replace_text']
+
+Suggestion: Check that search_text exactly matches file content (including whitespace)
+```
+
+### Error Recovery
+- Don't retry exact same call
+- Try alternative approaches
+- Explain to user
+- Suggest fixes
+
+## Security Baseline
+
+### HTTPS Only
+**Web operations**:
+- All web_fetch requires HTTPS
+- No HTTP allowed
+- No exceptions
+- Security over convenience
+
+### SSRF Protection
+**Server-Side Request Forgery**:
+- No localhost URLs
+- No internal IP ranges
+- DNS resolution checked
+- Prevents internal network access
+
+### Path Validation
+**File operations**:
+- Workspace boundary enforced
+- No path traversal
+- Symlink validation
+- Clear error messages
+
+## Tool-Specific Features
+
+### StrReplace
+**Precise replacement**:
+- `replace_all` parameter for multiple occurrences
+- Exact matching required
+- Whitespace-sensitive
+- Include context for uniqueness
+
+### EditNotebook
+**Multiple modes**:
+- `is_new_cell`: Insert new cell
+- `old_string`/`new_string`: Block replacement
+- `new_content`: Whole cell replacement
+
+### Grep
+**Advanced search**:
+- `output_mode`: matches/files/count
+- `head_limit`: Limit results
+- Regex support
+- Context lines
+
+### AskQuestion
+**Structured questions**:
+- Schema version 2
+- Multiple choice
+- Free-form text
+- Structured responses
+
+## What Metis Adopted
+
+### Direct Adoption
+1. **C-Style Aliases**: Complete support
+2. **Parameter Discipline**: Strict validation
+3. **Parallel Execution**: Independent tools
+4. **Error Messages**: Clear and actionable
+5. **Security Baseline**: HTTPS, SSRF, path validation
+
+### Adapted
+1. **Tool Set**: 17 tools → 50 tools (expanded)
+2. **Parameter Mapping**: Extended mappings
+3. **Workflows**: More patterns added
+
+### Enhanced
+1. **Tool Registry**: Unified registration
+2. **Dual Naming**: Both styles supported
+3. **Configuration**: Unified config system
+4. **Testing**: Comprehensive test suite
+5. **Documentation**: Modular prompt system
+
+## Key Insights
+
+### Insight 1: Discipline Matters
+- Strict parameter validation prevents errors
+- Clear naming reduces confusion
+- Consistent interface improves usability
+
+### Insight 2: Aliases Improve UX
+- Short names are convenient
+- Familiar to Metis tool discipline users
+- Easy to remember
+- Backward compatible
+
+### Insight 3: Parallel Execution is Key
+- Dramatically improves performance
+- Natural for independent operations
+- Claude decides, system executes
+
+### Insight 4: Security is Baseline
+- HTTPS only
+- SSRF protection
+- Path validation
+- No compromises
+
+### Insight 5: Tool Collaboration
+- Tools designed to work together
+- Clear patterns emerge
+- Workflows become natural
+- Better results
+
+## References
+
+### Metis tool discipline Documentation
+- `c 17个工具.txt`: Complete tool descriptions
+- `c工具使用.txt`: Tool usage patterns and collaboration

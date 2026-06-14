@@ -1,0 +1,35 @@
+appId: com.metis.app
+productName: Metis
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**
+  - electron/**
+  - package.json
+extraResources:
+  - from: resources/backend-dist
+    to: backend-dist
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+      - "!**/*.msi"
+      - "!**/*.key"
+      - "!**/*.pfx"
+      - "!.env"
+      - "!**/.env"
+      - "!var/rely/**/weights/**"
+  - from: resources/icons
+    to: icons
+win:
+  target:
+    - nsis
+  icon: resources/icons/logo.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: Metis
+  uninstallDisplayName: Metis
+  warningsAsErrors: false

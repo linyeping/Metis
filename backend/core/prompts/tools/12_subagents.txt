@@ -1,0 +1,989 @@
+# Category 12: Sub-Agents & Delegation (7 tools)
+
+## Overview
+
+Sub-agents are specialized agents that handle specific types of tasks autonomously. They run with their own system prompts and tool access, returning results to the main agent.
+
+**Key Principle**: Use sub-agents proactively when they match task requirements - don't wait for explicit user instruction.
+
+---
+
+## 1. summon_context_gatherer
+**Purpose**: Analyze repository structure to identify relevant files for a task
+
+**Parameters**:
+- `task_description` (required): What you need to understand
+- `focus_areas` (optional): Specific areas to explore
+- `thoroughness` (optional): quick/medium/very thorough
+
+**Usage**:
+```python
+# Basic exploration
+summon_context_gatherer(
+    task_description="Find all authentication-related code"
+)
+
+# With focus areas
+summon_context_gatherer(
+    task_description="Understand how user data flows through the system",
+    focus_areas=["models", "api", "database"]
+)
+
+# Thorough exploration
+summon_context_gatherer(
+    task_description="Map the entire payment processing system",
+    thoroughness="very thorough"
+)
+```
+
+**When to Use** (ALWAYS):
+
+1. **Starting work on unfamiliar codebase**:
+   ```python
+   # User: "Fix the login bug"
+   # You don't know the codebase
+   summon_context_gatherer(
+       task_description="Find login and authentication code"
+   )
+   ```
+
+2. **Bug investigation across multiple files**:
+   ```python
+   # User: "Users report slow API responses"
+   summon_context_gatherer(
+       task_description="Find API endpoints and performance-related code"
+   )
+   ```
+
+3. **Understanding component interactions**:
+   ```python
+   # User: "Add caching to the data pipeline"
+   summon_context_gatherer(
+       task_description="Understand data pipeline architecture and data flow"
+   )
+   ```
+
+4. **Repository-wide problems**:
+   ```python
+   # User: "Update all database queries to use async"
+   summon_context_gatherer(
+       task_description="Find all database query code"
+   )
+   ```
+
+**Use ONCE per query** at the beginning, then work with gathered context.
+
+**Returns**:
+- Relevant file paths
+- Code structure overview
+- Component relationships
+- Key functions/classes
+
+**Features**:
+- **Efficient exploration**: Faster than manual search
+- **Comprehensive**: Finds related code
+- **Structured output**: Organized by relevance
+- **Context-aware**: Understands relationships
+
+**Best Practices**:
+
+1. **Use at the start**:
+   ```python
+   # First thing for unfamiliar code
+   summon_context_gatherer(task_description="...")
+   
+   # Then work with results
+   read_file(path="identified_file.py", ...)
+   ```
+
+2. **Be specific in description**:
+   ```python
+   # Bad: Vague
+   summon_context_gatherer(task_description="Find code")
+   
+   # Good: Specific
+   summon_context_gatherer(
+       task_description="Find authentication, session management, and JWT token handling code"
+   )
+   ```
+
+3. **Trust the output**:
+   ```python
+   # Don't redundantly re-read files
+   # Sub-agent already analyzed them
+   ```
+
+---
+
+## 2. delegate_explore
+**Purpose**: Fast exploration of codebase with pattern matching and keyword search
+
+**Parameters**:
+- `task_description` (required): What to explore
+- `patterns` (optional): File patterns (e.g., "src/**/*.py")
+- `keywords` (optional): Keywords to search for
+- `thoroughness` (optional): quick/medium/very thorough
+
+**Usage**:
+```python
+# Find files by pattern
+delegate_explore(
+    task_description="Find all TypeScript React components",
+    patterns=["src/components/**/*.tsx"]
+)
+
+# Search for keywords
+delegate_explore(
+    task_description="Find API endpoints",
+    keywords=["@app.route", "@router.get", "@router.post"]
+)
+
+# Answer questions about codebase
+delegate_explore(
+    task_description="How do API endpoints work in this project?"
+)
+
+# Thorough exploration
+delegate_explore(
+    task_description="Find all database models and their relationships",
+    patterns=["**/*model*.py", "**/*schema*.py"],
+    thoroughness="very thorough"
+)
+```
+
+**When to Use**:
+
+1. **Quick file finding**:
+   ```python
+   # Find specific file types
+   delegate_explore(
+       task_description="Find all test files",
+       patterns=["**/*test*.py", "**/test_*.py"]
+   )
+   ```
+
+2. **Keyword search**:
+   ```python
+   # Find specific code patterns
+   delegate_explore(
+       task_description="Find all async functions",
+       keywords=["async def", "await"]
+   )
+   ```
+
+3. **Answer "how/where/what" questions**:
+   ```python
+   # Understand codebase
+   delegate_explore(
+       task_description="What authentication methods are used?"
+   )
+   ```
+
+**Thoroughness Levels**:
+- `quick`: Basic search, fast
+- `medium`: Moderate exploration
+- `very thorough`: Comprehensive analysis, multiple locations and naming conventions
+
+**Features**:
+- **Fast**: Optimized for speed
+- **Pattern matching**: Glob patterns
+- **Keyword search**: Find specific code
+- **Question answering**: Understands codebase
+
+---
+
+## 3. delegate_shell
+**Purpose**: Command execution specialist for bash commands and git operations
+
+**Parameters**:
+- `task_description` (required): What commands to run
+- `commands` (optional): Specific commands to execute
+- `cwd` (optional): Working directory
+
+**Usage**:
+```python
+# Git operations
+delegate_shell(
+    task_description="Check git status and recent commits"
+)
+
+# Multiple commands
+delegate_shell(
+    task_description="Run tests and generate coverage report",
+    commands=["pytest --cov", "coverage html"]
+)
+
+# In specific directory
+delegate_shell(
+    task_description="Build frontend",
+    commands=["npm run build"],
+    cwd="frontend"
+)
+```
+
+**When to Use**:
+
+1. **Git operations**:
+   ```python
+   delegate_shell(
+       task_description="Create feature branch and push"
+   )
+   ```
+
+2. **Command sequences**:
+   ```python
+   delegate_shell(
+       task_description="Install dependencies, run migrations, start server",
+       commands=[
+           "pip install -r requirements.txt",
+           "python manage.py migrate",
+           "python manage.py runserver"
+       ]
+   )
+   ```
+
+3. **Terminal tasks**:
+   ```python
+   delegate_shell(
+       task_description="Check system resources and disk space"
+   )
+   ```
+
+**Features**:
+- **Autonomous**: Handles command execution
+- **Git-aware**: Understands git workflows
+- **Error handling**: Manages failures
+- **Context preservation**: Maintains state
+
+---
+
+## 4. delegate_browser
+**Purpose**: Browser-based testing and web automation
+
+**Parameters**:
+- `task_description` (required): What to do in browser
+- `url` (optional): Starting URL
+- `actions` (optional): Specific actions to perform
+
+**Usage**:
+```python
+# Test web application
+delegate_browser(
+    task_description="Test login flow",
+    url="http://localhost:3000/login"
+)
+
+# Verify UI changes
+delegate_browser(
+    task_description="Verify new button appears on homepage",
+    url="http://localhost:3000"
+)
+
+# Fill forms
+delegate_browser(
+    task_description="Test registration form with valid data",
+    url="http://localhost:3000/register",
+    actions=[
+        "fill email field",
+        "fill password field",
+        "click submit",
+        "verify success message"
+    ]
+)
+
+# Take screenshots
+delegate_browser(
+    task_description="Take screenshot of dashboard",
+    url="http://localhost:3000/dashboard"
+)
+```
+
+**When to Use**:
+
+1. **Parallelize browser tasks**:
+   ```python
+   # Run browser test while doing other work
+   delegate_browser(task_description="Test login flow")
+   
+   # Meanwhile, continue with other tasks
+   robust_replace_in_file(...)
+   ```
+
+2. **Longer browser action sequences**:
+   ```python
+   # Complex multi-step browser workflow
+   delegate_browser(
+       task_description="Complete full user registration and profile setup flow"
+   )
+   ```
+
+3. **UI verification**:
+   ```python
+   # Verify changes
+   delegate_browser(
+       task_description="Verify new feature appears correctly"
+   )
+   ```
+
+**Features**:
+- **Full browser**: Real browser environment
+- **Interaction**: Click, fill, navigate
+- **Screenshots**: Visual verification
+- **Stateful**: Maintains session across actions
+
+**Note**: Requires agent mode (not available in readonly mode). Stateful - reuses existing browser agent if available.
+
+---
+
+## 5. delegate_best_of_n
+**Purpose**: Run task in isolated git worktree for parallel attempts or experiments
+
+**Parameters**:
+- `task_description` (required): Task to run in isolation
+- `branch_name` (optional): Branch name for worktree
+
+**Usage**:
+```python
+# Parallel attempts
+delegate_best_of_n(
+    task_description="Implement caching - approach 1: Redis",
+    branch_name="cache-redis"
+)
+
+delegate_best_of_n(
+    task_description="Implement caching - approach 2: In-memory",
+    branch_name="cache-memory"
+)
+
+# Isolated experiment
+delegate_best_of_n(
+    task_description="Try refactoring with different architecture",
+    branch_name="experiment-refactor"
+)
+```
+
+**When to Use**:
+
+1. **Best-of-N parallel attempts**:
+   ```python
+   # Try multiple approaches simultaneously
+   delegate_best_of_n(task_description="Approach 1: ...", branch_name="attempt-1")
+   delegate_best_of_n(task_description="Approach 2: ...", branch_name="attempt-2")
+   delegate_best_of_n(task_description="Approach 3: ...", branch_name="attempt-3")
+   
+   # Compare results and choose best
+   ```
+
+2. **Isolated experiments**:
+   ```python
+   # Experiment without affecting main code
+   delegate_best_of_n(
+       task_description="Experiment with new library",
+       branch_name="experiment"
+   )
+   ```
+
+**Features**:
+- **Isolated**: Own branch and working directory
+- **Parallel**: Multiple attempts simultaneously
+- **Safe**: Doesn't affect main code
+- **Git worktree**: Proper git isolation
+
+---
+
+## 6. custom_agent_creator
+**Purpose**: Create new custom agents for recurring task patterns
+
+**Parameters**:
+- `agent_name` (required): Name for new agent
+- `agent_description` (required): What the agent does
+- `capabilities` (required): Agent's capabilities
+- `system_prompt` (optional): Custom system prompt
+
+**Usage**:
+```python
+# Create code review agent
+custom_agent_creator(
+    agent_name="code-reviewer",
+    agent_description="Reviews code for best practices and potential issues",
+    capabilities=[
+        "Read code files",
+        "Analyze complexity",
+        "Check for common issues",
+        "Suggest improvements"
+    ]
+)
+
+# Create documentation agent
+custom_agent_creator(
+    agent_name="doc-generator",
+    agent_description="Generates documentation from code",
+    capabilities=[
+        "Read code files",
+        "Extract docstrings",
+        "Generate markdown docs",
+        "Create API references"
+    ]
+)
+
+# Create testing agent
+custom_agent_creator(
+    agent_name="test-generator",
+    agent_description="Generates unit tests for code",
+    capabilities=[
+        "Read code files",
+        "Identify functions to test",
+        "Generate test cases",
+        "Write test files"
+    ],
+    system_prompt="You are a testing expert. Generate comprehensive unit tests."
+)
+```
+
+**When to Use**:
+
+1. **User explicitly asks**:
+   ```python
+   # User: "Create an agent that reviews my code"
+   custom_agent_creator(
+       agent_name="code-reviewer",
+       agent_description="Reviews code for issues",
+       capabilities=[...]
+   )
+   ```
+
+2. **Recurring task pattern**:
+   ```python
+   # If you find yourself doing the same type of task repeatedly
+   custom_agent_creator(
+       agent_name="migration-helper",
+       agent_description="Helps with database migrations",
+       capabilities=[...]
+   )
+   ```
+
+**Features**:
+- **Custom capabilities**: Define what agent can do
+- **Custom prompts**: Tailor behavior
+- **Reusable**: Use for recurring tasks
+- **Specialized**: Focused on specific domain
+
+---
+
+## Common Workflows
+
+### Workflow 1: Explore Then Fix
+```python
+# 1. Explore unfamiliar codebase
+context = summon_context_gatherer(
+    task_description="Find authentication and session management code"
+)
+
+# 2. Read identified files
+read_file(path="auth/login.py", explanation="Understand login logic")
+read_file(path="auth/session.py", explanation="Understand session handling")
+
+# 3. Fix issue
+robust_replace_in_file(
+    file_path="auth/login.py",
+    search_text="old code",
+    replace_text="fixed code"
+)
+
+# 4. Test
+execute_bash_command(command="pytest tests/test_auth.py")
+```
+
+### Workflow 2: Parallel Exploration and Implementation
+```python
+# 1. Delegate exploration (runs in background)
+delegate_explore(
+    task_description="Find all API endpoints and their authentication"
+)
+
+# 2. Meanwhile, start on known parts
+robust_replace_in_file(...)
+
+# 3. Use exploration results for remaining work
+```
+
+### Workflow 3: Browser Testing While Coding
+```python
+# 1. Start browser test (runs in background)
+delegate_browser(
+    task_description="Test full user registration flow",
+    url="http://localhost:3000"
+)
+
+# 2. Continue coding
+robust_replace_in_file(...)
+write_file(...)
+
+# 3. Check browser test results
+```
+
+### Workflow 4: Best-of-N Approaches
+```python
+# 1. Try multiple approaches in parallel
+delegate_best_of_n(
+    task_description="Implement caching with Redis",
+    branch_name="cache-redis"
+)
+
+delegate_best_of_n(
+    task_description="Implement caching with in-memory dict",
+    branch_name="cache-memory"
+)
+
+delegate_best_of_n(
+    task_description="Implement caching with file-based storage",
+    branch_name="cache-file"
+)
+
+# 2. Compare results
+# 3. Choose best approach
+# 4. Merge chosen branch
+```
+
+### Workflow 5: Create and Use Custom Agent
+```python
+# 1. Create custom agent
+custom_agent_creator(
+    agent_name="api-documenter",
+    agent_description="Generates API documentation",
+    capabilities=[
+        "Read API route files",
+        "Extract endpoint information",
+        "Generate OpenAPI spec",
+        "Create markdown docs"
+    ]
+)
+
+# 2. Use the agent
+# (Agent is now available for future tasks)
+```
+
+---
+
+## Sub-Agent Best Practices
+
+### 1. Use Proactively
+```python
+# Don't wait for user to ask
+# Use when task matches sub-agent capabilities
+
+# User: "Fix the login bug"
+# Immediately use context-gatherer if unfamiliar with code
+summon_context_gatherer(task_description="Find login code")
+```
+
+### 2. Choose Right Sub-Agent
+```python
+# Unfamiliar codebase → context-gatherer
+# Quick file search → delegate_explore
+# Git operations → delegate_shell
+# Browser testing → delegate_browser
+# Parallel attempts → delegate_best_of_n
+# Recurring pattern → custom_agent_creator
+```
+
+### 3. Trust Sub-Agent Output
+```python
+# Don't redundantly re-read files
+# Sub-agents already analyzed them
+# Use their results directly
+```
+
+### 4. Use Once Per Query
+```python
+# For context-gatherer: Use once at beginning
+summon_context_gatherer(...)
+
+# Then work with gathered context
+# Don't call again in same query
+```
+
+### 5. Parallelize When Possible
+```python
+# Run sub-agents in parallel with other work
+delegate_browser(...)  # Runs in background
+robust_replace_in_file(...)  # Continue working
+```
+
+---
+
+## Integration Patterns
+
+### With Exploration:
+```python
+# Explore → Read → Modify
+summon_context_gatherer(...)
+read_file(...)
+robust_replace_in_file(...)
+```
+
+### With Testing:
+```python
+# Modify → Test (delegated)
+robust_replace_in_file(...)
+delegate_browser(task_description="Test changes")
+```
+
+### With Git:
+```python
+# Modify → Commit (delegated)
+robust_replace_in_file(...)
+delegate_shell(task_description="Commit and push changes")
+```
+
+---
+
+## Metis runtime pattern
+- invokeSubAgent system
+- context-gatherer specialization
+- Sub-agent autonomy
+- Proactive usage
+
+## Metis tool discipline
+- Task delegation
+- Parallel execution
+- Browser automation
+- Best-of-N attempts
+
+## From Metis
+- 6 specialized sub-agents
+- Unified delegation interface
+- Enhanced error handling
+- Configuration integration
+
+
+---
+
+## 7. task_dispatch (Task)
+**Alias**: Task  
+**Purpose**: Unified sub-task entry point with subprocess isolation
+
+**Parameters**:
+- `prompt` (required): Self-contained task description
+- `description` (optional): 3-5 word summary
+- `subagent_type` (optional): explore|shell|browser|best_of_n|context_gatherer|custom (default: explore)
+- `workspace_root` (optional): Workspace root (default: ".")
+- `resume` (optional): Session ID to resume
+- `model`, `readonly`, `run_in_background` (reserved)
+
+**Subprocess Mode** (default):
+- `Metis_TASK_SUBPROCESS=1` (default): Runs in isolated subprocess
+- Results via JSON protocol (see `TASK_SUBPROCESS_PROTOCOL.md`)
+- Timeout control: `Metis_TASK_TIMEOUT_SEC` (default: 180)
+- Session files: `.delegate_sessions/{session_id}_in.json` and `_out.json`
+
+**In-Process Mode**:
+- `Metis_TASK_SUBPROCESS=0`: Runs in same process (delegates to corresponding function)
+
+**Usage**:
+```python
+# Basic exploration task
+task_dispatch(
+    prompt="Analyze the authentication module and identify security issues",
+    description="Auth security audit",
+    subagent_type="explore"
+)
+
+# Shell task
+task_dispatch(
+    prompt="Run all unit tests and generate coverage report",
+    description="Test coverage",
+    subagent_type="shell"
+)
+
+# Resume previous task
+task_dispatch(
+    prompt="Continue previous analysis",
+    subagent_type="explore",
+    resume="abc123def456"
+)
+
+# Context gathering
+task_dispatch(
+    prompt="Map the entire payment processing system",
+    subagent_type="context_gatherer",
+    workspace_root="src/payments"
+)
+```
+
+**When to Use**:
+
+1. **Large, self-contained tasks**:
+   ```python
+   # Task that can run independently
+   task_dispatch(
+       prompt="Analyze all API endpoints for security vulnerabilities",
+       subagent_type="explore"
+   )
+   ```
+
+2. **Tasks needing isolation**:
+   ```python
+   # Prevent interference with main process
+   task_dispatch(
+       prompt="Run expensive analysis that might crash",
+       subagent_type="explore"
+   )
+   ```
+
+3. **Tasks with timeout needs**:
+   ```python
+   # Limit execution time
+   task_dispatch(
+       prompt="Search for patterns in large codebase",
+       subagent_type="explore"
+   )
+   # Auto-terminates after Metis_TASK_TIMEOUT_SEC
+   ```
+
+**Features**:
+- **Isolation**: Subprocess prevents crashes affecting main agent
+- **Timeout**: Auto-terminate long-running tasks
+- **Resume**: Continue from previous session
+- **Audit trail**: JSON files for debugging
+
+---
+
+## 8. run_parallel_tasks
+**Purpose**: Execute multiple independent tasks in parallel
+
+**Parameters**:
+- `tasks` (required): List of task objects, each containing:
+  - `prompt` (required): Task description
+  - `subagent_type` (optional): Type of sub-agent (default: "explore")
+  - `resume` (optional): Session ID to resume
+- `workspace_root` (optional): Workspace root (default: ".")
+- `timeout_sec` (optional): Timeout per task in seconds (default: 180)
+- `max_workers` (optional): Max parallel workers, 0=auto (default: min(task_count, cpu_count))
+
+**Requirements**:
+- Requires `Metis_TASK_SUBPROCESS=1` (default)
+- Tasks must be independent (no dependencies between them)
+
+**Usage**:
+```python
+# Analyze multiple directories in parallel
+run_parallel_tasks(
+    tasks=[
+        {"prompt": "Analyze src/auth directory for security issues", "subagent_type": "explore"},
+        {"prompt": "Analyze src/api directory for performance issues", "subagent_type": "explore"},
+        {"prompt": "Analyze src/database directory for query optimization", "subagent_type": "explore"},
+    ],
+    workspace_root=".",
+    timeout_sec=120
+)
+
+# Mixed task types
+run_parallel_tasks(
+    tasks=[
+        {"prompt": "Run unit tests", "subagent_type": "shell"},
+        {"prompt": "Run integration tests", "subagent_type": "shell"},
+        {"prompt": "Test UI in browser", "subagent_type": "browser"},
+    ],
+    max_workers=3
+)
+
+# With resume（须已存在 .delegate_sessions/<resume>.json，由上轮子进程或本工具落盘）
+run_parallel_tasks(
+    tasks=[
+        {"prompt": "Continue analysis", "subagent_type": "explore", "resume": "abc123"},
+        {"prompt": "New analysis", "subagent_type": "explore"},
+    ]
+)
+```
+
+**When to Use**:
+
+1. **Multiple independent explorations**:
+   ```python
+   # Analyze different modules simultaneously
+   run_parallel_tasks(
+       tasks=[
+           {"prompt": "Analyze auth module"},
+           {"prompt": "Analyze payment module"},
+           {"prompt": "Analyze notification module"},
+       ]
+   )
+   ```
+
+2. **Batch operations**:
+   ```python
+   # Run multiple tests/checks in parallel
+   run_parallel_tasks(
+       tasks=[
+           {"prompt": "Run Python tests", "subagent_type": "shell"},
+           {"prompt": "Run JavaScript tests", "subagent_type": "shell"},
+           {"prompt": "Run linters", "subagent_type": "shell"},
+       ]
+   )
+   ```
+
+3. **Multi-directory analysis**:
+   ```python
+   # Analyze multiple directories at once
+   run_parallel_tasks(
+       tasks=[
+           {"prompt": "Analyze frontend/", "subagent_type": "explore"},
+           {"prompt": "Analyze backend/", "subagent_type": "explore"},
+           {"prompt": "Analyze shared/", "subagent_type": "explore"},
+       ]
+   )
+   ```
+
+**Performance Benefits**:
+- **Time savings**: 3 tasks × 10s each = ~10s total (vs 30s serial)
+- **Resource utilization**: Uses multiple CPU cores
+- **Efficiency**: No waiting for sequential completion
+
+**Output Format**:
+```
+并行执行 3 个任务：
+
+成功: 3/3
+
+✅ 任务 1:
+   分析完成，发现 5 个安全问题...
+
+✅ 任务 2:
+   分析完成，发现 3 个性能问题...
+
+✅ 任务 3:
+   分析完成，发现 2 个优化机会...
+```
+
+**Features**:
+- **Parallel execution**: Multiple tasks simultaneously
+- **Auto-scaling**: Automatic worker count based on CPU cores
+- **Error isolation**: One task failure doesn't affect others
+- **Ordered results**: Results returned in original task order
+- **Progress tracking**: Shows success/failure for each task
+
+**Best Practices**:
+
+1. **Ensure independence**:
+   ```python
+   # Good: Independent tasks
+   run_parallel_tasks(tasks=[
+       {"prompt": "Analyze module A"},
+       {"prompt": "Analyze module B"},
+   ])
+   
+   # Bad: Dependent tasks (use serial task_dispatch instead)
+   # Task 2 depends on Task 1's output
+   ```
+
+2. **Control parallelism**:
+   ```python
+   # Auto (recommended)
+   run_parallel_tasks(tasks=[...], max_workers=0)
+   
+   # Limited (for resource constraints)
+   run_parallel_tasks(tasks=[...], max_workers=2)
+   ```
+
+3. **Set appropriate timeouts**:
+   ```python
+   # Quick tasks
+   run_parallel_tasks(tasks=[...], timeout_sec=60)
+   
+   # Long-running analysis
+   run_parallel_tasks(tasks=[...], timeout_sec=300)
+   ```
+
+---
+
+## 9. run_task_graph
+**Purpose**: Execute dependent tasks as a **DAG** (directed acyclic graph); same-layer parallelism as `run_parallel_tasks`.
+
+**Parameters**:
+- `nodes` (required): `[{ id, prompt, subagent_type?, resume? }]` — `id` unique; optional per-node `resume` requires existing `.delegate_sessions/<resume>.json`.
+- `edges` (required): `[{ from, to }]` — `from` must finish before `to`. **Cycles** → return `❌` and run nothing.
+- `workspace_root`, `timeout_sec`, `max_workers` — same semantics as `run_parallel_tasks`.
+- `resume` (optional): graph-level checkpoint id; non-empty **must** have `.delegate_sessions/<resume>.json` (no silent new graph).
+
+**Usage**:
+```python
+run_task_graph(
+    nodes=[
+        {"id": "auth", "prompt": "List files in src/auth", "subagent_type": "shell"},
+        {"id": "api", "prompt": "List files in src/api", "subagent_type": "shell"},
+        {"id": "merge", "prompt": "Summarize prior outputs in one line", "subagent_type": "explore"},
+    ],
+    edges=[
+        {"from": "auth", "to": "merge"},
+        {"from": "api", "to": "merge"},
+    ],
+    workspace_root=".",
+)
+```
+
+**When to Use**: Dependencies between subtasks; independent branches can run in parallel in the same topological layer.
+
+---
+
+## Choosing Between task_dispatch and run_parallel_tasks
+
+### Use task_dispatch when:
+- Single task
+- Simple delegation
+- Don't need parallelism
+- Task is quick
+
+### Use run_parallel_tasks when:
+- Multiple independent tasks
+- Want to save time
+- Tasks can run simultaneously
+- Batch operations
+
+### Example Decision:
+```python
+# Scenario: Analyze 5 different modules
+
+# Option 1: Serial (slow)
+task_dispatch(prompt="Analyze module 1")
+task_dispatch(prompt="Analyze module 2")
+task_dispatch(prompt="Analyze module 3")
+task_dispatch(prompt="Analyze module 4")
+task_dispatch(prompt="Analyze module 5")
+# Total time: 5 × 10s = 50s
+
+# Option 2: Parallel (fast) ✅
+run_parallel_tasks(
+    tasks=[
+        {"prompt": "Analyze module 1"},
+        {"prompt": "Analyze module 2"},
+        {"prompt": "Analyze module 3"},
+        {"prompt": "Analyze module 4"},
+        {"prompt": "Analyze module 5"},
+    ]
+)
+# Total time: ~10s (with 5 workers)
+```
+
+---
+
+## Summary
+
+**9 tools (subagents + task runners)**:
+1. summon_context_gatherer - Repository structure analysis
+2. delegate_explore - Fast exploration with patterns
+3. delegate_shell - Command execution specialist
+4. delegate_browser - Browser automation
+5. delegate_best_of_n - Isolated experiments
+6. custom_agent_creator - Create custom agents
+7. task_dispatch - Single task with subprocess isolation
+8. run_parallel_tasks - Multiple tasks in parallel
+9. run_task_graph - DAG-ordered tasks with layer parallelism
+
+**Key Capabilities**:
+- Autonomous execution
+- Subprocess isolation
+- Parallel processing
+- Error handling
+- Resume support
+- Flexible configuration

@@ -1,0 +1,13 @@
+{
+  "rules": [
+    {
+      "id": "4ba5d83c-4009-4ebc-a709-7cfeeacd5ca9",
+      "tool": "*",
+      "action": "allow",
+      "args_match": {},
+      "source": "composer_access",
+      "created_at": 1781107582.3130627,
+      "updated_at": 1781107582.3130627
+    }
+  ]
+}

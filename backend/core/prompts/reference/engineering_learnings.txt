@@ -1,0 +1,246 @@
+# Metis Engineering Learnings
+
+## Core Architecture
+
+### LangGraph State Machine
+**Not a simple loop** - Metis runtime uses LangGraph for structured execution:
+
+```
+START
+  ↓
+POPULATE_STEERING (refresh steering docs)
+  ↓
+MODEL_INVOKE (call Claude API)
+  ↓
+[Conditional Routing based on stopReason]
+  ├─ "tool_use" → TOOL_EXECUTION → back to MODEL_INVOKE
+  ├─ "end_turn" → END
+  ├─ "max_tokens" → END
+  └─ "cancelled" → END
+```
+
+**Key Insight**: State machine allows:
+- Conditional branching
+- Looping execution
+- State preservation
+- Graceful error handling
+
+### LangChain Integration
+**Purpose**: Message format conversion and monitoring
+
+```
+Metis runtime Message Format
+  ↓
+LangChain Format
+  ↓
+Claude API Format
+```
+
+**Benefits**:
+- Standardized message handling
+- LangSmith tracing for debugging
+- Retry and error handling
+- Token usage tracking
+
+### ACP Protocol
+**Standardized Interface** for IDE communication:
+- `prompt()`: Send user message
+- `requestPermission()`: Request tool permission
+- `sessionUpdate()`: Update session state
+
+## Intelligent Features
+
+### Content Pruning
+**LLM-based relevance extraction**:
+
+1. **Token Estimation**: Estimate content size
+2. **Relevance Analysis**: Use LLM to identify relevant sections
+3. **Smart Extraction**: Extract most relevant parts
+4. **Structure Preservation**: Maintain code structure
+
+**Configuration**:
+- Threshold: 1250 tokens (~5000 characters)
+- Controlled by `explanation` parameter quality
+- Can be disabled with `skipPruning=true`
+
+### AST Analysis
+**Code-aware operations**:
+- Parse code into Abstract Syntax Tree
+- Extract function/class signatures
+- Understand code structure
+- Safer refactoring
+
+**Tools using AST**:
+- `readCode`: AST-based code reading
+- `editCode`: AST-based code editing
+- `rename_symbol`: Semantic renaming
+- `extract_method`: Code extraction
+
+### Token Management
+**Context window optimization**:
+- Token estimation for all content
+- Intelligent pruning when needed
+- Budget tracking
+- Context window checking
+
+### Fallback Mechanisms
+**Error recovery strategies**:
+- `undo_last_edit`: Restore previous version
+- Retry with alternative approaches
+- Graceful degradation
+- Clear error messages
+
+## Hook System
+
+### Event-Driven Automation
+**Hook Types**:
+- `preToolUse`: Before tool execution
+- `postToolUse`: After tool execution
+- `fileEdited/Created/Deleted`: File system events
+- `promptSubmit/agentStop`: Conversation events
+- `preTaskExecution/postTaskExecution`: Task lifecycle
+
+### Hook Actions
+- `askAgent`: Send message to agent
+- `runCommand`: Execute shell command
+
+### Use Cases
+- Access control (preToolUse)
+- Logging (postToolUse)
+- Auto-linting (fileEdited)
+- Auto-testing (postTaskExecution)
+
+## Sub-Agent Architecture
+
+### Specialized Agents
+**Delegation pattern**:
+- `context-gatherer`: Repository exploration
+- `general-task-execution`: General tasks
+- `custom-agent-creator`: Create new agents
+
+### Benefits
+- Specialized expertise
+- Isolated context
+- Parallel execution
+- Focused problem-solving
+
+### When to Use
+- Unfamiliar codebase
+- Complex multi-step tasks
+- Specialized domains
+- Parallel work streams
+
+## Response Style
+
+### Personality Traits
+1. **Knowledgeable, not instructive**: Show expertise without condescension
+2. **Decisive and clear**: Be precise, lose the fluff
+3. **Supportive, not authoritative**: Compassionate and welcoming
+4. **Easygoing, not mellow**: Calm and relaxed, but engaged
+5. **Speak like a dev**: Technical when needed, digestible otherwise
+
+### Communication Principles
+- Be concise and direct
+- Don't repeat yourself
+- Prioritize actionable information
+- Minimal summaries (no bullet lists)
+- Don't create unnecessary documentation
+
+## Tool Design
+
+### 23 Tools Metis runtime pattern
+1. executePwsh (Shell)
+2. controlPwshProcess (Start/Stop)
+3. listProcesses
+4. getProcessOutput
+5. listDirectory
+6. readFile
+7. readMultipleFiles
+8. fileSearch
+9. grepSearch
+10. deleteFile
+11. fsWrite
+12. fsAppend
+13. strReplace
+14. semanticRename
+15. smartRelocate
+16. Metis MCP tools (MCP)
+17. createHook
+18. remote_web_search
+19. webFetch
+20. getDiagnostics
+21. readCode
+22. discloseContext
+23. invokeSubAgent
+
+### Tool Characteristics
+- Clear purpose and scope
+- Comprehensive parameters
+- Intelligent defaults
+- Error handling
+- Documentation
+
+## Key Insights
+
+### Insight 1: State Machine > Loop
+LangGraph provides:
+- Structured execution
+- Conditional branching
+- State preservation
+- Error recovery
+
+### Insight 2: Claude Decides, Metis runtime Executes
+- Claude chooses tools
+- Claude decides parallel/sequential
+- Metis runtime executes efficiently
+- Clear separation of concerns
+
+### Insight 3: Intelligent Pruning is Critical
+- Not blind deletion
+- LLM-based relevance
+- Saves tokens
+- Maintains quality
+
+### Insight 4: Hooks are Powerful
+- Event-driven automation
+- Access control
+- Workflow customization
+- Infinite possibilities
+
+### Insight 5: Sub-Agents Enable Specialization
+- Focused expertise
+- Isolated context
+- Parallel execution
+- Better results
+
+## What Metis Adopted
+
+### Direct Adoption
+1. **Intelligent Pruning**: Complete mechanism
+2. **Response Style**: Full personality
+3. **Hook Concept**: Event-driven automation
+4. **Sub-Agent Pattern**: Delegation architecture
+5. **AST Analysis**: Code-aware operations
+6. **Fallback Mechanisms**: Error recovery
+
+### Adapted
+1. **Tool Set**: 23 tools → 50 tools (expanded)
+2. **Configuration**: Added unified config system
+3. **Security**: Enhanced path/web/shell security
+4. **Testing**: Added comprehensive test suite
+
+### Enhanced
+1. **Tool Registry**: Unified registration
+2. **C-Style Aliases**: Dual naming support
+3. **Parameter Mapping**: Automatic normalization
+4. **Post-Edit Linting**: Quality checks
+5. **Grep Features**: Multiline, context, type filtering
+
+## References
+
+### Metis runtime Documentation
+- `COMPLETE_THINKING_CHAIN.md`: Full execution flow
+- `COMPLETE_THINKING_CHAIN_PART2.md`: Hook system details
+- `ULTIMATE_SUMMARY.md`: Core insights
+- `Metis runtime 1-16 系统级的描述性指令.txt`: Tool descriptions
+- `Metis runtime 17-21 动态的对话内容.txt`: Interaction patterns

@@ -1,0 +1,571 @@
+# Category 13: Advanced Features (2 tools)
+
+## 1. load_workflow_guidelines
+**Purpose**: Load workflow-specific guidelines and best practices
+
+**Parameters**:
+- `workflow_name` (required): Name of workflow to load
+- `context` (optional): Additional context for workflow
+
+**Available Workflows**:
+- `testing`: Testing best practices and patterns
+- `refactoring`: Refactoring guidelines
+- `security`: Security best practices
+- `performance`: Performance optimization
+- `documentation`: Documentation standards
+- `deployment`: Deployment procedures
+- `code_review`: Code review checklist
+- `debugging`: Debugging strategies
+
+**Usage**:
+```python
+# Load testing guidelines
+load_workflow_guidelines(workflow_name="testing")
+
+# Load with context
+load_workflow_guidelines(
+    workflow_name="refactoring",
+    context="Large legacy codebase with minimal tests"
+)
+
+# Load security guidelines
+load_workflow_guidelines(workflow_name="security")
+```
+
+**Workflow Guidelines Content**:
+
+### Testing Workflow
+```python
+load_workflow_guidelines(workflow_name="testing")
+
+# Provides:
+# - Test structure (AAA pattern)
+# - Mocking strategies
+# - Coverage requirements
+# - Test naming conventions
+# - Fixture usage
+# - Parametrized tests
+# - Integration vs unit tests
+```
+
+### Refactoring Workflow
+```python
+load_workflow_guidelines(workflow_name="refactoring")
+
+# Provides:
+# - Refactoring patterns
+# - When to refactor
+# - Safe refactoring steps
+# - Testing during refactoring
+# - Code smell detection
+# - Extract method/class patterns
+```
+
+### Security Workflow
+```python
+load_workflow_guidelines(workflow_name="security")
+
+# Provides:
+# - Input validation
+# - SQL injection prevention
+# - XSS prevention
+# - Authentication best practices
+# - Authorization patterns
+# - Secrets management
+# - HTTPS requirements
+```
+
+### Performance Workflow
+```python
+load_workflow_guidelines(workflow_name="performance")
+
+# Provides:
+# - Profiling techniques
+# - Caching strategies
+# - Database optimization
+# - Async patterns
+# - Memory management
+# - Algorithm optimization
+```
+
+**Use Cases**:
+
+1. **Before implementing feature**:
+   ```python
+   # Load relevant guidelines
+   load_workflow_guidelines(workflow_name="security")
+   
+   # Implement following guidelines
+   write_file(path="auth.py", content="...")
+   ```
+
+2. **During code review**:
+   ```python
+   # Load review checklist
+   load_workflow_guidelines(workflow_name="code_review")
+   
+   # Review code against checklist
+   read_file(path="module.py", ...)
+   ```
+
+3. **When refactoring**:
+   ```python
+   # Load refactoring guidelines
+   load_workflow_guidelines(workflow_name="refactoring")
+   
+   # Refactor following best practices
+   extract_method(...)
+   rename_symbol(...)
+   ```
+
+4. **Performance optimization**:
+   ```python
+   # Load performance guidelines
+   load_workflow_guidelines(workflow_name="performance")
+   
+   # Analyze and optimize
+   analyze_complexity(...)
+   robust_replace_in_file(...)
+   ```
+
+**Features**:
+- **Context-aware**: Guidelines adapt to context
+- **Comprehensive**: Covers common workflows
+- **Best practices**: Industry-standard patterns
+- **Actionable**: Specific, implementable advice
+
+**Integration with Other Tools**:
+
+```python
+# Load guidelines → Implement → Verify
+load_workflow_guidelines(workflow_name="testing")
+write_file(path="test_module.py", content="...")
+execute_bash_command(command="pytest")
+
+# Load guidelines → Refactor → Test
+load_workflow_guidelines(workflow_name="refactoring")
+extract_method(...)
+execute_bash_command(command="pytest")
+
+# Load guidelines → Review → Fix
+load_workflow_guidelines(workflow_name="security")
+read_file(path="auth.py", ...)
+robust_replace_in_file(...)
+```
+
+---
+
+## 2. task_dispatch
+**Alias**: Task  
+**Purpose**: Launch specialized subagents for complex, multi-step tasks
+
+**Parameters**:
+- `prompt` (required): Task for agent to execute
+- `description` (required): 3-5 word task summary
+- `subagent_type` (optional): Type of subagent (generalPurpose/explore/shell/browser-use/best-of-n-runner)
+- `model` (optional): Model to use (fast)
+- `readonly` (optional): Run in readonly mode
+- `resume` (optional): Agent ID to resume
+- `run_in_background` (optional): Run in background
+- `attachments` (optional): File paths to attach
+
+**Subagent Types**:
+
+### 1. generalPurpose (default)
+General-purpose agent for complex questions and multi-step tasks
+
+```python
+# Research complex question
+task_dispatch(
+    prompt="Research and explain how JWT authentication works in FastAPI",
+    description="Research JWT auth",
+    subagent_type="generalPurpose"
+)
+
+# Multi-step task
+task_dispatch(
+    prompt="Find all database queries, analyze performance, and suggest optimizations",
+    description="Optimize DB queries"
+)
+```
+
+### 2. explore
+Fast agent for exploring codebases
+
+```python
+# Quick exploration
+task_dispatch(
+    prompt="Find all API endpoints and their authentication methods",
+    description="Find API endpoints",
+    subagent_type="explore"
+)
+
+# Thorough exploration
+task_dispatch(
+    prompt="Very thorough: Map entire authentication system including all related files",
+    description="Map auth system",
+    subagent_type="explore"
+)
+```
+
+**Thoroughness levels** (specify in prompt):
+- "quick": Basic search
+- "medium": Moderate exploration
+- "very thorough": Comprehensive analysis
+
+### 3. shell
+Command execution specialist
+
+```python
+# Git operations
+task_dispatch(
+    prompt="Create feature branch, commit changes, and push",
+    description="Git workflow",
+    subagent_type="shell"
+)
+
+# Build and test
+task_dispatch(
+    prompt="Run full test suite and generate coverage report",
+    description="Test and coverage",
+    subagent_type="shell"
+)
+```
+
+### 4. browser-use
+Browser-based testing and automation
+
+```python
+# Test web app
+task_dispatch(
+    prompt="Test login flow: navigate to /login, fill credentials, submit, verify dashboard",
+    description="Test login",
+    subagent_type="browser-use"
+)
+
+# UI verification
+task_dispatch(
+    prompt="Verify new button appears on homepage and is clickable",
+    description="Verify UI",
+    subagent_type="browser-use"
+)
+```
+
+**Note**: Stateful - reuses existing browser agent if available. Requires agent mode.
+
+### 5. best-of-n-runner
+Run in isolated git worktree
+
+```python
+# Parallel attempts
+task_dispatch(
+    prompt="Implement caching using Redis",
+    description="Cache with Redis",
+    subagent_type="best-of-n-runner"
+)
+
+task_dispatch(
+    prompt="Implement caching using in-memory dict",
+    description="Cache in-memory",
+    subagent_type="best-of-n-runner"
+)
+```
+
+**Model Options**:
+
+### fast
+- Cost: 1/10
+- Intelligence: 5/10
+- Use for: Tightly scoped changes
+- Not for: Long-horizon tasks or deep investigations
+
+```python
+task_dispatch(
+    prompt="Fix typo in docstring",
+    description="Fix typo",
+    model="fast"
+)
+```
+
+**When to Use Task Dispatch**:
+
+1. **Broadly exploring codebase**:
+   ```python
+   # VERY IMPORTANT: Use explore subagent instead of direct search
+   task_dispatch(
+       prompt="Find all authentication-related code",
+       description="Find auth code",
+       subagent_type="explore"
+   )
+   ```
+
+2. **Complex multi-step tasks**:
+   ```python
+   task_dispatch(
+       prompt="Research best practices, implement solution, write tests, and document",
+       description="Full implementation"
+   )
+   ```
+
+3. **Parallel work**:
+   ```python
+   # Launch multiple agents concurrently
+   task_dispatch(prompt="Task 1", description="Task 1")
+   task_dispatch(prompt="Task 2", description="Task 2")
+   task_dispatch(prompt="Task 3", description="Task 3")
+   ```
+
+**When NOT to Use**:
+
+1. **Narrow or specific questions**:
+   ```python
+   # Don't use Task for simple questions
+   # Answer directly using available tools
+   read_file(...)
+   ```
+
+2. **Known file paths**:
+   ```python
+   # Don't use Task to read specific files
+   # Use Read tool directly
+   read_file(path="known/file.py", ...)
+   ```
+
+3. **Simple symbol lookups**:
+   ```python
+   # Don't use Task for simple searches
+   # Use Grep or Glob directly
+   grep_search(query="class Foo")
+   ```
+
+4. **Searching within 2-3 specific files**:
+   ```python
+   # Don't use Task
+   # Use Read tool
+   read_file(path="file1.py", ...)
+   read_file(path="file2.py", ...)
+   ```
+
+**Usage Notes**:
+
+1. **Always include description**:
+   ```python
+   # Required: 3-5 word summary
+   task_dispatch(
+       prompt="Long detailed task description...",
+       description="Short summary"
+   )
+   ```
+
+2. **Launch multiple concurrently**:
+   ```python
+   # Single message with multiple tool uses
+   task_dispatch(prompt="Task 1", description="Task 1")
+   task_dispatch(prompt="Task 2", description="Task 2")
+   ```
+
+3. **Provide detailed context**:
+   ```python
+   # Subagent doesn't see user message or prior steps
+   # Provide all necessary context in prompt
+   task_dispatch(
+       prompt="""
+       Context: We have a FastAPI application with JWT authentication.
+       Task: Find all endpoints that require authentication and verify they use the correct decorator.
+       Expected output: List of endpoints with their authentication status.
+       """,
+       description="Verify auth"
+   )
+   ```
+
+4. **Trust subagent output**:
+   ```python
+   # Subagent outputs should generally be trusted
+   # Don't redundantly verify their work
+   ```
+
+5. **Resume agents**:
+   ```python
+   # Resume previous agent with follow-up
+   task_dispatch(
+       prompt="Now also check for authorization",
+       description="Check authorization",
+       resume="agent_id_from_previous_invocation"
+   )
+   ```
+
+6. **Background execution**:
+   ```python
+   # Run in background, check later
+   result = task_dispatch(
+       prompt="Long-running analysis task",
+       description="Analysis",
+       run_in_background=True
+   )
+   
+   # Returns output_file path
+   # Check later: read_file(path=result["output_file"])
+   ```
+
+**Attachments**:
+
+```python
+# Attach video for Gemini models
+task_dispatch(
+    prompt="Analyze this video and describe what happens",
+    description="Video analysis",
+    attachments=["recording.mp4"]
+)
+```
+
+Supports: mp4, webm (for Gemini models)
+
+---
+
+## Common Workflows
+
+### Workflow 1: Load Guidelines and Implement
+```python
+# 1. Load relevant guidelines
+load_workflow_guidelines(workflow_name="security")
+
+# 2. Implement following guidelines
+write_file(
+    path="auth.py",
+    content="""
+# Following security guidelines:
+# - Input validation
+# - Password hashing
+# - JWT tokens
+# - HTTPS only
+"""
+)
+
+# 3. Verify
+read_lints(paths="auth.py")
+```
+
+### Workflow 2: Explore with Task Dispatch
+```python
+# 1. Broadly explore codebase
+task_dispatch(
+    prompt="Very thorough: Find all API endpoints, their authentication, and database queries",
+    description="Map API structure",
+    subagent_type="explore"
+)
+
+# 2. Use results to implement changes
+# (Results returned by subagent)
+
+# 3. Implement based on findings
+robust_replace_in_file(...)
+```
+
+### Workflow 3: Parallel Task Execution
+```python
+# 1. Launch multiple tasks concurrently
+task_dispatch(
+    prompt="Research best caching strategies for our use case",
+    description="Research caching",
+    subagent_type="generalPurpose"
+)
+
+task_dispatch(
+    prompt="Find all database queries that could benefit from caching",
+    description="Find queries",
+    subagent_type="explore"
+)
+
+task_dispatch(
+    prompt="Run performance benchmarks on current system",
+    description="Benchmark",
+    subagent_type="shell"
+)
+
+# 2. Synthesize results and implement
+```
+
+### Workflow 4: Guidelines + Task + Verification
+```python
+# 1. Load guidelines
+load_workflow_guidelines(workflow_name="testing")
+
+# 2. Delegate test generation
+task_dispatch(
+    prompt="Generate comprehensive unit tests for auth module following loaded testing guidelines",
+    description="Generate tests"
+)
+
+# 3. Run tests
+execute_bash_command(command="pytest")
+
+# 4. Verify coverage
+execute_bash_command(command="pytest --cov")
+```
+
+### Workflow 5: Browser Testing with Guidelines
+```python
+# 1. Load testing guidelines
+load_workflow_guidelines(workflow_name="testing")
+
+# 2. Run browser tests
+task_dispatch(
+    prompt="Test complete user registration flow: form validation, submission, email verification, login",
+    description="Test registration",
+    subagent_type="browser-use"
+)
+
+# 3. Verify results
+```
+
+---
+
+## Integration Patterns
+
+### With Guidelines:
+```python
+# Load → Implement → Verify
+load_workflow_guidelines(workflow_name="...")
+write_file(...)
+read_lints(...)
+```
+
+### With Task Dispatch:
+```python
+# Dispatch → Use Results → Implement
+task_dispatch(...)
+# ... results returned ...
+robust_replace_in_file(...)
+```
+
+### With Other Sub-Agents:
+```python
+# Task dispatch is similar to specific sub-agents
+# But more flexible and powerful
+
+# Instead of:
+summon_context_gatherer(...)
+
+# Can use:
+task_dispatch(subagent_type="explore", ...)
+```
+
+---
+
+## Metis runtime pattern
+- Workflow guidelines system
+- Task dispatch framework
+- Sub-agent specialization
+- Context preservation
+
+## Metis tool discipline
+- Task tool with subagent types
+- Proactive exploration
+- Parallel execution
+- Thoroughness levels
+
+## From Metis
+- Unified advanced features
+- Enhanced task dispatch
+- Workflow integration
+- Configuration support

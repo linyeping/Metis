@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+<title>Metis takeover control</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+    margin: 8px;
+    padding: 0 8px 0 14px;
+    border-radius: 22px;
+    background: rgba(28, 24, 16, 0.82);
+    border: 1px solid rgba(226, 184, 87, 0.55);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35),
+                inset 0 0 12px rgba(214, 170, 74, 0.18);
+    backdrop-filter: blur(8px);
+    color: #f3e6c4;
+    -webkit-app-region: drag;
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #f5d78c, #d6aa4a);
+    box-shadow: 0 0 8px 2px rgba(226, 184, 87, 0.8);
+    animation: pulse 2.4s ease-in-out infinite;
+    flex: none;
+  }
+  .label {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    letter-spacing: 0.2px;
+  }
+  .stop {
+    -webkit-app-region: no-drag;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 15px;
+    background: linear-gradient(180deg, #e2b857, #c8923a);
+    color: #2a1d08;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: filter 120ms ease, transform 120ms ease;
+  }
+  .stop:hover { filter: brightness(1.08); }
+  .stop:active { transform: scale(0.96); }
+  .stop .sq { width: 9px; height: 9px; border-radius: 2px; background: #2a1d08; }
+  @media (prefers-reduced-motion: reduce) {
+    .dot { animation: none; }
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.6; transform: scale(0.9); }
+    50%      { opacity: 1; transform: scale(1.1); }
+  }
+</style>
+</head>
+<body>
+  <div class="pill">
+    <span class="dot"></span>
+    <span class="label">Metis 正在操作…</span>
+    <button class="stop" id="stop" type="button"><span class="sq"></span>停止</button>
+  </div>
+  <script>
+    document.getElementById('stop').addEventListener('click', function () {
+      try { window.metis && window.metis.overlayStop && window.metis.overlayStop(); } catch (e) {}
+    });
+  </script>
+</body>
+</html>
