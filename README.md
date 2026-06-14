@@ -5,10 +5,8 @@
 # Metis · 墨提斯
 
 **一个会读写代码、操控终端与网页的桌面 AI 智能体**
-_A desktop AI agent that reads your code, runs your terminal, and drives the web._
 
 > 智者不喧，巧者不竭。
-> _The wise stay quiet; the skilled never run dry._
 
 ![Electron](https://img.shields.io/badge/Electron-40-47848F?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -17,7 +15,7 @@ _A desktop AI agent that reads your code, runs your terminal, and drives the web
 ![i18n](https://img.shields.io/badge/i18n-中文%20%2F%20English-C9A24B)
 ![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B)
 
-**Built by [linyeping](https://github.com/linyeping)**
+**由 [linyeping](https://github.com/linyeping) 打造**
 
 **中文 · [English](README.en.md)**
 
@@ -146,6 +144,6 @@ Miro/
 
 <div align="center">
 
-**Built by [linyeping](https://github.com/linyeping)** · 智者不喧，巧者不竭。
+**由 [linyeping](https://github.com/linyeping) 打造** · 智者不喧，巧者不竭。
 
 </div>
