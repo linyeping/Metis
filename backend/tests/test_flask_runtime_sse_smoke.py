@@ -421,7 +421,8 @@ def test_run_registry_cancel_aborts_blocking_provider_stream(
         created = client.post("/runs", json={"message": "cancel blocking provider"})
         assert created.status_code == 200
         run_id = created.get_json()["run_id"]
-        time.sleep(0.08)
+        # 慢机器(CI)上后台线程要更久才发出事件；阻塞操作有 5s 余量，等久一点再取消，避免 race。
+        time.sleep(1.0)
         canceled = client.post(f"/runs/{run_id}/cancel")
         assert canceled.status_code == 200
         events, saw_done_marker = _run_events(client, run_id)
@@ -465,7 +466,8 @@ def test_run_registry_cancel_releases_blocking_tool_execution(
         created = client.post("/runs", json={"message": "cancel blocking tool"})
         assert created.status_code == 200
         run_id = created.get_json()["run_id"]
-        time.sleep(0.08)
+        # 慢机器(CI)上后台线程要更久才发出事件；阻塞操作有 5s 余量，等久一点再取消，避免 race。
+        time.sleep(1.0)
         canceled = client.post(f"/runs/{run_id}/cancel")
         assert canceled.status_code == 200
         events, saw_done_marker = _run_events(client, run_id)
