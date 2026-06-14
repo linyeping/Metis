@@ -6,8 +6,8 @@
 
 **本地优先、隐私至上的桌面 AI 智能体 — 为 DeepSeek 深度调校**
 
-> 在你自己的电脑上，把想法做成结果。
-> _Turn intent into results — on your own machine._
+> 智者不喧，巧者不竭。
+> _The wise stay quiet; the skilled never run dry._
 
 ![Electron](https://img.shields.io/badge/Electron-40-47848F?logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -143,6 +143,6 @@ Miro/
 
 <div align="center">
 
-**Built by [linyeping](https://github.com/linyeping)** · 巧智,胜于蛮力。
+**Built by [linyeping](https://github.com/linyeping)** · 智者不喧，巧者不竭。
 
 </div>
