@@ -14,7 +14,9 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-Flask%20%2B%20SSE-3776AB?logo=python&logoColor=white)
 ![i18n](https://img.shields.io/badge/i18n-中文%20%2F%20English-C9A24B)
-![License](https://img.shields.io/badge/License-MIT-22a06b)
+![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B)
+
+**Built by [linyeping](https://github.com/linyeping)**
 
 </div>
 
@@ -132,4 +134,15 @@ Miro/
 
 ## 许可证
 
-[MIT License](LICENSE) © Metis
+**[PolyForm Noncommercial 1.0.0](LICENSE)** © 2026 linyeping
+
+源码可见,**个人 / 非商用免费**(学习、研究、个人项目、非营利组织)。
+**任何商业用途或商业二次开发,须事先获得作者书面授权(付费)** —— 联系见仓库主页。
+
+---
+
+<div align="center">
+
+**Built by [linyeping](https://github.com/linyeping)** · 巧智,胜于蛮力。
+
+</div>

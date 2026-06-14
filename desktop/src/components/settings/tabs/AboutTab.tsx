@@ -51,7 +51,7 @@ export const AboutTab = memo(function AboutTab({
         <div className="about-open-source-grid">
           <article>
             <span>{t('开源协议')}</span>
-            <strong>MIT</strong>
+            <strong>PolyForm NC</strong>
           </article>
           <article>
             <span>{t('项目主页')}</span>
