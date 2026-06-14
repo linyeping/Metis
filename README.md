@@ -75,19 +75,17 @@ _A desktop AI agent that reads your code, runs your terminal, and drives the web
 
 ---
 
-## 运行需要什么环境
+## 运行环境
 
-发给别人的安装包是**自包含**的，对方电脑**不用装 Python、不用装 Node**：
-
-| 必需 | 说明 |
+| 项 | 要求 |
 |---|---|
-| **Windows 10/11 64 位** | 安装包是 win-x64 |
-| **磁盘 ~450MB** | 后端经 PyInstaller 打成独立 exe，已内置 Python 运行时 |
-| **联网** | 调用 DeepSeek / 中转的大模型 API |
-| **一个 API key** | 首启向导里填自己的 DeepSeek 或中转 key（仅按环境变量名引用，不落明文） |
-| **Chrome / Edge** | `/browser` 网页操控复用系统浏览器（Windows 自带 Edge 即可） |
+| 操作系统 | Windows 10 / 11（64 位） |
+| 磁盘空间 | 约 450 MB |
+| 网络 | 联网以调用大模型 API |
+| API key | DeepSeek 或任意 OpenAI 兼容端点的密钥，首次启动时在向导中填入 |
+| 浏览器 | `/browser` 网页操控复用系统 Chrome / Edge |
 
-> `/computer` 桌面操控会控制鼠标键盘，首次可能触发一次 UAC 提权；安装包若未做受信任签名，Windows 会提示「未知发布者」，点「仍要运行」即可。
+安装包已内置运行时，无需额外配置开发环境。`/computer` 桌面操控涉及鼠标键盘控制，首次使用可能触发系统授权。当前版本尚未代码签名，Windows SmartScreen 可能提示风险，确认后可继续运行。
 
 ---
 
