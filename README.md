@@ -19,6 +19,8 @@ _A desktop AI agent that reads your code, runs your terminal, and drives the web
 
 **Built by [linyeping](https://github.com/linyeping)**
 
+**中文 · [English](README.en.md)**
+
 </div>
 
 ---
