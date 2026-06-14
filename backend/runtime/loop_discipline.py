@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, List, Mapping
 
 
 LOOP_DISCIPLINE_PROMPT = """---

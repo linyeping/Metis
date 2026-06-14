@@ -1,11 +1,9 @@
 """tree_sitter_parser 单元测试 —— 验证 AST 签名提取的正确性。"""
 from __future__ import annotations
 
-import os
 import textwrap
 from pathlib import Path
 
-import pytest
 
 from backend.tools.coding.foundation.tree_sitter_parser import (
     SignatureNode,

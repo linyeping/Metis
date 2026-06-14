@@ -6,7 +6,6 @@ deferred 工具默认不进 schema，只在目录里列名；search_tools 检索
 """
 from __future__ import annotations
 
-import pytest
 
 from backend.runtime.tool_registry import ToolDefinition, ToolRegistry
 

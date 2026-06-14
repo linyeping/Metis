@@ -11,7 +11,6 @@ from backend.runtime.mini_agent import MiniAgentConfig, MiniAgentResult, run_min
 from backend.runtime.tool_registry import ToolDefinition, ToolRegistry
 from backend.runtime.tool_tiers import TIER_2_TOOLS, TIER_3_TOOLS, tools_for_tier
 from backend.tools.coding.workflow_features.subagents.custom_agent_creator import custom_agent_creator
-from backend.tools.coding.workflow_features.subagents.delegate_browser import delegate_browser
 from backend.web import app as web_app
 from backend.web import desk_blueprint
 

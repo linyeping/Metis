@@ -788,7 +788,7 @@ def run(
         if response.stop_reason == "max_tokens" and not response.tool_calls:
             if continuation_count < MAX_TRUNCATION_CONTINUATIONS:
                 continuation_count += 1
-                partial = response.content or accumulated_text or ""
+                partial = response.content or ""
                 if partial.strip():
                     continuation_buffer += partial
                     working_messages.append(_format_assistant_message(response, config))
@@ -797,7 +797,7 @@ def run(
                     working_messages.append({"role": "user", "content": TRUNCATED_TOOLCALL_PROMPT})
                 turn_count -= 1
                 continue
-            final_text = (continuation_buffer + (response.content or accumulated_text or "")) or "(No response from LLM)"
+            final_text = (continuation_buffer + (response.content or "")) or "(No response from LLM)"
             yield ContentEvent(text=final_text + "\n\n[输出多次超长被截断，请把任务拆小或缩小单次写入范围]")
             yield _runtime_status_event("completed", "Agent runtime completed", turn=turn_count, tool_calls=tool_call_count)
             yield DoneEvent(
@@ -1359,7 +1359,7 @@ def run_stream(
         if response.stop_reason == "max_tokens" and not response.tool_calls:
             if continuation_count < MAX_TRUNCATION_CONTINUATIONS:
                 continuation_count += 1
-                partial = response.content or accumulated_text or ""
+                partial = response.content or ""
                 if partial.strip():
                     continuation_buffer += partial
                     working_messages.append(_format_assistant_message(response, config))
@@ -1368,7 +1368,7 @@ def run_stream(
                     working_messages.append({"role": "user", "content": TRUNCATED_TOOLCALL_PROMPT})
                 turn_count -= 1
                 continue
-            final_text = (continuation_buffer + (response.content or accumulated_text or "")) or "(No response from LLM)"
+            final_text = (continuation_buffer + (response.content or "")) or "(No response from LLM)"
             yield ContentEvent(text=final_text + "\n\n[输出多次超长被截断，请把任务拆小或缩小单次写入范围]")
             yield _runtime_status_event("completed", "Agent runtime completed", turn=turn_count, tool_calls=tool_call_count)
             yield DoneEvent(

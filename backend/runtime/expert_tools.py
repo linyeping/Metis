@@ -16,8 +16,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +133,7 @@ def _create_expert_executor(
 
     def expert_execute(goal: str = "", **kwargs: Any) -> str:
         """执行专家任务。"""
-        from .agent_loop import run, AgentConfig, Event, ContentEvent, ErrorEvent, DoneEvent
+        from .agent_loop import run, AgentConfig, ContentEvent, ErrorEvent, DoneEvent
         from .tool_registry import get_registry
 
         registry = get_registry(include_mcp=False)

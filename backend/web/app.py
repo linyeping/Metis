@@ -1,25 +1,17 @@
 from __future__ import annotations
 
-import ipaddress
 import fnmatch
-import hashlib
 import json
 import logging
-import mimetypes
 import os
-import re
-import shutil
-import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
-import webbrowser
 from dataclasses import replace
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 from flask import Flask, Response, abort, jsonify, request, send_file, stream_with_context
 
@@ -57,8 +49,7 @@ from backend.runtime.checkpoints import (  # noqa: E402
 from backend.core.paths import legacy_miro_path, metis_dir, metis_path  # noqa: E402
 from backend.runtime.tool_registry import get_registry  # noqa: E402
 from backend.runtime.error_catalog import ErrorInfo, classify_llm_error  # noqa: E402
-from backend.runtime.path_safety import validate_path_access, validate_tool_paths  # noqa: E402
-from backend.web.desktop_window import handle_window_action  # noqa: E402
+from backend.runtime.path_safety import validate_tool_paths  # noqa: E402
 from backend.web.error_handlers import register_error_handlers  # noqa: E402
 from backend.web.llm_state import (  # noqa: E402
     build_agent_config,
@@ -67,16 +58,8 @@ from backend.web.llm_state import (  # noqa: E402
     env_any,
     env_bool,
     env_disabled,
-    first_run_status_payload,
-    get_provider_models,
-    get_provider_status,
-    get_provider_usage,
-    get_runtime_settings,
-    save_first_run_config,
     sanitize_for_log,
     should_auto_compact,
-    update_runtime_settings,
-    verify_provider_settings,
 )
 from backend.web.sessions import get_session_manager  # noqa: E402
 from backend.web.workspaces import get_workspace_manager  # noqa: E402

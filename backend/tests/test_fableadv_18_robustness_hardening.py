@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+from typing import Iterable
 
 import pytest
 
@@ -26,7 +26,8 @@ def test_replace_with_retry_recovers_from_transient_lock(monkeypatch):
     monkeypatch.setattr(llm_state.os, "replace", flaky_replace)
     monkeypatch.setattr(llm_state, "time", __import__("time"))  # ensure real sleep stub ok
 
-    import tempfile, os as _os
+    import tempfile
+    import os as _os
 
     d = tempfile.mkdtemp()
     src = _os.path.join(d, "src.tmp")

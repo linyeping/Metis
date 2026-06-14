@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 
-import pytest
 
 from backend.runtime import action_audit
 from backend.runtime.llm_backends import ToolCall

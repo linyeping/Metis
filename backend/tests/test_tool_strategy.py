@@ -1,7 +1,6 @@
 """tool_strategy.py 单元测试 — 验证工具策略提示生成逻辑。"""
 from __future__ import annotations
 
-import pytest
 
 from backend.core.engine.tool_strategy import generate_tool_strategy, tool_strategy_block
 

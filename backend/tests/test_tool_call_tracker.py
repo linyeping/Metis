@@ -1,7 +1,6 @@
 """tool_call_tracker.py 单元测试 — 验证循环检测和效率建议。"""
 from __future__ import annotations
 
-import pytest
 
 from backend.runtime.tool_call_tracker import ToolCallTracker
 

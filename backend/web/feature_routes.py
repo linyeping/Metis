@@ -24,7 +24,6 @@ from backend.web.helpers import (
     request_client_is_loopback,
     safe_skill_slug,
     skill_title,
-    skills_dir,
     unique_skill_dir,
     write_text,
 )

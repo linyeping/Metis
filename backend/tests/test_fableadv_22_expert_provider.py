@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import pytest
 
 from backend.runtime import agent_loop, expert_tools
 

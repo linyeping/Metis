@@ -15,7 +15,7 @@ import os
 import threading
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 _lock = threading.Lock()
 

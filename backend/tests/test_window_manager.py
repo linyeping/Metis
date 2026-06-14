@@ -6,8 +6,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -65,7 +64,6 @@ class TestWindowInfo:
 class TestCoordinateConversion:
     def test_window_to_screen(self):
         from backend.tools.desk_automation.capture.window_manager import (
-            _get_window_rect,
             window_to_screen,
         )
 

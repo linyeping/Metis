@@ -10,7 +10,6 @@ from flask import request
 from backend.core.paths import metis_dir, metis_path
 from backend.runtime.error_catalog import ErrorInfo
 from backend.web.runtime_state import RuntimeState
-from backend.web.sessions import get_session_manager
 from backend.web.workspaces import get_workspace_manager
 
 _runtime_state: Optional[RuntimeState] = None
@@ -98,7 +97,6 @@ def open_directory(path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def skills_dir() -> str:
-    import re  # noqa: F811
     return str(metis_dir("skills"))
 
 

@@ -18,7 +18,7 @@ import ctypes.wintypes as wt
 import io
 import logging
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)

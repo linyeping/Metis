@@ -1,13 +1,11 @@
 """repo_map 单元测试 —— 验证文件收集、签名格式化、缓存和截断逻辑。"""
 from __future__ import annotations
 
-import json
 import os
 import textwrap
 from pathlib import Path
 from typing import List
 
-import pytest
 
 from backend.tools.coding.foundation.repo_map import (
     _collect_source_files,

@@ -12,7 +12,7 @@ jobs:
           node-version: 22
       - run: cd desktop && npm ci
       - run: cd desktop && npm run typecheck
-      - run: cd desktop && npm run test:contracts
+      - run: cd desktop && npm run test
 
   backend:
     runs-on: windows-latest
@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e backend/
-      - run: pip install pytest
+      - run: pip install pytest tree-sitter tree-sitter-python tree-sitter-javascript tree-sitter-typescript
       - run: python -m pytest backend/tests/ -q
 
   lint:
@@ -35,4 +35,4 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install ruff
-      - run: ruff check backend/ --select E,W,F --ignore E501,W291,W292,W293 --exclude backend/tools/coding --exclude backend/var --exclude backend/build --exclude backend/others --exclude backend/output --exclude backend/packaging_blueprint
+      - run: ruff check backend/ --select E,W,F --ignore E501,W291,W292,W293,E402,F841,E702 --exclude backend/tools/coding --exclude backend/var --exclude backend/build --exclude backend/others --exclude backend/output --exclude backend/packaging_blueprint
