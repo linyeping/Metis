@@ -91,6 +91,7 @@ interface UiState {
   settingsSection: SettingsSection;
   commandOpen: boolean;
   modelPickerOpen: boolean;
+  workspaceMenuOpen: boolean;
   rightRailOpen: boolean;
   rightRailWidth: number;
   rightRailMode: RightRailMode;
@@ -128,6 +129,7 @@ interface UiState {
   setSettingsSection: (section: SettingsSection) => void;
   setCommandOpen: (open: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
+  setWorkspaceMenuOpen: (open: boolean) => void;
   setRightRailOpen: (open: boolean) => void;
   setRightRailWidth: (width: number) => void;
   setRightRailMode: (mode: RightRailMode) => void;
@@ -346,6 +348,7 @@ export const useUiStore = create<UiState>(set => ({
   settingsSection: 'appearance',
   commandOpen: false,
   modelPickerOpen: false,
+  workspaceMenuOpen: false,
   rightRailOpen: hasVisibleWorkspaceCard(initialWorkspaceCardVisibility),
   rightRailWidth: 780,
   rightRailMode: 'files',
@@ -417,6 +420,7 @@ export const useUiStore = create<UiState>(set => ({
   setSettingsSection: settingsSection => set({ settingsSection }),
   setCommandOpen: commandOpen => set({ commandOpen }),
   setModelPickerOpen: modelPickerOpen => set({ modelPickerOpen }),
+  setWorkspaceMenuOpen: workspaceMenuOpen => set({ workspaceMenuOpen }),
   setRightRailOpen: rightRailOpen => set({ rightRailOpen }),
   setRightRailWidth: rightRailWidth => set({ rightRailWidth: Math.min(Math.max(rightRailWidth, 420), 1180) }),
   setRightRailMode: rightRailMode =>

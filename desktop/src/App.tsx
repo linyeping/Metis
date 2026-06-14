@@ -84,6 +84,7 @@ export function App() {
   const settingsOpen = useUiStore(state => state.settingsOpen);
   const commandOpen = useUiStore(state => state.commandOpen);
   const modelPickerOpen = useUiStore(state => state.modelPickerOpen);
+  const workspaceMenuOpen = useUiStore(state => state.workspaceMenuOpen);
   const appDialog = useUiStore(state => state.appDialog);
   const loadSessions = useSessionStore(state => state.load);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
@@ -218,9 +219,9 @@ export function App() {
   // 任意 DOM 浮层打开时，让主进程藏掉原生 preview 视图——它没有 z-index，否则会盖在弹窗上面。
   useEffect(() => {
     const occluded =
-      settingsOpen || commandOpen || modelPickerOpen || Boolean(appDialog) || firstRun || bootState.status !== 'ready' || !backendReady;
+      settingsOpen || commandOpen || modelPickerOpen || workspaceMenuOpen || Boolean(appDialog) || firstRun || bootState.status !== 'ready' || !backendReady;
     void window.metis?.previewSetOccluded?.(occluded);
-  }, [settingsOpen, commandOpen, modelPickerOpen, appDialog, firstRun, bootState.status, backendReady]);
+  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, firstRun, bootState.status, backendReady]);
 
   useEffect(() => {
     let lastEscapeAt = 0;

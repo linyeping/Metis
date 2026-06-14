@@ -44,9 +44,17 @@ export function Titlebar({ model }: TitlebarProps) {
   const workspaceCardVisibility = useUiStore(state => state.workspaceCardVisibility);
   const toggleWorkspaceCard = useUiStore(state => state.toggleWorkspaceCard);
   const sideChatStreaming = useSideChatStore(state => state.streaming);
+  const setWorkspaceMenuOpen = useUiStore(state => state.setWorkspaceMenuOpen);
   const t = useT();
   const [cardMenuOpen, setCardMenuOpen] = useState(false);
   const cardMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // 原生 preview 视图没有 z-index，永远盖在 DOM 之上。此下拉菜单浮在 preview 区域上方，
+  // 打开时必须通知主进程藏掉 preview，否则 webview 会盖住菜单下半部分（尤其末尾两项）。
+  useEffect(() => {
+    setWorkspaceMenuOpen(cardMenuOpen);
+    return () => setWorkspaceMenuOpen(false);
+  }, [cardMenuOpen, setWorkspaceMenuOpen]);
   const visibleCardCount = titlebarWorkspaceCardOptions.filter(option => workspaceCardVisibility[option.id]).length;
 
   useEffect(() => {
