@@ -77,7 +77,13 @@ class OpenAICompatBackend(LLMBackend):
 
     @property
     def chat_completions_url(self) -> str:
-        return normalize_chat_completions_url(self.base_url)
+        # DeepSeek /beta 端点：仅 chat completions 走 /beta，开启 strict tool mode + chat prefix
+        # completion（提升工具调用可靠性，配合稳定前缀更利于上下文缓存命中）。用户显式带 /v1 或
+        # /beta 视为自主选择不再追加；/models 等其它路径不受影响（走独立函数）。
+        base = self.base_url.rstrip("/")
+        if base.lower().endswith("api.deepseek.com"):
+            base = base + "/beta"
+        return normalize_chat_completions_url(base)
 
     @property
     def supports_vision(self) -> bool:
