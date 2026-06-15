@@ -4441,8 +4441,8 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 }
 
 .composer-highlight .composer-cmd {
+  /* 只用颜色区分；粗细/字距必须与 textarea 完全一致，否则光标会落进字符中间（覆盖层与真实文字宽度不符）。 */
   color: #4f8cff;
-  font-weight: 600;
 }
 
 /* 有文字时让真实 textarea 文字透明（仅留光标），可见文字由上方高亮层呈现；空时保持正常以显示 placeholder。 */
