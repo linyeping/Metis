@@ -121,9 +121,15 @@ def test_production_config_builder_excludes_volatile_layers_from_prefix(monkeypa
 
     monkeypatch.setattr(llm_state, "compile_prompt_runtime", fake_compile)
     llm_state.build_agent_config(system_prompt="BASE", execution_mode="execute")
-    assert captured.get("include_agent_state_hint") is False
-    assert captured.get("include_open_files_hint") is False
-    assert captured.get("include_terminal_hint") is False
+    # 所有"会随干活而变"的层都不得进前缀，以最大化 DeepSeek 上下文缓存命中。
+    for flag in (
+        "include_agent_state_hint",
+        "include_open_files_hint",
+        "include_terminal_hint",
+        "include_repo_map_hint",
+        "include_workspace_memory_hint",
+    ):
+        assert captured.get(flag) is False, flag
 
 
 def test_context_ledger_exposes_cache_hit_rate():

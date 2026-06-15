@@ -403,9 +403,12 @@ def build_agent_config(
     if not api_key and resolved["backend"] != backend:
         api_key = _runtime_value("api_key", resolved["backend"], file_values, "")
     model_capabilities = detect_from_model_name(resolved["model"])
-    # 缓存纪律：agent_state/open_files/terminal 属"每轮易变"，一旦进入 system 前缀就会在
-    # 活跃会话中逐轮漂移，从该点起打断 DeepSeek 上下文缓存（连带后续历史全不命中）。这些状态
-    # 本就可由模型经工具按需获取，todo 也已在末尾消息单独刷新；故排除出前缀以最大化缓存命中。
+    # 缓存纪律：凡"会随干活而变"的层都不进 system 前缀，否则在活跃会话中逐轮漂移，从漂移点起
+    # 打断 DeepSeek 上下文缓存（连带后续整段历史全不命中）。
+    #   - agent_state/open_files/terminal：每轮易变
+    #   - repo_map/workspace_memory：随文件/记忆改动而变
+    # 这些信息本就可由模型经工具按需获取（符合工具化设计），todo 也已在末尾消息单独刷新。
+    # 前缀只保留真正稳定的层（base、固定规则、cwd、skills 索引、用户 METIS.md），以最大化缓存命中。
     prompt_snapshot = compile_prompt_runtime(
         system_prompt,
         user_memory_text=user_memory_text,
@@ -415,6 +418,8 @@ def build_agent_config(
         include_agent_state_hint=False,
         include_open_files_hint=False,
         include_terminal_hint=False,
+        include_repo_map_hint=False,
+        include_workspace_memory_hint=False,
     )
     return AgentConfig(
         llm_backend=resolved["backend"],
