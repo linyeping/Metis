@@ -239,6 +239,7 @@ export interface RuntimeSettings {
   baseUrl: string;
   model: string;
   temperature: number;
+  reasoningEffort: string;
   maxTokens: number;
   apiKey: string;
   hasApiKey: boolean;

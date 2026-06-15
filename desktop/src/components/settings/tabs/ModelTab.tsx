@@ -284,6 +284,19 @@ export const ModelTab = memo(function ModelTab({
               onChange={event => onSettingsChange({ ...settings, maxTokens: Number(event.target.value) })}
             />
           </label>
+          <label>
+            <span>{tr(language, 'reasoningEffort')}</span>
+            <select
+              value={settings.reasoningEffort || 'off'}
+              onChange={event => onSettingsChange({ ...settings, reasoningEffort: event.target.value })}
+            >
+              <option value="off">{language === 'zh' ? '关（更快/更省）' : 'Off (faster/cheaper)'}</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="max">max</option>
+            </select>
+          </label>
         </div>
       </section>
 

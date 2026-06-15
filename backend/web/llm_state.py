@@ -363,6 +363,7 @@ def load_persistent_config() -> None:
         "api_key": "METIS_LLM_API_KEY",
         "model": "METIS_LLM_MODEL",
         "temperature": "METIS_TEMPERATURE",
+        "reasoning_effort": "METIS_REASONING_EFFORT",
         "max_tokens": "METIS_MAX_TOKENS",
         "auto_memory": "METIS_AUTO_MEMORY",
         "auto_skills": "METIS_AUTO_SKILLS",
@@ -469,6 +470,7 @@ def get_runtime_settings() -> Dict[str, Any]:
             "has_api_key": bool(api_key),
             "model": model,
             "temperature": float(env("METIS_TEMPERATURE", "MIRO_TEMPERATURE", "0.3")),
+            "reasoning_effort": env("METIS_REASONING_EFFORT", "MIRO_REASONING_EFFORT", "off"),
             "max_tokens": int(env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096")),
             "auto_memory": env_bool("METIS_AUTO_MEMORY", "MIRO_AUTO_MEMORY", True),
             "auto_skills": env_bool("METIS_AUTO_SKILLS", "MIRO_AUTO_SKILLS", True),
@@ -492,6 +494,7 @@ def update_runtime_settings(data: Dict[str, Any]) -> List[str]:
             "api_key": "METIS_LLM_API_KEY",
             "model": "METIS_LLM_MODEL",
             "temperature": "METIS_TEMPERATURE",
+            "reasoning_effort": "METIS_REASONING_EFFORT",
             "max_tokens": "METIS_MAX_TOKENS",
             "auto_memory": "METIS_AUTO_MEMORY",
             "auto_skills": "METIS_AUTO_SKILLS",
@@ -583,6 +586,7 @@ def persist_runtime_settings(data: Dict[str, Any]) -> None:
                 or _runtime_value("model", backend, file_values, default_model(backend))
             ).strip(),
             "temperature": str(data.get("temperature") or env("METIS_TEMPERATURE", "MIRO_TEMPERATURE", "0.3")).strip(),
+            "reasoning_effort": str(data.get("reasoning_effort") or env("METIS_REASONING_EFFORT", "MIRO_REASONING_EFFORT", "off")).strip(),
             "max_tokens": str(data.get("max_tokens") or env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096")).strip(),
             "auto_memory": data.get("auto_memory")
             if data.get("auto_memory") is not None

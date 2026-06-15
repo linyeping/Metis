@@ -263,6 +263,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
         baseUrl: settings.baseUrl,
         model: settings.model,
         temperature: settings.temperature,
+        reasoningEffort: settings.reasoningEffort,
         maxTokens: settings.maxTokens,
         autoMemory: settings.autoMemory,
         autoSkills: settings.autoSkills,
