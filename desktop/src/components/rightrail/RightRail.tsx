@@ -82,6 +82,7 @@ function workspaceColumnWidth(
 export function RightRail({ backendReady }: RightRailProps) {
   const t = useT();
   const previewPath = useUiStore(state => state.previewPath);
+  const previewFrozenSrc = useUiStore(state => state.previewFrozenSrc);
   const toolPreview = useUiStore(state => state.toolPreview);
   const diffPreview = useUiStore(state => state.diffPreview);
   const diffSummary = useUiStore(state => state.diffSummary);
@@ -1131,7 +1132,11 @@ export function RightRail({ backendReady }: RightRailProps) {
       )}
       {webPreviewUrl ? (
         <div className="web-preview-frame" data-zoom={Math.round(activeWebZoom * 100)}>
-          <div className="web-preview-host" data-preview-url={webPreviewUrl} ref={previewHostRef} />
+          <div className="web-preview-host" data-preview-url={webPreviewUrl} ref={previewHostRef}>
+            {previewFrozenSrc && (
+              <img className="web-preview-frozen" src={previewFrozenSrc} alt="" draggable={false} />
+            )}
+          </div>
         </div>
       ) : (
         <div className="rail-empty-card">

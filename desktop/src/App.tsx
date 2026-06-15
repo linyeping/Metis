@@ -217,10 +217,30 @@ export function App() {
   }, [backendReady]);
 
   // 任意 DOM 浮层打开时，让主进程藏掉原生 preview 视图——它没有 z-index，否则会盖在弹窗上面。
+  // 但直接藏掉会让预览整页空白；故遮挡前先截一帧当占位（冻结画面），浮层关闭后再恢复原生视图。
   useEffect(() => {
     const occluded =
       settingsOpen || commandOpen || modelPickerOpen || workspaceMenuOpen || Boolean(appDialog) || firstRun || bootState.status !== 'ready' || !backendReady;
-    void window.metis?.previewSetOccluded?.(occluded);
+    let cancelled = false;
+    const setFrozen = useUiStore.getState().setPreviewFrozenSrc;
+    void (async () => {
+      if (occluded) {
+        try {
+          const shot = await window.metis?.previewCapture?.();
+          if (!cancelled && shot?.ok && shot.dataUrl) setFrozen(shot.dataUrl);
+        } catch {
+          /* 截图失败就退回原行为（可能短暂空白），不致命 */
+        }
+        if (cancelled) return;
+        await window.metis?.previewSetOccluded?.(true);
+      } else {
+        await window.metis?.previewSetOccluded?.(false);
+        if (!cancelled) setFrozen(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, firstRun, bootState.status, backendReady]);
 
   useEffect(() => {

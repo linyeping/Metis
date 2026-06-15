@@ -92,6 +92,7 @@ interface UiState {
   commandOpen: boolean;
   modelPickerOpen: boolean;
   workspaceMenuOpen: boolean;
+  previewFrozenSrc: string | null;
   rightRailOpen: boolean;
   rightRailWidth: number;
   rightRailMode: RightRailMode;
@@ -130,6 +131,7 @@ interface UiState {
   setCommandOpen: (open: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
   setWorkspaceMenuOpen: (open: boolean) => void;
+  setPreviewFrozenSrc: (src: string | null) => void;
   setRightRailOpen: (open: boolean) => void;
   setRightRailWidth: (width: number) => void;
   setRightRailMode: (mode: RightRailMode) => void;
@@ -349,6 +351,7 @@ export const useUiStore = create<UiState>(set => ({
   commandOpen: false,
   modelPickerOpen: false,
   workspaceMenuOpen: false,
+  previewFrozenSrc: null,
   rightRailOpen: hasVisibleWorkspaceCard(initialWorkspaceCardVisibility),
   rightRailWidth: 780,
   rightRailMode: 'files',
@@ -421,6 +424,7 @@ export const useUiStore = create<UiState>(set => ({
   setCommandOpen: commandOpen => set({ commandOpen }),
   setModelPickerOpen: modelPickerOpen => set({ modelPickerOpen }),
   setWorkspaceMenuOpen: workspaceMenuOpen => set({ workspaceMenuOpen }),
+  setPreviewFrozenSrc: previewFrozenSrc => set({ previewFrozenSrc }),
   setRightRailOpen: rightRailOpen => set({ rightRailOpen }),
   setRightRailWidth: rightRailWidth => set({ rightRailWidth: Math.min(Math.max(rightRailWidth, 420), 1180) }),
   setRightRailMode: rightRailMode =>
