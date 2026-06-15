@@ -91,6 +91,41 @@ def test_todo_refresh_replaces_not_accumulates(tmp_path):
     assert len(markers) == 1
 
 
+def test_request_volatile_layers_excluded_when_disabled(tmp_path):
+    """显式关掉 agent_state/open_files/terminal 后，前缀里不得出现任何 request(易变)层。"""
+    from backend.core.engine.prompt_runtime import compile_prompt_runtime
+
+    snap = compile_prompt_runtime(
+        "BASE",
+        workspace_root=str(tmp_path),
+        include_agent_state_hint=False,
+        include_open_files_hint=False,
+        include_terminal_hint=False,
+    )
+    assert all(layer.stability != "request" for layer in snap.layers)
+    for name in ("agent_state_hint", "open_files_hint", "terminal_hint"):
+        assert name not in snap.layer_names()
+
+
+def test_production_config_builder_excludes_volatile_layers_from_prefix(monkeypatch):
+    """build_agent_config(生产前缀构建器)必须把易变 request 层排除出前缀——锁死缓存纪律。"""
+    import backend.web.llm_state as llm_state
+
+    captured = {}
+
+    def fake_compile(base, **kwargs):
+        captured.update(kwargs)
+        from backend.core.engine.prompt_runtime import PromptRuntimeSnapshot
+
+        return PromptRuntimeSnapshot(base, [], base, kwargs.get("workspace_root"))
+
+    monkeypatch.setattr(llm_state, "compile_prompt_runtime", fake_compile)
+    llm_state.build_agent_config(system_prompt="BASE", execution_mode="execute")
+    assert captured.get("include_agent_state_hint") is False
+    assert captured.get("include_open_files_hint") is False
+    assert captured.get("include_terminal_hint") is False
+
+
 def test_context_ledger_exposes_cache_hit_rate():
     usage = Usage(prompt_tokens=1000, completion_tokens=50, total_tokens=1050)
     usage.prompt_cache_hit_tokens = 710

@@ -70,6 +70,8 @@ class OpenAICompatBackend(LLMBackend):
         self.model = model
         self.detected_model = model
         self.max_retries = max_retries
+        # opt-in 推理强度（由工厂在构造后注入）。空=关。
+        self.reasoning_effort = ""
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
@@ -102,6 +104,21 @@ class OpenAICompatBackend(LLMBackend):
             return True
         return False
 
+    def _reasoning_params(self) -> Optional[Dict[str, Any]]:
+        """DeepSeek v4 推理参数（opt-in）。其它供应商/模型返回 None，绝不注入不支持的字段。
+
+        映射沿用 DeepSeek 文档：low/medium/high -> reasoning_effort=high；max -> max；均带
+        thinking enabled。off/空 -> 不注入（保持非推理行为）。
+        """
+        effort = (self.reasoning_effort or "").strip().lower()
+        if not effort or effort == "off":
+            return None
+        model = (self.detected_model or self.model or "").lower()
+        if "deepseek" not in self.base_url.lower() or not model.startswith("deepseek-v4"):
+            return None
+        level = "max" if effort == "max" else "high"
+        return {"reasoning_effort": level, "thinking": {"type": "enabled"}}
+
     @property
     def supports_parallel_tool_calls(self) -> bool:
         return parallel_tool_calls_enabled(
@@ -128,6 +145,9 @@ class OpenAICompatBackend(LLMBackend):
         }
         if tools:
             payload["tools"] = tools
+        reasoning = self._reasoning_params()
+        if reasoning:
+            payload.update(reasoning)
 
         response = post_with_retries(
             self.chat_completions_url,
@@ -179,6 +199,9 @@ class OpenAICompatBackend(LLMBackend):
         }
         if tools:
             payload["tools"] = tools
+        reasoning = self._reasoning_params()
+        if reasoning:
+            payload.update(reasoning)
         if not any(host in self.base_url.lower() for host in ("localhost", "127.0.0.1", "0.0.0.0")):
             payload["stream_options"] = {"include_usage": True}
 

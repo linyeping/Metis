@@ -184,6 +184,9 @@ class AgentConfig:
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
+    # 推理强度开关（opt-in，默认空=关，零行为变化）。取值 off/low/medium/high/max；
+    # 仅对 DeepSeek v4 推理模型注入 reasoning_effort + thinking，其它供应商/模型忽略。
+    reasoning_effort: str = ""
     temperature: float = 0.3
     # FABLEADV-19: 4096 was too small for writing whole files (e.g. a 569-line
     # CSS exceeds it → truncated tool_call → "No response" task failure). Modern
@@ -1754,12 +1757,17 @@ def run_sync(
 def _create_backend(config: AgentConfig) -> LLMBackend:
     backend_type = config.llm_backend
     if backend_type in {"openai", "deepseek", "openai-compatible", "openai_compat", "custom", "custom-openai"}:
-        return get_backend(
+        backend = get_backend(
             backend_type,
             base_url=config.llm_base_url,
             api_key=config.llm_api_key,
             model=config.llm_model,
         )
+        # opt-in 推理强度：构造后注入，避免穿过 build_backend_kwargs 的参数白名单。
+        effort = str(getattr(config, "reasoning_effort", "") or "").strip()
+        if effort and hasattr(backend, "reasoning_effort"):
+            backend.reasoning_effort = effort
+        return backend
     if backend_type == "anthropic":
         kwargs: Dict[str, Any] = {"api_key": config.llm_api_key}
         if config.llm_model:

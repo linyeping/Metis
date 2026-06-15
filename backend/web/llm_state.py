@@ -403,18 +403,25 @@ def build_agent_config(
     if not api_key and resolved["backend"] != backend:
         api_key = _runtime_value("api_key", resolved["backend"], file_values, "")
     model_capabilities = detect_from_model_name(resolved["model"])
+    # 缓存纪律：agent_state/open_files/terminal 属"每轮易变"，一旦进入 system 前缀就会在
+    # 活跃会话中逐轮漂移，从该点起打断 DeepSeek 上下文缓存（连带后续历史全不命中）。这些状态
+    # 本就可由模型经工具按需获取，todo 也已在末尾消息单独刷新；故排除出前缀以最大化缓存命中。
     prompt_snapshot = compile_prompt_runtime(
         system_prompt,
         user_memory_text=user_memory_text,
         model_tier=model_capabilities.tier,
         model_context_window=model_capabilities.effective_context,
         workspace_root=workspace_root or "",
+        include_agent_state_hint=False,
+        include_open_files_hint=False,
+        include_terminal_hint=False,
     )
     return AgentConfig(
         llm_backend=resolved["backend"],
         llm_base_url=resolved["base_url"],
         llm_api_key=api_key,
         llm_model=resolved["model"],
+        reasoning_effort=env("METIS_REASONING_EFFORT", "MIRO_REASONING_EFFORT", ""),
         temperature=float(env("METIS_TEMPERATURE", "MIRO_TEMPERATURE", "0.3")),
         max_tokens=int(env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096")),
         max_turns=int(env("METIS_MAX_TURNS", "MIRO_MAX_TURNS", "64")),
