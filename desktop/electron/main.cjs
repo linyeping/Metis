@@ -176,6 +176,9 @@ function setPreviewOccluded(value) {
     if (lastPreviewBounds && lastPreviewBounds.width > 4 && lastPreviewBounds.height > 4) {
       lastPreviewBoundsKey = `${lastPreviewBounds.x},${lastPreviewBounds.y},${lastPreviewBounds.width},${lastPreviewBounds.height}`
       try { previewView.setBounds(lastPreviewBounds) } catch {}
+    } else {
+      // 渲染端最新意图是隐藏（遮挡期间关掉了预览）——保持隐藏，别用旧位置把网页恢复出来。
+      hidePreviewView()
     }
   }
 }
@@ -1712,8 +1715,24 @@ ipcMain.handle('metis:dev-server-stop', (_event, payload = {}) => stopDevServer(
 ipcMain.handle('metis:dev-server-status', (_event, payload = {}) => devServerStatus(payload))
 ipcMain.handle('metis:save-preview-evidence', (_event, payload = {}) => savePreviewEvidence(payload))
 ipcMain.handle('metis:preview-set-bounds', (_event, payload = {}) => {
-  // 有 DOM 浮层挡着时，无视一切定位请求，保持隐藏（否则 ResizeObserver 会把它又显示到弹窗上面）。
-  if (previewOccluded) return { ok: true, occluded: true }
+  // 有 DOM 浮层挡着时，不移动原生视图（否则 ResizeObserver 会把它又显示到弹窗上面），
+  // 但仍要记录渲染端的最新意图——否则遮挡期间关掉预览，解除遮挡后会用旧位置把网页又恢复出来（残留）。
+  if (previewOccluded) {
+    const wantVisible = Boolean(payload.visible)
+    const w = Math.max(0, Math.round(Number(payload.width) || 0))
+    const h = Math.max(0, Math.round(Number(payload.height) || 0))
+    if (!wantVisible || w <= 4 || h <= 4) {
+      lastPreviewBounds = null
+    } else {
+      lastPreviewBounds = {
+        x: Math.max(0, Math.round(Number(payload.x) || 0)),
+        y: Math.max(0, Math.round(Number(payload.y) || 0)),
+        width: w,
+        height: h
+      }
+    }
+    return { ok: true, occluded: true }
+  }
   const visible = Boolean(payload.visible)
   if (!visible) {
     hidePreviewView()
