@@ -42,4 +42,13 @@ def post_tool_hook(tool_name: str, kwargs: Dict[str, Any], result: str) -> str:
     _register_builtin_hooks()
     for fn in _post:
         fn(tool_name, kwargs, result)
+    # 反馈回路：改完文件就地跑诊断，有真实报错则回灌（取代泛泛提醒）；无错/不适用回退到提醒。
+    try:
+        from .edit_diagnostics import edit_diagnostics_feedback
+
+        diagnostics = edit_diagnostics_feedback(tool_name, kwargs, _FILE_MODIFY_TOOLS)
+    except Exception:
+        diagnostics = ""
+    if diagnostics:
+        return result + diagnostics
     return post_tool_reminder(tool_name, result)
