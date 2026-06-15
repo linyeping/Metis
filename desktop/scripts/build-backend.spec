@@ -73,6 +73,28 @@ datas += flask_datas
 binaries += flask_binaries
 hiddenimports += flask_hiddenimports
 
+# 桌面自动化/急停依赖：computer use 的输入(pyautogui)与全局 ESC 监听(pynput)必须打进包，
+# 否则 frozen 应用无法在运行时 `pip install`（sys.executable -m pip 不可用），导致接管时灵时不灵、
+# ESC 急停失效。显式 collect pyautogui/pynput 及其运行时依赖。
+for _auto_pkg in (
+    "pynput",
+    "pyautogui",
+    "pyscreeze",
+    "pygetwindow",
+    "pyrect",
+    "mouseinfo",
+    "pymsgbox",
+    "pytweening",
+    "pyperclip",
+):
+    try:
+        _ad, _ab, _ah = collect_all(_auto_pkg)
+        datas += _ad
+        binaries += _ab
+        hiddenimports += _ah
+    except Exception:
+        pass  # 可选依赖缺失不阻断打包；运行时按需降级
+
 excluded_modules = [
     "IPython",
     "PyQt5",

@@ -1529,7 +1529,7 @@ function runTerminalCommand(payload = {}) {
 
 // ── Takeover overlay (FABLEADV-21) ─────────────────────────────────
 // 模型接管真实键鼠时，全屏四边浮现金色光晕 + 右下角急停胶囊。
-// 两个窗口：glow 全屏点击穿透（纯视觉），pill 小窗可点击（急停）。
+// 两个窗口：glow 全屏点击穿透（纯视觉），pill 小窗也点击穿透（纯提示）。
 // 二者都 setContentProtection(true)：用户肉眼可见，但截图 API 抓不到，
 // 因此对智能体的视觉判断天然隐形，不污染 desktop_screenshot。
 let overlayGlowWindow = null
@@ -1610,12 +1610,10 @@ function ensureOverlayWindows() {
       skipTaskbar: true,
       hasShadow: false,
       fullscreenable: false,
-      webPreferences: {
-        ...HARDENED_WEB_PREFERENCES,
-        preload: path.join(__dirname, 'preload.cjs')
-      }
+      webPreferences: { ...HARDENED_WEB_PREFERENCES }
     })
     overlayPillWindow.setAlwaysOnTop(true, 'screen-saver')
+    overlayPillWindow.setIgnoreMouseEvents(true, { forward: true })
     try { overlayPillWindow.setContentProtection(true) } catch {}
     overlayPillWindow.loadFile(path.join(__dirname, 'overlay-pill.html')).catch(() => {})
   }

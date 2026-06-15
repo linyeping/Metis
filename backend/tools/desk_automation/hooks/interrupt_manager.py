@@ -112,8 +112,14 @@ def start_esc_listener() -> bool:
         if _started:
             return True
         try:
-            from pynput import keyboard
-        except ImportError:
+            # 优先直接导入（打包版已收录 pynput）；dev 环境缺失时按需安装，与输入层(actions.py)一致。
+            try:
+                from pynput import keyboard
+            except ImportError:
+                from backend.runtime.pip_helper import ensure_import
+
+                keyboard = ensure_import("pynput", pip="pynput").keyboard
+        except Exception:
             return False
 
         def _run() -> None:
