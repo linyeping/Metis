@@ -29,6 +29,7 @@ SAFE_TOOLS: frozenset[str] = frozenset(
         "browse_web",
         "browse_and_extract",
         "read_project_memory",
+        "read_workspace_memory",
         "load_skill",
         "check_dev_environment",
         "desktop_screenshot",
@@ -131,6 +132,7 @@ def infer_toolset(name: str, source: str = "", description: str = "") -> str:
         return "web"
     if tool in {
         "read_project_memory",
+        "read_workspace_memory",
         "load_skill",
         "update_project_memory",
         "todo_write",

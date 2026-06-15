@@ -77,6 +77,7 @@ from backend.tools.coding.workflow_features.agent_state.switch_mode import switc
 from backend.tools.coding.workflow_features.agent_state.todo_write import todo_write
 from backend.tools.coding.workflow_features.agent_state.update_project_memory import (
     read_project_memory,
+    read_workspace_memory,
     update_project_memory,
 )
 from backend.tools.coding.workflow_features.agent_state.write_open_files_context import write_open_files_context
@@ -194,6 +195,7 @@ AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
     "populate_steering": populate_steering,
     "todo_write": todo_write,
     "read_project_memory": read_project_memory,
+    "read_workspace_memory": read_workspace_memory,
     "update_project_memory": update_project_memory,
     "write_open_files_context": write_open_files_context,
     "switch_mode": switch_mode,

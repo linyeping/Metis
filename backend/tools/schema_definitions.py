@@ -580,6 +580,14 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
         [],
     ),
     (
+        "read_workspace_memory",
+        "Read the auto-maintained workspace memory (.metis/memory.json): inferred project type, "
+        "key files, architecture notes, common commands, and learned patterns from prior sessions. "
+        "Call this when resuming a long-running project to recover continuity.",
+        {},
+        [],
+    ),
+    (
         "update_project_memory",
         "Update MIRO.md to persist important project facts, conventions, or user corrections across sessions.",
         {

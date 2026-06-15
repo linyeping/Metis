@@ -41,6 +41,27 @@ def read_project_memory(scope: str = "project") -> str:
 
 
 @trace_execution
+def read_workspace_memory() -> str:
+    """Read the auto-maintained workspace memory at ``.metis/memory.json``.
+
+    This is the agent's accumulated working knowledge from prior sessions (inferred
+    project type, key files, architecture notes, common commands, learned patterns).
+    It is kept out of the system prompt to protect prefix-cache hit rate, so read it
+    on demand — e.g. when resuming a long-running project — to recover continuity.
+    """
+    from backend.core.memory.workspace_memory import WorkspaceMemory
+
+    memory = WorkspaceMemory.load(os.getcwd())
+    block = memory.to_prompt_block().strip()
+    if not block:
+        return (
+            "📓 Workspace memory (.metis/memory.json) is empty. It accumulates "
+            "automatically as you work; nothing to recall yet."
+        )
+    return "📓 Workspace memory (.metis/memory.json):\n" + block
+
+
+@trace_execution
 def update_project_memory(
     content: str,
     mode: str = "append",
