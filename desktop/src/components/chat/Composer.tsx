@@ -61,7 +61,6 @@ export function Composer() {
   const t = useT();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const highlightRef = useRef<HTMLDivElement | null>(null);
   const heightAnimationReadyRef = useRef(false);
   const heightFrameRef = useRef<number | null>(null);
   const sendReadyRef = useRef(false);
@@ -303,41 +302,24 @@ export function Composer() {
         </div>
       )}
       <div className="composer">
-        <div className="composer-input" data-highlight={text.length > 0}>
-          {/* 高亮覆盖层：与 textarea 同字体/行高/换行，命令 token 染蓝以和用户输入区分。 */}
-          <div className="composer-highlight" ref={highlightRef} aria-hidden="true">
-            {(() => {
-              const match = /^(\/\S+)([\s\S]*)$/.exec(text);
-              if (!match) return text;
-              return (
-                <>
-                  <span className="composer-cmd">{match[1]}</span>
-                  {match[2]}
-                </>
-              );
-            })()}
-            {'​'}
-          </div>
-          <textarea
-            ref={textareaRef}
-            aria-label="Message input"
-            rows={1}
-            value={text}
-            placeholder={t('让 Metis 在这个项目里开始工作...')}
-            onChange={event => {
-              setText(event.target.value);
-              // 只在「还在敲命令本身」（斜杠开头、且还没空格）时显示菜单；一旦开始输入任务参数就收起。
-              setSlashOpen(/^\/\S*$/.test(event.target.value));
-            }}
-            onFocus={() => {
-              heightAnimationReadyRef.current = true;
-            }}
-            onScroll={event => {
-              if (highlightRef.current) highlightRef.current.scrollTop = event.currentTarget.scrollTop;
-            }}
-            onKeyDown={handleKeyDown}
-          />
-        </div>
+        {/* 命令模式（斜杠开头、还没空格）时给真实文字染蓝——原生光标，永不错位；进入任务参数即转普通色。 */}
+        <textarea
+          ref={textareaRef}
+          aria-label="Message input"
+          rows={1}
+          value={text}
+          data-command={/^\/\S*$/.test(text)}
+          placeholder={t('让 Metis 在这个项目里开始工作...')}
+          onChange={event => {
+            setText(event.target.value);
+            // 只在「还在敲命令本身」（斜杠开头、且还没空格）时显示菜单；一旦开始输入任务参数就收起。
+            setSlashOpen(/^\/\S*$/.test(event.target.value));
+          }}
+          onFocus={() => {
+            heightAnimationReadyRef.current = true;
+          }}
+          onKeyDown={handleKeyDown}
+        />
         <div className="composer-toolbar">
           <div className="composer-toolbar-left">
             <button className="icon-button composer-attach-button" type="button" title={t('添加附件')} onClick={() => fileInputRef.current?.click()}>

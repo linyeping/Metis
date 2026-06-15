@@ -4413,45 +4413,10 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   color: color-mix(in srgb, var(--text-muted) 76%, transparent);
 }
 
-/* 斜杠指令高亮：覆盖层与 textarea 同字体/行高/换行/滚动，命令 token 染蓝以和用户输入区分。 */
-.composer-input {
-  position: relative;
-  width: 100%;
-}
-
-.composer-highlight {
-  position: absolute;
-  inset: 0;
-  margin: 0;
-  padding: 0 2px;
-  border: 0;
-  font: inherit;
-  /* 必须与 .composer textarea 完全一致：字号走 --ui-font-size-lg（用户可调），行高 1.55。 */
-  font-size: var(--ui-font-size-lg);
-  line-height: 1.55;
-  text-align: left;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: break-word;
-  color: var(--text);
-  pointer-events: none;
-  overflow: hidden;
-  box-sizing: border-box;
-  scrollbar-gutter: stable;
-}
-
-.composer-highlight .composer-cmd {
-  /* 只用颜色区分；粗细/字距必须与 textarea 完全一致，否则光标会落进字符中间（覆盖层与真实文字宽度不符）。 */
+/* 斜杠命令染色：直接给真实 textarea 文字上色（原生光标，永不错位）。仅命令模式（斜杠开头、未含空格）生效。 */
+.composer textarea[data-command='true'] {
   color: #4f8cff;
-}
-
-/* 有文字时让真实 textarea 文字透明（仅留光标），可见文字由上方高亮层呈现；空时保持正常以显示 placeholder。 */
-.composer-input[data-highlight='true'] textarea {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  caret-color: var(--text);
-  position: relative;
-  z-index: 1;
+  -webkit-text-fill-color: #4f8cff;
 }
 
 @media (max-width: 720px) {
