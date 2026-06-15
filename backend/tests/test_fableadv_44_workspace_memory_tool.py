@@ -6,8 +6,6 @@ workspace 记忆(.metis/memory.json)被移出 system 前缀以保缓存命中后
 """
 from __future__ import annotations
 
-import os
-
 from backend.core.memory.workspace_memory import WorkspaceMemory
 from backend.tools.coding.workflow_features.agent_state.update_project_memory import (
     read_workspace_memory,
