@@ -155,7 +155,7 @@ export const zhEn: Record<string, string> = {
   '检查中...': 'Checking...',
   '检查更新': 'Check for updates',
   '发布诊断': 'Release diagnostics',
-  '生成不含密钥的诊断包，包含版本、平台、后端启动状态和后端日志尾巴。': 'Generate a secret-free diagnostics bundle with version, platform, backend boot status, and the tail of the backend log.',
+  '生成不含密钥的诊断包，包含版本、平台、后端日志、工具调用、Preview 错误和截图证据摘要。': 'Generate a secret-free diagnostics bundle with version, platform, backend logs, tool calls, Preview errors, and screenshot evidence summary.',
   '后端状态': 'Backend status',
   '后端端口': 'Backend port',
   '终端后端': 'Terminal backend',

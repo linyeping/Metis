@@ -103,6 +103,10 @@ export function applyChatEvent(
   } else if (normalized.kind === 'runtime_status' && normalized.runtimeStatus) {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
     setRuntimeStatus(normalized.runtimeStatus);
+    const terminal = runtimeTerminalToolFinalizer(normalized.runtimeStatus);
+    if (terminal) {
+      finalizeOpenTools(assistantId, terminal.status, terminal.result, terminal.errorHint);
+    }
     persistRecovery(assistantId);
   } else if (normalized.kind === 'tool_call') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
@@ -153,6 +157,12 @@ export function applyChatEvent(
   } else if (normalized.kind === 'error') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
     const message = formatStreamError(normalized);
+    finalizeOpenTools(
+      assistantId,
+      'error',
+      `[Run failed before this tool returned a result]\n${message}`,
+      normalized.error.hint || '运行流失败，工具活动已停止。查看错误信息后可重试。',
+    );
     chatStore().setState({ runtimeStatus: runtimeStatusFromError(normalized.error) });
     updateAssistant(assistantId, current => ({ ...current, content: current.content || message, error: message }));
     useUiStore.getState().pushToast({
@@ -360,7 +370,12 @@ function mergeToolEvent(previous: ChatToolEvent, incoming: ChatToolEvent, preser
   };
 }
 
-function finalizeOpenTools(messageId: string, status: 'success' | 'error'): void {
+function finalizeOpenTools(
+  messageId: string,
+  status: 'success' | 'error',
+  fallbackResult?: string,
+  fallbackErrorHint?: string,
+): void {
   const now = Date.now();
   updateAssistant(messageId, message => {
     const tools = message.tools ?? [];
@@ -370,6 +385,7 @@ function finalizeOpenTools(messageId: string, status: 'success' | 'error'): void
       changed = true;
       const result =
         tool.result ??
+        fallbackResult ??
         (status === 'error'
           ? '[Run ended before this tool returned a result]'
           : '[Run completed without a separate tool result event]');
@@ -381,12 +397,49 @@ function finalizeOpenTools(messageId: string, status: 'success' | 'error'): void
         summary: tool.summary || summarizeToolValue(result),
         errorHint:
           status === 'error'
-            ? tool.errorHint || 'This run ended before the tool returned a separate result.'
+            ? tool.errorHint || fallbackErrorHint || 'This run ended before the tool returned a separate result.'
             : tool.errorHint,
       };
     });
     return changed ? { ...message, tools: nextTools } : message;
   });
+}
+
+function runtimeTerminalToolFinalizer(runtimeStatus: RuntimeStatus): {
+  status: 'success' | 'error';
+  result: string;
+  errorHint?: string;
+} | null {
+  const phase = String(runtimeStatus.phase || '').toLowerCase();
+  const message = runtimeStatus.message || runtimeStatus.display || '';
+  if (phase === 'completed') {
+    return {
+      status: 'success',
+      result: '[Run completed without a separate tool result event]',
+    };
+  }
+  if (phase === 'failed') {
+    return {
+      status: 'error',
+      result: `[Run failed before this tool returned a result]${message ? `\n${message}` : ''}`,
+      errorHint: runtimeStatus.hint || '运行失败，工具活动已停止。查看错误信息后可重试。',
+    };
+  }
+  if (phase === 'canceled' || phase === 'cancelled') {
+    return {
+      status: 'error',
+      result: `[Run canceled before this tool returned a result]${message ? `\n${message}` : ''}`,
+      errorHint: runtimeStatus.hint || '任务已取消，工具活动已停止。',
+    };
+  }
+  if (phase === 'timeout' || phase === 'timed_out' || phase === 'tool_timeout') {
+    return {
+      status: 'error',
+      result: `[Run timed out before this tool returned a result]${message ? `\n${message}` : ''}`,
+      errorHint: runtimeStatus.hint || '任务超时，工具活动已停止。可以缩小目标后重试。',
+    };
+  }
+  return null;
 }
 
 function ensureParts(message: ChatMessage): ChatMessagePart[] {

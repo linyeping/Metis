@@ -74,7 +74,7 @@ export const AboutTab = memo(function AboutTab({
           <Wrench size={16} className="section-icon" />
           <h3>{t('发布诊断')}</h3>
         </div>
-        <p className="section-desc">{t('生成不含密钥的诊断包，包含版本、平台、后端启动状态和后端日志尾巴。')}</p>
+        <p className="section-desc">{t('生成不含密钥的诊断包，包含版本、平台、后端日志、工具调用、Preview 错误和截图证据摘要。')}</p>
         <div className="diagnostics-grid">
           <article>
             <span>{t('后端状态')}</span>

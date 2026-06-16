@@ -2028,6 +2028,30 @@ def agent_events_contract() -> Any:
     return jsonify(agent_event_contract_payload())
 
 
+@app.route("/diagnostics/tool-audit", methods=["GET"])
+def diagnostics_tool_audit() -> Any:
+    """Return recent local tool-call audit rows for diagnostics export."""
+    try:
+        limit = max(1, min(int(request.args.get("limit") or request.args.get("n") or 80), 200))
+    except (TypeError, ValueError):
+        limit = 80
+    root = _active_workspace_root()
+    try:
+        from backend.runtime import action_audit
+
+        rows = action_audit.read_recent(root, limit=limit)
+    except Exception as exc:
+        logger.warning("failed to read action audit: %s", sanitize_for_log(exc))
+        rows = []
+    return jsonify(
+        {
+            "workspace_root": root,
+            "path": os.path.join(root, ".metis", "audit", "agent-actions.jsonl"),
+            "recent": rows,
+        }
+    )
+
+
 @app.route("/runs", methods=["GET"])
 def list_runs() -> Any:
     session_id = str(request.args.get("session_id") or request.args.get("sessionId") or "").strip()

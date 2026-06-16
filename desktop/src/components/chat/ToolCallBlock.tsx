@@ -194,7 +194,7 @@ export function ToolCard({
   const setToolCardExpanded = useUiStore(state => state.setToolCardExpanded);
   const toolProgress = fileChangePreview && fileChangeCounts
     ? `${compactPath(fileChangePreview.path || fileChangePreview.title)} `
-    : toolProgressText(toolName, status);
+    : desktopExpertProgressText(toolName, status, args, result, t) || toolProgressText(toolName, status);
 
   useEffect(() => {
     if (status === 'error') setToolCardExpanded(cardId, true);
@@ -439,6 +439,78 @@ function toolPartsFromSnapshot(snapshot: string): ToolActivityPart[] {
   } catch {
     return [];
   }
+}
+
+function desktopExpertProgressText(
+  toolName: string,
+  status: string,
+  args: unknown,
+  result: unknown,
+  t: (zh: string) => string = (s) => s,
+): string {
+  const name = String(toolName || '').toLowerCase();
+  if (!isDesktopExpertToolName(name)) return '';
+  if (status === 'waiting_approval') return t('Desktop Expert 等待确认');
+  if (status === 'error') return t('Desktop Expert 已停止，展开查看失败原因');
+  if (status === 'running') {
+    if (name.includes('observe') || name.includes('screenshot') || name.includes('capture') || name.includes('status')) {
+      return t('Desktop Expert 正在观察屏幕');
+    }
+    if (name.includes('action')) return desktopExpertActionText(args, t);
+    return t('Desktop Expert 正在观察、计划、执行并验证');
+  }
+  if (name.includes('observe') || name.includes('screenshot') || name.includes('capture')) return t('Desktop Expert 已完成观察');
+  if (name.includes('status')) return t('Desktop Expert 已读取运行状态');
+  if (name.includes('action')) return t('Desktop Expert 已执行动作，等待验证');
+  return desktopExpertResultText(result, t);
+}
+
+function isDesktopExpertToolName(name: string): boolean {
+  return (
+    name === 'desktop_expert' ||
+    name.startsWith('desktop_win2_') ||
+    name === 'desktop_vision_task' ||
+    name.startsWith('desktop_window_') ||
+    name === 'desktop_action' ||
+    name === 'desktop_screenshot'
+  );
+}
+
+function desktopExpertActionText(args: unknown, t: (zh: string) => string): string {
+  const action = firstToolString(args, ['action', 'kind', 'type']).toLowerCase();
+  if (action.includes('click')) return t('Desktop Expert 正在点击目标');
+  if (action.includes('type') || action.includes('input')) return t('Desktop Expert 正在输入文本');
+  if (action.includes('key') || action.includes('press')) return t('Desktop Expert 正在按键操作');
+  if (action.includes('scroll')) return t('Desktop Expert 正在滚动页面');
+  return t('Desktop Expert 正在执行桌面动作');
+}
+
+function desktopExpertResultText(result: unknown, t: (zh: string) => string): string {
+  const text = formatTool(result);
+  const lower = text.toLowerCase();
+  if (/"fallback_recommended"\s*:\s*true/.test(lower) || lower.includes('fallback recommended')) {
+    return t('Desktop Expert 已结束，建议切换备用视觉验证');
+  }
+  if (/"status"\s*:\s*"max_steps"/.test(lower)) {
+    return t('Desktop Expert 已停止在步数上限，展开查看验证状态');
+  }
+  if (/"status"\s*:\s*"error"/.test(lower) || lower.includes('[expert error:') || lower.includes('failed')) {
+    return t('Desktop Expert 已失败，展开查看详情');
+  }
+  if (/"status"\s*:\s*"done"/.test(lower) || lower.includes('goal satisfied') || lower.includes('completed')) {
+    return t('Desktop Expert 已完成并验证');
+  }
+  return t('Desktop Expert 已完成');
+}
+
+function firstToolString(value: unknown, keys: string[]): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const row = value as Record<string, unknown>;
+  for (const key of keys) {
+    const field = row[key];
+    if (typeof field === 'string' && field.trim()) return field.trim();
+  }
+  return '';
 }
 
 function toolActivitySnapshot(content: unknown, startIndex?: number, endIndex?: number): string {

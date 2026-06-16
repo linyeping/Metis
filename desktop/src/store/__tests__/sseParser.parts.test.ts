@@ -105,4 +105,60 @@ describe('sseParser ordered message parts', () => {
     expect(state.messages[0].tools?.[0].finishedAt).toEqual(expect.any(Number));
     expect(state.messages[0].tools?.[0].result).toBe('[Run completed without a separate tool result event]');
   });
+
+  it('finalizes running tools when the runtime reports cancellation', () => {
+    const state = bindParserState();
+    const persistSnapshot = () => undefined;
+    const persistRecovery = () => undefined;
+
+    applyChatEvent(
+      { type: 'tool_call', payload: { tool: 'desktop_expert', args: { goal: 'open notepad' }, call_id: 'desktop-call-3' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+    applyChatEvent(
+      { type: 'runtime_status', payload: { phase: 'canceled', message: 'User canceled this run' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+
+    expect(state.messages[0].tools).toHaveLength(1);
+    expect(state.messages[0].tools?.[0]).toMatchObject({
+      callId: 'desktop-call-3',
+      status: 'error',
+      result: '[Run canceled before this tool returned a result]\nUser canceled this run',
+      errorHint: '任务已取消，工具活动已停止。',
+    });
+  });
+
+  it('finalizes running tools when an error event arrives before a tool result', () => {
+    const state = bindParserState();
+    const persistSnapshot = () => undefined;
+    const persistRecovery = () => undefined;
+
+    applyChatEvent(
+      { type: 'tool_call', payload: { tool: 'desktop_expert', args: { goal: 'open notepad' }, call_id: 'desktop-call-4' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+    applyChatEvent(
+      { type: 'error', payload: { title: '运行失败', message: 'Desktop task timed out', hint: 'Try a smaller goal.' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+
+    expect(state.messages[0].tools).toHaveLength(1);
+    expect(state.messages[0].tools?.[0].status).toBe('error');
+    expect(state.messages[0].tools?.[0].result).toContain('[Run failed before this tool returned a result]');
+    expect(state.messages[0].tools?.[0].result).toContain('Desktop task timed out');
+    expect(state.messages[0].tools?.[0].finishedAt).toEqual(expect.any(Number));
+  });
 });

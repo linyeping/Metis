@@ -284,7 +284,8 @@ function runtimeStatus(input: {
 
 function runtimeSeverity(phase: string): RuntimeStatus['severity'] {
   if (phase === 'failed') return 'error';
-  if (phase === 'retrying' || phase === 'sse_reconnecting') return 'warning';
+  if (phase === 'timeout' || phase === 'timed_out' || phase === 'tool_timeout') return 'error';
+  if (phase === 'retrying' || phase === 'sse_reconnecting' || phase === 'cancel_requested' || phase === 'canceled' || phase === 'cancelled') return 'warning';
   if (phase === 'completed') return 'done';
   if (phase === 'tool_running' || phase === 'streaming' || phase === 'llm_request' || phase === 'compact_started') return 'working';
   return 'info';
@@ -300,6 +301,9 @@ function runtimeDisplay(phase: string, message: string, toolName: string): strin
   if (phase === 'compact_done') return '上下文已压缩';
   if (phase === 'retrying') return '正在重试...';
   if (phase === 'sse_reconnecting') return message || '事件流断开，正在重连...';
+  if (phase === 'cancel_requested') return '正在取消...';
+  if (phase === 'canceled' || phase === 'cancelled') return message || '已取消';
+  if (phase === 'timeout' || phase === 'timed_out' || phase === 'tool_timeout') return message ? `已超时: ${message}` : '已超时';
   if (phase === 'completed') return '已完成';
   if (phase === 'failed') return message ? `已失败: ${message}` : '已失败';
   return message || phase || '运行中...';

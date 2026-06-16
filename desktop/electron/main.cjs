@@ -248,7 +248,17 @@ function addPreviewCandidate(candidates, source, url) {
   candidates.push({ source, url: normalized.url, port: localUrlPort(normalized.url), parsed: normalized.parsed })
 }
 
-function activePreviewDevServerCandidates() {
+function commonPreviewPortCandidates(protocol = 'http:', skipPort = 0) {
+  const candidates = []
+  for (const port of PREVIEW_LOCAL_PORT_CANDIDATES) {
+    if (port === skipPort) continue
+    addPreviewCandidate(candidates, 'common-port-scan', `${protocol}//${DEV_SERVER_HOST}:${port}/`)
+  }
+  return candidates
+}
+
+function activePreviewDevServerCandidates(options = {}) {
+  const includeCurrent = options.includeCurrent !== false
   const candidates = []
   addPreviewCandidate(candidates, 'METIS_DESKTOP_DEV_SERVER', process.env.METIS_DESKTOP_DEV_SERVER || '')
   for (const session of devServers.values()) {
@@ -258,6 +268,10 @@ function activePreviewDevServerCandidates() {
     if (status.previewPort) {
       addPreviewCandidate(candidates, 'dev-server-preview-port', `http://${DEV_SERVER_HOST}:${status.previewPort}/`)
     }
+  }
+  if (includeCurrent) {
+    addPreviewCandidate(candidates, 'current-preview-url', previewWebContents()?.getURL() || '')
+    addPreviewCandidate(candidates, 'current-preview-loaded-url', previewLoadedUrls.get(previewTabId) || '')
   }
   return candidates
 }
@@ -299,6 +313,20 @@ async function resolvePreviewNavigationUrl(input) {
           source: fallback.source,
           checkedPorts,
           reason: 'Current Preview page is empty; using the active local dev server.'
+        }
+      }
+    }
+    const scanned = await firstReachablePreviewCandidate(commonPreviewPortCandidates('http:', 0), checkedPorts)
+    if (scanned) {
+      return {
+        ok: true,
+        url: scanned.url,
+        requestedUrl: normalized.requestedUrl || '',
+        resolution: {
+          mode: 'fallback-current-empty-common-port',
+          source: scanned.source,
+          checkedPorts,
+          reason: `Current Preview page is empty; using scanned local port ${scanned.port}.`
         }
       }
     }
@@ -354,12 +382,7 @@ async function resolvePreviewNavigationUrl(input) {
     }
   }
 
-  const scanCandidates = []
-  for (const port of PREVIEW_LOCAL_PORT_CANDIDATES) {
-    if (port === requestedPort) continue
-    addPreviewCandidate(scanCandidates, 'common-port-scan', `${requested.protocol}//${DEV_SERVER_HOST}:${port}/`)
-  }
-  const scanned = await firstReachablePreviewCandidate(scanCandidates, checkedPorts)
+  const scanned = await firstReachablePreviewCandidate(commonPreviewPortCandidates(requested.protocol, requestedPort), checkedPorts)
   if (scanned) {
     const resolvedUrl = mergeLocalPreviewUrl(scanned.url, normalized.url)
     return {
@@ -1823,8 +1846,27 @@ function redactDiagnosticsText(value) {
     .replace(/sk-[A-Za-z0-9_-]{12,}/g, 'sk-***')
     .replace(/(api[_-]?key\s*["':=]\s*)[^\s"',;}]+/gi, '$1***')
     .replace(/(authorization\s*["':=]\s*bearer\s+)[^\s"',;}]+/gi, '$1***')
+    .replace(/([?&](?:access_token|refresh_token|id_token|token|api_key|apikey|key|code|secret|password)=)[^&\s"'`]+/gi, '$1***')
     .replace(/-----BEGIN [^-]+PRIVATE KEY-----[\s\S]*?-----END [^-]+PRIVATE KEY-----/g, '[redacted private key]')
     .replace(/\b[\w.-]+\.(?:pem|pfx|key)\b/gi, '[redacted secret file]')
+}
+
+function redactDiagnosticsValue(value, depth = 0) {
+  if (depth > 8) return '[redacted deep object]'
+  if (typeof value === 'string') return redactDiagnosticsText(value)
+  if (value === null || value === undefined) return value
+  if (typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.slice(0, 200).map(item => redactDiagnosticsValue(item, depth + 1))
+  const output = {}
+  for (const [key, field] of Object.entries(value)) {
+    const lower = key.toLowerCase()
+    if (/(api[_-]?key|apikey|token|secret|password|authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|oauth[_-]?code)/i.test(lower)) {
+      output[key] = '***'
+      continue
+    }
+    output[key] = redactDiagnosticsValue(field, depth + 1)
+  }
+  return output
 }
 
 function sanitizedBootEvent(event) {
@@ -1846,10 +1888,50 @@ function sanitizedBootError(error) {
   }
 }
 
-function diagnosticsPayload() {
+async function fetchBackendDiagnostics(pathname) {
+  if (!backendPort) {
+    return { ok: false, skipped: true, error: 'backend unavailable' }
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 1800)
+  try {
+    const response = await fetch(`http://127.0.0.1:${backendPort}${pathname}`, { signal: controller.signal })
+    const text = await response.text()
+    let data = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = text
+    }
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: response.status,
+        error: redactDiagnosticsText(typeof data === 'string' ? data.slice(0, 1000) : JSON.stringify(data).slice(0, 1000))
+      }
+    }
+    return { ok: true, data: redactDiagnosticsValue(data) }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error?.name === 'AbortError' ? 'backend diagnostics request timed out' : redactDiagnosticsText(error?.message || String(error))
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function diagnosticsPayload() {
   const state = bootState()
   const storage = resolveDataRootInfo()
-  return {
+  const [runs, permissions, toolAudit, deskStatus, deskGoalLog] = await Promise.all([
+    fetchBackendDiagnostics('/runs'),
+    fetchBackendDiagnostics('/permissions'),
+    fetchBackendDiagnostics('/diagnostics/tool-audit?limit=80'),
+    fetchBackendDiagnostics('/api/status'),
+    fetchBackendDiagnostics('/api/goal/log?n=80')
+  ])
+  return redactDiagnosticsValue({
     generatedAt: new Date().toISOString(),
     app: {
       name: app.getName(),
@@ -1881,15 +1963,30 @@ function diagnosticsPayload() {
     terminal: {
       activeSessions: terminalSessions.size,
       backend: nodePty ? 'pty' : 'shell'
+    },
+    preview: {
+      state: previewStatePayload(),
+      activity: previewActivityPayload(48),
+      diagnostics: previewDiagnosticsPayload(),
+      evidence: {
+        directory: path.join(app.getPath('userData'), 'preview-evidence')
+      }
+    },
+    backendRuntime: {
+      runs,
+      permissions,
+      toolAudit,
+      deskStatus,
+      deskGoalLog
     }
-  }
+  })
 }
 
 function diagnosticsBundleContent(payload = diagnosticsPayload()) {
   return JSON.stringify(
     {
       schema: 'metis.diagnostics.bundle.v1',
-      diagnostics: payload
+      diagnostics: redactDiagnosticsValue(payload)
     },
     null,
     2
@@ -1897,7 +1994,7 @@ function diagnosticsBundleContent(payload = diagnosticsPayload()) {
 }
 
 async function saveDiagnosticsBundle() {
-  const diagnostics = diagnosticsPayload()
+  const diagnostics = await diagnosticsPayload()
   const content = diagnosticsBundleContent(diagnostics)
 
   if (process.env.METIS_DESKTOP_SMOKE === '1') {
