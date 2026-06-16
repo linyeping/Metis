@@ -4,7 +4,7 @@
 
 # Metis · 墨提斯
 
-**A desktop AI agent that reads your code, runs your terminal, and drives the web.**
+**A local desktop AI agent that writes code, runs terminals, controls browsers, and operates Windows apps.**
 
 > The wise stay quiet; the skilled never run dry.
 
@@ -23,42 +23,81 @@
 
 ---
 
-## What is it
+## What is Metis
 
-**Metis** is a desktop AI agent client: an Electron + React front end backed by a Python agent process running on your machine. Give it a goal and it plans, calls tools, and works through the task step by step — reading and writing code, running terminal commands, querying databases, browsing the web, and even taking over the desktop when needed. Every action streams into the workbench on the right, so you can see exactly what it's doing and what it changed.
+**Metis** is a desktop AI workbench. It combines an Electron + React renderer with a local Python agent backend, and calls models through DeepSeek or any OpenAI-compatible API endpoint. Give it a goal and it plans steps, calls tools, observes results, and keeps going until the task is handled.
 
-Models are accessed over an API: DeepSeek is supported out of the box, and any OpenAI-compatible endpoint (including custom relays) works too — just drop your key into Settings.
+Metis is meant to do the work, not only talk about it:
 
-A few deliberate choices:
+- Read, search, and edit code, produce diffs, and run tests for verification.
+- Control terminals, Git, the filesystem, local projects, and development servers.
+- Use the right-side Preview Browser to inspect pages, click, type, screenshot, and collect console/network/DOM diagnostics.
+- Use `/computer` to operate Windows desktop software and cross-application workflows.
+- Show execution transparently through tool activity, task lists, permission gates, and audit logs.
 
-- 🔒 **It doesn't collect your stuff** — Metis itself requires no account, no forced login, and no telemetry; third-party connectors use standard OAuth, with tokens encrypted locally, never leaving your machine and never passing through a relay.
-- 🌏 **Bilingual** — switch the entire UI between 中文 and English in one click.
-- 🧱 **Built to stay up** — crash self-recovery, health-heartbeat reconnection, and an action audit log, so it tries not to fall over mid-task.
-
-Still actively polishing — try it out and file issues.
+Metis itself requires no account, no forced login, and no telemetry. Third-party connectors use standard OAuth, with tokens encrypted and stored locally.
 
 ---
 
-## Features
+## Current Core Capabilities
+
+### Computer Use
+
+`/computer` is designed for Windows desktop applications and cross-software workflows. The current implementation uses:
+
+- **Win2 runtime**: prefers window-level Win32 automation and observes/acts relative to the target window, reducing full-screen coordinate drift.
+- **Structured action loop**: `observe -> plan -> act -> verify`, with a fresh observation after meaningful actions.
+- **Multi-source observation**: window screenshots, window inventory, accessibility/structured observation, and vision fallback when needed.
+- **Desktop Expert**: complex desktop tasks are delegated to `desktop_expert`, which has desktop-specific tools and a longer turn budget.
+- **Takeover overlay and activity cards**: active desktop control is visible, and chat tool cards show status, duration, and result.
+- **Completion-state hardening**: if a tool result loses or mutates its call id, it is merged back into the running tool card; completed runs no longer leave a stale "desktop expert running" state.
+
+### Preview Browser / Browser Use
+
+`/browser` uses the right-side Preview Browser for local web and file automation:
+
+- Automatically detects the active dev server, prefers `METIS_DESKTOP_DEV_SERVER`, and scans common ports such as `5173/5174/3000/4200/8000/8080`.
+- Supports navigation, clicking, typing, DOM observation, screenshots, reloads, and reuse of the right rail's current URL.
+- Captures console errors/warnings, failed network requests, page JavaScript exceptions, DOM summaries, title, URL, viewport, and screenshot evidence.
+- Includes a Browser Verifier for element existence/visibility, clickable buttons, writable inputs, blank-page checks, console-error checks, and pure white/black screenshot checks.
+- Browser Activity is collapsed by default so it does not squeeze the live page preview.
+
+### OAuth and Connectors
+
+Metis now has a connector framework and OAuth foundation:
+
+- The Electron main process handles OAuth callbacks, encrypted token storage, and security boundaries.
+- The Settings UI includes connector entry points for future Gmail, GitHub, and similar integrations.
+- Tokens are not written to logs, not injected into model context, and not routed through a relay service.
+
+### Context Engineering and Long-Run Stability
+
+- Automatic context compaction preserves task summaries and recoverable boundaries.
+- Tool results can be compacted so long outputs do not consume the entire model context.
+- Run recovery, background run tracking, heartbeat reconnects, and session checkpoints are built in.
+- Tool contracts use a unified SSE event contract shared by backend and frontend.
+
+---
+
+## Feature Overview
 
 <div align="center">
 <img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
 </div>
 
-| Module | What it does |
+| Module | Description |
 |---|---|
-| 🤖 **Agent loop** | Plan → call tool → observe → continue; supports **auto-continuation after truncation**, deferred tool activation, action auditing |
-| 🛠️ **Toolbox** | Code read/write/search, **local semantic index (RAG)**, terminal, Git/Diff, file preview |
-| 🌐 **Browser control** | `/browser`: autonomous browsing via the DOM, form filling, reusing logged-in sessions |
-| 🖥️ **Desktop control** | `/computer`: screenshot + coordinate-based control of any native app, configurable coordinate space |
-| ⚡ **Parallel sub-agents** | Fan out read-only analysis tasks in parallel to speed up large-repo understanding |
-| 📋 **Audit log** | Every tool action per turn is written to `.metis/audit/` for traceability |
-| 🎚️ **Permission modes** | Ask for approval / approve on my behalf / full access, graded by risk |
-| ⏱️ **Scheduled tasks** | Built-in cron to run agent workflows on a schedule |
-| 🧩 **Skills & `/` commands** | Type `/` for the command palette: `/new`, `/compact`, `/rewind`, `/browser`, `/computer`, plus custom skills |
-| 🎨 **16 themes** | 8 light + 8 dark, gold-forward palette; light/dark dual mode each remembers its own theme |
-| 🔁 **Self-healing reconnect** | Auto-restart on backend crash, 8s heartbeat probe for a stalled API, honest "reconnecting" status |
-| 📦 **One-step packaging** | PyInstaller bundles the backend + electron-builder produces a ready-to-run Windows installer |
+| Agent loop | Planning, tool calls, observation, continuation, truncation recovery, deferred tool activation, and run recovery |
+| Code tools | File read/write, code search, semantic index, AST/patch edits, test execution, and diff preview |
+| Terminal tools | Local command execution, environment diagnostics, build and test debugging |
+| Browser Use | Right-side Preview Browser automation, DOM/screenshot/console/network diagnostics, and verification |
+| Computer Use | Win2 desktop automation, window observation, mouse/keyboard execution, vision fallback, Desktop Expert |
+| Task lists | Live plan, active steps, and completion state |
+| Tool activity | Per-tool status, summary, duration, error hints, and expandable details |
+| Permission modes | Ask for approval, approve on my behalf, or full access, with risk-based gating |
+| OAuth connectors | Local OAuth callback, encrypted token storage, and groundwork for Gmail/GitHub integrations |
+| Internationalization | Chinese / English UI and documentation |
+| Packaging | PyInstaller backend bundle plus electron-builder Windows installer |
 
 ---
 
@@ -68,10 +107,29 @@ Still actively polishing — try it out and file issues.
 <img src="backend/assets/Architecture.png" alt="Architecture" width="100%" />
 </div>
 
-- **Renderer** `desktop/src/` — React 19 + Vite + Zustand state + assistant-ui message stream.
-- **Main process** `desktop/electron/main.cjs` — window management, native `WebContentsView` web preview, packaging entry.
-- **Backend** `backend/` — Flask/SSE service, the `agent_loop`, the `tool_registry`, and provider adapters.
-- The three communicate over **HTTP / SSE**, with tools ultimately talking to **DeepSeek / any compatible endpoint**.
+```text
+Metis Desktop
+├─ Electron main process
+│  ├─ Windowing, menus, OAuth, WebContentsView Preview
+│  ├─ Backend lifecycle management
+│  └─ Windows packaging entry
+├─ React renderer
+│  ├─ Chat / Tool Activity / Right Rail / Settings
+│  ├─ Browser Activity / Preview Browser UI
+│  └─ Zustand stores + assistant-ui message stream
+└─ Python backend
+   ├─ Flask + SSE API
+   ├─ agent_loop / tool_registry / skills
+   ├─ browser automation / desktop automation
+   ├─ provider adapters
+   └─ checkpoint / context budget / connectors
+```
+
+Communication model:
+
+- The renderer talks to the backend over HTTP / SSE.
+- The Electron main process owns local preview, OAuth, packaged backend startup, and desktop shell capabilities.
+- Backend tools interact with the local filesystem, terminal, browser, desktop automation, and model APIs.
 
 ---
 
@@ -79,66 +137,123 @@ Still actively polishing — try it out and file issues.
 
 | Item | Requirement |
 |---|---|
-| OS | Windows 10 / 11 (64-bit) |
-| Disk | ~450 MB |
-| Network | Internet access to call the model API |
-| API key | A DeepSeek key, or any OpenAI-compatible endpoint key, entered in the first-run wizard |
-| Browser | `/browser` reuses the system Chrome / Edge for web control |
+| OS | Windows 10 / 11 64-bit |
+| Node.js | Required for development mode; not required for installed users |
+| Python | Required for development mode; bundled into the packaged backend |
+| Network | Required for model API calls |
+| API key | DeepSeek or any OpenAI-compatible endpoint |
+| Desktop control | `/computer` controls mouse and keyboard; sensitive actions should be confirmed by the user |
 
-The installer ships with the runtime bundled — no separate dev environment to set up. `/computer` desktop control moves the mouse and keyboard and may trigger a system authorization prompt on first use. This build is not yet code-signed, so Windows SmartScreen may warn; you can choose to continue.
+This build is not code-signed yet, so Windows SmartScreen may warn before launch.
 
 ---
 
 ## Development
 
 ```powershell
-python -m pip install -e backend/   # install the backend
+python -m pip install -e backend/
+
 cd desktop
 npm ci
-npm run dev                          # dev mode, auto-starts the backend
+npm run dev
 ```
 
-## Verification
+Development mode starts:
+
+- Vite renderer: `http://127.0.0.1:5174` by default
+- Electron desktop shell
+- Local Python backend managed by the Electron launcher
+
+---
+
+## Common Commands
 
 ```powershell
-python -m pytest backend/tests/ -q   # backend unit tests
+# Frontend type check
 cd desktop
-npm run typecheck                     # type check
-npm run test                          # renderer unit tests (vitest)
-npm run test:contracts                # contract / security tests
-```
+npm run typecheck
 
-## Packaging (Windows)
+# Frontend unit tests
+npm run test
 
-```powershell
+# Electron / security / contract tests
+npm run test:contracts
+
+# Backend tests
+cd ..
+python -m pytest backend/tests/ -q
+
+# Production renderer build
 cd desktop
-npm run build-backend                 # PyInstaller bundles the backend
-npm run dist:win                      # produces an NSIS installer → desktop/release/
+npm run build
 ```
 
 ---
 
-## Project structure
+## Build a Windows EXE
 
+```powershell
+cd desktop
+npm run dist:win
 ```
+
+`dist:win` runs:
+
+1. `npm run build-backend`: bundles the Python backend with PyInstaller.
+2. `npm run build`: builds the React/Vite renderer.
+3. `electron-builder --win nsis`: produces a Windows NSIS installer.
+
+Output location:
+
+```text
+desktop/release/
+```
+
+To verify only the production renderer build:
+
+```powershell
+cd desktop
+npm run build
+```
+
+---
+
+## Project Structure
+
+```text
 Miro/
-├── backend/          # Python agent: Flask/SSE, agent_loop, tools, provider adapters
-│   ├── runtime/      #   agent loop, tool registry, skills, audit, parallel sub-agents
-│   ├── tools/        #   code / browser / desktop / retrieval tool implementations
-│   └── assets/       #   brand imagery (cover / architecture / feature showcase)
-├── desktop/          # Electron desktop app
-│   ├── electron/     #   main process, preload, security / contract tests
-│   ├── src/          #   React renderer (components, stores, runtime, i18n)
-│   └── scripts/      #   packaging & smoke scripts
-└── docs/             # architecture / development / changelog
+├── backend/
+│   ├── bridges/        # event contracts and provider/tool protocol bridges
+│   ├── runtime/        # agent loop, tool registry, skills, checkpoint, context budget
+│   ├── tools/          # code, browser, desktop, retrieval, and other tools
+│   ├── web/            # Flask API, SSE, Preview Browser bridge
+│   └── assets/         # cover, architecture, and feature showcase images
+├── desktop/
+│   ├── electron/       # Electron main/preload, OAuth, packaging entry
+│   ├── src/            # React UI, stores, runtime, i18n
+│   └── scripts/        # build, contract, and smoke scripts
+├── docs/               # development logs and design documents
+└── README.md / README.en.md
 ```
+
+---
+
+## Privacy and Safety
+
+- Metis does not require a platform account and does not include built-in telemetry.
+- API keys and OAuth tokens stay in local configuration/encrypted storage.
+- Connector tokens are not inserted into model context.
+- Tool actions are audited for traceability.
+- `/computer` and `/browser` distinguish reading information from sending or submitting data; external side effects, sensitive data, deletion, uploads, and authorization changes should be confirmed first.
+
+---
 
 ## License
 
 **[PolyForm Noncommercial 1.0.0](LICENSE)** © 2026 linyeping
 
-Source-available, **free for personal / non-commercial use** (learning, research, personal projects, nonprofits).
-**Any commercial use or commercial derivative work requires prior written (paid) authorization from the author** — see the repository homepage for contact.
+Source-available, **free for personal / non-commercial use** including learning, research, personal projects, and nonprofits.
+**Any commercial use or commercial derivative work requires prior written paid authorization from the author**.
 
 ---
 
