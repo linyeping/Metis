@@ -17,6 +17,8 @@
 
 **Built by [linyeping](https://github.com/linyeping)**
 
+Product direction and part of the design thinking: [Serein](https://github.com/Serein0812)
+
 **[中文](README.md) · English**
 
 </div>
@@ -259,6 +261,6 @@ Source-available, **free for personal / non-commercial use** including learning,
 
 <div align="center">
 
-**Built by [linyeping](https://github.com/linyeping)** · The wise stay quiet; the skilled never run dry.
+**Built by [linyeping](https://github.com/linyeping)** · Product direction and part of the design thinking: [Serein](https://github.com/Serein0812) · The wise stay quiet; the skilled never run dry.
 
 </div>

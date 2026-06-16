@@ -17,6 +17,8 @@
 
 **由 [linyeping](https://github.com/linyeping) 打造**
 
+产品方向与部分设计思路致谢：[Serein](https://github.com/Serein0812)
+
 **中文 · [English](README.en.md)**
 
 </div>
@@ -259,6 +261,6 @@ Miro/
 
 <div align="center">
 
-**由 [linyeping](https://github.com/linyeping) 打造** · 智者不喧，巧者不竭。
+**由 [linyeping](https://github.com/linyeping) 打造** · 产品方向与部分设计思路致谢：[Serein](https://github.com/Serein0812) · 智者不喧，巧者不竭。
 
 </div>
