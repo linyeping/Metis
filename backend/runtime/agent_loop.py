@@ -156,6 +156,7 @@ class DoneEvent(Event):
     total_tokens: int = 0
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0
+    context_ledger: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -199,6 +200,7 @@ class AgentConfig:
     enabled_tools: List[str] = field(default_factory=list)
     execution_mode: str = "auto"
     workspace_root: str = ""
+    session_id: str = ""
     permission_checker: Optional[Callable[[str, Dict[str, Any]], Optional[str]]] = None
     tool_boundary_overrides: Optional[Callable[[str, Dict[str, Any]], Dict[str, bool]]] = None
 
@@ -527,11 +529,70 @@ def _log_context_ledger(
     phase: str,
     turn: int,
     usage: Optional[Usage] = None,
-) -> None:
+) -> Dict[str, Any]:
     payload = context_ledger(messages, tools, usage=usage, model=config.llm_model)
     payload["phase"] = phase
     payload["turn"] = turn
     logger.info("context_ledger %s", json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return payload
+
+
+def _done_event(
+    turn_count: int,
+    tool_call_count: int,
+    usage: Usage,
+    *,
+    ledger: Optional[Dict[str, Any]] = None,
+    messages: Optional[List[Dict[str, Any]]] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    config: Optional[AgentConfig] = None,
+) -> DoneEvent:
+    context_payload = dict(ledger or {})
+    if not context_payload and messages is not None and config is not None:
+        try:
+            context_payload = context_ledger(messages, tools or [], usage=usage, model=config.llm_model)
+        except Exception:
+            logger.debug("failed to build done context ledger", exc_info=True)
+            context_payload = {}
+    return DoneEvent(
+        total_turns=turn_count,
+        total_tool_calls=tool_call_count,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        total_tokens=usage.total_tokens,
+        prompt_cache_hit_tokens=usage.prompt_cache_hit_tokens,
+        prompt_cache_miss_tokens=usage.prompt_cache_miss_tokens,
+        context_ledger=context_payload,
+    )
+
+
+def _save_runtime_checkpoint(
+    config: AgentConfig,
+    messages: List[Dict[str, Any]],
+    *,
+    turn_count: int,
+    tool_call_count: int,
+    reason: str,
+) -> None:
+    session_id = str(getattr(config, "session_id", "") or "").strip()
+    if not session_id:
+        return
+    try:
+        from .checkpoint_store import save_checkpoint
+
+        state = {
+            "kind": "agent_loop",
+            "reason": reason,
+            "messages": json.loads(json.dumps(messages, ensure_ascii=False, default=str)),
+            "runtime": {
+                "turn": turn_count,
+                "tool_calls": tool_call_count,
+                "model": config.llm_model,
+            },
+        }
+        save_checkpoint(session_id, state)
+    except Exception:
+        logger.debug("failed to save runtime checkpoint", exc_info=True)
 
 
 _SAFE_TOOLS: set[str] = {
@@ -574,15 +635,20 @@ def _error_done_event(
     turn_count: int,
     tool_call_count: int,
     usage: Usage,
+    *,
+    ledger: Optional[Dict[str, Any]] = None,
+    messages: Optional[List[Dict[str, Any]]] = None,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    config: Optional[AgentConfig] = None,
 ) -> DoneEvent:
-    return DoneEvent(
-        total_turns=turn_count,
-        total_tool_calls=tool_call_count,
-        prompt_tokens=usage.prompt_tokens,
-        completion_tokens=usage.completion_tokens,
-        total_tokens=usage.total_tokens,
-        prompt_cache_hit_tokens=usage.prompt_cache_hit_tokens,
-        prompt_cache_miss_tokens=usage.prompt_cache_miss_tokens,
+    return _done_event(
+        turn_count,
+        tool_call_count,
+        usage,
+        ledger=ledger,
+        messages=messages,
+        tools=tools,
+        config=config,
     )
 
 
@@ -658,6 +724,7 @@ def run(
     tool_call_count = 0
     consecutive_errors = 0
     cumulative_usage = Usage()
+    last_context_ledger: Dict[str, Any] = {}
     tool_recovery_attempted = False
     continuation_count = 0
     continuation_buffer = ""
@@ -702,7 +769,7 @@ def run(
                 recoverable=False,
             )
             yield _context_limit_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
         turn_count += 1
         yield _runtime_status_event(
@@ -713,7 +780,7 @@ def run(
         )
         try:
             request_messages = _messages_for_llm_request(working_messages, config)
-            _log_context_ledger(
+            last_context_ledger = _log_context_ledger(
                 request_messages,
                 tools,
                 config,
@@ -752,7 +819,7 @@ def run(
                     recoverable=False,
                 )
                 yield _llm_error_event(exc, message=message, recoverable=False)
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                 return
             yield _llm_error_event(exc, message=message, recoverable=True)
             yield _runtime_status_event(
@@ -767,7 +834,7 @@ def run(
             continue
 
         cumulative_usage = _combine_usage(cumulative_usage, response.usage)
-        _log_context_ledger(
+        last_context_ledger = _log_context_ledger(
             request_messages,
             tools,
             config,
@@ -803,15 +870,7 @@ def run(
             final_text = (continuation_buffer + (response.content or "")) or "(No response from LLM)"
             yield ContentEvent(text=final_text + "\n\n[输出多次超长被截断，请把任务拆小或缩小单次写入范围]")
             yield _runtime_status_event("completed", "Agent runtime completed", turn=turn_count, tool_calls=tool_call_count)
-            yield DoneEvent(
-                total_turns=turn_count,
-                total_tool_calls=tool_call_count,
-                prompt_tokens=cumulative_usage.prompt_tokens,
-                completion_tokens=cumulative_usage.completion_tokens,
-                total_tokens=cumulative_usage.total_tokens,
-                prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-                prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
-            )
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
 
         if response.tool_calls:
@@ -996,6 +1055,13 @@ def run(
                 tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
             _audit_tool_results(results, config, turn_count)
             working_messages = _evict_tool_results_for_budget(working_messages, tools, config)
+            _save_runtime_checkpoint(
+                config,
+                _messages_for_llm_request(working_messages, config),
+                turn_count=turn_count,
+                tool_call_count=tool_call_count,
+                reason="tool_loop",
+            )
             continue
 
         # No tool calls — pure content response
@@ -1014,15 +1080,7 @@ def run(
                 turn=turn_count,
                 tool_calls=tool_call_count,
             )
-            yield DoneEvent(
-                total_turns=turn_count,
-                total_tool_calls=tool_call_count,
-                prompt_tokens=cumulative_usage.prompt_tokens,
-                completion_tokens=cumulative_usage.completion_tokens,
-                total_tokens=cumulative_usage.total_tokens,
-                prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-                prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
-            )
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             logger.info("agent run completed turns=%s tool_calls=%s", turn_count, tool_call_count)
             return
 
@@ -1033,15 +1091,7 @@ def run(
             turn=turn_count,
             tool_calls=tool_call_count,
         )
-        yield DoneEvent(
-            total_turns=turn_count,
-            total_tool_calls=tool_call_count,
-            prompt_tokens=cumulative_usage.prompt_tokens,
-            completion_tokens=cumulative_usage.completion_tokens,
-            total_tokens=cumulative_usage.total_tokens,
-            prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-            prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
-        )
+        yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
         logger.info("agent run completed turns=%s tool_calls=%s", turn_count, tool_call_count)
         return
 
@@ -1060,14 +1110,14 @@ def run(
         hint="请缩小任务范围、提高最大轮次，或把复杂任务拆成几步继续。",
         recoverable=False,
     )
-    yield DoneEvent(
-        total_turns=turn_count,
-        total_tool_calls=tool_call_count,
-        prompt_tokens=cumulative_usage.prompt_tokens,
-        completion_tokens=cumulative_usage.completion_tokens,
-        total_tokens=cumulative_usage.total_tokens,
-        prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-        prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
+    yield _done_event(
+        turn_count,
+        tool_call_count,
+        cumulative_usage,
+        ledger=last_context_ledger,
+        messages=_messages_for_llm_request(working_messages, config),
+        tools=tools,
+        config=config,
     )
 
 
@@ -1095,6 +1145,7 @@ def run_stream(
     tool_call_count = 0
     consecutive_errors = 0
     cumulative_usage = Usage()
+    last_context_ledger: Dict[str, Any] = {}
     last_tool_signature = ""
     repeated_tool_count = 0
     tool_recovery_attempted = False
@@ -1122,7 +1173,7 @@ def run_stream(
             logger.info("agent stream canceled before turn")
             yield _runtime_status_event("canceled", "Agent runtime canceled", recoverable=False)
             yield _cancelled_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
         working_messages = _refresh_todo_context_message(working_messages, config.workspace_root)
         working_messages = _append_turn_budget_hint(
@@ -1148,7 +1199,7 @@ def run_stream(
                 recoverable=False,
             )
             yield _context_limit_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
         turn_count += 1
         yield _runtime_status_event(
@@ -1167,7 +1218,7 @@ def run_stream(
             if cancel_event is not None:
                 stream_kwargs["cancel_event"] = cancel_event
             request_messages = _messages_for_llm_request(working_messages, config)
-            _log_context_ledger(
+            last_context_ledger = _log_context_ledger(
                 request_messages,
                 tools,
                 config,
@@ -1188,7 +1239,7 @@ def run_stream(
                 recoverable=False,
             )
             yield _cancelled_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
         except Exception as exc:
             consecutive_errors += 1
@@ -1214,7 +1265,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _llm_error_event(exc, message=message, recoverable=False)
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                 return
             yield _llm_error_event(exc, message=message, recoverable=True)
             yield _runtime_status_event(
@@ -1235,7 +1286,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _cancelled_error_event()
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                 return
             turn_count -= 1
             continue
@@ -1279,7 +1330,7 @@ def run_stream(
                 recoverable=False,
             )
             yield _cancelled_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
         except Exception as exc:
             consecutive_errors += 1
@@ -1302,7 +1353,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _llm_error_event(exc, message=message, recoverable=False)
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                 return
             yield _llm_error_event(exc, message=message, recoverable=True)
             yield _runtime_status_event(
@@ -1323,7 +1374,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _cancelled_error_event()
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                 return
             turn_count -= 1
             continue
@@ -1338,7 +1389,7 @@ def run_stream(
             response = replace(response, content=accumulated_text)
 
         cumulative_usage = _combine_usage(cumulative_usage, response.usage)
-        _log_context_ledger(
+        last_context_ledger = _log_context_ledger(
             request_messages,
             tools,
             config,
@@ -1374,15 +1425,7 @@ def run_stream(
             final_text = (continuation_buffer + (response.content or "")) or "(No response from LLM)"
             yield ContentEvent(text=final_text + "\n\n[输出多次超长被截断，请把任务拆小或缩小单次写入范围]")
             yield _runtime_status_event("completed", "Agent runtime completed", turn=turn_count, tool_calls=tool_call_count)
-            yield DoneEvent(
-                total_turns=turn_count,
-                total_tool_calls=tool_call_count,
-                prompt_tokens=cumulative_usage.prompt_tokens,
-                completion_tokens=cumulative_usage.completion_tokens,
-                total_tokens=cumulative_usage.total_tokens,
-                prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-                prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
-            )
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             return
 
         if response.tool_calls:
@@ -1425,7 +1468,7 @@ def run_stream(
                             recoverable=False,
                         )
                         yield _cancelled_error_event()
-                        yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                        yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                         return
                     tool_call_count += 1
                     logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
@@ -1468,7 +1511,7 @@ def run_stream(
                         recoverable=False,
                     )
                     yield _repeated_tool_error_event(tool_call, hint=loop_hint)
-                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                     return
                 if is_cancel_requested(cancel_event):
                     yield _runtime_status_event(
@@ -1481,7 +1524,7 @@ def run_stream(
                         recoverable=False,
                     )
                     yield _cancelled_error_event()
-                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                     return
                 yield ToolCallEvent(
                     tool_name=tool_call.name,
@@ -1601,7 +1644,7 @@ def run_stream(
                         recoverable=False,
                     )
                     yield _cancelled_error_event()
-                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                     return
                 tool_call_count += 1
                 logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
@@ -1647,6 +1690,13 @@ def run_stream(
                 tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
             _audit_tool_results(results, config, turn_count)
             working_messages = _evict_tool_results_for_budget(working_messages, tools, config)
+            _save_runtime_checkpoint(
+                config,
+                _messages_for_llm_request(working_messages, config),
+                turn_count=turn_count,
+                tool_call_count=tool_call_count,
+                reason="tool_loop",
+            )
             if _working_context_chars(working_messages) > MAX_WORKING_CONTEXT_CHARS:
                 yield _runtime_status_event(
                     "failed",
@@ -1656,7 +1706,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _context_limit_error_event()
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
                 return
             continue
 
@@ -1675,15 +1725,7 @@ def run_stream(
                 turn=turn_count,
                 tool_calls=tool_call_count,
             )
-            yield DoneEvent(
-                total_turns=turn_count,
-                total_tool_calls=tool_call_count,
-                prompt_tokens=cumulative_usage.prompt_tokens,
-                completion_tokens=cumulative_usage.completion_tokens,
-                total_tokens=cumulative_usage.total_tokens,
-                prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-                prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
-            )
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
             logger.info("agent stream completed turns=%s tool_calls=%s", turn_count, tool_call_count)
             return
 
@@ -1694,15 +1736,7 @@ def run_stream(
             turn=turn_count,
             tool_calls=tool_call_count,
         )
-        yield DoneEvent(
-            total_turns=turn_count,
-            total_tool_calls=tool_call_count,
-            prompt_tokens=cumulative_usage.prompt_tokens,
-            completion_tokens=cumulative_usage.completion_tokens,
-            total_tokens=cumulative_usage.total_tokens,
-            prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-            prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
-        )
+        yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
         logger.info("agent stream completed turns=%s tool_calls=%s", turn_count, tool_call_count)
         return
 
@@ -1721,14 +1755,14 @@ def run_stream(
         hint="请缩小任务范围、提高最大轮次，或把复杂任务拆成几步继续。",
         recoverable=False,
     )
-    yield DoneEvent(
-        total_turns=turn_count,
-        total_tool_calls=tool_call_count,
-        prompt_tokens=cumulative_usage.prompt_tokens,
-        completion_tokens=cumulative_usage.completion_tokens,
-        total_tokens=cumulative_usage.total_tokens,
-        prompt_cache_hit_tokens=cumulative_usage.prompt_cache_hit_tokens,
-        prompt_cache_miss_tokens=cumulative_usage.prompt_cache_miss_tokens,
+    yield _done_event(
+        turn_count,
+        tool_call_count,
+        cumulative_usage,
+        ledger=last_context_ledger,
+        messages=_messages_for_llm_request(working_messages, config),
+        tools=tools,
+        config=config,
     )
 
 

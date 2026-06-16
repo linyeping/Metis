@@ -1,6 +1,9 @@
 import type {
   BootEvent,
   BootState,
+  BrowserActivityPayload,
+  ConnectorAuthorizeResult,
+  ConnectorStatusPayload,
   DevServerDetectResult,
   DevServerEventPayload,
   DevServerStartPayload,
@@ -40,7 +43,19 @@ declare global {
       previewLoad: (payload: { url: string; tabId?: string }) => Promise<{ ok: boolean; error?: string }>;
       previewCommand: (command: 'back' | 'forward' | 'reload' | 'stop') => Promise<{ ok: boolean }>;
       previewSetZoom: (zoom: number) => Promise<{ ok: boolean; zoom?: number }>;
-      previewCapture: () => Promise<{ ok: boolean; dataUrl: string }>;
+      previewCapture: () => Promise<{ ok: boolean; dataUrl: string; width?: number; height?: number; url?: string; title?: string; error?: string }>;
+      previewObserve: (payload?: { maxElements?: number; includeText?: boolean }) => Promise<Record<string, unknown>>;
+      previewAction: (payload: {
+        action: 'click' | 'double_click' | 'type' | 'key' | 'scroll' | 'wait';
+        elementId?: string;
+        x?: number;
+        y?: number;
+        text?: string;
+        key?: string;
+        scrollY?: number;
+        waitMs?: number;
+      }) => Promise<Record<string, unknown>>;
+      previewActivity: (payload?: { limit?: number }) => Promise<BrowserActivityPayload>;
       terminalRun: (payload: TerminalRunPayload) => Promise<TerminalRunResult>;
       terminalCreate: (payload: TerminalCreatePayload) => Promise<TerminalSessionPayload>;
       terminalInput: (sessionId: string, data: string) => Promise<{ ok: boolean }>;
@@ -52,6 +67,9 @@ declare global {
       safeStorageAvailable: () => Promise<boolean>;
       safeStorageEncrypt: (plaintext: string) => Promise<string | null>;
       safeStorageDecrypt: (encrypted: string) => Promise<string | null>;
+      connectorAuthorize: (service: string, options?: { token?: string; clientId?: string; scope?: string }) => Promise<ConnectorAuthorizeResult>;
+      connectorStatus: () => Promise<ConnectorStatusPayload>;
+      connectorDisconnect: (service: string) => Promise<{ ok: boolean; service?: string; error?: string }>;
       window: (action: 'minimize' | 'toggle-maximize' | 'hide' | 'quit') => Promise<{ ok: boolean }>;
       pickFolder: () => Promise<string | null>;
       pickPythonExe: () => Promise<string | null>;

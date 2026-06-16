@@ -408,6 +408,7 @@ export function normalizedSnapshotEvent(event: Partial<NormalizedChatEvent> & { 
       recoverable: event.error?.recoverable ?? false,
     },
     usage: event.usage || null,
+    contextLedger: event.contextLedger || null,
     runtimeStatus: event.runtimeStatus || null,
     compactStatus: event.compactStatus || null,
     memory: event.memory || null,

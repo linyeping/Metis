@@ -33,7 +33,7 @@ import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getWorkspaceFile, getWorkspaceTree } from '../../lib/api';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { ChatRunPayload, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import type { BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -126,6 +126,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const [devStatus, setDevStatus] = useState<DevServerStatus | null>(null);
   const [devBusy, setDevBusy] = useState(false);
   const [previewAudit, setPreviewAudit] = useState<PreviewAuditResult | null>(null);
+  const [browserActivity, setBrowserActivity] = useState<BrowserActivityPayload | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [devDetailsOpen, setDevDetailsOpen] = useState(false);
   const [workspaceSettling, setWorkspaceSettling] = useState(false);
@@ -206,6 +207,23 @@ export function RightRail({ backendReady }: RightRailProps) {
       if (Object.keys(patch).length > 0) updateWebPreviewTab(tabId, patch);
     });
   }, [updateWebPreviewTab]);
+
+  const refreshBrowserActivity = useCallback(async () => {
+    if (!window.metis?.previewActivity || !rightRailOpen || !webCardVisible) return;
+    try {
+      const result = await window.metis.previewActivity({ limit: 24 });
+      if (result?.ok) setBrowserActivity(result);
+    } catch {
+      // Activity is observational; preview itself should not be disturbed if this fails.
+    }
+  }, [rightRailOpen, webCardVisible]);
+
+  useEffect(() => {
+    if (!rightRailOpen || !webCardVisible) return;
+    void refreshBrowserActivity();
+    const timer = window.setInterval(() => void refreshBrowserActivity(), 1600);
+    return () => window.clearInterval(timer);
+  }, [refreshBrowserActivity, rightRailOpen, webCardVisible]);
 
   const hidePreviewView = useCallback(() => {
     void window.metis?.previewSetBounds?.({ visible: false });
@@ -1130,6 +1148,9 @@ export function RightRail({ backendReady }: RightRailProps) {
           {activeWebTab.error}
         </p>
       )}
+      {browserActivity && browserActivity.items.length > 0 && (
+        <BrowserActivityPanel activity={browserActivity} t={t} />
+      )}
       {webPreviewUrl ? (
         <div className="web-preview-frame" data-zoom={Math.round(activeWebZoom * 100)}>
           <div className="web-preview-host" data-preview-url={webPreviewUrl} ref={previewHostRef}>
@@ -1308,6 +1329,88 @@ export function RightRail({ backendReady }: RightRailProps) {
       </div>
     </div>
   );
+}
+
+function BrowserActivityPanel({ activity, t }: { activity: BrowserActivityPayload; t: (text: string) => string }) {
+  const [open, setOpen] = useState(false);
+  const recentItems = activity.items.slice(-8).reverse();
+  const diagnostics = activity.diagnostics_counts || {};
+  const hasDiagnostics = Boolean((diagnostics.console_errors || 0) + (diagnostics.exceptions || 0) + (diagnostics.network_failed || 0));
+
+  return (
+    <div className="browser-activity-panel" data-open={open} data-errors={activity.counts.errors > 0} data-blocked={activity.counts.blocked > 0}>
+      <button className="browser-activity-head" type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        <Network size={14} />
+        <div>
+          <strong>{t('浏览器活动')}</strong>
+          <span>
+            {activity.counts.navigate} {t('导航')} · {activity.counts.observe} {t('观察')} · {activity.counts.action} {t('动作')} · {activity.counts.screenshot} {t('截图')}
+          </span>
+        </div>
+        {(activity.counts.blocked > 0 || activity.counts.errors > 0 || hasDiagnostics) && (
+          <em>
+            {activity.counts.blocked > 0 ? `${activity.counts.blocked} ${t('拦截')}` : activity.counts.errors > 0 ? `${activity.counts.errors} ${t('失败')}` : t('诊断')}
+          </em>
+        )}
+        <span className="browser-activity-caret">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+      </button>
+      {open && (
+        <div className="browser-activity-list">
+          {recentItems.map((item, index) => (
+            <div className="browser-activity-item" data-event={item.event} data-ok={item.ok} data-blocked={item.blocked} key={`${item.at}-${index}`}>
+              <span className="browser-activity-icon">{browserActivityIcon(item)}</span>
+              <div>
+                <strong>{item.summary || browserActivityFallbackSummary(item, t)}</strong>
+                <span>{browserActivityMeta(item, t)}</span>
+                {item.error && <code>{item.error}</code>}
+                {item.saved_path && <code>{item.saved_path}</code>}
+              </div>
+              <time>{relativeActivityTime(item.at, t)}</time>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function browserActivityIcon(item: BrowserActivityItem) {
+  if (!item.ok || item.blocked) return <AlertTriangle size={13} />;
+  if (item.event === 'navigate') return <Globe size={13} />;
+  if (item.event === 'observe') return <ScanSearch size={13} />;
+  if (item.event === 'screenshot') return <ImageIcon size={13} />;
+  return <CircleCheck size={13} />;
+}
+
+function browserActivityFallbackSummary(item: BrowserActivityItem, t: (text: string) => string): string {
+  if (item.event === 'navigate') return item.ok ? t('导航完成') : t('导航失败');
+  if (item.event === 'observe') return `${t('观察页面')} ${item.element_count || 0}`;
+  if (item.event === 'screenshot') return item.ok ? t('截图完成') : t('截图失败');
+  if (item.blocked) return t('动作已拦截');
+  return item.ok ? t('动作完成') : t('动作失败');
+}
+
+function browserActivityMeta(item: BrowserActivityItem, t: (text: string) => string): string {
+  const parts: string[] = [];
+  if (item.target) parts.push(item.target);
+  if (item.event === 'observe' && item.text_length) parts.push(`${item.text_length} ${t('字')}`);
+  if (item.event === 'screenshot' && item.width && item.height) parts.push(`${item.width}x${item.height}`);
+  if (item.risk?.summary) parts.push(item.risk.summary);
+  if (item.navigation_resolution && typeof item.navigation_resolution.reason === 'string') {
+    parts.push(item.navigation_resolution.reason);
+  }
+  return parts.join(' · ') || item.title || item.url || t('Preview');
+}
+
+function relativeActivityTime(value: string, t: (text: string) => string): string {
+  const timestamp = Date.parse(value || '');
+  if (!Number.isFinite(timestamp)) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 5) return t('刚刚');
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function RunActivityCenter({

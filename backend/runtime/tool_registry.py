@@ -6,6 +6,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 import time
@@ -753,6 +754,190 @@ def _png_dimensions(png_bytes: bytes) -> Tuple[int, int]:
     return 0, 0
 
 
+def _compact_preview_diagnostics(value: Any) -> Dict[str, Any]:
+    diagnostics = value if isinstance(value, dict) else {}
+    return {
+        "counts": diagnostics.get("counts", {}),
+        "recent_console": list(diagnostics.get("recent_console") or [])[-8:],
+        "exceptions": list(diagnostics.get("exceptions") or [])[-8:],
+        "network_failed": list(diagnostics.get("network_failed") or [])[-8:],
+        "page_failures": list(diagnostics.get("page_failures") or [])[-6:],
+    }
+
+
+def _compact_preview_browser_activity(value: Any) -> Dict[str, Any]:
+    activity = value if isinstance(value, dict) else {}
+    items: list[dict[str, Any]] = []
+    for item in list(activity.get("items") or [])[-12:]:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "at": item.get("at", ""),
+                "event": item.get("event", ""),
+                "action": item.get("action", ""),
+                "ok": item.get("ok", True),
+                "blocked": item.get("blocked", False),
+                "summary": item.get("summary", ""),
+                "target": item.get("target", ""),
+                "error": item.get("error", ""),
+                "saved_path": item.get("saved_path", ""),
+                "navigation_resolution": item.get("navigation_resolution", None),
+            }
+        )
+    return {
+        "url": activity.get("url", ""),
+        "title": activity.get("title", ""),
+        "counts": activity.get("counts", {}),
+        "diagnostics_counts": activity.get("diagnostics_counts", {}),
+        "items": items,
+    }
+
+
+def _preview_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _preview_casefold(value: Any) -> str:
+    return _preview_text(value).casefold()
+
+
+def _preview_contains(haystack: Any, needle: Any) -> bool:
+    query = _preview_casefold(needle)
+    if not query:
+        return True
+    return query in _preview_casefold(haystack)
+
+
+def _preview_element_blob(element: Dict[str, Any]) -> str:
+    parts = [
+        element.get("text", ""),
+        element.get("ariaLabel", ""),
+        element.get("placeholder", ""),
+        element.get("labelText", ""),
+        element.get("name", ""),
+        element.get("title", ""),
+        element.get("href", ""),
+        element.get("selector", ""),
+    ]
+    return " ".join(_preview_text(part) for part in parts if _preview_text(part))
+
+
+def _preview_element_matches(element: Dict[str, Any], query: str) -> bool:
+    return not query or _preview_contains(_preview_element_blob(element), query)
+
+
+def _preview_element_is_button(element: Dict[str, Any]) -> bool:
+    tag = _preview_casefold(element.get("tag", ""))
+    role = _preview_casefold(element.get("role", ""))
+    input_type = _preview_casefold(element.get("type", ""))
+    button_type = _preview_casefold(element.get("buttonType", ""))
+    return (
+        tag == "button"
+        or role == "button"
+        or input_type in {"button", "submit", "reset"}
+        or button_type in {"button", "submit", "reset"}
+    )
+
+
+def _preview_element_is_input(element: Dict[str, Any]) -> bool:
+    tag = _preview_casefold(element.get("tag", ""))
+    input_type = _preview_casefold(element.get("type", ""))
+    role = _preview_casefold(element.get("role", ""))
+    return (
+        tag in {"input", "textarea", "select"}
+        or role in {"textbox", "combobox", "searchbox"}
+        or bool(element.get("isContentEditable"))
+        or input_type in {"text", "email", "search", "url", "tel", "number", "password"}
+    )
+
+
+def _preview_element_clickable(element: Dict[str, Any]) -> bool:
+    rect = element.get("rect") if isinstance(element.get("rect"), dict) else {}
+    width = float(rect.get("width") or 0)
+    height = float(rect.get("height") or 0)
+    return not bool(element.get("disabled")) and width > 0 and height > 0
+
+
+def _preview_element_editable(element: Dict[str, Any]) -> bool:
+    input_type = _preview_casefold(element.get("type", ""))
+    if input_type in {"hidden", "button", "submit", "reset", "checkbox", "radio", "file"}:
+        return False
+    return _preview_element_is_input(element) and not bool(element.get("disabled")) and not bool(element.get("readOnly"))
+
+
+def _compact_preview_element(element: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(element, dict):
+        return {}
+    return {
+        key: element.get(key)
+        for key in [
+            "element_id",
+            "tag",
+            "role",
+            "type",
+            "text",
+            "ariaLabel",
+            "placeholder",
+            "labelText",
+            "name",
+            "disabled",
+            "readOnly",
+            "rect",
+        ]
+        if element.get(key) not in (None, "")
+    }
+
+
+def _find_preview_element(
+    elements: List[Dict[str, Any]],
+    query: str = "",
+    predicate: Callable[[Dict[str, Any]], bool] | None = None,
+) -> Dict[str, Any] | None:
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        if predicate is not None and not predicate(element):
+            continue
+        if _preview_element_matches(element, query):
+            return element
+    return None
+
+
+def _extract_preview_natural_target(assertion: str, nouns: List[str]) -> str:
+    text = _preview_text(assertion)
+    if not text:
+        return ""
+    noun_pattern = "|".join(re.escape(noun) for noun in nouns)
+    patterns = [
+        rf"(?:确认|检查|确保|验证|看看|看下|请)?\s*([^，。,.、\s]{{1,40}}?)(?:{noun_pattern})",
+        rf"([A-Za-z0-9 _-]{{1,60}}?)\s+(?:{noun_pattern})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = match.group(1).strip()
+        target = re.sub(r"^(页面|当前|这个|那个|有|存在|出现|the|a|an)\s*", "", target, flags=re.IGNORECASE)
+        target = re.sub(r"(是否|有没有|能否|可以)?$", "", target).strip()
+        if target:
+            return target
+    return ""
+
+
+def _preview_assertion_has_any(assertion: str, words: List[str]) -> bool:
+    folded = _preview_casefold(assertion)
+    return any(_preview_casefold(word) in folded for word in words)
+
+
+def _preview_diagnostics_has_console_errors(diagnostics: Dict[str, Any]) -> bool:
+    counts = diagnostics.get("counts", {}) if isinstance(diagnostics, dict) else {}
+    return bool(
+        int(counts.get("console_errors") or 0) > 0
+        or int(counts.get("exceptions") or 0) > 0
+    )
+
+
 def register_desktop_tools(registry: ToolRegistry) -> None:
     """Register desktop automation wrappers without importing them eagerly."""
 
@@ -853,10 +1038,40 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
         max_steps: int = 20,
         exec_mode: str = "auto",
     ) -> str:
+        win2_attempt: dict[str, Any] | None = None
+
+        def _compact_win2_attempt(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+            if not isinstance(payload, dict):
+                return None
+            return {
+                "provider": payload.get("provider"),
+                "ok": bool(payload.get("ok")),
+                "status": payload.get("status"),
+                "error": payload.get("error", ""),
+                "fallback_recommended": bool(payload.get("fallback_recommended", False)),
+                "hwnd": payload.get("hwnd"),
+                "title": payload.get("title"),
+                "steps": payload.get("steps"),
+            }
+
+        if exec_mode in ("auto", "skill") and os.environ.get("METIS_DESKTOP_WIN2_AUTO", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            from backend.tools.desk_automation.providers.win2_loop import (
+                format_tool_result,
+                run_task as _run_win2_task,
+            )
+
+            win2_result = _run_win2_task(goal=goal, max_steps=max_steps)
+            win2_attempt = _compact_win2_attempt(win2_result)
+            if win2_result.get("ok") or not win2_result.get("fallback_recommended", False):
+                return format_tool_result(win2_result)
+
         from backend.tools.desk_automation.orchestrator.vision_loop import get_state, start
 
         start_result = start(goal=goal, max_steps=max_steps, exec_mode=exec_mode)
         if not start_result.get("ok"):
+            if win2_attempt:
+                start_result = dict(start_result)
+                start_result["win2_attempt"] = win2_attempt
             return json.dumps(start_result, ensure_ascii=False)
 
         deadline = time.time() + max(15, max_steps * 15)
@@ -875,7 +1090,358 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
             "error": state.get("error", ""),
             "last_actions": history[-3:],
         }
+        if win2_attempt:
+            summary["win2_attempt"] = win2_attempt
         return json.dumps(summary, ensure_ascii=False, indent=2)
+
+    def desktop_win2_status() -> str:
+        """Report Window2-style provider health and visible windows."""
+        from backend.tools.desk_automation.providers.win2_loop import format_tool_result, status
+
+        return format_tool_result(status())
+
+    def desktop_win2_observe(
+        hwnd: int = 0,
+        title: str = "",
+        include_ocr: bool = False,
+    ) -> str:
+        """Capture one target window and return structured observation."""
+        from backend.tools.desk_automation.providers.win2_loop import format_tool_result, observe
+
+        return format_tool_result(observe(hwnd=hwnd, title=title, include_ocr=include_ocr))
+
+    def desktop_win2_action(
+        hwnd: int,
+        action: str,
+        x: int = 0,
+        y: int = 0,
+        text: str = "",
+        key: str = "",
+        keys: list[str] | str | None = None,
+        scroll_delta: int = 0,
+        start_x: int = 0,
+        start_y: int = 0,
+        end_x: int = 0,
+        end_y: int = 0,
+    ) -> str:
+        """Run one Window2-style action against a target window."""
+        from backend.tools.desk_automation.providers.win2_loop import act as _win2_act, format_tool_result
+
+        return format_tool_result(
+            _win2_act(
+                hwnd=hwnd,
+                action=action,
+                x=x,
+                y=y,
+                text=text,
+                key=key,
+                keys=keys,
+                scroll_delta=scroll_delta,
+                start_x=start_x,
+                start_y=start_y,
+                end_x=end_x,
+                end_y=end_y,
+            )
+        )
+
+    def desktop_win2_task(
+        goal: str,
+        max_steps: int = 20,
+    ) -> str:
+        """Run a Window2-style observe-plan-act-verify loop."""
+        from backend.tools.desk_automation.providers.win2_loop import format_tool_result, run_task
+
+        return format_tool_result(run_task(goal=goal, max_steps=max_steps))
+
+    def _preview_bridge_json(kind: str, payload: dict[str, Any] | None = None, timeout: float = 12.0) -> str:
+        from backend.web.preview_bridge import request_preview_command
+
+        result = request_preview_command(kind, payload or {}, timeout=timeout)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def preview_browser_status() -> str:
+        """Report the Electron Preview bridge health."""
+        from backend.web.preview_bridge import preview_bridge_status
+
+        return json.dumps(preview_bridge_status(), ensure_ascii=False, indent=2)
+
+    def preview_browser_navigate(url: str = "", tab_id: str = "", timeout: int = 15) -> str:
+        """Navigate the right-rail Preview browser to a URL."""
+        return _preview_bridge_json("navigate", {"url": url, "tabId": tab_id}, timeout=timeout)
+
+    def preview_browser_observe(max_elements: int = 80, include_text: bool = True, timeout: int = 12) -> str:
+        """Observe the active right-rail Preview page as structured browser state."""
+        return _preview_bridge_json(
+            "observe",
+            {"maxElements": max_elements, "includeText": include_text},
+            timeout=timeout,
+        )
+
+    def preview_browser_action(
+        action: str,
+        element_id: str = "",
+        x: int = 0,
+        y: int = 0,
+        text: str = "",
+        key: str = "",
+        scroll_y: int = 0,
+        timeout: int = 12,
+    ) -> str:
+        """Perform one action inside the right-rail Preview browser."""
+        return _preview_bridge_json(
+            "action",
+            {
+                "action": action,
+                "elementId": element_id,
+                "x": x,
+                "y": y,
+                "text": text,
+                "key": key,
+                "scrollY": scroll_y,
+            },
+            timeout=timeout,
+        )
+
+    def preview_browser_screenshot(timeout: int = 12) -> str:
+        """Capture the right-rail Preview page and save it to a local PNG."""
+        import base64
+        import re
+
+        from backend.web.preview_bridge import request_preview_command
+
+        result = request_preview_command("screenshot", {}, timeout=timeout)
+        if not result.get("ok"):
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        data_url = str(result.get("dataUrl") or "")
+        match = re.match(r"^data:image/png;base64,(.+)$", data_url)
+        if not match:
+            result = dict(result)
+            result.pop("dataUrl", None)
+            result["ok"] = False
+            result["error"] = "preview screenshot did not return a PNG data URL"
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        png_bytes = base64.b64decode(match.group(1))
+        path = os.path.join(tempfile.gettempdir(), f"metis_preview_browser_{int(time.time() * 1000)}.png")
+        with open(path, "wb") as handle:
+            handle.write(png_bytes)
+        width, height = _png_dimensions(png_bytes)
+        compact = {
+            "ok": True,
+            "path": path,
+            "width": width or result.get("width", 0),
+            "height": height or result.get("height", 0),
+            "url": result.get("url", ""),
+            "title": result.get("title", ""),
+            "viewport": result.get("viewport", None),
+            "page_health": result.get("page_health", {}),
+            "screenshot_health": result.get("screenshot_health", {}),
+            "diagnostics": _compact_preview_diagnostics(result.get("diagnostics", {})),
+            "browser_activity": _compact_preview_browser_activity(result.get("browser_activity", {})),
+        }
+        return json.dumps(compact, ensure_ascii=False, indent=2)
+
+    def preview_browser_verify(
+        text_contains: str = "",
+        url_contains: str = "",
+        title_contains: str = "",
+        assertion: str = "",
+        button_text: str = "",
+        input_label: str = "",
+        visible_text: str = "",
+        not_visible_text: str = "",
+        require_button: bool = False,
+        require_button_clickable: bool = False,
+        require_input: bool = False,
+        require_input_editable: bool = False,
+        require_no_blank: bool = False,
+        require_no_console_errors: bool = False,
+        require_no_network_failures: bool = False,
+        require_screenshot_not_blank: bool = False,
+        timeout: int = 12,
+    ) -> str:
+        """Verify structured acceptance checks against the current Preview browser page."""
+        from backend.web.preview_bridge import request_preview_command
+
+        assertion_text = _preview_text(assertion)
+        if assertion_text:
+            if not button_text:
+                button_text = _extract_preview_natural_target(assertion_text, ["按钮", "button"])
+            if not input_label:
+                input_label = _extract_preview_natural_target(
+                    assertion_text,
+                    ["输入框", "输入栏", "文本框", "input", "field", "textbox"],
+                )
+            if _preview_assertion_has_any(assertion_text, ["按钮", "button"]):
+                require_button = True
+            if _preview_assertion_has_any(assertion_text, ["可点击", "能点击", "clickable", "can click"]):
+                require_button_clickable = True
+            if _preview_assertion_has_any(assertion_text, ["输入框", "输入栏", "文本框", "input", "field", "textbox"]):
+                require_input = True
+            if _preview_assertion_has_any(assertion_text, ["可输入", "能输入", "可编辑", "editable", "typeable", "can type"]):
+                require_input_editable = True
+            if _preview_assertion_has_any(assertion_text, ["白屏", "空白页", "blank page", "not blank", "no blank"]):
+                require_no_blank = True
+            if _preview_assertion_has_any(assertion_text, ["console", "控制台", "报错", "错误"]) and _preview_assertion_has_any(
+                assertion_text,
+                ["没有", "无", "no", "not", "error", "错误", "报错"],
+            ):
+                require_no_console_errors = True
+            if _preview_assertion_has_any(assertion_text, ["network", "请求失败", "failed request"]) and _preview_assertion_has_any(
+                assertion_text,
+                ["没有", "无", "no", "not"],
+            ):
+                require_no_network_failures = True
+            if _preview_assertion_has_any(assertion_text, ["截图", "screenshot"]) and _preview_assertion_has_any(
+                assertion_text,
+                ["纯白", "纯黑", "空白", "blank", "white", "black"],
+            ):
+                require_screenshot_not_blank = True
+
+        if button_text:
+            require_button = True
+        if require_button_clickable:
+            require_button = True
+        if input_label:
+            require_input = True
+        if require_input_editable:
+            require_input = True
+
+        observed = request_preview_command(
+            "observe",
+            {"maxElements": 80, "includeText": True},
+            timeout=timeout,
+        )
+        if not observed.get("ok"):
+            return json.dumps(observed, ensure_ascii=False, indent=2)
+        haystack = str(observed.get("text") or "")
+        url = str(observed.get("url") or "")
+        title = str(observed.get("title") or "")
+        diagnostics = observed.get("diagnostics", {})
+        page_health = observed.get("page_health", {})
+        dom_summary = observed.get("dom_summary", {})
+        elements = [element for element in (observed.get("elements") or []) if isinstance(element, dict)]
+        checks: Dict[str, bool] = {}
+        check_details: Dict[str, Any] = {}
+
+        def add_check(name: str, ok: bool, detail: Dict[str, Any] | None = None) -> None:
+            checks[name] = bool(ok)
+            if detail is not None:
+                check_details[name] = detail
+
+        add_check("text_contains", _preview_contains(haystack, text_contains), {"query": text_contains} if text_contains else None)
+        add_check("url_contains", _preview_contains(url, url_contains), {"query": url_contains, "url": url} if url_contains else None)
+        add_check("title_contains", _preview_contains(title, title_contains), {"query": title_contains, "title": title} if title_contains else None)
+
+        if visible_text:
+            visible_element = _find_preview_element(elements, visible_text)
+            add_check(
+                "visible_text",
+                _preview_contains(haystack, visible_text) or visible_element is not None,
+                {"query": visible_text, "matched_element": _compact_preview_element(visible_element)},
+            )
+
+        if not_visible_text:
+            hidden_match = _find_preview_element(elements, not_visible_text)
+            add_check(
+                "not_visible_text",
+                not _preview_contains(haystack, not_visible_text) and hidden_match is None,
+                {"query": not_visible_text, "matched_visible_element": _compact_preview_element(hidden_match)},
+            )
+
+        button = _find_preview_element(elements, button_text, _preview_element_is_button)
+        if require_button:
+            add_check(
+                "button_visible",
+                button is not None,
+                {"query": button_text, "matched_element": _compact_preview_element(button)},
+            )
+        if require_button_clickable:
+            add_check(
+                "button_clickable",
+                button is not None and _preview_element_clickable(button),
+                {"query": button_text, "matched_element": _compact_preview_element(button)},
+            )
+
+        input_element = _find_preview_element(elements, input_label, _preview_element_is_input)
+        if require_input:
+            add_check(
+                "input_visible",
+                input_element is not None,
+                {"query": input_label, "matched_element": _compact_preview_element(input_element)},
+            )
+        if require_input_editable:
+            add_check(
+                "input_editable",
+                input_element is not None and _preview_element_editable(input_element),
+                {"query": input_label, "matched_element": _compact_preview_element(input_element)},
+            )
+
+        if require_no_blank:
+            reasons = page_health.get("reasons", []) if isinstance(page_health, dict) else []
+            blank = bool(page_health.get("blank")) if isinstance(page_health, dict) else False
+            add_check(
+                "page_not_blank",
+                not blank,
+                {"page_health": page_health, "blank_reasons": reasons},
+            )
+
+        if require_no_console_errors:
+            counts = diagnostics.get("counts", {}) if isinstance(diagnostics, dict) else {}
+            add_check(
+                "no_console_errors",
+                not _preview_diagnostics_has_console_errors(diagnostics if isinstance(diagnostics, dict) else {}),
+                {"counts": counts},
+            )
+
+        if require_no_network_failures:
+            counts = diagnostics.get("counts", {}) if isinstance(diagnostics, dict) else {}
+            add_check(
+                "no_network_failures",
+                int(counts.get("network_failed") or 0) == 0,
+                {"counts": counts},
+            )
+
+        screenshot_summary: Dict[str, Any] = {}
+        if require_screenshot_not_blank:
+            screenshot_result = request_preview_command("screenshot", {}, timeout=timeout)
+            screenshot_health = screenshot_result.get("screenshot_health", {}) if isinstance(screenshot_result, dict) else {}
+            screenshot_summary = {
+                "ok": bool(screenshot_result.get("ok")) if isinstance(screenshot_result, dict) else False,
+                "url": screenshot_result.get("url", "") if isinstance(screenshot_result, dict) else "",
+                "title": screenshot_result.get("title", "") if isinstance(screenshot_result, dict) else "",
+                "width": screenshot_result.get("width", 0) if isinstance(screenshot_result, dict) else 0,
+                "height": screenshot_result.get("height", 0) if isinstance(screenshot_result, dict) else 0,
+                "page_health": screenshot_result.get("page_health", {}) if isinstance(screenshot_result, dict) else {},
+                "screenshot_health": screenshot_health,
+            }
+            add_check(
+                "screenshot_not_blank",
+                bool(screenshot_result.get("ok")) and isinstance(screenshot_health, dict) and not bool(screenshot_health.get("appears_blank")),
+                {"screenshot_health": screenshot_health},
+            )
+
+        return json.dumps(
+            {
+                "ok": all(checks.values()),
+                "checks": checks,
+                "check_details": check_details,
+                "assertion": assertion_text,
+                "url": url,
+                "title": title,
+                "text_preview": haystack[:1000],
+                "matched_elements": {
+                    "button": _compact_preview_element(button),
+                    "input": _compact_preview_element(input_element),
+                },
+                "dom_summary": dom_summary,
+                "page_health": page_health,
+                "screenshot": screenshot_summary,
+                "diagnostics": _compact_preview_diagnostics(diagnostics),
+                "browser_activity": _compact_preview_browser_activity(observed.get("browser_activity", {})),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     def desktop_inventory(query: str = "all") -> str:
         results: Dict[str, Any] = {}
@@ -1079,6 +1645,274 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
             },
             execute_fn=desktop_vision_task,
             source="desktop",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="desktop_win2_status",
+            description=(
+                "Read-only health check for the Window2-style desktop provider. "
+                "Lists visible windows and launch shortcuts without taking actions."
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_fn=desktop_win2_status,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="desktop_win2_observe",
+            description=(
+                "Observe a specific desktop window using the Window2-style provider. "
+                "Returns window metadata and a saved screenshot path. Coordinates for "
+                "later desktop_win2_action calls are relative to this screenshot."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "hwnd": {"type": "integer", "description": "Window handle."},
+                    "title": {"type": "string", "description": "Title substring if hwnd is not known."},
+                    "include_ocr": {"type": "boolean", "description": "Best-effort OCR text extraction."},
+                },
+                "required": [],
+            },
+            execute_fn=desktop_win2_observe,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="desktop_win2_action",
+            description=(
+                "Perform a single Window2-style action inside a specific window. "
+                "Use window-relative coordinates from desktop_win2_observe. "
+                "Supported actions: activate, click, double_click, right_click, "
+                "type, key, hotkey, scroll, drag, move, wait."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "hwnd": {"type": "integer", "description": "Window handle."},
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "activate",
+                            "click",
+                            "double_click",
+                            "right_click",
+                            "type",
+                            "key",
+                            "hotkey",
+                            "scroll",
+                            "drag",
+                            "move",
+                            "wait",
+                        ],
+                    },
+                    "x": {"type": "integer", "description": "Window-relative X."},
+                    "y": {"type": "integer", "description": "Window-relative Y."},
+                    "text": {"type": "string", "description": "Text to type."},
+                    "key": {"type": "string", "description": "Key name to press."},
+                    "keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Keys for hotkey actions, e.g. ['ctrl', 'l'].",
+                    },
+                    "scroll_delta": {"type": "integer", "description": "Scroll amount. Negative = down."},
+                    "start_x": {"type": "integer", "description": "Drag start X, window-relative."},
+                    "start_y": {"type": "integer", "description": "Drag start Y, window-relative."},
+                    "end_x": {"type": "integer", "description": "Drag end X, window-relative."},
+                    "end_y": {"type": "integer", "description": "Drag end Y, window-relative."},
+                },
+                "required": ["hwnd", "action"],
+            },
+            execute_fn=desktop_win2_action,
+            source="desktop",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="desktop_win2_task",
+            description=(
+                "Preferred high-level Computer Use tool for desktop apps. Runs a "
+                "Window2-style observe -> plan -> act -> verify loop with window "
+                "capture and window-relative actions, then falls back to legacy "
+                "vision when the target window cannot be resolved."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string", "description": "Desktop task goal."},
+                    "max_steps": {"type": "integer", "description": "Maximum action steps."},
+                },
+                "required": ["goal"],
+            },
+            execute_fn=desktop_win2_task,
+            source="desktop",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="preview_browser_status",
+            description=(
+                "Read-only health check for the right-rail Preview browser bridge. "
+                "Use before preview_browser_* tools if Preview actions time out."
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_fn=preview_browser_status,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="preview_browser_navigate",
+            description=(
+                "Navigate the right-rail Preview browser. This uses the built-in "
+                "Preview card, not an external browser. Local URLs are auto-resolved: "
+                "bare localhost/current page requests can use the current Preview URL, "
+                "METIS_DESKTOP_DEV_SERVER, running dev-server status, or common ports "
+                "5173/5174/3000/4200/8000/8080 when the requested port is missing or down."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to open in Preview. May be blank/current, bare localhost, localhost:PORT, or http(s)."},
+                    "tab_id": {"type": "string", "description": "Optional Preview tab id."},
+                    "timeout": {"type": "integer", "description": "Bridge timeout in seconds."},
+                },
+                "required": [],
+            },
+            execute_fn=preview_browser_navigate,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="preview_browser_observe",
+            description=(
+                "Observe the current right-rail Preview page. Returns URL, title, "
+                "viewport, visible text, and interactable elements with element_id "
+                "and coordinates for preview_browser_action. Also returns diagnostics "
+                "for console warnings/errors, JavaScript exceptions, failed network requests, "
+                "page load failures, DOM summary, and page_health for blank-page debugging."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "max_elements": {"type": "integer", "description": "Max interactable elements to return."},
+                    "include_text": {"type": "boolean", "description": "Include visible page text."},
+                    "timeout": {"type": "integer", "description": "Bridge timeout in seconds."},
+                },
+                "required": [],
+            },
+            execute_fn=preview_browser_observe,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="preview_browser_action",
+            description=(
+                "Perform one action inside the right-rail Preview browser, then observe "
+                "again to verify. Supported actions: click, double_click, type, key, "
+                "scroll, wait. Use element_id from preview_browser_observe when possible, "
+                "or x/y viewport coordinates. The Electron execution layer hard-blocks "
+                "risky webpage actions (login/OAuth, submit, upload, send, purchase, "
+                "delete, payment, password/file inputs) and asks the user to confirm "
+                "before any input event is sent."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["click", "double_click", "type", "key", "scroll", "wait"],
+                    },
+                    "element_id": {"type": "string", "description": "Element id from preview_browser_observe."},
+                    "x": {"type": "integer", "description": "Preview viewport X coordinate."},
+                    "y": {"type": "integer", "description": "Preview viewport Y coordinate."},
+                    "text": {"type": "string", "description": "Text for type action."},
+                    "key": {"type": "string", "description": "Key name for key action, e.g. Enter, Tab, Escape."},
+                    "scroll_y": {"type": "integer", "description": "Scroll amount in CSS pixels; positive scrolls down."},
+                    "timeout": {"type": "integer", "description": "Bridge timeout in seconds."},
+                },
+                "required": ["action"],
+            },
+            execute_fn=preview_browser_action,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="preview_browser_screenshot",
+            description=(
+                "Capture the current right-rail Preview page and save a PNG for visual "
+                "verification. The result includes URL, title, viewport, page_health, "
+                "screenshot_health for pure white/black detection, and compact diagnostics "
+                "for failed requests and page errors."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "timeout": {"type": "integer", "description": "Bridge timeout in seconds."},
+                },
+                "required": [],
+            },
+            execute_fn=preview_browser_screenshot,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="preview_browser_verify",
+            description=(
+                "Browser Verifier for the current Preview page after a browser action. "
+                "Checks URL/title/text, button visibility/clickability, input editability, "
+                "visible or hidden text, no blank page, no console/network errors, and "
+                "screenshot not pure white/black. Supports one-sentence assertions such as "
+                "'确认登录按钮可见并可点击'. Returns DOM summary plus diagnostics."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text_contains": {"type": "string", "description": "Visible text that should be present."},
+                    "url_contains": {"type": "string", "description": "URL substring that should be present."},
+                    "title_contains": {"type": "string", "description": "Title substring that should be present."},
+                    "assertion": {"type": "string", "description": "One-sentence acceptance assertion, e.g. 确认登录按钮可见并可点击."},
+                    "button_text": {"type": "string", "description": "Button label/name/aria text that should be visible."},
+                    "input_label": {"type": "string", "description": "Input label/placeholder/name text that should be visible or editable."},
+                    "visible_text": {"type": "string", "description": "Text or element label that should be visible."},
+                    "not_visible_text": {"type": "string", "description": "Text or element label that should not be visible."},
+                    "require_button": {"type": "boolean", "description": "Require a matching visible button."},
+                    "require_button_clickable": {"type": "boolean", "description": "Require the matching button to be clickable/not disabled."},
+                    "require_input": {"type": "boolean", "description": "Require a matching visible input/control."},
+                    "require_input_editable": {"type": "boolean", "description": "Require the matching input/control to accept typing."},
+                    "require_no_blank": {"type": "boolean", "description": "Require page_health.blank to be false."},
+                    "require_no_console_errors": {"type": "boolean", "description": "Require console error and JS exception counts to be zero."},
+                    "require_no_network_failures": {"type": "boolean", "description": "Require failed network request count to be zero."},
+                    "require_screenshot_not_blank": {"type": "boolean", "description": "Capture a screenshot and require it not to be pure white/black/flat."},
+                    "timeout": {"type": "integer", "description": "Bridge timeout in seconds."},
+                },
+                "required": [],
+            },
+            execute_fn=preview_browser_verify,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
         )
     )
     registry.register(

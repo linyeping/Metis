@@ -62,3 +62,4 @@ def test_expert_config_inherits_provider_runtime(monkeypatch):
     assert cfg.llm_base_url == "https://relay.example.com/v1"
     assert cfg.llm_api_key == "sk-test-123"
     assert cfg.llm_model == "gpt-5.5"
+    assert cfg.enabled_tools == ["desktop_vision_task"]

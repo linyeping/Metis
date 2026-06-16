@@ -75,6 +75,13 @@ type ToolActivityContextValue = {
   expandSignal: number;
 };
 
+type BrowserActivityCardSummary = {
+  blocked: number;
+  errors: number;
+  last: string;
+  summary: string;
+};
+
 const ToolActivityContext = createContext<ToolActivityContextValue>({ collapseSignal: 0, expandSignal: 0 });
 
 // ---------------------------------------------------------------------------
@@ -176,6 +183,7 @@ export function ToolCard({
   );
   const fileChangePreview = useMemo(() => buildFileChangePreview(toolName, args, result), [args, result, toolName]);
   const fileChangeCounts = useMemo(() => (fileChangePreview ? countDiffLines(fileChangePreview) : null), [fileChangePreview]);
+  const browserActivity = useMemo(() => browserActivitySummaryFromResult(result, t), [result, t]);
   const autoOpenedDiffRef = useRef('');
   const autoOpenedWebRef = useRef('');
   const elapsed = elapsedText(metisStartedAt, metisFinishedAt);
@@ -243,6 +251,13 @@ export function ToolCard({
           </span>
         )}
       </p>
+      {browserActivity && (
+        <div className="tool-browser-activity-summary" data-blocked={browserActivity.blocked > 0} data-errors={browserActivity.errors > 0}>
+          <Activity size={12} />
+          <span>{browserActivity.summary}</span>
+          {browserActivity.last && <code>{browserActivity.last}</code>}
+        </div>
+      )}
       <div className="tool-card-actions">
         <button
           className="tool-card-open"
@@ -332,6 +347,52 @@ function hashToolCardSeed(value: string): string {
     hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
   }
   return hash.toString(16);
+}
+
+function browserActivitySummaryFromResult(result: unknown, t: (text: string) => string): BrowserActivityCardSummary | null {
+  const payload = resultObject(result);
+  const activity = payload?.browser_activity || payload?.browserActivity;
+  if (!activity || typeof activity !== 'object') return null;
+  const row = activity as { counts?: Record<string, unknown>; items?: unknown[] };
+  const counts = row.counts || {};
+  const items = Array.isArray(row.items) ? row.items : [];
+  const lastItem = items.length > 0 && typeof items[items.length - 1] === 'object'
+    ? (items[items.length - 1] as Record<string, unknown>)
+    : null;
+  const navigate = numberField(counts.navigate);
+  const observe = numberField(counts.observe);
+  const action = numberField(counts.action);
+  const screenshot = numberField(counts.screenshot);
+  const blocked = numberField(counts.blocked);
+  const errors = numberField(counts.errors);
+  const parts = [
+    navigate > 0 ? `${navigate} ${t('导航')}` : '',
+    observe > 0 ? `${observe} ${t('观察')}` : '',
+    action > 0 ? `${action} ${t('动作')}` : '',
+    screenshot > 0 ? `${screenshot} ${t('截图')}` : '',
+  ].filter(Boolean);
+  return {
+    blocked,
+    errors,
+    last: String(lastItem?.summary || lastItem?.error || '').slice(0, 160),
+    summary: `${t('浏览器活动')} · ${parts.length > 0 ? parts.join(' · ') : t('暂无记录')}`,
+  };
+}
+
+function resultObject(result: unknown): Record<string, unknown> | null {
+  if (result && typeof result === 'object') return result as Record<string, unknown>;
+  if (typeof result !== 'string') return null;
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function numberField(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 export function toolPartValue(value: unknown): ToolActivityPart | null {

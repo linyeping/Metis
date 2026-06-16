@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('metis', {
   previewCommand: command => ipcRenderer.invoke('metis:preview-command', command),
   previewSetZoom: zoom => ipcRenderer.invoke('metis:preview-set-zoom', zoom),
   previewCapture: () => ipcRenderer.invoke('metis:preview-capture'),
+  previewObserve: payload => ipcRenderer.invoke('metis:preview-observe', payload),
+  previewAction: payload => ipcRenderer.invoke('metis:preview-action', payload),
+  previewActivity: payload => ipcRenderer.invoke('metis:preview-activity', payload),
   terminalRun: payload => ipcRenderer.invoke('metis:terminal-run', payload),
   terminalCreate: payload => ipcRenderer.invoke('metis:terminal-create', payload),
   terminalInput: (sessionId, data) => ipcRenderer.invoke('metis:terminal-input', sessionId, data),
@@ -43,6 +46,9 @@ contextBridge.exposeInMainWorld('metis', {
   safeStorageAvailable: () => ipcRenderer.invoke('metis:safe-storage-available'),
   safeStorageEncrypt: plaintext => ipcRenderer.invoke('metis:safe-storage-encrypt', plaintext),
   safeStorageDecrypt: encrypted => ipcRenderer.invoke('metis:safe-storage-decrypt', encrypted),
+  connectorAuthorize: (service, options) => ipcRenderer.invoke('metis:connector-authorize', service, options),
+  connectorStatus: () => ipcRenderer.invoke('metis:connector-status'),
+  connectorDisconnect: service => ipcRenderer.invoke('metis:connector-disconnect', service),
   getPathForFile: file => {
     try {
       return webUtils.getPathForFile(file) || ''

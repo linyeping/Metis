@@ -5,7 +5,7 @@
 
 核心约束：
 - 子智能体不能再调子智能体（防递归 token 爆炸）
-- 硬限制 ``max_turns=5``
+- 每类专家有独立 ``max_turns``，桌面任务需要更多 observe/act/verify 轮次
 - 使用与主循环相同的 LLM 配置
 
 预定义专家：
@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
-_EXPERT_MAX_TURNS = 5
+_DEFAULT_EXPERT_MAX_TURNS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -63,10 +63,17 @@ _EXPERT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "You are a desktop automation expert. Your job is to interact with "
             "desktop windows and applications using the available tools.\n\n"
             "Rules:\n"
+            "- Use the Window2-style tools first for desktop apps: "
+            "desktop_win2_status -> desktop_win2_observe -> desktop_win2_action, "
+            "or desktop_win2_task for an end-to-end observe-plan-act-verify loop. "
+            "Window2 coordinates are relative to the captured target window, not "
+            "the full desktop.\n"
+            "- After every meaningful action, observe the target window again and "
+            "verify whether the goal advanced before continuing.\n"
             "- For any multi-step GUI task (open app, search, navigate, fill a form), "
-            "use desktop_vision_task first: it detects elements and maps coordinates "
-            "reliably. Only fall back to desktop_screenshot + desktop_action for a "
-            "single precise click/key when the vision task is not enough.\n"
+            "prefer desktop_win2_task. Fall back to desktop_vision_task only when "
+            "Window2 cannot resolve/capture the target window or the UI is a game/canvas "
+            "that needs full-screen vision.\n"
             "- When you do use desktop_action, take coordinates directly from the "
             "screenshot you were shown; they are auto-mapped to the real screen.\n"
             "- Always list windows before acting on them.\n"
@@ -74,10 +81,13 @@ _EXPERT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "- Report clear success/failure status.\n"
         ),
         "tool_whitelist": {
+            "desktop_win2_status", "desktop_win2_observe", "desktop_win2_action",
+            "desktop_win2_task",
             "desktop_screenshot", "desktop_action", "desktop_vision_task",
             "desktop_inventory", "desktop_window_list",
             "desktop_window_capture", "desktop_window_action",
         },
+        "max_turns": 24,
         "parameters": {
             "type": "object",
             "properties": {
@@ -128,6 +138,7 @@ def _create_expert_executor(
     expert_name: str,
     system_prompt: str,
     tool_whitelist: set[str],
+    max_turns: int = _DEFAULT_EXPERT_MAX_TURNS,
 ) -> Callable[..., str]:
     """创建一个专家工具的执行函数。"""
 
@@ -141,7 +152,7 @@ def _create_expert_executor(
         # 构建限制工具集的配置
         config = AgentConfig(
             system_prompt=system_prompt,
-            max_turns=_EXPERT_MAX_TURNS,
+            max_turns=max_turns,
             execution_mode="execute",
             llm_backend=_get_current_backend(),
             # FABLEADV-22: 子智能体必须继承主聊天的 base_url/api_key，否则
@@ -150,6 +161,7 @@ def _create_expert_executor(
             llm_base_url=_get_current_base_url(),
             llm_api_key=_get_current_api_key(),
             llm_model=_get_current_model(),
+            enabled_tools=sorted(tool_whitelist),
         )
 
         messages = [{"role": "user", "content": goal or kwargs.get("task", "No goal specified")}]
@@ -236,8 +248,9 @@ def register_expert_tools(registry: Any) -> int:
     for expert_name, definition in _EXPERT_DEFINITIONS.items():
         tool_whitelist = definition["tool_whitelist"]
         system_prompt = definition["system_prompt"]
+        max_turns = int(definition.get("max_turns") or _DEFAULT_EXPERT_MAX_TURNS)
 
-        executor = _create_expert_executor(expert_name, system_prompt, tool_whitelist)
+        executor = _create_expert_executor(expert_name, system_prompt, tool_whitelist, max_turns=max_turns)
 
         try:
             registry.register(

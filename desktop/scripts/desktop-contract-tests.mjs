@@ -24,6 +24,7 @@ function readSettingsSources() {
     'src/components/settings/tabs/NetworkTab.tsx',
     'src/components/settings/tabs/TerminalTab.tsx',
     'src/components/settings/tabs/ToolsTab.tsx',
+    'src/components/settings/tabs/ConnectorsTab.tsx',
     'src/components/settings/tabs/DesktopTab.tsx',
     'src/components/settings/tabs/AboutTab.tsx',
   ].map(read).join('\n');
@@ -47,6 +48,30 @@ test('package exposes core verification scripts', () => {
   assert.ok(pkg.scripts['smoke:desktop']);
   assert.ok(pkg.scripts['perf:desktop']);
   assert.ok(pkg.scripts['test:contracts']);
+});
+
+test('FABLEADV-47 connector OAuth stores tokens safely', () => {
+  const oauth = read('electron/oauth.cjs');
+  const main = read('electron/main.cjs');
+  const preload = read('electron/preload.cjs');
+  const globals = read('src/global.d.ts');
+  const settings = readSettingsSources();
+
+  assert.match(oauth, /safeStorage\.encryptString/);
+  assert.match(oauth, /metis:connector-authorize/);
+  assert.match(oauth, /metis:connector-status/);
+  assert.match(oauth, /metis:connector-disconnect/);
+  assert.match(oauth, /GITHUB_PERSONAL_ACCESS_TOKEN/);
+  assert.match(oauth, /GOOGLE_OAUTH_ACCESS_TOKEN/);
+  assert.match(oauth, /login\/device\/code/);
+  assert.match(oauth, /code_challenge_method', 'S256'/);
+  assert.doesNotMatch(oauth, /console\.log\(.*token/i);
+  assert.match(main, /registerConnectorIpc/);
+  assert.match(preload, /connectorAuthorize/);
+  assert.match(preload, /connectorStatus/);
+  assert.match(preload, /connectorDisconnect/);
+  assert.match(globals, /connectorAuthorize/);
+  assert.match(settings, /ConnectorsTab/);
 });
 
 test('FABLEADV-11 build hygiene keeps Vite and backend packaging scoped', () => {
@@ -281,6 +306,114 @@ test('right rail browser workbench keeps navigation and zoom wired', () => {
   assert.match(doc, /NEW-51/);
 });
 
+test('FABLEADV-50 preview browser automation and safety gate stay wired', () => {
+  const main = read('electron/main.cjs');
+  const preload = read('electron/preload.cjs');
+  const globals = read('src/global.d.ts');
+  const rightRail = read('src/components/rightrail/RightRail.tsx');
+  const toolCard = read('src/components/chat/ToolCallBlock.tsx');
+  const types = read('src/lib/types.ts');
+  const css = read('src/index.css');
+  const bridge = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'preview_bridge.py'), 'utf8');
+  const toolRegistry = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'tool_registry.py'), 'utf8');
+  const toolProfiles = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'tool_profiles.py'), 'utf8');
+  const skillLoader = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'skill_loader.py'), 'utf8');
+  const browserSkill = fs.readFileSync(
+    path.resolve(root, '..', 'backend', 'resources', 'builtin_skills', 'browser', 'SKILL.md'),
+    'utf8',
+  );
+  const tests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_preview_browser_bridge.py'), 'utf8');
+  const doc = fs.readFileSync(
+    path.resolve(root, '..', 'docs', 'dev-log', 'FABLEADV-50-Preview-Browser-MVP.md'),
+    'utf8',
+  );
+
+  assert.match(main, /function observePreviewPage/);
+  assert.match(main, /function performPreviewAction/);
+  assert.match(main, /PREVIEW_LOCAL_PORT_CANDIDATES = \[5173,\s*5174,\s*3000,\s*4200,\s*8000,\s*8080\]/);
+  assert.match(main, /function resolvePreviewNavigationUrl/);
+  assert.match(main, /METIS_DESKTOP_DEV_SERVER/);
+  assert.match(main, /function isPreviewCurrentAlias/);
+  assert.match(main, /current-preview-url/);
+  assert.match(main, /fallback-dead-local-port/);
+  assert.match(main, /function previewDiagnosticsPayload/);
+  assert.match(main, /function buildPreviewPageHealth/);
+  assert.match(main, /function installPreviewPageDiagnosticsHooks/);
+  assert.match(main, /webContents\.on\('console-message',\s*recordPreviewConsoleMessage\)/);
+  assert.match(main, /webRequest\.onErrorOccurred/);
+  assert.match(main, /window\.addEventListener\('unhandledrejection'/);
+  assert.match(main, /dom_summary/);
+  assert.match(main, /page_health/);
+  assert.match(main, /analyzePreviewImageHealth/);
+  assert.match(main, /screenshot_health/);
+  assert.match(main, /async function loadPreviewUrl/);
+  assert.match(main, /await view\.webContents\.loadURL\(value\)/);
+  assert.match(main, /previewLoadedUrls\.delete\(previewTabId\)/);
+  assert.match(main, /PREVIEW_RISK_PATTERN/);
+  assert.match(main, /confirmPreviewRisk/);
+  assert.match(main, /dialog\.showMessageBox/);
+  assert.match(main, /recordPreviewAction/);
+  assert.match(main, /function previewActivityLabel/);
+  assert.match(main, /function previewActivityPayload/);
+  assert.match(main, /kind === 'activity'/);
+  assert.match(main, /metis:preview-observe/);
+  assert.match(main, /metis:preview-action/);
+  assert.match(main, /metis:preview-activity/);
+  assert.match(main, /browser_activity/);
+  assert.match(preload, /previewObserve/);
+  assert.match(preload, /previewAction/);
+  assert.match(preload, /previewActivity/);
+  assert.match(globals, /previewObserve/);
+  assert.match(globals, /previewAction/);
+  assert.match(globals, /previewActivity/);
+  assert.match(globals, /BrowserActivityPayload/);
+  assert.match(types, /interface BrowserActivityItem/);
+  assert.match(types, /interface BrowserActivityPayload/);
+  assert.match(rightRail, /BrowserActivityPanel/);
+  assert.match(rightRail, /previewActivity\(\{ limit: 24 \}\)/);
+  assert.match(rightRail, /browser-activity-panel/);
+  assert.match(toolCard, /browserActivitySummaryFromResult/);
+  assert.match(toolCard, /tool-browser-activity-summary/);
+  assert.match(css, /\.browser-activity-panel/);
+  assert.match(css, /\.tool-browser-activity-summary/);
+  assert.match(bridge, /preview_bridge_bp/);
+  assert.match(bridge, /\/api\/preview-browser\/next/);
+  assert.match(bridge, /\/api\/preview-browser\/result/);
+  assert.match(toolRegistry, /preview_browser_observe/);
+  assert.match(toolRegistry, /preview_browser_action/);
+  assert.match(toolRegistry, /bare localhost\/current page requests/);
+  assert.match(toolRegistry, /console warnings\/errors/);
+  assert.match(toolRegistry, /failed network\s+requests/);
+  assert.match(toolRegistry, /button visibility\/clickability/);
+  assert.match(toolRegistry, /require_screenshot_not_blank/);
+  assert.match(toolRegistry, /确认登录按钮可见并可点击/);
+  assert.match(toolRegistry, /hard-blocks/);
+  assert.match(toolRegistry, /_compact_preview_browser_activity/);
+  assert.match(toolRegistry, /browser_activity/);
+  assert.match(toolProfiles, /preview_browser_observe/);
+  assert.match(toolProfiles, /browse_and_extract/);
+  assert.match(skillLoader, /BUILTIN_SKILLS_VERSION = 6/);
+  assert.match(skillLoader, /Allowed tools:/);
+  assert.match(browserSkill, /Browser Router/);
+  assert.match(browserSkill, /preview_browser_observe/);
+  assert.match(browserSkill, /preview_browser_action/);
+  assert.match(browserSkill, /localhost:5173/);
+  assert.match(browserSkill, /diagnostics/);
+  assert.match(browserSkill, /page_health/);
+  assert.match(browserSkill, /一句话验收/);
+  assert.match(browserSkill, /screenshot_health/);
+  assert.match(browserSkill, /browse_and_extract/);
+  assert.match(tests, /test_preview_bridge_round_trips_command_result/);
+  assert.match(tests, /test_preview_browser_verify_supports_browser_verifier/);
+  assert.match(doc, /Phase 2/);
+  assert.match(doc, /Phase 3/);
+  assert.match(doc, /Phase 5/);
+  assert.match(doc, /Phase 7/);
+  assert.match(doc, /Phase 8/);
+  assert.match(doc, /Phase 9/);
+  assert.match(doc, /高风险动作确认门禁/);
+});
+
 test('NEW-82 agent activity and compact tool calls stay wired', () => {
   const uiStore = read('src/store/uiStore.ts');
   const thread = read('src/components/chat/MetisThread.tsx');
@@ -504,7 +637,7 @@ test('NEW-85 real provider and backend session routing stay wired', () => {
   assert.match(realBackend, /def _save_session_history/);
   assert.match(realBackend, /run_history = list\(history if history is not None else messages\)/);
   assert.match(realBackend, /model_context = _model_context_with_skill_invocation\(history, compact_state, workspace_root\)/);
-  assert.match(realBackend, /_stream_agent_response\(model_context, config, session_id=session_id, history=history, mode=mode(?:, checkpoint=checkpoint)?\)/);
+  assert.match(realBackend, /_stream_agent_response\([\s\S]*model_context[\s\S]*session_id=session_id[\s\S]*history=history[\s\S]*compact_state=compact_state[\s\S]*mode=mode[\s\S]*checkpoint=checkpoint/);
   assert.match(flaskSmoke, /test_chat_sse_honors_request_session_id_without_polluting_active_session/);
   assert.match(flaskSmoke, /session_id=target\.id/);
   assert.match(doc, /Real Provider And Session Stability/);
@@ -1354,7 +1487,7 @@ test('NEW-67 context window quota bar stays wired', () => {
   assert.match(helper, /deepseek-v4-flash/);
   assert.match(helper, /contextWindowLevel/);
   assert.match(component, /context-window-card/);
-  assert.match(component, /Context window/);
+  assert.match(component, /上下文窗口|Context window/);
   assert.match(sidebar, /ContextWindowBar/);
   assert.match(app, /<Sidebar model=\{settings\?\.model/);
   assert.match(css, /\.context-window-card/);
@@ -2205,6 +2338,11 @@ test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
   const launcher = read('electron/backend.cjs');
   const api = read('src/lib/api.ts');
   const types = read('src/lib/types.ts');
+  const browserAgent = fs.readFileSync(path.resolve(root, '..', 'backend', 'tools', 'browser_automation', 'browser_agent.py'), 'utf8');
+  const browserTests = fs.readFileSync(
+    path.resolve(root, '..', 'backend', 'tests', 'test_new_116_computer_browser_python_discovery.py'),
+    'utf8',
+  );
   const backendPyproject = fs.readFileSync(path.resolve(root, '..', 'backend', 'pyproject.toml'), 'utf8');
   const new116 = fs.readFileSync(
     path.resolve(root, '..', 'docs', 'dev-log', 'NEW-116-Computer-Use-Browser-Use-And-Python-Discovery.md'),
@@ -2223,6 +2361,13 @@ test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
   assert.match(types, /visionProtocol:\s*string/);
   assert.match(api, /vision_protocol \?\? row\.visionProtocol/);
   assert.match(backendPyproject, /browser-use>=0\.13/);
+  assert.match(browserAgent, /browser_use\.llm\.openai\.chat/);
+  assert.match(browserAgent, /BrowserLLMConfig/);
+  assert.match(browserAgent, /api_key_encrypted/);
+  assert.match(browserAgent, /_format_browser_failure/);
+  assert.match(browserAgent, /object\.__setattr__\(llm,\s*"provider"/);
+  assert.match(browserTests, /test_fableadv_50_browser_use_native_openai_compatible_llm/);
+  assert.match(browserTests, /test_fableadv_50_browser_use_errors_redact_secrets/);
   assert.match(new116, /Status:\s*Completed/);
   assert.match(new120, /Status:\s*Completed/);
 });
@@ -2407,4 +2552,3 @@ test('FABLEADV-15 provider probe and FABLEADV-17 rewind stay wired', () => {
   assert.match(uiStore, /refreshWorkspaceView/);
   assert.match(css, /\.user-rewind-button/);
 });
-

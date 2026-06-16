@@ -1,4 +1,4 @@
-import type { AgentEventKind, ChatStreamEvent, ChatSubagentEvent, ChatTodoItem, ChatTokenUsage, CompactStatusPayload, RuntimeStatus } from './types';
+import type { AgentEventKind, ChatStreamEvent, ChatSubagentEvent, ChatTodoItem, ChatTokenUsage, CompactStatusPayload, ContextLedger, RuntimeStatus } from './types';
 
 interface NormalizedError {
   code: string;
@@ -33,6 +33,7 @@ export interface NormalizedChatEvent {
   requestId: string;
   error: NormalizedError;
   usage: ChatTokenUsage | null;
+  contextLedger: ContextLedger | null;
   runtimeStatus: RuntimeStatus | null;
   compactStatus: CompactStatusPayload | null;
   memory: NormalizedMemory | null;
@@ -66,6 +67,7 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
   const payload = recordValue(event.payload);
   const kind = eventKind(event);
   const usagePayload = recordValue(value(payload, eventRecord, 'usage'));
+  const ledgerPayload = recordValue(value(payload, eventRecord, 'context_ledger', 'contextLedger'));
   const memoryCount = numberValue(value(payload, eventRecord, 'memory_count', 'memoryCount'));
   const skillCount = numberValue(value(payload, eventRecord, 'skill_count', 'skillCount'));
   const memoryPath = stringValue(value(payload, eventRecord, 'memory_path', 'memoryPath'));
@@ -107,6 +109,10 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
             promptCacheHitTokens: numberValue(value(usagePayload, {}, 'prompt_cache_hit_tokens', 'promptCacheHitTokens')),
             promptCacheMissTokens: numberValue(value(usagePayload, {}, 'prompt_cache_miss_tokens', 'promptCacheMissTokens')),
           }
+        : null,
+    contextLedger:
+      kind === 'done' && Object.keys(ledgerPayload).length > 0
+        ? contextLedgerValue(ledgerPayload)
         : null,
     runtimeStatus:
       kind === 'runtime_status'
@@ -207,6 +213,36 @@ function clampProgress(value: number): number {
 
 function booleanValue(value: unknown, fallback = false): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function contextLedgerValue(payload: UnknownRecord): ContextLedger {
+  const systemBreakdown = recordValue(value(payload, {}, 'system_breakdown', 'systemBreakdown'));
+  const schemaBreakdown = recordValue(value(payload, {}, 'schema_breakdown', 'schemaBreakdown'));
+  return {
+    systemTokens: numberValue(value(payload, {}, 'system_tokens', 'systemTokens')),
+    schemaTokens: numberValue(value(payload, {}, 'schema_tokens', 'schemaTokens')),
+    historyTokens: numberValue(value(payload, {}, 'history_tokens', 'historyTokens')),
+    estimatedTotalTokens: numberValue(value(payload, {}, 'estimated_total_tokens', 'estimatedTotalTokens')),
+    contextLimit: numberValue(value(payload, {}, 'context_limit', 'contextLimit')),
+    contextRatio: numberValue(value(payload, {}, 'context_ratio', 'contextRatio')),
+    cacheHitTokens: numberValue(value(payload, {}, 'cache_hit_tokens', 'cacheHitTokens')),
+    cacheMissTokens: numberValue(value(payload, {}, 'cache_miss_tokens', 'cacheMissTokens')),
+    cacheHitRate: numberValue(value(payload, {}, 'cache_hit_rate', 'cacheHitRate')),
+    promptTokens: numberValue(value(payload, {}, 'prompt_tokens', 'promptTokens')),
+    completionTokens: numberValue(value(payload, {}, 'completion_tokens', 'completionTokens')),
+    totalTokens: numberValue(value(payload, {}, 'total_tokens', 'totalTokens')),
+    messageCount: numberValue(value(payload, {}, 'message_count', 'messageCount')),
+    toolCount: numberValue(value(payload, {}, 'tool_count', 'toolCount')),
+    systemBreakdown: {
+      systemPrompt: numberValue(value(systemBreakdown, {}, 'system_prompt', 'systemPrompt')),
+      skills: numberValue(value(systemBreakdown, {}, 'skills')),
+      memory: numberValue(value(systemBreakdown, {}, 'memory')),
+    },
+    schemaBreakdown: {
+      mcp: numberValue(value(schemaBreakdown, {}, 'mcp')),
+      builtin: numberValue(value(schemaBreakdown, {}, 'builtin')),
+    },
+  };
 }
 
 function isDoneTodoStatus(status: unknown): boolean {

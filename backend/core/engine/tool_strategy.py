@@ -39,6 +39,13 @@ _STRATEGY_RULES: list[tuple[set[str], str]] = [
     ),
     # --- 桌面自动化 ---
     (
+        {"desktop_win2_status", "desktop_win2_observe"},
+        "Desktop automation: Prefer the Window2-style flow first: "
+        "desktop_win2_status -> desktop_win2_observe -> desktop_win2_action, "
+        "or desktop_win2_task for multi-step app workflows. Fall back to legacy "
+        "desktop_vision_task only when Window2 cannot resolve or capture the target.",
+    ),
+    (
         {"desktop_window_list", "desktop_screenshot"},
         "Desktop automation: Use desktop_window_list -> desktop_window_capture -> "
         "desktop_window_action for targeted window operations. "

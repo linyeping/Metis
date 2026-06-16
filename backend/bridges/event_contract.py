@@ -65,7 +65,7 @@ LEGACY_COMPAT_FIELDS: Dict[str, Tuple[str, ...]] = {
         "requestId",
     ),
     "error": ("code", "title", "message", "hint", "recoverable", "status", "details"),
-    "done": ("turns", "tool_calls", "usage"),
+    "done": ("turns", "tool_calls", "usage", "context_ledger"),
     "compact": ("before_count", "after_count", "summary_preview"),
     "runtime_status": (
         "phase",
@@ -156,6 +156,7 @@ class DoneEvent:
     kind: Literal["done"]
     message_id: Optional[str] = None
     usage: Mapping[str, int] = field(default_factory=dict)
+    context_ledger: Mapping[str, Any] = field(default_factory=dict)
 
 
 MetisEvent = Union[

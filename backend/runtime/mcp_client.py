@@ -27,6 +27,8 @@ class MCPServerConfig:
     args: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     url: Optional[str] = None
+    auth_token: str = ""
+    token_env: str = ""
 
 
 @dataclass
@@ -69,7 +71,7 @@ class MCPSession:
         if not command:
             raise ValueError(f"MCP server '{self.config.name}' has no command")
         cmd = [command] + list(self.config.args)
-        env = {**os.environ, **self.config.env}
+        env = _stdio_env_for_config(self.config)
 
         self._process = subprocess.Popen(
             cmd,
@@ -561,6 +563,8 @@ class MCPManager:
                     args=list(raw_config.get("args") or []),
                     env={str(k): str(v) for k, v in (raw_config.get("env") or {}).items()},
                     url=raw_config.get("url"),
+                    auth_token=str(raw_config.get("auth_token") or raw_config.get("authToken") or ""),
+                    token_env=str(raw_config.get("token_env") or raw_config.get("tokenEnv") or ""),
                 )
             )
         return configs
@@ -604,6 +608,15 @@ def register_mcp_tools(registry: ToolRegistry, config_path: str = "") -> int:
 
 def get_mcp_manager() -> Optional[MCPManager]:
     return _global_manager
+
+
+def _stdio_env_for_config(config: MCPServerConfig) -> Dict[str, str]:
+    env = {**os.environ, **config.env}
+    token_env = str(config.token_env or "").strip()
+    auth_token = str(config.auth_token or "")
+    if token_env and auth_token:
+        env[token_env] = auth_token
+    return env
 
 
 def _cleanup_mcp_on_exit() -> None:

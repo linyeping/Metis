@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from backend.core.paths import metis_dir, metis_path
 
 
-BUILTIN_SKILLS_VERSION = 2
+BUILTIN_SKILLS_VERSION = 6
 SKILL_INDEX_DEFAULT_CONTEXT_WINDOW = 128_000
 SKILL_INDEX_MAX_TOKENS_FLOOR = 320
 SKILL_INDEX_MAX_TOKENS_CEILING = 2_048
@@ -79,6 +79,7 @@ def ensure_builtin_skills_installed() -> None:
     if int(marker_data.get("version") or 0) >= BUILTIN_SKILLS_VERSION:
         return
     installed: List[str] = []
+    refreshed: List[str] = []
     for source_dir in sorted(path for path in source_root.iterdir() if path.is_dir()):
         if not (source_dir / "SKILL.md").is_file():
             continue
@@ -86,11 +87,15 @@ def ensure_builtin_skills_installed() -> None:
         if not target_dir.exists():
             shutil.copytree(source_dir, target_dir)
             installed.append(source_dir.name)
+        elif _is_builtin_skill_file(target_dir / "SKILL.md"):
+            shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+            refreshed.append(source_dir.name)
     marker.write_text(
         json.dumps(
             {
                 "version": BUILTIN_SKILLS_VERSION,
                 "installed": installed,
+                "refreshed": refreshed,
                 "updated_at": time.time(),
             },
             ensure_ascii=False,
@@ -183,12 +188,14 @@ def render_skill_for_model(skill: SkillDefinition, *, arguments: str = "") -> st
     body = skill.body or skill.content
     if "$ARGUMENTS" in body:
         body = body.replace("$ARGUMENTS", args)
+    tool_contract = _skill_tool_contract_block(skill)
     return (
         f"[Loaded Metis skill: {skill.name}]\n"
         f"Source: {skill.source}\n"
         f"Path: {skill.path}\n"
         f"Description: {skill.description}\n"
         + (f"Arguments: {args}\n" if args else "")
+        + tool_contract
         + "\n"
         + body.strip()
     ).strip()
@@ -345,6 +352,26 @@ def _read_skill(path: Path, *, source: str) -> Optional[SkillDefinition]:
         frontmatter=frontmatter,
         mtime=stat.st_mtime,
     )
+
+
+def _is_builtin_skill_file(path: Path) -> bool:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    frontmatter, _body = parse_frontmatter(content)
+    return _bool_value(frontmatter.get("builtin"), False)
+
+
+def _skill_tool_contract_block(skill: SkillDefinition) -> str:
+    lines: List[str] = []
+    if skill.allowed_tools:
+        lines.append("Allowed tools: " + ", ".join(skill.allowed_tools))
+    if skill.disallowed_tools:
+        lines.append("Disallowed tools: " + ", ".join(skill.disallowed_tools))
+    if not lines:
+        return ""
+    return "".join(f"{line}\n" for line in lines)
 
 
 def parse_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:

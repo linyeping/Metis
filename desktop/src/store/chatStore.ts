@@ -29,6 +29,7 @@ import type {
   ChatTodoItem,
   ChatTodoNotice,
   ChatTokenUsage,
+  ContextLedger,
   ParsedFile,
   RuntimeStatus,
   SessionCheckpoint,
@@ -98,6 +99,7 @@ interface ChatState {
   runSessionId: string | null;
   pendingSendSessionId: string | null;
   usage: ChatTokenUsage | null;
+  contextLedger: ContextLedger | null;
   setComposerText: (value: string) => void;
   addFiles: (files: FileList | File[]) => Promise<void>;
   removeAttachment: (path: string) => void;
@@ -138,6 +140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   runSessionId: null,
   pendingSendSessionId: null,
   usage: null,
+  contextLedger: null,
   setComposerText: composerText => set({ composerText }),
   addFiles: async files => {
     const incoming = Array.from(files).slice(0, 5);
@@ -258,6 +261,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         compactStatus: null,
         runtimeStatus: null,
         subagents: [],
+        usage: null,
+        contextLedger: null,
       });
       return;
     }
@@ -305,6 +310,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       todoNotice: null,
       recoveryNotice: activeRunInfo ? null : recoverySnapshot,
       usage: null,
+      contextLedger: null,
       runtimeStatus: null,
       subagents: [],
       streaming: Boolean(activeRunInfo),
@@ -380,6 +386,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       runtimeStatus: null,
       streaming: true,
       usage: null,
+      contextLedger: null,
       subagents: [],
       messages: [
         ...state.messages,
@@ -471,6 +478,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       recoveryNotice: null,
       compactStatus: null,
       usage: null,
+      contextLedger: null,
       runtimeStatus: null,
       error: null,
       pendingSendSessionId: null,

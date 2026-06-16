@@ -1551,6 +1551,30 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   gap: 8px;
 }
 
+.context-window-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.context-window-toggle strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.context-window-toggle strong svg {
+  transition: transform 140ms ease;
+}
+
+.context-window-toggle strong svg[data-open='true'] {
+  transform: rotate(180deg);
+}
+
 .context-window-head span {
   display: inline-flex;
   min-width: 0;
@@ -1611,6 +1635,57 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   color: var(--text-faint);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
+}
+
+.context-window-details {
+  display: grid;
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.context-window-detail-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.context-window-detail-row > div:first-child,
+.context-window-cache-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.context-window-detail-row > div:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-window-detail-row > div:first-child strong,
+.context-window-cache-row strong {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.context-window-detail-track {
+  overflow: hidden;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.context-window-detail-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 78%, var(--text) 8%);
 }
 
 .context-window-suggestion {
@@ -2935,6 +3010,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 /* 收起态只保留一行头部：进度行与操作按钮仅在展开时出现，
    否则 26 张卡每张三行堆成一大坨（用户报告的"堆叠"）。 */
 .tool-card[data-open='false'] .tool-progress-line,
+.tool-card[data-open='false'] .tool-browser-activity-summary,
 .tool-card[data-open='false'] .tool-card-actions {
   display: none;
 }
@@ -3155,6 +3231,66 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 .file-change-counts i,
 .file-change-file-row i {
   color: var(--danger);
+}
+
+.tool-browser-activity-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0 7px 5px 44px;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.tool-browser-activity-summary[data-errors='true'] {
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--border));
+  background: color-mix(in srgb, var(--panel) 92%, var(--danger) 8%);
+}
+
+.tool-browser-activity-summary[data-blocked='true'] {
+  border-color: color-mix(in srgb, var(--warning) 44%, var(--border));
+  background: color-mix(in srgb, var(--panel) 92%, var(--warning) 8%);
+}
+
+.tool-browser-activity-summary svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.tool-browser-activity-summary[data-errors='true'] svg {
+  color: var(--danger);
+}
+
+.tool-browser-activity-summary[data-blocked='true'] svg {
+  color: var(--warning);
+}
+
+.tool-browser-activity-summary span,
+.tool-browser-activity-summary code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-browser-activity-summary span {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-weight: 620;
+}
+
+.tool-browser-activity-summary code {
+  flex: 1 1 auto;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .tool-activity-group-body {
@@ -6247,6 +6383,26 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   line-height: inherit;
 }
 
+.side-chat-bubble .side-chat-markdown,
+.side-chat-bubble .markdown-body {
+  display: block;
+  min-width: 0;
+}
+
+.side-chat-bubble .side-chat-markdown :where(p, ul, ol, blockquote, pre) {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.side-chat-bubble .side-chat-markdown :where(ul, ol) {
+  padding-left: 1.35em;
+}
+
+.side-chat-bubble .side-chat-markdown li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+
 .side-chat-bubble .markdown-body > :first-child {
   margin-top: 0;
 }
@@ -6751,6 +6907,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   position: relative;
   grid-template-columns: auto auto minmax(52px, 1fr) auto auto auto;
   min-height: 32px;
+  align-items: center;
   overflow: visible;
   gap: 5px;
   padding: 4px 4px 4px 5px;
@@ -6954,6 +7111,146 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
 }
 
+.browser-activity-panel {
+  display: grid;
+  min-width: 0;
+  max-height: 210px;
+  gap: 5px;
+  padding: 5px 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg-secondary) 12%);
+}
+
+.browser-activity-panel[data-open='false'] {
+  max-height: 38px;
+}
+
+.browser-activity-panel[data-errors='true'] {
+  border-color: color-mix(in srgb, var(--danger) 46%, var(--border));
+}
+
+.browser-activity-panel[data-blocked='true'] {
+  border-color: color-mix(in srgb, var(--warning) 44%, var(--border));
+}
+
+.browser-activity-head {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.browser-activity-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.browser-activity-head strong,
+.browser-activity-head span,
+.browser-activity-head em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-activity-head strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.browser-activity-head span,
+.browser-activity-head em {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
+.browser-activity-caret {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--text-faint);
+}
+
+.browser-activity-list {
+  display: grid;
+  min-height: 0;
+  gap: 5px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.browser-activity-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-secondary) 66%, transparent);
+}
+
+.browser-activity-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: var(--accent);
+}
+
+.browser-activity-item[data-ok='false'] .browser-activity-icon,
+.browser-activity-item[data-blocked='true'] .browser-activity-icon {
+  color: var(--warning);
+}
+
+.browser-activity-item > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.browser-activity-item strong,
+.browser-activity-item span,
+.browser-activity-item code,
+.browser-activity-item time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-activity-item strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.browser-activity-item span,
+.browser-activity-item time {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.browser-activity-item code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
 .web-tab-close {
   display: grid;
   width: 20px;
@@ -6975,6 +7272,9 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   width: 100%;
   min-width: 0;
   height: 26px;
+  min-height: 26px;
+  padding-top: 0;
+  padding-bottom: 0;
   padding-right: 10px;
   border: 0;
   outline: 0;
@@ -6990,6 +7290,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   width: 14px;
   height: 14px;
   min-width: 14px;
+  align-self: center;
   color: var(--text-muted);
 }
 
@@ -6998,6 +7299,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   min-width: 0;
   grid-template-columns: repeat(3, 22px);
   align-items: center;
+  height: 26px;
   gap: 2px;
 }
 
@@ -9418,6 +9720,31 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   line-height: 1.55;
 }
 
+.connector-card .settings-section-header {
+  align-items: center;
+}
+
+.connector-state {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.connector-card[data-connected='true'] .connector-state {
+  color: var(--success);
+}
+
+.connector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.connector-actions button {
+  min-width: 0;
+}
+
 .settings-disclosure {
   align-content: start;
 }
@@ -11522,6 +11849,39 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 .rail-info-bar button,
 .composer-access-button {
   min-height: calc(var(--ui-font-size) + 20px);
+}
+
+.app-shell .web-url-bar input {
+  height: 26px;
+  min-height: 26px !important;
+  line-height: 26px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.app-shell .web-url-bar .web-toolbar-button {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px !important;
+  line-height: 1;
+}
+
+.app-shell .web-url-bar .web-zoom-button {
+  height: 22px;
+  min-height: 22px !important;
+  line-height: 1;
+}
+
+.app-shell .web-url-bar .web-more-button,
+.app-shell .web-url-bar .web-external-button {
+  height: 26px;
+  min-height: 26px !important;
+  line-height: 1;
+}
+
+.app-shell .browser-activity-head {
+  min-height: 26px !important;
 }
 
 .app-shell .titlebar-actions > button:not(.nav-button):not(.icon-button),

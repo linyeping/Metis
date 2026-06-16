@@ -1,6 +1,6 @@
 import type { FontFamily, PermissionRule, SettingsSection, TerminalShell } from '../../lib/types';
 
-export const sections: SettingsSection[] = ['appearance', 'conversation', 'model', 'usage', 'network', 'terminal', 'tools', 'desktop', 'about'];
+export const sections: SettingsSection[] = ['appearance', 'conversation', 'model', 'usage', 'network', 'terminal', 'tools', 'connectors', 'desktop', 'about'];
 
 export const fontOptions: Array<{ value: FontFamily; label: string; hint: string }> = [
   { value: 'official-sans', label: '官方 Sans', hint: 'Metis 默认字体栈，英文和中文都优先保证清晰。' },

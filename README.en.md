@@ -31,7 +31,7 @@ Models are accessed over an API: DeepSeek is supported out of the box, and any O
 
 A few deliberate choices:
 
-- 🔒 **It doesn't collect your stuff** — no accounts, no OAuth, no telemetry; API keys are referenced by environment-variable name and never written to disk in plaintext.
+- 🔒 **It doesn't collect your stuff** — Metis itself requires no account, no forced login, and no telemetry; third-party connectors use standard OAuth, with tokens encrypted locally, never leaving your machine and never passing through a relay.
 - 🌏 **Bilingual** — switch the entire UI between 中文 and English in one click.
 - 🧱 **Built to stay up** — crash self-recovery, health-heartbeat reconnection, and an action audit log, so it tries not to fall over mid-task.
 

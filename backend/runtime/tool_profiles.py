@@ -22,9 +22,16 @@ LEAN_PROFILE = frozenset(
         "delegate_shell",
         "web_fetch",
         "browse_web",
+        "browse_and_extract",
         "web_search",
         "desktop_screenshot",
         "desktop_action",
+        "preview_browser_status",
+        "preview_browser_navigate",
+        "preview_browser_observe",
+        "preview_browser_action",
+        "preview_browser_screenshot",
+        "preview_browser_verify",
     }
 )
 

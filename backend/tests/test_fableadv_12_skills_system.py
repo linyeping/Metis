@@ -9,6 +9,7 @@ from backend.core.paths import clear_metis_home_cache
 from backend.core.engine.prompt_runtime import compile_prompt_runtime
 from backend.runtime import tool_registry
 from backend.runtime.skill_loader import (
+    BUILTIN_SKILLS_VERSION,
     build_skills_index,
     discover_skills,
     expand_user_skill_command,
@@ -133,6 +134,7 @@ def test_load_skill_tool_is_in_lean_profile_and_expands_slash_command(metis_home
         for schema in registry.get_schemas_for_profile("lean", format="openai", include_desktop=False)
     }
     assert "load_skill" in lean_names
+    assert "browse_and_extract" in lean_names
 
     result = registry.execute("load_skill", {"name": "custom-skill", "arguments": "fix parser"}, workspace_root=str(workspace))
     assert "[Loaded Metis skill: custom-skill]" in result
@@ -141,3 +143,52 @@ def test_load_skill_tool_is_in_lean_profile_and_expands_slash_command(metis_home
     expanded = expand_user_skill_command("/custom-skill fix parser", workspace_root=str(workspace))
     assert "[Original user request after skill invocation]" in expanded
     assert "Task: fix parser" in expanded
+
+
+def test_rendered_skill_includes_tool_contract(metis_home: Path) -> None:
+    write_skill(
+        metis_home / "skills",
+        "contract-skill",
+        "---\n"
+        "name: contract-skill\n"
+        "description: contract test\n"
+        "allowed-tools: [read_file, run_tests]\n"
+        "disallowed-tools: [desktop_action]\n"
+        "---\n"
+        "# Contract\n",
+    )
+
+    rendered = load_skill_content("contract-skill")
+
+    assert "Allowed tools: read_file, run_tests" in rendered
+    assert "Disallowed tools: desktop_action" in rendered
+
+
+def test_builtin_browser_skill_refreshes_and_routes_preview_browser(metis_home: Path, tmp_path: Path) -> None:
+    browser_dir = metis_home / "skills" / "browser"
+    browser_dir.mkdir(parents=True)
+    (browser_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: browser\n"
+        "builtin: true\n"
+        "description: old browser\n"
+        "allowed-tools: [browse_web]\n"
+        "---\n"
+        "# Old Browser\n\n"
+        "Only use browse_web.\n",
+        encoding="utf-8",
+    )
+    (metis_home / "skills" / ".builtin-skills.json").write_text(
+        f'{{"version": {BUILTIN_SKILLS_VERSION - 1}}}',
+        encoding="utf-8",
+    )
+
+    skills = discover_skills(workspace_root=str(tmp_path))
+    browser = next(skill for skill in skills if skill.name == "browser")
+    expanded = expand_user_skill_command("/browser test localhost:5173", workspace_root=str(tmp_path))
+
+    assert "preview_browser_navigate" in browser.allowed_tools
+    assert "preview_browser_observe" in expanded
+    assert "preview_browser_action" in expanded
+    assert "browse_web" in expanded
+    assert "localhost" in expanded

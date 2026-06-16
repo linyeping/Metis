@@ -115,6 +115,7 @@ def test_done_event_usage_payload() -> None:
             prompt_tokens=11,
             completion_tokens=13,
             total_tokens=24,
+            context_ledger={"estimated_total_tokens": 42, "context_limit": 100},
         )
     )
     assert payload["kind"] == "done"
@@ -127,6 +128,8 @@ def test_done_event_usage_payload() -> None:
         "prompt_cache_hit_tokens": 0,
         "prompt_cache_miss_tokens": 0,
     }
+    assert payload["context_ledger"]["estimated_total_tokens"] == 42
+    assert payload["payload"]["context_ledger"]["context_limit"] == 100
 
 
 def test_compact_event_payload() -> None:
@@ -199,4 +202,5 @@ def test_agent_event_contract_payload_lists_supported_kinds() -> None:
     for kind in ("text_delta", "content_delta", "tool_call", "permission_request", "runtime_status", "todo_update", "done"):
         assert kind in payload["event_kinds"]
         assert kind in payload["legacy_compat_fields"]
+    assert "context_ledger" in payload["legacy_compat_fields"]["done"]
     assert "payload" in payload["envelope_required"]

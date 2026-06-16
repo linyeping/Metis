@@ -89,6 +89,7 @@ interface UiState {
   uiFontSize: number;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
+  contextDetailsOpen: boolean;
   commandOpen: boolean;
   modelPickerOpen: boolean;
   workspaceMenuOpen: boolean;
@@ -128,6 +129,8 @@ interface UiState {
   setUiFontSize: (size: number) => void;
   setSettingsOpen: (open: boolean) => void;
   setSettingsSection: (section: SettingsSection) => void;
+  setContextDetailsOpen: (open: boolean) => void;
+  toggleContextDetailsOpen: () => void;
   setCommandOpen: (open: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
   setWorkspaceMenuOpen: (open: boolean) => void;
@@ -348,6 +351,7 @@ export const useUiStore = create<UiState>(set => ({
   uiFontSize: storedNumber('metis.uiFontSize', 14, 12, 18),
   settingsOpen: false,
   settingsSection: 'appearance',
+  contextDetailsOpen: false,
   commandOpen: false,
   modelPickerOpen: false,
   workspaceMenuOpen: false,
@@ -421,6 +425,8 @@ export const useUiStore = create<UiState>(set => ({
   },
   setSettingsOpen: settingsOpen => set({ settingsOpen }),
   setSettingsSection: settingsSection => set({ settingsSection }),
+  setContextDetailsOpen: contextDetailsOpen => set({ contextDetailsOpen }),
+  toggleContextDetailsOpen: () => set(state => ({ contextDetailsOpen: !state.contextDetailsOpen })),
   setCommandOpen: commandOpen => set({ commandOpen }),
   setModelPickerOpen: modelPickerOpen => set({ modelPickerOpen }),
   setWorkspaceMenuOpen: workspaceMenuOpen => set({ workspaceMenuOpen }),

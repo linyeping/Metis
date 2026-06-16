@@ -3,7 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.bridges.model_capability import detect_from_model_name
-from backend.tools.browser_automation.browser_agent import BrowserResult, BrowserTask
+import pytest
+
+from backend.tools.browser_automation.browser_agent import (
+    BrowserLLMConfig,
+    BrowserResult,
+    BrowserTask,
+    _active_provider_config,
+    _build_browser_use_llm,
+    _format_browser_failure,
+)
 from backend.tools.browser_automation.tools import browse_web
 from backend.tools.desk_automation.orchestrator.screen_reader import (
     ActionType,
@@ -82,6 +91,86 @@ def test_new_116_browser_types_and_dependency_fallback(monkeypatch) -> None:
         lambda _task: BrowserResult(ok=False, error="browser-use missing"),
     )
     assert "browser-use" in browse_web("check docs")
+
+
+def test_fableadv_50_browser_use_native_openai_compatible_llm() -> None:
+    config = BrowserLLMConfig(
+        provider_id="custom-openai",
+        display_name="Custom Relay",
+        backend_type="openai",
+        model="gpt-5.5",
+        base_url="https://relay.example/v1",
+        api_key="test-secret",
+        api_key_source="METIS_LLM_API_KEY",
+        openai_compatible=True,
+    )
+
+    llm, resolved = _build_browser_use_llm(config)
+
+    assert resolved.provider_id == "custom-openai"
+    assert getattr(llm, "provider", "") == "openai"
+    assert getattr(llm, "model", "") == "gpt-5.5"
+    assert str(getattr(llm, "base_url", "")) == "https://relay.example/v1"
+
+
+def test_fableadv_50_browser_use_missing_key_is_clear() -> None:
+    config = BrowserLLMConfig(
+        provider_id="custom-openai",
+        display_name="Custom Relay",
+        backend_type="openai",
+        model="gpt-5.5",
+        base_url="https://relay.example/v1",
+        api_key="",
+        openai_compatible=True,
+        api_key_required=True,
+    )
+
+    with pytest.raises(ValueError) as exc:
+        _build_browser_use_llm(config)
+
+    message = str(exc.value)
+    assert "API Key" in message
+    assert "api_key_encrypted" in message
+
+
+def test_fableadv_50_browser_use_reads_metis_runtime_provider(monkeypatch) -> None:
+    from backend.web import llm_state
+
+    monkeypatch.setattr(llm_state, "load_persistent_config", lambda: None)
+    monkeypatch.setattr(llm_state, "_env_file_values", lambda: {})
+    monkeypatch.setenv("METIS_LLM_BACKEND", "custom-openai")
+    monkeypatch.setenv("METIS_LLM_BASE_URL", "https://relay.example/v1")
+    monkeypatch.setenv("METIS_LLM_MODEL", "gpt-5.5")
+    monkeypatch.setenv("METIS_LLM_API_KEY", "runtime-secret")
+
+    config = _active_provider_config()
+
+    assert config.provider_id == "custom-openai"
+    assert config.model == "gpt-5.5"
+    assert config.base_url == "https://relay.example/v1"
+    assert config.api_key == "runtime-secret"
+    assert config.api_key_source == "runtime"
+
+
+def test_fableadv_50_browser_use_errors_redact_secrets() -> None:
+    config = BrowserLLMConfig(
+        provider_id="custom-openai",
+        model="gpt-5.5",
+        base_url="https://relay.example/v1",
+        api_key="sk-very-secret-token-123456",
+        api_key_source="METIS_LLM_API_KEY",
+    )
+
+    message = _format_browser_failure(
+        RuntimeError("ChatOpenAI object has no attribute provider; Authorization: Bearer sk-very-secret-token-123456"),
+        config=config,
+        phase="browser-use run",
+    )
+
+    assert "has no attribute provider" in message
+    assert "METIS_LLM_API_KEY" in message
+    assert "sk-very-secret-token" not in message
+    assert "Bearer sk-****" in message
 
 
 def test_new_116_delegate_browser_uses_real_browser_wrapper() -> None:

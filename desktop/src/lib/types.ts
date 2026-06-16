@@ -26,7 +26,7 @@ export type ThemeName =
 
 export type SectionId = 'chat' | 'skills' | 'mcp' | 'computer' | 'cron';
 
-export type SettingsSection = 'appearance' | 'conversation' | 'model' | 'usage' | 'network' | 'terminal' | 'tools' | 'desktop' | 'about';
+export type SettingsSection = 'appearance' | 'conversation' | 'model' | 'usage' | 'network' | 'terminal' | 'tools' | 'connectors' | 'desktop' | 'about';
 
 export type BootPhase = 'idle' | 'detecting' | 'preflight' | 'starting' | 'log' | 'ready' | 'error' | 'exit' | 'restarting';
 
@@ -164,6 +164,52 @@ export interface PreviewAuditResult {
   screenshotPath?: string;
   capturedAt: string;
   screenshotAvailable: boolean;
+}
+
+export interface BrowserActivityItem {
+  at: string;
+  url: string;
+  title: string;
+  event: string;
+  action: string;
+  ok: boolean;
+  blocked: boolean;
+  confirmed: boolean;
+  target: string;
+  point?: { x?: number; y?: number; element_id?: string } | null;
+  risk?: { risk_level?: string; summary?: string; reasons?: string[] } | null;
+  element_count?: number;
+  text_length?: number;
+  width?: number;
+  height?: number;
+  saved_path?: string;
+  error?: string;
+  summary: string;
+  navigation_resolution?: Record<string, unknown> | null;
+  diagnostics_counts?: Record<string, number> | null;
+  page_health?: Record<string, unknown> | null;
+  screenshot_health?: Record<string, unknown> | null;
+}
+
+export interface BrowserActivityPayload {
+  ok: boolean;
+  tabId?: string;
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  counts: {
+    total: number;
+    navigate: number;
+    observe: number;
+    action: number;
+    screenshot: number;
+    blocked: number;
+    errors: number;
+  };
+  diagnostics_counts: Record<string, number>;
+  items: BrowserActivityItem[];
 }
 
 export interface Workspace {
@@ -791,6 +837,32 @@ export interface ChatTokenUsage {
   promptCacheMissTokens?: number;
 }
 
+export interface ContextLedger {
+  systemTokens: number;
+  schemaTokens: number;
+  historyTokens: number;
+  estimatedTotalTokens: number;
+  contextLimit: number;
+  contextRatio: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  cacheHitRate: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  messageCount?: number;
+  toolCount?: number;
+  systemBreakdown?: {
+    systemPrompt: number;
+    skills: number;
+    memory: number;
+  };
+  schemaBreakdown?: {
+    mcp: number;
+    builtin: number;
+  };
+}
+
 export interface ChatStreamEvent {
   schema?: 'metis.agent_event.v1' | string;
   kind?: AgentEventKind | string;
@@ -849,6 +921,34 @@ export interface ChatStreamEvent {
     promptCacheHitTokens?: number;
     promptCacheMissTokens?: number;
   };
+  context_ledger?: Record<string, unknown>;
+  contextLedger?: Record<string, unknown>;
+}
+
+export interface ConnectorServiceStatus {
+  service: 'github' | 'gmail' | string;
+  displayName: string;
+  scopes: string[];
+  tokenEnv: string;
+  connected: boolean;
+  encryptionAvailable: boolean;
+}
+
+export interface ConnectorStatusPayload {
+  ok: boolean;
+  encryptionAvailable: boolean;
+  services: ConnectorServiceStatus[];
+}
+
+export interface ConnectorAuthorizeResult {
+  ok: boolean;
+  service?: string;
+  method?: string;
+  code?: string;
+  error?: string;
+  userCode?: string;
+  verificationUri?: string;
+  testModeNote?: string;
 }
 
 export interface MemoryPayload {

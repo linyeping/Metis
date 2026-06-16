@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BarChart3, Cpu, Globe, Info, MessageSquare, Monitor, Palette, Terminal, Wrench, X } from 'lucide-react';
+import { BarChart3, Cpu, Globe, Info, MessageSquare, Monitor, Palette, Plug, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionRule,
   deletePermissionRule,
@@ -43,6 +43,7 @@ import { UsageTab } from './tabs/UsageTab';
 import { NetworkTab } from './tabs/NetworkTab';
 import { TerminalTab } from './tabs/TerminalTab';
 import { ToolsTab } from './tabs/ToolsTab';
+import { ConnectorsTab } from './tabs/ConnectorsTab';
 import { DesktopTab } from './tabs/DesktopTab';
 import { AboutTab } from './tabs/AboutTab';
 
@@ -73,6 +74,7 @@ const sectionIcons: Record<SettingsSection, typeof Palette> = {
   network: Globe,
   terminal: Terminal,
   tools: Wrench,
+  connectors: Plug,
   desktop: Monitor,
   about: Info,
 };
@@ -532,6 +534,8 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             onDelete={deletePermission}
           />
         );
+      case 'connectors':
+        return <ConnectorsTab />;
       case 'desktop':
         return <DesktopTab capabilities={modelCapabilities} capabilitiesError={modelCapabilitiesError} />;
       case 'about':

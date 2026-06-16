@@ -13,6 +13,7 @@ const {
   resolveDataRootInfo
 } = require('./data-root.cjs')
 const { getBackendLogPath, startBackend, stopBackend, tailBackendLog } = require('./backend.cjs')
+const { registerConnectorIpc } = require('./oauth.cjs')
 const {
   HARDENED_WEB_PREFERENCES,
   isAllowedAppNavigation,
@@ -23,6 +24,8 @@ let autoUpdater = null
 try {
   autoUpdater = require('electron-updater').autoUpdater
 } catch {}
+
+registerConnectorIpc({ app, ipcMain, safeStorage, shell })
 
 // GitHub 项目主页 / 更新检查源（#8）
 const GITHUB_OWNER = 'linyeping'
@@ -49,6 +52,8 @@ let lastPreviewBounds = null
 // 必须把它藏掉，否则就会像截图那样压在弹窗上面。这是 VS Code / 各家稳定方案的核心做法。
 let previewOccluded = false
 const previewLoadedUrls = new Map()
+const previewElementCache = new Map()
+let previewBridgeLoopId = 0
 let tray = null
 let backendPort = null
 let bootRunning = false
@@ -62,6 +67,8 @@ const TERMINAL_TIMEOUT_MS = 120000
 const TERMINAL_LIVE_OUTPUT_LIMIT = 120000
 const DEV_SERVER_LOG_LIMIT = 80
 const DEV_SERVER_HOST = '127.0.0.1'
+const PREVIEW_LOCAL_PORT_CANDIDATES = [5173, 5174, 3000, 4200, 8000, 8080]
+const PREVIEW_DIAGNOSTIC_LIMIT = 80
 const BACKEND_RESTART_LIMIT = 5
 let terminalCounter = 1
 const terminalSessions = new Map()
@@ -75,6 +82,12 @@ const PREVIEW_WEB_PREFERENCES = Object.freeze({
   webSecurity: true,
   allowRunningInsecureContent: false
 })
+
+const PREVIEW_RISK_PATTERN = /(\blog\s*in\b|\bsign\s*in\b|\bsign\s*up\b|\boauth\b|\bauthori[sz]e\b|\bgrant\b|\ballow\b|\bconsent\b|\bpassword\b|\bpasscode\b|\botp\b|\bsubmit\b|\bsend\b|\bpost\b|\bpublish\b|\bshare\b|\bupload\b|\bdelete\b|\bremove\b|\bpurchase\b|\bbuy\b|\bcheckout\b|\bpay\b|\bpayment\b|\bsubscribe\b|登录|登陆|注册|授权|允许|同意|密码|验证码|提交|发送|发布|分享|上传|删除|移除|购买|支付|付款|结账|订阅|确认)/i
+const PREVIEW_AUTH_URL_PATTERN = /(accounts\.google\.com|github\.com\/login|\/oauth|\/authorize|\/auth\/|login|signin|sign-in|signup|sign-up)/i
+const PREVIEW_SENSITIVE_INPUT_TYPES = new Set(['password', 'file'])
+const PREVIEW_SUBMIT_INPUT_TYPES = new Set(['submit', 'image'])
+const PREVIEW_CONSOLE_LEVELS = ['verbose', 'info', 'warning', 'error']
 
 try {
   nodePty = require('node-pty')
@@ -115,6 +128,267 @@ if (!gotSingleInstanceLock) {
 
 function log(message) {
   process.stdout.write(`${String(message).trimEnd()}\n`)
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)))
+}
+
+function trimUrlInput(value) {
+  return String(value || '').trim().replace(/[.,;!?，。；！？]+$/g, '')
+}
+
+function isPreviewCurrentAlias(value) {
+  const raw = trimUrlInput(value).toLowerCase()
+  if (!raw) return true
+  return [
+    'current',
+    'current page',
+    'current-page',
+    'active',
+    'active page',
+    '当前',
+    '当前页',
+    '当前页面',
+    '右栏当前页',
+    '右栏当前页面',
+    'preview current',
+    '__current__'
+  ].includes(raw)
+}
+
+function isLoopbackHostname(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '[::1]' || host === '::1'
+}
+
+function hostForLocalProbe(hostname) {
+  const host = String(hostname || '').toLowerCase()
+  if (host === '[::1]' || host === '::1') return '::1'
+  return DEV_SERVER_HOST
+}
+
+function normalizePreviewNavigationInput(value) {
+  let raw = trimUrlInput(value)
+  if (isPreviewCurrentAlias(raw)) {
+    return { ok: true, useCurrent: true, requestedUrl: raw }
+  }
+  if (/^:\d{2,5}(?:[/?#].*)?$/i.test(raw)) {
+    raw = `${DEV_SERVER_HOST}${raw}`
+  }
+  if (/^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|::1)(?::\d{1,5})?(?:[/?#].*)?$/i.test(raw)) {
+    raw = `http://${raw}`
+  }
+  try {
+    const parsed = new URL(raw)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { ok: false, requestedUrl: raw, error: 'Preview 只允许 http(s) 地址' }
+    }
+    if (parsed.hostname === '0.0.0.0') {
+      parsed.hostname = DEV_SERVER_HOST
+    }
+    return {
+      ok: true,
+      url: parsed.toString(),
+      parsed,
+      requestedUrl: raw,
+      local: isLoopbackHostname(parsed.hostname),
+      explicitPort: Boolean(parsed.port)
+    }
+  } catch {
+    return { ok: false, requestedUrl: raw, error: 'invalid preview url' }
+  }
+}
+
+function localPortOpen(hostname, port, timeoutMs = 260) {
+  const targetPort = normalizePort(port, 0)
+  if (!targetPort) return Promise.resolve(false)
+  return new Promise(resolve => {
+    const socket = net.createConnection({ host: hostForLocalProbe(hostname), port: targetPort })
+    let settled = false
+    const done = value => {
+      if (settled) return
+      settled = true
+      try { socket.destroy() } catch {}
+      resolve(value)
+    }
+    socket.once('connect', () => done(true))
+    socket.once('error', () => done(false))
+    socket.setTimeout(timeoutMs, () => done(false))
+  })
+}
+
+function localUrlPort(url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    if (!isLoopbackHostname(parsed.hostname)) return 0
+    return normalizePort(parsed.port, parsed.protocol === 'https:' ? 443 : 80)
+  } catch {
+    return 0
+  }
+}
+
+function mergeLocalPreviewUrl(candidateUrl, requestedUrl) {
+  try {
+    const candidate = new URL(String(candidateUrl || ''))
+    const requested = new URL(String(requestedUrl || candidateUrl || ''))
+    if (requested.pathname && requested.pathname !== '/') candidate.pathname = requested.pathname
+    if (requested.search) candidate.search = requested.search
+    if (requested.hash) candidate.hash = requested.hash
+    return candidate.toString()
+  } catch {
+    return candidateUrl
+  }
+}
+
+function addPreviewCandidate(candidates, source, url) {
+  const normalized = normalizePreviewNavigationInput(url)
+  if (!normalized.ok || normalized.useCurrent || !normalized.url || !normalized.local) return
+  if (candidates.some(item => item.url === normalized.url)) return
+  candidates.push({ source, url: normalized.url, port: localUrlPort(normalized.url), parsed: normalized.parsed })
+}
+
+function activePreviewDevServerCandidates() {
+  const candidates = []
+  addPreviewCandidate(candidates, 'METIS_DESKTOP_DEV_SERVER', process.env.METIS_DESKTOP_DEV_SERVER || '')
+  for (const session of devServers.values()) {
+    const status = session?.status || {}
+    if (!['running', 'starting', 'detected'].includes(String(status.state || ''))) continue
+    addPreviewCandidate(candidates, 'dev-server-status', status.url || '')
+    if (status.previewPort) {
+      addPreviewCandidate(candidates, 'dev-server-preview-port', `http://${DEV_SERVER_HOST}:${status.previewPort}/`)
+    }
+  }
+  return candidates
+}
+
+async function firstReachablePreviewCandidate(candidates, checkedPorts) {
+  for (const candidate of candidates) {
+    if (!candidate.port) continue
+    checkedPorts.push({ source: candidate.source, port: candidate.port, url: candidate.url })
+    if (await localPortOpen(candidate.parsed.hostname, candidate.port)) return candidate
+  }
+  return null
+}
+
+async function resolvePreviewNavigationUrl(input) {
+  const normalized = normalizePreviewNavigationInput(input)
+  const checkedPorts = []
+  if (!normalized.ok) {
+    return { ok: false, requestedUrl: normalized.requestedUrl || String(input || ''), error: normalized.error || 'invalid preview url' }
+  }
+
+  if (normalized.useCurrent) {
+    const currentUrl = previewWebContents()?.getURL() || ''
+    if (currentUrl && isSafeExternalUrl(currentUrl)) {
+      return {
+        ok: true,
+        url: currentUrl,
+        requestedUrl: normalized.requestedUrl || '',
+        resolution: { mode: 'current-preview-url', reason: 'Using the current right-rail Preview page.' }
+      }
+    }
+    const fallback = await firstReachablePreviewCandidate(activePreviewDevServerCandidates(), checkedPorts)
+    if (fallback) {
+      return {
+        ok: true,
+        url: fallback.url,
+        requestedUrl: normalized.requestedUrl || '',
+        resolution: {
+          mode: 'fallback-current-empty',
+          source: fallback.source,
+          checkedPorts,
+          reason: 'Current Preview page is empty; using the active local dev server.'
+        }
+      }
+    }
+    return {
+      ok: false,
+      requestedUrl: normalized.requestedUrl || '',
+      error: 'current preview page is empty and no local dev server was detected',
+      resolution: { mode: 'current-preview-url', checkedPorts }
+    }
+  }
+
+  if (!normalized.local) {
+    return {
+      ok: true,
+      url: normalized.url,
+      requestedUrl: normalized.requestedUrl,
+      resolution: { mode: 'external-url', reason: 'External URL is used as requested.' }
+    }
+  }
+
+  const requested = normalized.parsed
+  const requestedPort = localUrlPort(normalized.url)
+  if (normalized.explicitPort && requestedPort) {
+    checkedPorts.push({ source: 'requested-url', port: requestedPort, url: normalized.url })
+    if (await localPortOpen(requested.hostname, requestedPort)) {
+      return {
+        ok: true,
+        url: normalized.url,
+        requestedUrl: normalized.requestedUrl,
+        resolution: { mode: 'requested-local-port', checkedPorts, reason: `Requested local port ${requestedPort} is reachable.` }
+      }
+    }
+  }
+
+  const candidates = activePreviewDevServerCandidates()
+  const fallback = await firstReachablePreviewCandidate(candidates, checkedPorts)
+  if (fallback) {
+    const resolvedUrl = mergeLocalPreviewUrl(fallback.url, normalized.url)
+    return {
+      ok: true,
+      url: resolvedUrl,
+      requestedUrl: normalized.requestedUrl,
+      resolution: {
+        mode: normalized.explicitPort ? 'fallback-dead-local-port' : 'fallback-missing-local-port',
+        source: fallback.source,
+        fromPort: requestedPort || 0,
+        toPort: fallback.port,
+        checkedPorts,
+        reason: normalized.explicitPort
+          ? `Requested local port ${requestedPort} is not reachable; using ${fallback.source} on port ${fallback.port}.`
+          : `No local port was provided; using ${fallback.source} on port ${fallback.port}.`
+      }
+    }
+  }
+
+  const scanCandidates = []
+  for (const port of PREVIEW_LOCAL_PORT_CANDIDATES) {
+    if (port === requestedPort) continue
+    addPreviewCandidate(scanCandidates, 'common-port-scan', `${requested.protocol}//${DEV_SERVER_HOST}:${port}/`)
+  }
+  const scanned = await firstReachablePreviewCandidate(scanCandidates, checkedPorts)
+  if (scanned) {
+    const resolvedUrl = mergeLocalPreviewUrl(scanned.url, normalized.url)
+    return {
+      ok: true,
+      url: resolvedUrl,
+      requestedUrl: normalized.requestedUrl,
+      resolution: {
+        mode: normalized.explicitPort ? 'fallback-dead-local-port' : 'fallback-missing-local-port',
+        source: scanned.source,
+        fromPort: requestedPort || 0,
+        toPort: scanned.port,
+        checkedPorts,
+        reason: normalized.explicitPort
+          ? `Requested local port ${requestedPort} is not reachable; using scanned port ${scanned.port}.`
+          : `No local port was provided; using scanned port ${scanned.port}.`
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    url: normalized.url,
+    requestedUrl: normalized.requestedUrl,
+    resolution: {
+      mode: 'no-local-fallback',
+      checkedPorts,
+      reason: 'No reachable local fallback port was detected; trying the requested URL.'
+    }
+  }
 }
 
 function openExternalSafe(url) {
@@ -224,6 +498,30 @@ function ensurePreviewView() {
     event.preventDefault()
     log(`[security] denied preview redirect ${String(url || '').slice(0, 120)}`)
   })
+  webContents.on('console-message', recordPreviewConsoleMessage)
+  webContents.on('render-process-gone', (_event, details = {}) => {
+    addPreviewDiagnostic('page_failures', {
+      kind: 'render-process-gone',
+      reason: details.reason || '',
+      exitCode: details.exitCode ?? null
+    })
+  })
+  webContents.on('unresponsive', () => {
+    addPreviewDiagnostic('page_failures', { kind: 'unresponsive' })
+  })
+  try {
+    webContents.session.webRequest.onErrorOccurred({ urls: ['http://*/*', 'https://*/*'] }, details => {
+      if (details.webContentsId && details.webContentsId !== webContents.id) return
+      const error = String(details.error || '')
+      if (error === 'net::ERR_ABORTED') return
+      addPreviewDiagnostic('network_failed', {
+        method: details.method || '',
+        url: compactPreviewText(details.url || '', 1000),
+        resourceType: details.resourceType || '',
+        error
+      })
+    })
+  } catch {}
   webContents.on('did-start-loading', () => emitPreviewState({ error: '', loading: true }))
   webContents.on('did-stop-loading', () => emitPreviewState({ loading: false }))
   webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -231,6 +529,13 @@ function ensurePreviewView() {
       emitPreviewState({ loading: false })
       return
     }
+    addPreviewDiagnostic('page_failures', {
+      kind: 'did-fail-load',
+      errorCode,
+      errorDescription: errorDescription || '',
+      validatedURL: validatedURL || '',
+      isMainFrame: Boolean(isMainFrame)
+    })
     emitPreviewState({
       error: errorDescription || '网页加载失败',
       loading: false,
@@ -239,32 +544,1177 @@ function ensurePreviewView() {
   })
   webContents.on('did-navigate', (_event, url) => emitPreviewState({ error: '', loading: false, url }))
   webContents.on('did-navigate-in-page', (_event, url) => emitPreviewState({ error: '', loading: false, url }))
+  webContents.on('did-finish-load', () => {
+    void installPreviewPageDiagnosticsHooks(webContents)
+  })
   webContents.on('page-title-updated', (_event, title) => emitPreviewState({ title }))
 
   return previewView
 }
 
-function loadPreviewUrl(url, tabId = '') {
-  const value = String(url || '').trim()
+async function loadPreviewUrl(url, tabId = '') {
+  const requestedValue = trimUrlInput(url)
   const nextTabId = String(tabId || '')
+  const resolved = await resolvePreviewNavigationUrl(requestedValue)
+  if (!resolved.ok) {
+    emitPreviewState({ error: resolved.error || 'Preview URL 解析失败', loading: false, tabId: nextTabId, url: resolved.url || '' })
+    recordPreviewAction({
+      event: 'navigate',
+      action: 'navigate',
+      ok: false,
+      requestedUrl: requestedValue,
+      resolvedUrl: resolved.url || '',
+      error: resolved.error || 'Preview URL 解析失败',
+      navigation_resolution: resolved.resolution || {}
+    })
+    return {
+      ok: false,
+      requestedUrl: requestedValue,
+      error: resolved.error || 'Preview URL 解析失败',
+      navigation_resolution: resolved.resolution || {},
+      browser_activity: previewActivityPayload()
+    }
+  }
+  const value = resolved.url
   if (!isSafeExternalUrl(value)) {
-    emitPreviewState({ error: 'Preview 只允许 http(s) 地址', loading: false, tabId })
-    return { ok: false, error: 'unsafe url' }
+    emitPreviewState({ error: 'Preview 只允许 http(s) 地址', loading: false, tabId: nextTabId })
+    recordPreviewAction({
+      event: 'navigate',
+      action: 'navigate',
+      ok: false,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      error: 'unsafe url',
+      navigation_resolution: resolved.resolution || {}
+    })
+    return { ok: false, requestedUrl: requestedValue, resolvedUrl: value, error: 'unsafe url', navigation_resolution: resolved.resolution || {}, browser_activity: previewActivityPayload() }
   }
   const view = ensurePreviewView()
-  if (!view) return { ok: false, error: 'preview view unavailable' }
+  if (!view) {
+    recordPreviewAction({
+      event: 'navigate',
+      action: 'navigate',
+      ok: false,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      error: 'preview view unavailable',
+      navigation_resolution: resolved.resolution || {}
+    })
+    return { ok: false, requestedUrl: requestedValue, resolvedUrl: value, error: 'preview view unavailable', navigation_resolution: resolved.resolution || {}, browser_activity: previewActivityPayload() }
+  }
   const currentUrl = view.webContents.getURL()
   if (previewTabId === nextTabId && (currentUrl === value || previewLoadedUrls.get(nextTabId) === value)) {
     emitPreviewState({ error: '', loading: false, tabId: nextTabId, url: value })
-    return { ok: true, skipped: true }
+    recordPreviewAction({
+      event: 'navigate',
+      action: 'navigate',
+      ok: true,
+      skipped: true,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      navigation_resolution: resolved.resolution || {}
+    })
+    return {
+      ...previewStatePayload({ url: value }),
+      ok: true,
+      skipped: true,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      navigation_resolution: resolved.resolution || {},
+      browser_activity: previewActivityPayload()
+    }
   }
   previewTabId = nextTabId
-  previewLoadedUrls.set(previewTabId, value)
+  resetPreviewDiagnostics(`navigate:${value}`)
   emitPreviewState({ error: '', loading: true, tabId: previewTabId, url: value })
-  view.webContents.loadURL(value).catch(error => {
-    emitPreviewState({ error: error?.message || String(error), loading: false, url: value })
+  try {
+    await view.webContents.loadURL(value)
+    previewLoadedUrls.set(previewTabId, value)
+    emitPreviewState({ error: '', loading: false, tabId: previewTabId, url: view.webContents.getURL() || value })
+    recordPreviewAction({
+      event: 'navigate',
+      action: 'navigate',
+      ok: true,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      navigation_resolution: resolved.resolution || {}
+    })
+    return previewStatePayload({
+      ok: true,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      navigation_resolution: resolved.resolution || {},
+      browser_activity: previewActivityPayload()
+    })
+  } catch (error) {
+    const message = error?.message || String(error)
+    previewLoadedUrls.delete(previewTabId)
+    emitPreviewState({ error: message, loading: false, tabId: previewTabId, url: value })
+    recordPreviewAction({
+      event: 'navigate',
+      action: 'navigate',
+      ok: false,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      error: message,
+      navigation_resolution: resolved.resolution || {}
+    })
+    return previewStatePayload({
+      ok: false,
+      requestedUrl: requestedValue,
+      resolvedUrl: value,
+      url: view.webContents.getURL() || value,
+      error: message,
+      navigation_resolution: resolved.resolution || {},
+      browser_activity: previewActivityPayload()
+    })
+  }
+}
+
+function previewWebContents() {
+  const webContents = previewView?.webContents
+  if (!webContents || webContents.isDestroyed()) return null
+  return webContents
+}
+
+function previewStatePayload(extra = {}) {
+  const webContents = previewWebContents()
+  return {
+    ok: Boolean(webContents),
+    tabId: previewTabId,
+    url: webContents ? webContents.getURL() : '',
+    title: webContents ? webContents.getTitle() : '',
+    canGoBack: webContents ? webContents.canGoBack() : false,
+    canGoForward: webContents ? webContents.canGoForward() : false,
+    loading: webContents ? webContents.isLoading() : false,
+    ...extra
+  }
+}
+
+function clampPreviewNumber(value, min, max, fallback = 0) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(Math.max(number, min), max)
+}
+
+function compactPreviewText(value, max = 240) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+function previewActionLog() {
+  if (!globalThis.__metisPreviewActionLog) {
+    globalThis.__metisPreviewActionLog = []
+  }
+  return globalThis.__metisPreviewActionLog
+}
+
+function recordPreviewAction(entry = {}) {
+  const logItems = previewActionLog()
+  logItems.push({
+    at: new Date().toISOString(),
+    url: previewWebContents()?.getURL() || '',
+    title: previewWebContents()?.getTitle() || '',
+    ...entry
   })
-  return { ok: true }
+  while (logItems.length > 80) logItems.shift()
+}
+
+function previewActivityLabel(item = {}) {
+  const event = String(item.event || item.action || '').toLowerCase()
+  if (event === 'navigate') {
+    return item.ok === false
+      ? `Navigation failed: ${compactPreviewText(item.resolvedUrl || item.requestedUrl || item.url || '', 120)}`
+      : `Navigated: ${compactPreviewText(item.resolvedUrl || item.requestedUrl || item.url || '', 120)}`
+  }
+  if (event === 'observe') {
+    return `Observed ${Number(item.element_count || 0)} elements`
+  }
+  if (event === 'screenshot') {
+    return item.ok === false
+      ? `Screenshot failed: ${compactPreviewText(item.error || '', 120)}`
+      : `Screenshot captured ${item.width || 0}x${item.height || 0}`
+  }
+  if (item.blocked || item.requires_confirmation) {
+    return `Blocked ${compactPreviewText(item.action || 'action', 40)}: ${compactPreviewText(item.target || item.error || '', 120)}`
+  }
+  if (event || item.action) {
+    return `${compactPreviewText(item.action || event, 40)} ${item.ok === false ? 'failed' : 'completed'}: ${compactPreviewText(item.target || item.error || '', 120)}`
+  }
+  return compactPreviewText(item.summary || item.error || 'Preview activity', 160)
+}
+
+function previewActivityPayload(limit = 24) {
+  const items = previewActionLog().slice(-Math.max(1, Math.min(Number(limit) || 24, 80))).map(item => {
+    const event = String(item.event || item.action || '').toLowerCase()
+    return {
+      at: item.at || '',
+      url: item.url || '',
+      title: item.title || '',
+      event: event || 'activity',
+      action: item.action || '',
+      ok: item.ok !== false,
+      blocked: Boolean(item.blocked || item.requires_confirmation),
+      confirmed: Boolean(item.confirmed),
+      target: compactPreviewText(item.target || '', 240),
+      point: item.point || item.action_point || null,
+      risk: item.risk || null,
+      element_count: Number(item.element_count || 0) || 0,
+      text_length: Number(item.text_length || 0) || 0,
+      width: Number(item.width || 0) || 0,
+      height: Number(item.height || 0) || 0,
+      saved_path: item.saved_path || item.path || '',
+      error: compactPreviewText(item.error || '', 300),
+      navigation_resolution: item.navigation_resolution || null,
+      diagnostics_counts: item.diagnostics_counts || null,
+      page_health: item.page_health || null,
+      screenshot_health: item.screenshot_health || null,
+      summary: previewActivityLabel(item)
+    }
+  })
+  const counts = {
+    total: items.length,
+    navigate: items.filter(item => item.event === 'navigate').length,
+    observe: items.filter(item => item.event === 'observe').length,
+    action: items.filter(item => !['navigate', 'observe', 'screenshot'].includes(item.event)).length,
+    screenshot: items.filter(item => item.event === 'screenshot').length,
+    blocked: items.filter(item => item.blocked).length,
+    errors: items.filter(item => item.ok === false).length
+  }
+  const diagnostics = previewDiagnosticsPayload()
+  return {
+    ...previewStatePayload(),
+    ok: true,
+    items,
+    counts,
+    diagnostics_counts: diagnostics.counts || {}
+  }
+}
+
+function previewDiagnosticsStore() {
+  if (!globalThis.__metisPreviewDiagnostics) {
+    globalThis.__metisPreviewDiagnostics = {
+      console: [],
+      exceptions: [],
+      network_failed: [],
+      page_failures: [],
+      lifecycle: [],
+      reset_at: new Date().toISOString(),
+      reset_reason: 'initial'
+    }
+  }
+  return globalThis.__metisPreviewDiagnostics
+}
+
+function boundedDiagnosticItems(items, limit = PREVIEW_DIAGNOSTIC_LIMIT) {
+  while (items.length > limit) items.shift()
+}
+
+function resetPreviewDiagnostics(reason = 'navigation') {
+  globalThis.__metisPreviewDiagnostics = {
+    console: [],
+    exceptions: [],
+    network_failed: [],
+    page_failures: [],
+    lifecycle: [{
+      at: new Date().toISOString(),
+      reason,
+      url: previewWebContents()?.getURL() || ''
+    }],
+    reset_at: new Date().toISOString(),
+    reset_reason: reason
+  }
+}
+
+function addPreviewDiagnostic(kind, entry = {}, limit = PREVIEW_DIAGNOSTIC_LIMIT) {
+  const store = previewDiagnosticsStore()
+  const target = Array.isArray(store[kind]) ? store[kind] : (store[kind] = [])
+  target.push({
+    at: new Date().toISOString(),
+    url: previewWebContents()?.getURL() || '',
+    title: previewWebContents()?.getTitle() || '',
+    ...entry
+  })
+  boundedDiagnosticItems(target, limit)
+}
+
+function normalizePreviewConsoleLevel(level) {
+  if (typeof level === 'number') return PREVIEW_CONSOLE_LEVELS[level] || `level-${level}`
+  return String(level || 'info').toLowerCase()
+}
+
+function recordPreviewConsoleMessage(_event, levelOrDetails, message, line, sourceId) {
+  const details = levelOrDetails && typeof levelOrDetails === 'object'
+    ? levelOrDetails
+    : { level: levelOrDetails, message, line, sourceId }
+  const level = normalizePreviewConsoleLevel(details.level)
+  const text = compactPreviewText(details.message || message || '', 1200)
+  if (!text) return
+  addPreviewDiagnostic('console', {
+    level,
+    message: text,
+    line: Number(details.line || line || 0) || 0,
+    source: compactPreviewText(details.sourceId || details.source || sourceId || '', 700)
+  })
+  if (level === 'error' || /\b(uncaught|exception|unhandled|syntaxerror|typeerror|referenceerror)\b/i.test(text)) {
+    addPreviewDiagnostic('exceptions', {
+      kind: 'console-error',
+      message: text,
+      line: Number(details.line || line || 0) || 0,
+      source: compactPreviewText(details.sourceId || details.source || sourceId || '', 700)
+    }, 40)
+  }
+}
+
+function previewDiagnosticsPayload(extra = {}) {
+  const store = previewDiagnosticsStore()
+  const consoleItems = store.console.slice(-30)
+  const exceptions = store.exceptions.slice(-20)
+  const networkFailed = store.network_failed.slice(-20)
+  const pageFailures = store.page_failures.slice(-12)
+  const lifecycle = store.lifecycle.slice(-12)
+  const consoleErrorCount = store.console.filter(item => item.level === 'error').length
+  const consoleWarningCount = store.console.filter(item => item.level === 'warning' || item.level === 'warn').length
+  return {
+    reset_at: store.reset_at,
+    reset_reason: store.reset_reason,
+    counts: {
+      console: store.console.length,
+      console_errors: consoleErrorCount,
+      console_warnings: consoleWarningCount,
+      exceptions: store.exceptions.length,
+      network_failed: store.network_failed.length,
+      page_failures: store.page_failures.length
+    },
+    recent_console: consoleItems,
+    exceptions,
+    network_failed: networkFailed,
+    page_failures: pageFailures,
+    lifecycle,
+    ...extra
+  }
+}
+
+function buildPreviewPageHealth(observed = {}, diagnostics = previewDiagnosticsPayload()) {
+  const url = String(observed.url || previewWebContents()?.getURL() || '')
+  const title = String(observed.title || previewWebContents()?.getTitle() || '')
+  const text = String(observed.text || '')
+  const domSummary = observed.dom_summary || {}
+  const elementCount = Array.isArray(observed.elements) ? observed.elements.length : 0
+  const bodyTextLength = Number(domSummary.bodyTextLength ?? text.length) || 0
+  const bodyChildCount = Number(domSummary.bodyChildCount || 0) || 0
+  const reasons = []
+  if (url.startsWith('chrome-error://')) reasons.push('chrome_error_page')
+  if (diagnostics.counts?.page_failures) reasons.push('page_load_failure')
+  if (diagnostics.counts?.network_failed) reasons.push('network_failure')
+  if (diagnostics.counts?.exceptions) reasons.push('javascript_exception')
+  if (bodyTextLength < 20 && elementCount === 0 && bodyChildCount <= 2) reasons.push('little_or_no_visible_dom')
+  if (!title && bodyTextLength < 20 && elementCount === 0) reasons.push('empty_title_and_body')
+  const blank = reasons.includes('chrome_error_page') || reasons.includes('little_or_no_visible_dom') || reasons.includes('empty_title_and_body')
+  let status = 'ok'
+  if (blank || reasons.includes('page_load_failure')) status = 'error'
+  else if (reasons.length) status = 'warning'
+  return {
+    status,
+    blank,
+    reasons,
+    url,
+    title,
+    bodyTextLength,
+    elementCount,
+    bodyChildCount
+  }
+}
+
+async function collectPreviewPageErrors(webContents) {
+  if (!webContents || webContents.isDestroyed()) return []
+  const script = `
+(() => {
+  const errors = Array.isArray(window.__metisPreviewErrors) ? window.__metisPreviewErrors.slice(-20) : [];
+  if (Array.isArray(window.__metisPreviewErrors)) window.__metisPreviewErrors = [];
+  return errors.map(item => ({
+    at: item.at || '',
+    kind: item.kind || 'page-error',
+    message: String(item.message || '').slice(0, 1200),
+    source: String(item.source || '').slice(0, 700),
+    line: Number(item.line || 0) || 0,
+    column: Number(item.column || 0) || 0
+  }));
+})()
+`
+  try {
+    const errors = await webContents.executeJavaScript(script, true)
+    return Array.isArray(errors) ? errors : []
+  } catch {
+    return []
+  }
+}
+
+async function installPreviewPageDiagnosticsHooks(webContents) {
+  if (!webContents || webContents.isDestroyed()) return
+  const script = `
+(() => {
+  if (window.__metisPreviewDiagnosticsHooked) return true;
+  window.__metisPreviewDiagnosticsHooked = true;
+  window.__metisPreviewErrors = Array.isArray(window.__metisPreviewErrors) ? window.__metisPreviewErrors : [];
+  const push = item => {
+    window.__metisPreviewErrors.push({ at: new Date().toISOString(), ...item });
+    if (window.__metisPreviewErrors.length > 80) window.__metisPreviewErrors.shift();
+  };
+  window.addEventListener('error', event => {
+    push({
+      kind: 'error',
+      message: event.message || String(event.error || 'Script error'),
+      source: event.filename || '',
+      line: event.lineno || 0,
+      column: event.colno || 0
+    });
+  });
+  window.addEventListener('unhandledrejection', event => {
+    const reason = event.reason;
+    push({
+      kind: 'unhandledrejection',
+      message: reason && reason.stack ? String(reason.stack) : String(reason && reason.message ? reason.message : reason),
+      source: '',
+      line: 0,
+      column: 0
+    });
+  });
+  return true;
+})()
+`
+  try {
+    await webContents.executeJavaScript(script, true)
+  } catch {}
+}
+
+function previewElementSearchText(meta = {}, payload = {}) {
+  return compactPreviewText([
+    meta.text,
+    meta.href,
+    meta.selector,
+    meta.role,
+    meta.type,
+    meta.name,
+    meta.title,
+    meta.ariaLabel,
+    meta.placeholder,
+    meta.formAction,
+    payload.text,
+    payload.key
+  ].filter(Boolean).join(' '), 1600)
+}
+
+function classifyPreviewActionRisk(action = '', payload = {}, meta = {}) {
+  const normalizedAction = String(action || '').trim().toLowerCase()
+  const tag = String(meta.tag || '').toLowerCase()
+  const type = String(meta.type || '').toLowerCase()
+  const role = String(meta.role || '').toLowerCase()
+  const href = String(meta.href || meta.formAction || '')
+  const searchText = previewElementSearchText(meta, payload)
+  const reasons = []
+
+  if (PREVIEW_SENSITIVE_INPUT_TYPES.has(type)) {
+    reasons.push(type === 'file' ? 'file_upload_control' : 'password_or_secret_input')
+  }
+  if (PREVIEW_SUBMIT_INPUT_TYPES.has(type)) {
+    reasons.push('submit_control')
+  }
+  if (tag === 'button' && String(meta.buttonType || '').toLowerCase() === 'submit') {
+    reasons.push('submit_button')
+  }
+  if (PREVIEW_AUTH_URL_PATTERN.test(href)) {
+    reasons.push('auth_or_oauth_navigation')
+  }
+  if (PREVIEW_RISK_PATTERN.test(searchText)) {
+    reasons.push('risk_keyword')
+  }
+  if (normalizedAction === 'type' && PREVIEW_RISK_PATTERN.test(String(meta.labelText || searchText))) {
+    reasons.push('sensitive_text_entry_target')
+  }
+  if (
+    normalizedAction === 'key' &&
+    String(payload.key || '').toLowerCase() === 'enter' &&
+    (meta.withinForm || PREVIEW_RISK_PATTERN.test(searchText))
+  ) {
+    reasons.push('enter_may_submit_form')
+  }
+
+  const riskLevel = reasons.length ? 'high' : 'none'
+  return {
+    risk_level: riskLevel,
+    requires_confirmation: riskLevel !== 'none',
+    reasons: [...new Set(reasons)],
+    summary: riskLevel === 'none'
+      ? ''
+      : compactPreviewText(`${normalizedAction || 'action'} on ${searchText || tag || 'page element'}`, 300)
+  }
+}
+
+async function inspectPreviewTarget(webContents, payload = {}, point = {}, action = '') {
+  const fallback = point.cached || {}
+  const useActive = !point.elementId && !payload.x && !payload.y && ['key', 'type'].includes(String(action || '').toLowerCase())
+  const script = `
+(() => {
+  const input = ${JSON.stringify({ x: point.x || 0, y: point.y || 0, useActive })};
+  const clampText = (value, max = 500) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+  const rectPayload = rect => ({
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    centerX: Math.round(rect.x + rect.width / 2),
+    centerY: Math.round(rect.y + rect.height / 2)
+  });
+  const base = input.useActive ? document.activeElement : document.elementFromPoint(input.x, input.y);
+  const el = base && base.closest
+    ? (base.closest('a[href],button,input,textarea,select,summary,label,[role="button"],[role="link"],[role="menuitem"],[contenteditable=""],[contenteditable="true"],[onclick]') || base)
+    : base;
+  if (!el || !el.getBoundingClientRect) return null;
+  const form = el.closest ? el.closest('form') : null;
+  const label =
+    el.getAttribute('aria-label') ||
+    el.getAttribute('title') ||
+    el.getAttribute('placeholder') ||
+    el.innerText ||
+    el.value ||
+    el.name ||
+    el.href ||
+    '';
+  const rect = el.getBoundingClientRect();
+  return {
+    tag: el.tagName ? el.tagName.toLowerCase() : '',
+    role: el.getAttribute ? (el.getAttribute('role') || '') : '',
+    type: el.getAttribute ? (el.getAttribute('type') || '') : '',
+    buttonType: el.tagName && el.tagName.toLowerCase() === 'button'
+      ? ((el.getAttribute && el.getAttribute('type')) || (form ? 'submit' : 'button'))
+      : (el.getAttribute ? (el.getAttribute('type') || '') : ''),
+    text: clampText(label, 300),
+    href: el.href ? String(el.href).slice(0, 700) : '',
+    name: el.getAttribute ? (el.getAttribute('name') || '') : '',
+    title: el.getAttribute ? (el.getAttribute('title') || '') : '',
+    ariaLabel: el.getAttribute ? (el.getAttribute('aria-label') || '') : '',
+    placeholder: el.getAttribute ? (el.getAttribute('placeholder') || '') : '',
+    labelText: clampText((el.labels && el.labels.length ? Array.from(el.labels).map(item => item.innerText || '').join(' ') : '') || '', 300),
+    withinForm: Boolean(form),
+    formAction: form ? String(form.action || '').slice(0, 700) : '',
+    formMethod: form ? String(form.method || '').toLowerCase() : '',
+    isContentEditable: Boolean(el.isContentEditable),
+    rect: rectPayload(rect)
+  };
+})()
+`
+  try {
+    const fresh = await webContents.executeJavaScript(script, true)
+    return { ...fallback, ...(fresh || {}) }
+  } catch {
+    return fallback
+  }
+}
+
+async function confirmPreviewRisk(action, payload, meta, risk) {
+  if (!risk?.requires_confirmation) return true
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  try {
+    showWindow()
+  } catch {}
+  const response = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['允许一次', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    title: 'Preview Browser 需要确认',
+    message: 'Metis 即将在 Preview 网页中执行一个可能产生外部影响的动作。',
+    detail: [
+      `动作: ${action}`,
+      `页面: ${previewWebContents()?.getURL() || ''}`,
+      `目标: ${compactPreviewText(meta.text || meta.href || meta.selector || '', 220) || '页面元素'}`,
+      `原因: ${(risk.reasons || []).join(', ') || 'risk_keyword'}`
+    ].join('\n')
+  })
+  return response.response === 0
+}
+
+async function observePreviewPage(payload = {}) {
+  const webContents = previewWebContents()
+  if (!webContents) return { ok: false, error: 'preview view unavailable' }
+  const options = {
+    maxElements: clampPreviewNumber(payload.maxElements ?? payload.max_elements, 1, 200, 80),
+    includeText: payload.includeText !== false && payload.include_text !== false
+  }
+  const script = `
+(() => {
+  const options = ${JSON.stringify(options)};
+  const clampText = (value, max = 500) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, max);
+  const rectPayload = rect => ({
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+    centerX: Math.round(rect.x + rect.width / 2),
+    centerY: Math.round(rect.y + rect.height / 2)
+  });
+  const visible = el => {
+    if (!el || !el.getBoundingClientRect) return false;
+    const style = window.getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity || '1') === 0) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return false;
+    return rect.bottom >= 0 && rect.right >= 0 && rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+  };
+  const selectorFor = el => {
+    if (!el || !el.tagName) return '';
+    const cssEscape = value => window.CSS && CSS.escape ? CSS.escape(value) : String(value || '').replace(/[^a-zA-Z0-9_-]/g, '\\\\$&');
+    if (el.id) return '#' + cssEscape(el.id);
+    const testId = el.getAttribute('data-testid') || el.getAttribute('data-test-id');
+    if (testId) return el.tagName.toLowerCase() + '[data-testid="' + testId.replace(/"/g, '\\\\"') + '"]';
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === Node.ELEMENT_NODE && parts.length < 4) {
+      let part = node.tagName.toLowerCase();
+      const parent = node.parentElement;
+      if (parent) {
+        const same = Array.from(parent.children).filter(child => child.tagName === node.tagName);
+        if (same.length > 1) part += ':nth-of-type(' + (same.indexOf(node) + 1) + ')';
+      }
+      parts.unshift(part);
+      node = parent;
+    }
+    return parts.join(' > ');
+  };
+  const nodes = Array.from(document.querySelectorAll([
+    'a[href]',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'summary',
+    'label',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="menuitem"]',
+    '[tabindex]:not([tabindex="-1"])',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[onclick]'
+  ].join(',')));
+  const seen = new Set();
+  const elements = [];
+  for (const el of nodes) {
+    if (elements.length >= options.maxElements) break;
+    if (seen.has(el) || !visible(el)) continue;
+    seen.add(el);
+    const rect = el.getBoundingClientRect();
+    const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute('role') || '';
+    const type = el.getAttribute('type') || '';
+    const form = el.closest ? el.closest('form') : null;
+    const label =
+      el.getAttribute('aria-label') ||
+      el.getAttribute('title') ||
+      el.getAttribute('placeholder') ||
+      el.innerText ||
+      el.value ||
+      el.name ||
+      el.href ||
+      '';
+    elements.push({
+      tag,
+      role,
+      type,
+      buttonType: tag === 'button' ? (type || (form ? 'submit' : 'button')) : type,
+      text: clampText(label, 220),
+      href: tag === 'a' ? String(el.href || '').slice(0, 500) : '',
+      name: el.getAttribute('name') || '',
+      title: el.getAttribute('title') || '',
+      ariaLabel: el.getAttribute('aria-label') || '',
+      placeholder: el.getAttribute('placeholder') || '',
+      labelText: clampText((el.labels && el.labels.length ? Array.from(el.labels).map(item => item.innerText || '').join(' ') : '') || '', 220),
+      withinForm: Boolean(form),
+      formAction: form ? String(form.action || '').slice(0, 500) : '',
+      selector: selectorFor(el),
+      rect: rectPayload(rect),
+      disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
+      readOnly: Boolean(el.readOnly || el.getAttribute('aria-readonly') === 'true'),
+      isContentEditable: Boolean(el.isContentEditable)
+    });
+  }
+  const bodyText = options.includeText && document.body ? clampText(document.body.innerText || document.body.textContent || '', 6000) : '';
+  const headings = Array.from(document.querySelectorAll('h1,h2,h3')).slice(0, 12).map(item => ({
+    tag: item.tagName.toLowerCase(),
+    text: clampText(item.innerText || item.textContent || '', 180)
+  })).filter(item => item.text);
+  const domSummary = {
+    bodyTextLength: document.body ? String(document.body.innerText || document.body.textContent || '').trim().length : 0,
+    bodyChildCount: document.body ? document.body.children.length : 0,
+    rootChildCount: document.documentElement ? document.documentElement.children.length : 0,
+    buttons: document.querySelectorAll('button,[role="button"]').length,
+    inputs: document.querySelectorAll('input,textarea,select,[contenteditable=""],[contenteditable="true"]').length,
+    links: document.querySelectorAll('a[href]').length,
+    forms: document.querySelectorAll('form').length,
+    images: document.querySelectorAll('img,svg,canvas,video').length,
+    scripts: document.scripts ? document.scripts.length : 0,
+    stylesheets: document.styleSheets ? document.styleSheets.length : 0,
+    headings,
+    bodyClass: document.body ? clampText(document.body.className || '', 240) : '',
+    appRoots: Array.from(document.querySelectorAll('#root, #app, [data-reactroot], [data-nextjs-root]')).map(item => ({
+      selector: item.id ? '#' + item.id : (item.getAttribute('data-reactroot') !== null ? '[data-reactroot]' : item.tagName.toLowerCase()),
+      childCount: item.children ? item.children.length : 0,
+      textLength: String(item.innerText || item.textContent || '').trim().length
+    }))
+  };
+  return {
+    ok: true,
+    url: location.href,
+    title: document.title,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      scrollX: Math.round(window.scrollX || 0),
+      scrollY: Math.round(window.scrollY || 0),
+      devicePixelRatio: window.devicePixelRatio || 1
+    },
+    text: bodyText,
+    elements,
+    dom_summary: domSummary
+  };
+})()
+`
+  try {
+    const observed = await webContents.executeJavaScript(script, true)
+    const pageErrors = await collectPreviewPageErrors(webContents)
+    for (const errorItem of pageErrors) {
+      addPreviewDiagnostic('exceptions', errorItem, 40)
+    }
+    previewElementCache.clear()
+    const stamp = Date.now().toString(36)
+    const elements = Array.isArray(observed?.elements) ? observed.elements.map((element, index) => {
+      const elementId = `preview-${stamp}-${index + 1}`
+      const rect = element.rect || {}
+      const risk = classifyPreviewActionRisk('click', {}, element)
+      previewElementCache.set(elementId, {
+        x: Number(rect.centerX) || 0,
+        y: Number(rect.centerY) || 0,
+        rect,
+        selector: element.selector || '',
+        text: element.text || '',
+        href: element.href || '',
+        tag: element.tag || '',
+        role: element.role || '',
+        type: element.type || '',
+        buttonType: element.buttonType || '',
+        name: element.name || '',
+        title: element.title || '',
+        ariaLabel: element.ariaLabel || '',
+        placeholder: element.placeholder || '',
+        labelText: element.labelText || '',
+        withinForm: Boolean(element.withinForm),
+        formAction: element.formAction || '',
+        disabled: Boolean(element.disabled),
+        readOnly: Boolean(element.readOnly),
+        isContentEditable: Boolean(element.isContentEditable),
+        risk,
+        observedAt: Date.now()
+      })
+      return {
+        element_id: elementId,
+        risk,
+        ...element
+      }
+    }) : []
+    const diagnostics = previewDiagnosticsPayload()
+    const pageHealth = buildPreviewPageHealth(observed, diagnostics)
+    recordPreviewAction({
+      event: 'observe',
+      action: 'observe',
+      ok: true,
+      element_count: elements.length,
+      text_length: String(observed?.text || '').length,
+      page_health: pageHealth,
+      diagnostics_counts: diagnostics.counts || {}
+    })
+    const browserActivity = previewActivityPayload()
+    return {
+      ...previewStatePayload(),
+      ...observed,
+      elements,
+      diagnostics,
+      page_health: pageHealth,
+      action_log: browserActivity.items.slice(-12),
+      browser_activity: browserActivity
+    }
+  } catch (error) {
+    const diagnostics = previewDiagnosticsPayload()
+    recordPreviewAction({
+      event: 'observe',
+      action: 'observe',
+      ok: false,
+      error: error?.message || String(error),
+      diagnostics_counts: diagnostics.counts || {}
+    })
+    return {
+      ...previewStatePayload(),
+      ok: false,
+      error: error?.message || String(error),
+      diagnostics,
+      page_health: buildPreviewPageHealth({}, diagnostics),
+      browser_activity: previewActivityPayload()
+    }
+  }
+}
+
+function previewPointForPayload(payload = {}) {
+  const elementId = String(payload.elementId || payload.element_id || '')
+  const cached = elementId ? previewElementCache.get(elementId) : null
+  if (cached) {
+    return { x: cached.x, y: cached.y, elementId, cached }
+  }
+  const bounds = lastPreviewBounds || { width: 1200, height: 800 }
+  const x = clampPreviewNumber(payload.x, 0, Math.max(0, bounds.width || 0), Math.round((bounds.width || 0) / 2))
+  const y = clampPreviewNumber(payload.y, 0, Math.max(0, bounds.height || 0), Math.round((bounds.height || 0) / 2))
+  return { x, y, elementId, cached: null }
+}
+
+function sendPreviewClick(webContents, x, y, clickCount = 1) {
+  webContents.sendInputEvent({ type: 'mouseMove', x, y })
+  webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount })
+  webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount })
+}
+
+async function performPreviewAction(payload = {}) {
+  const action = String(payload.action || '').trim().toLowerCase()
+  const point = previewPointForPayload(payload)
+  const webContents = previewWebContents()
+  if (!webContents) {
+    recordPreviewAction({
+      event: 'action',
+      action,
+      ok: false,
+      error: 'preview view unavailable',
+      point: { x: point.x, y: point.y, element_id: point.elementId || '' }
+    })
+    return { ok: false, action, error: 'preview view unavailable', browser_activity: previewActivityPayload() }
+  }
+  try {
+    const targetMeta = await inspectPreviewTarget(webContents, payload, point, action)
+    const risk = ['click', 'double_click', 'type', 'key'].includes(action)
+      ? classifyPreviewActionRisk(action, payload, targetMeta)
+      : { risk_level: 'none', requires_confirmation: false, reasons: [], summary: '' }
+    if (risk.requires_confirmation) {
+      const confirmed = await confirmPreviewRisk(action, payload, targetMeta, risk)
+      if (!confirmed) {
+        recordPreviewAction({
+          event: 'action',
+          action,
+          blocked: true,
+          risk,
+          target: compactPreviewText(targetMeta.text || targetMeta.href || targetMeta.selector || '', 300),
+          point: { x: point.x, y: point.y, element_id: point.elementId || '' }
+        })
+        return {
+          ...previewStatePayload(),
+          ok: false,
+          blocked: true,
+          requires_confirmation: true,
+          risk,
+          action,
+          action_point: { x: point.x, y: point.y, element_id: point.elementId || '' },
+          target: targetMeta,
+          browser_activity: previewActivityPayload(),
+          message: 'Preview Browser blocked this high-risk action until the user confirms it.'
+        }
+      }
+      recordPreviewAction({
+        event: 'action',
+        action,
+        confirmed: true,
+        risk,
+        target: compactPreviewText(targetMeta.text || targetMeta.href || targetMeta.selector || '', 300),
+        point: { x: point.x, y: point.y, element_id: point.elementId || '' }
+      })
+    }
+    try { webContents.focus() } catch {}
+    if (action === 'click') {
+      sendPreviewClick(webContents, point.x, point.y, 1)
+    } else if (action === 'double_click') {
+      sendPreviewClick(webContents, point.x, point.y, 2)
+    } else if (action === 'type') {
+      if (point.elementId || payload.x || payload.y) {
+        sendPreviewClick(webContents, point.x, point.y, 1)
+        await delay(80)
+      }
+      await webContents.insertText(String(payload.text || ''))
+    } else if (action === 'key') {
+      const keyCode = String(payload.key || 'Enter')
+      webContents.sendInputEvent({ type: 'keyDown', keyCode })
+      webContents.sendInputEvent({ type: 'keyUp', keyCode })
+    } else if (action === 'scroll') {
+      const scrollY = clampPreviewNumber(payload.scrollY ?? payload.scroll_y, -5000, 5000, 600)
+      const scrollScript = `window.scrollBy({ left: 0, top: ${JSON.stringify(scrollY)}, behavior: 'auto' }); true;`
+      await webContents.executeJavaScript(scrollScript, true).catch(() => {})
+      webContents.sendInputEvent({ type: 'mouseWheel', x: point.x, y: point.y, deltaY: -scrollY })
+    } else if (action === 'wait') {
+      await delay(clampPreviewNumber(payload.waitMs ?? payload.wait_ms, 100, 10000, 800))
+    } else {
+      recordPreviewAction({
+        event: 'action',
+        action,
+        ok: false,
+        error: `unknown preview action: ${action}`,
+        point: { x: point.x, y: point.y, element_id: point.elementId || '' }
+      })
+      return { ...previewStatePayload(), ok: false, action, error: `unknown preview action: ${action}`, browser_activity: previewActivityPayload() }
+    }
+    await delay(action === 'wait' ? 0 : 180)
+    const observed = await observePreviewPage({ maxElements: 25, includeText: true })
+    recordPreviewAction({
+      event: 'action',
+      action,
+      ok: Boolean(observed.ok),
+      risk,
+      target: compactPreviewText(targetMeta.text || targetMeta.href || targetMeta.selector || '', 300),
+      point: { x: point.x, y: point.y, element_id: point.elementId || '' }
+    })
+    return {
+      ...observed,
+      action,
+      risk,
+      target: targetMeta,
+      action_point: { x: point.x, y: point.y, element_id: point.elementId || '' },
+      browser_activity: previewActivityPayload()
+    }
+  } catch (error) {
+    recordPreviewAction({
+      event: 'action',
+      action,
+      ok: false,
+      error: error?.message || String(error),
+      point: { x: point.x, y: point.y, element_id: point.elementId || '' }
+    })
+    return { ...previewStatePayload(), ok: false, action, error: error?.message || String(error), browser_activity: previewActivityPayload() }
+  }
+}
+
+function analyzePreviewImageHealth(image) {
+  const size = image?.getSize ? image.getSize() : { width: 0, height: 0 }
+  const width = Number(size.width || 0)
+  const height = Number(size.height || 0)
+  const bitmap = image?.getBitmap ? image.getBitmap() : null
+  if (!bitmap || !bitmap.length || width <= 0 || height <= 0) {
+    return {
+      ok: false,
+      width,
+      height,
+      sampled_pixels: 0,
+      appears_blank: true,
+      reasons: ['empty_capture']
+    }
+  }
+
+  const pixelCount = Math.floor(bitmap.length / 4)
+  const step = Math.max(1, Math.floor(pixelCount / 12000))
+  let sampled = 0
+  let nearWhite = 0
+  let nearBlack = 0
+  let transparent = 0
+  let minBrightness = 255
+  let maxBrightness = 0
+  let brightnessTotal = 0
+
+  for (let pixel = 0; pixel < pixelCount; pixel += step) {
+    const offset = pixel * 4
+    const c1 = bitmap[offset] ?? 0
+    const c2 = bitmap[offset + 1] ?? 0
+    const c3 = bitmap[offset + 2] ?? 0
+    const alpha = bitmap[offset + 3] ?? 255
+    sampled += 1
+    if (alpha === 0) {
+      transparent += 1
+      continue
+    }
+    const brightness = Math.round((c1 + c2 + c3) / 3)
+    minBrightness = Math.min(minBrightness, brightness)
+    maxBrightness = Math.max(maxBrightness, brightness)
+    brightnessTotal += brightness
+    if (c1 >= 248 && c2 >= 248 && c3 >= 248) nearWhite += 1
+    if (c1 <= 7 && c2 <= 7 && c3 <= 7) nearBlack += 1
+  }
+
+  const nonTransparent = Math.max(1, sampled - transparent)
+  const nearWhiteRatio = nearWhite / nonTransparent
+  const nearBlackRatio = nearBlack / nonTransparent
+  const transparentRatio = transparent / Math.max(1, sampled)
+  const brightnessRange = maxBrightness - minBrightness
+  const reasons = []
+  if (nearWhiteRatio >= 0.985) reasons.push('mostly_white')
+  if (nearBlackRatio >= 0.985) reasons.push('mostly_black')
+  if (transparentRatio >= 0.985) reasons.push('mostly_transparent')
+  if (brightnessRange <= 2) reasons.push('flat_brightness')
+
+  return {
+    ok: true,
+    width,
+    height,
+    sampled_pixels: sampled,
+    near_white_ratio: Number(nearWhiteRatio.toFixed(4)),
+    near_black_ratio: Number(nearBlackRatio.toFixed(4)),
+    transparent_ratio: Number(transparentRatio.toFixed(4)),
+    brightness_min: minBrightness,
+    brightness_max: maxBrightness,
+    brightness_average: Number((brightnessTotal / nonTransparent).toFixed(1)),
+    appears_blank: reasons.length > 0,
+    reasons
+  }
+}
+
+async function capturePreviewPage() {
+  const webContents = previewWebContents()
+  if (!webContents) {
+    recordPreviewAction({
+      event: 'screenshot',
+      action: 'screenshot',
+      ok: false,
+      error: 'preview view unavailable'
+    })
+    return { ...previewStatePayload(), ok: false, dataUrl: '', error: 'preview view unavailable', browser_activity: previewActivityPayload() }
+  }
+  try {
+    const image = await webContents.capturePage()
+    const size = image.getSize()
+    const screenshotHealth = analyzePreviewImageHealth(image)
+    const diagnostics = previewDiagnosticsPayload()
+    let domSummary = {}
+    try {
+      domSummary = await webContents.executeJavaScript(`
+(() => ({
+  bodyTextLength: document.body ? String(document.body.innerText || document.body.textContent || '').trim().length : 0,
+  bodyChildCount: document.body ? document.body.children.length : 0,
+  buttons: document.querySelectorAll('button,[role="button"]').length,
+  inputs: document.querySelectorAll('input,textarea,select,[contenteditable=""],[contenteditable="true"]').length,
+  links: document.querySelectorAll('a[href]').length,
+  forms: document.querySelectorAll('form').length
+}))()
+`, true)
+    } catch {}
+    const state = previewStatePayload()
+    const pageHealth = buildPreviewPageHealth({ ...state, dom_summary: domSummary }, diagnostics)
+    recordPreviewAction({
+      event: 'screenshot',
+      action: 'screenshot',
+      ok: true,
+      width: size.width,
+      height: size.height,
+      page_health: pageHealth,
+      screenshot_health: screenshotHealth,
+      diagnostics_counts: diagnostics.counts || {}
+    })
+    return {
+      ...state,
+      ok: true,
+      width: size.width,
+      height: size.height,
+      viewport: lastPreviewBounds || null,
+      diagnostics,
+      page_health: pageHealth,
+      screenshot_health: screenshotHealth,
+      browser_activity: previewActivityPayload(),
+      dataUrl: image.toDataURL()
+    }
+  } catch (error) {
+    const diagnostics = previewDiagnosticsPayload()
+    recordPreviewAction({
+      event: 'screenshot',
+      action: 'screenshot',
+      ok: false,
+      error: error?.message || String(error),
+      diagnostics_counts: diagnostics.counts || {}
+    })
+    return {
+      ...previewStatePayload(),
+      ok: false,
+      dataUrl: '',
+      error: error?.message || String(error),
+      diagnostics,
+      page_health: buildPreviewPageHealth({}, diagnostics),
+      browser_activity: previewActivityPayload()
+    }
+  }
+}
+
+async function handlePreviewBridgeRequest(request = {}) {
+  const kind = String(request.kind || '').trim()
+  const payload = request.payload || {}
+  if (kind === 'navigate') {
+    return loadPreviewUrl(payload.url, payload.tabId || payload.tab_id || '')
+  }
+  if (kind === 'observe') {
+    return observePreviewPage(payload)
+  }
+  if (kind === 'action') {
+    return performPreviewAction(payload)
+  }
+  if (kind === 'screenshot') {
+    return capturePreviewPage()
+  }
+  if (kind === 'status') {
+    return previewStatePayload()
+  }
+  if (kind === 'activity') {
+    return previewActivityPayload(payload.limit)
+  }
+  return { ok: false, error: `unknown preview bridge command: ${kind}` }
+}
+
+async function postPreviewBridgeResult(requestId, result) {
+  if (!backendPort || !requestId) return
+  await fetch(`http://127.0.0.1:${backendPort}/api/preview-browser/result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: requestId, result })
+  })
+}
+
+function startPreviewBridgeLoop() {
+  if (!backendPort) return
+  const loopId = ++previewBridgeLoopId
+  void (async () => {
+    log('[preview-browser] bridge loop started')
+    while (loopId === previewBridgeLoopId && backendPort) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${backendPort}/api/preview-browser/next?timeout=25`)
+        if (!response.ok) {
+          await delay(1000)
+          continue
+        }
+        const data = await response.json()
+        const request = data?.request
+        if (!request?.id) {
+          await delay(150)
+          continue
+        }
+        let result
+        try {
+          result = await handlePreviewBridgeRequest(request)
+        } catch (error) {
+          result = { ok: false, error: error?.message || String(error) }
+        }
+        try {
+          await postPreviewBridgeResult(request.id, result)
+        } catch (error) {
+          log(`[preview-browser] failed to post result: ${error?.message || error}`)
+        }
+      } catch (error) {
+        if (loopId === previewBridgeLoopId && backendPort) {
+          await delay(1000)
+        }
+      }
+    }
+    log('[preview-browser] bridge loop stopped')
+  })()
+}
+
+function stopPreviewBridgeLoop() {
+  previewBridgeLoopId += 1
 }
 
 function emitBootEvent(event) {
@@ -281,6 +1731,7 @@ function emitBootEvent(event) {
   } else if (payload.phase === 'error' || payload.phase === 'exit') {
     backendPort = null
     bootStatus = 'error'
+    stopPreviewBridgeLoop()
     bootError = {
       title: payload.title || '后端启动失败',
       detail: payload.detail || payload.logTail || '',
@@ -288,6 +1739,7 @@ function emitBootEvent(event) {
     }
   } else if (payload.phase === 'stopped') {
     backendPort = null
+    stopPreviewBridgeLoop()
   } else if (payload.phase !== 'log') {
     bootStatus = 'starting'
   }
@@ -976,9 +2428,11 @@ async function startBackendWithEvents({ reset = false } = {}) {
     const port = await startBackend(emitBootEvent)
     backendPort = port
     bootStatus = 'ready'
+    startPreviewBridgeLoop()
   } catch (error) {
     bootStatus = 'error'
     backendPort = null
+    stopPreviewBridgeLoop()
     if (!error?.title) {
       emitBootEvent({
         phase: 'error',
@@ -1600,8 +3054,8 @@ function ensureOverlayWindows() {
   }
   if (!overlayPillWindow || overlayPillWindow.isDestroyed()) {
     overlayPillWindow = new BrowserWindow({
-      width: 248,
-      height: 60,
+      width: 318,
+      height: 74,
       show: false,
       transparent: true,
       frame: false,
@@ -1627,10 +3081,10 @@ function positionOverlayWindows() {
   if (overlayPillWindow && !overlayPillWindow.isDestroyed()) {
     const work = screen.getPrimaryDisplay().workArea
     overlayPillWindow.setBounds({
-      width: 248,
-      height: 60,
-      x: work.x + work.width - 268,
-      y: work.y + work.height - 80
+      width: 318,
+      height: 74,
+      x: work.x + work.width - 338,
+      y: work.y + work.height - 94
     })
   }
 }
@@ -1783,12 +3237,10 @@ ipcMain.handle('metis:preview-set-zoom', (_event, zoom) => {
   webContents.setZoomFactor(factor)
   return { ok: true, zoom: factor }
 })
-ipcMain.handle('metis:preview-capture', async () => {
-  const webContents = previewView?.webContents
-  if (!webContents || webContents.isDestroyed()) return { ok: false, dataUrl: '' }
-  const image = await webContents.capturePage()
-  return { ok: true, dataUrl: image.toDataURL() }
-})
+ipcMain.handle('metis:preview-capture', () => capturePreviewPage())
+ipcMain.handle('metis:preview-observe', (_event, payload = {}) => observePreviewPage(payload))
+ipcMain.handle('metis:preview-action', (_event, payload = {}) => performPreviewAction(payload))
+ipcMain.handle('metis:preview-activity', (_event, payload = {}) => previewActivityPayload(payload.limit))
 ipcMain.handle('metis:check-updates', async () => {
   const current = app.getVersion()
 

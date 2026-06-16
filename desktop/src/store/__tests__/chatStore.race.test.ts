@@ -66,6 +66,7 @@ describe('chatStore loadSession runtime correctness', () => {
       runSessionId: null,
       pendingSendSessionId: null,
       usage: null,
+      contextLedger: null,
     });
     vi.mocked(api.getActiveSessionRun).mockResolvedValue({ ok: false, run: null });
   });

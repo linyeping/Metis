@@ -104,10 +104,13 @@ def _with_legacy_fields(
         legacy["payload"]["error_info"] = legacy["error_info"]
     elif kind == "done":
         usage = _usage_payload(payload)
+        context_ledger = _mapping_payload(payload.get("context_ledger", payload.get("contextLedger")))
         legacy["turns"] = int(_to_float(payload.get("turns", payload.get("total_turns")), 0))
         legacy["tool_calls"] = int(_to_float(payload.get("tool_calls", payload.get("total_tool_calls")), 0))
         legacy["usage"] = usage
+        legacy["context_ledger"] = context_ledger
         legacy["payload"]["usage"] = usage
+        legacy["payload"]["context_ledger"] = context_ledger
     elif kind == "compact":
         legacy["before_count"] = int(_to_float(payload.get("before_count"), 0))
         legacy["after_count"] = int(_to_float(payload.get("after_count"), 0))
@@ -187,6 +190,7 @@ def _payload_from_runtime_event(kind: str, event: Any) -> Dict[str, Any]:
                 "prompt_cache_hit_tokens": getattr(event, "prompt_cache_hit_tokens", 0),
                 "prompt_cache_miss_tokens": getattr(event, "prompt_cache_miss_tokens", 0),
             },
+            "context_ledger": getattr(event, "context_ledger", {}) or {},
         }
     if kind == "compact":
         return {
@@ -251,6 +255,10 @@ def _usage_payload(payload: Mapping[str, Any]) -> Dict[str, int]:
         "prompt_cache_hit_tokens": int(_to_float(usage.get("prompt_cache_hit_tokens", usage.get("promptCacheHitTokens")), 0)),
         "prompt_cache_miss_tokens": int(_to_float(usage.get("prompt_cache_miss_tokens", usage.get("promptCacheMissTokens")), 0)),
     }
+
+
+def _mapping_payload(value: Any) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _event_timestamp(event: Any) -> float:

@@ -46,6 +46,12 @@ from backend.runtime.checkpoints import (  # noqa: E402
     prune_checkpoints,
     restore_files_from_checkpoint,
 )
+from backend.runtime.checkpoint_store import (  # noqa: E402
+    list_checkpoints as list_runtime_checkpoints,
+    load_checkpoint as load_runtime_checkpoint,
+    load_latest as load_latest_runtime_checkpoint,
+    save_checkpoint as save_runtime_checkpoint,
+)
 from backend.core.paths import legacy_miro_path, metis_dir, metis_path  # noqa: E402
 from backend.runtime.tool_registry import get_registry  # noqa: E402
 from backend.runtime.error_catalog import ErrorInfo, classify_llm_error  # noqa: E402
@@ -64,6 +70,7 @@ from backend.web.llm_state import (  # noqa: E402
 from backend.web.sessions import get_session_manager  # noqa: E402
 from backend.web.workspaces import get_workspace_manager  # noqa: E402
 from backend.web.runtime_state import RuntimeState  # noqa: E402
+from backend.web.preview_bridge import preview_bridge_bp  # noqa: E402
 try:
     from backend.bridges.event_contract import agent_event_contract_payload  # noqa: E402
     from backend.bridges.event_serializer import agent_event_payload, sse_data  # noqa: E402
@@ -665,6 +672,33 @@ def _save_session_history(
     return save_session_history(session_id, history=history, compact_state=compact_state, mode=mode)
 
 
+def _save_runtime_history_checkpoint(
+    session_id: Optional[str],
+    *,
+    history: List[Dict[str, Any]],
+    compact_state: Optional[Dict[str, Any]] = None,
+    mode: str = "auto",
+    reason: str = "runtime",
+    runtime: Optional[Dict[str, Any]] = None,
+) -> None:
+    if not session_id:
+        return
+    try:
+        save_runtime_checkpoint(
+            session_id,
+            {
+                "kind": "web_history",
+                "reason": reason,
+                "history": list(history),
+                "compact_state": dict(compact_state or {}),
+                "mode": mode or "auto",
+                "runtime": dict(runtime or {}),
+            },
+        )
+    except Exception:
+        logger.debug("runtime history checkpoint save failed", exc_info=True)
+
+
 def _disk_full_event() -> Dict[str, Any]:
     return _event_payload(
         ErrorEvent(
@@ -1252,6 +1286,7 @@ def _create_run_state(
     assistant_id: str,
     history: List[Dict[str, Any]],
     mode: str,
+    compact_state: Optional[Dict[str, Any]] = None,
     model_context: Optional[List[Dict[str, Any]]] = None,
     workspace_root: str = "",
     checkpoint: Optional[CheckpointRecorder] = None,
@@ -1266,6 +1301,7 @@ def _create_run_state(
         "status": "queued",
         "phase": "queued",
         "history": list(history),
+        "compact_state": dict(compact_state or {}),
         "model_context": list(model_context if model_context is not None else history),
         "checkpoint": checkpoint,
         "events": [],
@@ -1554,12 +1590,16 @@ def _stream_agent_response(
     *,
     session_id: Optional[str] = None,
     history: Optional[List[Dict[str, Any]]] = None,
+    compact_state: Optional[Dict[str, Any]] = None,
     mode: str = "auto",
     cancel_event: Optional[threading.Event] = None,
     checkpoint: Optional[CheckpointRecorder] = None,
 ) -> Any:
     """Stream a normal agent response with shared permission and compact handling."""
+    if session_id:
+        config = replace(config, session_id=session_id)
     run_history = list(history if history is not None else messages)
+    runtime_compact_state = dict(compact_state or {})
     working_messages = list(messages)
     pending_compact_event: Optional[CompactEvent] = None
     estimated_prompt_tokens = _estimate_prompt_tokens(working_messages, config.system_prompt)
@@ -1692,9 +1732,24 @@ def _stream_agent_response(
                         },
                     )
                 )
+                _save_runtime_history_checkpoint(
+                    session_id,
+                    history=run_history,
+                    compact_state=runtime_compact_state,
+                    mode=mode,
+                    reason="tool_result",
+                    runtime={"tool": event.tool_name, "call_id": event.call_id},
+                )
 
             if isinstance(event, ContentEvent):
                 run_history.append(_new_message("assistant", event.text))
+                _save_runtime_history_checkpoint(
+                    session_id,
+                    history=run_history,
+                    compact_state=runtime_compact_state,
+                    mode=mode,
+                    reason="assistant_content",
+                )
 
             yield _sse(_event_payload(event))
 
@@ -1736,6 +1791,17 @@ def _stream_agent_response(
                     yield _sse(_event_payload(compact_event))
 
             if isinstance(event, DoneEvent):
+                _save_runtime_history_checkpoint(
+                    session_id,
+                    history=run_history,
+                    compact_state=runtime_compact_state,
+                    mode=mode,
+                    reason="done",
+                    runtime={
+                        "turn": event.total_turns,
+                        "tool_calls": event.total_tool_calls,
+                    },
+                )
                 learning_event = _maybe_record_learning(event, tool_names, session_id=session_id, history=run_history)
                 if learning_event is not None:
                     yield _sse(learning_event)
@@ -1816,6 +1882,7 @@ def _run_registry_worker(run_id: str) -> None:
         config,
         session_id=str(run["session_id"]),
         history=list(run["history"]),
+        compact_state=dict(run.get("compact_state") or {}),
         mode=str(run.get("mode") or "auto"),
         cancel_event=run.get("cancel_event"),
         checkpoint=run.get("checkpoint") if isinstance(run.get("checkpoint"), CheckpointRecorder) else None,
@@ -2000,7 +2067,7 @@ def create_run() -> Any:
         user_message_id=str(user_record.get("id") or ""),
     )
     model_context = _model_context_with_skill_invocation(history, compact_state, workspace_root)
-    _save_session_history(session_id, history=history, mode=mode)
+    _save_session_history(session_id, history=history, compact_state=compact_state, mode=mode)
     _commit_request_history_to_active(session_id, history, compact_state, mode, explicit_session)
     if was_empty and session_id:
         get_session_manager().update_session(session_id, title=_auto_title(_message_text(user_message)))
@@ -2011,6 +2078,7 @@ def create_run() -> Any:
         assistant_id=assistant_id,
         history=history,
         mode=mode,
+        compact_state=compact_state,
         model_context=model_context,
         workspace_root=workspace_root,
         checkpoint=checkpoint,
@@ -2067,6 +2135,54 @@ def cancel_run(run_id: str) -> Any:
             },
         )
     return jsonify({"ok": True, **_run_public_payload(run)})
+
+
+@app.route("/api/checkpoints/<session_id>", methods=["GET"])
+def api_runtime_checkpoints(session_id: str) -> Any:
+    session = get_session_manager().get_session(session_id)
+    if session is None:
+        return jsonify({"ok": False, "error": "session not found"}), 404
+    return jsonify({"ok": True, "checkpoints": list_runtime_checkpoints(session_id)})
+
+
+@app.route("/api/checkpoints/<session_id>/restore", methods=["POST"])
+def api_restore_runtime_checkpoint(session_id: str) -> Any:
+    manager = get_session_manager()
+    session = manager.get_session(session_id)
+    if session is None:
+        return jsonify({"ok": False, "error": "session not found"}), 404
+    active_run = _active_run_for_session(session_id)
+    if active_run is not None:
+        return jsonify({"ok": False, "error": "当前会话仍有任务运行，结束后才能恢复 checkpoint。"}), 409
+
+    data = request.get_json(silent=True) or {}
+    checkpoint_id = str(data.get("checkpoint_id") or data.get("checkpointId") or "").strip()
+    checkpoint = (
+        load_runtime_checkpoint(session_id, checkpoint_id)
+        if checkpoint_id
+        else load_latest_runtime_checkpoint(session_id)
+    )
+    if checkpoint is None:
+        return jsonify({"ok": False, "error": "checkpoint not found"}), 404
+    state = checkpoint.get("state") if isinstance(checkpoint.get("state"), dict) else {}
+    history = state.get("history")
+    if not isinstance(history, list):
+        return jsonify({"ok": False, "error": "checkpoint has no restorable session history"}), 400
+    compact_state = state.get("compact_state") if isinstance(state.get("compact_state"), dict) else {}
+    mode = str(state.get("mode") or session.mode or "auto")
+    manager.update_session(session_id, history=list(history), compact_state=dict(compact_state), mode=mode)
+    if session_id == _runtime_state.active_session_id:
+        _runtime_state.chat_history = list(history)
+        _runtime_state.compact_state = dict(compact_state)
+        _runtime_state.execution_mode = mode
+    return jsonify(
+        {
+            "ok": True,
+            "checkpoint_id": checkpoint.get("checkpoint_id", ""),
+            "history_length": len(history),
+            "mode": mode,
+        }
+    )
 
 
 @app.route("/sessions/<session_id>/checkpoints", methods=["GET"])
@@ -2342,7 +2458,17 @@ def chat() -> Any:
         )
 
     model_context = _model_context_with_skill_invocation(history, compact_state, workspace_root)
-    return _sse_response(_stream_agent_response(model_context, config, session_id=session_id, history=history, mode=mode, checkpoint=checkpoint))
+    return _sse_response(
+        _stream_agent_response(
+            model_context,
+            config,
+            session_id=session_id,
+            history=history,
+            compact_state=compact_state,
+            mode=mode,
+            checkpoint=checkpoint,
+        )
+    )
 
 
 @app.route("/chat/edit", methods=["POST"])
@@ -2381,6 +2507,7 @@ def chat_edit() -> Any:
             config,
             session_id=_runtime_state.active_session_id,
             history=list(_runtime_state.chat_history),
+            compact_state=dict(_runtime_state.compact_state),
             mode=_runtime_state.execution_mode,
         )
     )
@@ -2415,6 +2542,7 @@ def chat_regenerate() -> Any:
             config,
             session_id=_runtime_state.active_session_id,
             history=list(_runtime_state.chat_history),
+            compact_state=dict(_runtime_state.compact_state),
             mode=_runtime_state.execution_mode,
         )
     )
@@ -2462,6 +2590,8 @@ def chat_sync() -> Any:
     errors: List[Dict[str, Any]] = []
     last_done: Optional[DoneEvent] = None
 
+    if session_id:
+        config = replace(config, session_id=session_id)
     for event in run(messages, config):
         if isinstance(event, ContentEvent):
             final_text = event.text
@@ -2488,7 +2618,18 @@ def chat_sync() -> Any:
     if final_text:
         history.append(_new_message("assistant", final_text))
         _commit_request_history_to_active(session_id, history, compact_state, mode, explicit_session)
-    _save_session_history(session_id, history=history, mode=mode)
+    _save_session_history(session_id, history=history, compact_state=compact_state, mode=mode)
+    _save_runtime_history_checkpoint(
+        session_id,
+        history=history,
+        compact_state=compact_state,
+        mode=mode,
+        reason="sync_done",
+        runtime={
+            "turn": last_done.total_turns if last_done else 0,
+            "tool_calls": last_done.total_tool_calls if last_done else len(tool_calls),
+        },
+    )
     checkpoint.finalize("done" if not errors else "failed")
     if last_done and session_id == _runtime_state.active_session_id and should_auto_compact(last_done.prompt_tokens, config.llm_model):
         _trigger_auto_compact(config)
@@ -3325,6 +3466,7 @@ app.register_blueprint(settings_bp)
 app.register_blueprint(feature_bp)
 app.register_blueprint(session_bp)
 app.register_blueprint(workspace_bp)
+app.register_blueprint(preview_bridge_bp)
 
 try:
     from backend.web.desk_blueprint import desk_bp

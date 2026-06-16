@@ -25,7 +25,10 @@ let initialized = false;
 const DESK_STREAM_RECONNECT_MS = 5000;
 const takeoverTools = new Set([
   'desktop_action',
+  'desktop_expert',
   'desktop_vision_task',
+  'desktop_win2_action',
+  'desktop_win2_task',
   'desktop_window_action',
 ]);
 

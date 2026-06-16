@@ -53,6 +53,32 @@ describe('normalizeChatStreamEvent', () => {
     });
   });
 
+  it('normalizes done context ledger fields', () => {
+    const event = normalizeChatStreamEvent({
+      type: 'done',
+      payload: {
+        context_ledger: {
+          system_tokens: 10,
+          schema_tokens: 20,
+          history_tokens: 30,
+          estimated_total_tokens: 60,
+          context_limit: 1000,
+          context_ratio: 0.06,
+          cache_hit_tokens: 40,
+          cache_miss_tokens: 10,
+          cache_hit_rate: 0.8,
+          system_breakdown: { system_prompt: 4, skills: 5, memory: 1 },
+          schema_breakdown: { mcp: 8, builtin: 12 },
+        },
+      },
+    });
+
+    expect(event.contextLedger?.estimatedTotalTokens).toBe(60);
+    expect(event.contextLedger?.systemBreakdown?.skills).toBe(5);
+    expect(event.contextLedger?.schemaBreakdown?.mcp).toBe(8);
+    expect(event.contextLedger?.cacheHitRate).toBe(0.8);
+  });
+
   it('normalizes todo update events', () => {
     const event = normalizeChatStreamEvent({
       type: 'todo_update',

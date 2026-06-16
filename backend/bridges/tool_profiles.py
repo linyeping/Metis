@@ -32,6 +32,8 @@ SAFE_TOOLS: frozenset[str] = frozenset(
         "read_workspace_memory",
         "load_skill",
         "check_dev_environment",
+        "desktop_win2_status",
+        "desktop_win2_observe",
         "desktop_screenshot",
         "desktop_inventory",
     }
@@ -61,6 +63,8 @@ DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
         "manage_mcp_servers",
         "desktop_action",
         "desktop_vision_task",
+        "desktop_win2_action",
+        "desktop_win2_task",
         "update_project_memory",
     }
 )

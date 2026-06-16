@@ -9,6 +9,13 @@ from .llm_backends import Usage
 
 _DEFAULT_CONTEXT_LIMIT = 128_000
 IMAGE_BLOCK_TOKEN_ESTIMATE = 1600
+_SYSTEM_BREAKDOWN_KEYS = ("system_prompt", "skills", "memory")
+_SCHEMA_BREAKDOWN_KEYS = ("mcp", "builtin")
+_SYSTEM_MARKER_CATEGORIES = {
+    "[可用技能 / Available Skills]": "skills",
+    "[Desktop Automation Skill Reference]": "skills",
+    "[User METIS.md]": "memory",
+}
 _MODEL_CONTEXT_LIMITS: Dict[str, int] = {
     "deepseek-v4-flash": 1_000_000,
     "deepseek-v4-pro": 1_000_000,
@@ -96,6 +103,82 @@ def _is_image_content_block(value: MappingABC[str, Any]) -> bool:
     return isinstance(image_url, MappingABC) and bool(image_url.get("url"))
 
 
+def _empty_breakdown(keys: tuple[str, ...]) -> Dict[str, int]:
+    return {key: 0 for key in keys}
+
+
+def _system_content_breakdown(content: Any) -> Dict[str, int]:
+    breakdown = _empty_breakdown(_SYSTEM_BREAKDOWN_KEYS)
+    if not isinstance(content, str):
+        breakdown["system_prompt"] = estimate_tokens(content)
+        return breakdown
+    if not content:
+        return breakdown
+
+    markers: List[tuple[int, str]] = []
+    for marker, category in _SYSTEM_MARKER_CATEGORIES.items():
+        start = 0
+        while True:
+            index = content.find(marker, start)
+            if index < 0:
+                break
+            markers.append((index, category))
+            start = index + len(marker)
+    if not markers:
+        breakdown["system_prompt"] = estimate_tokens(content)
+        return breakdown
+
+    markers.sort(key=lambda item: item[0])
+    deduped: List[tuple[int, str]] = []
+    seen_positions: set[int] = set()
+    for position, category in markers:
+        if position in seen_positions:
+            continue
+        deduped.append((position, category))
+        seen_positions.add(position)
+
+    cursor = 0
+    current_category = "system_prompt"
+    for position, next_category in deduped:
+        if position > cursor:
+            breakdown[current_category] += estimate_tokens(content[cursor:position])
+        current_category = next_category
+        cursor = position
+    if cursor < len(content):
+        breakdown[current_category] += estimate_tokens(content[cursor:])
+    return breakdown
+
+
+def _system_breakdown(messages: List[Mapping[str, Any]]) -> Dict[str, int]:
+    breakdown = _empty_breakdown(_SYSTEM_BREAKDOWN_KEYS)
+    for message in messages:
+        if str(message.get("role") or "") != "system":
+            continue
+        for key, value in _system_content_breakdown(message.get("content")).items():
+            breakdown[key] += value
+        if message.get("tool_calls"):
+            breakdown["system_prompt"] += estimate_tokens(message.get("tool_calls"))
+        if message.get("name"):
+            breakdown["system_prompt"] += estimate_tokens(message.get("name"))
+    return breakdown
+
+
+def _schema_breakdown(tools: Optional[List[Mapping[str, Any]]]) -> Dict[str, int]:
+    breakdown = _empty_breakdown(_SCHEMA_BREAKDOWN_KEYS)
+    for tool in tools or []:
+        category = "mcp" if _is_mcp_tool_schema(tool) else "builtin"
+        breakdown[category] += estimate_tokens(tool)
+    return breakdown
+
+
+def _is_mcp_tool_schema(tool: Mapping[str, Any]) -> bool:
+    source = str(tool.get("source") or tool.get("_metis_source") or "").strip().lower()
+    function = tool.get("function") if isinstance(tool.get("function"), MappingABC) else {}
+    name = str(tool.get("name") or function.get("name") or "").strip()
+    description = str(tool.get("description") or function.get("description") or "").lstrip()
+    return source.startswith("mcp:") or name.startswith("mcp_") or description.startswith("[MCP:")
+
+
 def context_ledger(
     messages: List[Mapping[str, Any]],
     tools: Optional[List[Mapping[str, Any]]] = None,
@@ -118,6 +201,8 @@ def context_ledger(
             history_tokens += tokens
 
     schema_tokens = estimate_tokens(tools or [])
+    system_parts = _system_breakdown(messages)
+    schema_parts = _schema_breakdown(tools)
     estimated_total = system_tokens + schema_tokens + history_tokens
     limit = context_limit_for_model(model)
     cache_hit = int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0)
@@ -139,4 +224,6 @@ def context_ledger(
         "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
         "message_count": len(messages),
         "tool_count": len(tools or []),
+        "system_breakdown": system_parts,
+        "schema_breakdown": schema_parts,
     }

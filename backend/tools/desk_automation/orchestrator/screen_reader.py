@@ -955,6 +955,9 @@ def call_vision_llm_batch(
             lines.append(line)
         parts.append("## 已执行\n" + "\n".join(lines))
 
+    if extra_context:
+        parts.append(f"## 额外信息\n{extra_context}")
+
     parts.append("## 请回答\n" + "\n".join(f"- {q}" for q in questions))
     parts.append(
         f"## 规划接下来的操作（JSON 数组，2~8 步）\n"

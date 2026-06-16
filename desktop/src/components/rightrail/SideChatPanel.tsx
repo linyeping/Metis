@@ -268,7 +268,11 @@ export function SideChatPanel({ defaultModel = '', floating = false, onClose }: 
             return (
             <article className="side-chat-message" data-role={message.role} key={message.id}>
               <div className="side-chat-bubble" data-empty-pending={emptyPending} data-error={Boolean(message.error)} data-pending={Boolean(message.pending)}>
-                {hasContent && <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>}
+                {hasContent && (
+                  <div className="markdown-body side-chat-markdown">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                  </div>
+                )}
                 {message.pending && (
                   <span className="side-chat-pending">
                     <LoaderCircle className="spin" size={12} />

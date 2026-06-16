@@ -169,12 +169,19 @@ export function applyChatEvent(
     chatStore().setState({ compactStatus: normalized.compactStatus });
   } else if (normalized.kind === 'done') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
+    finalizeOpenTools(
+      assistantId,
+      chatStore().getState().runtimeStatus?.severity === 'error' ? 'error' : 'success',
+    );
     maybeOpenLocalPreview(chatStore().getState().messages.find(message => message.id === assistantId)?.content || '');
     if (chatStore().getState().runtimeStatus?.severity !== 'error') {
       chatStore().setState({ runtimeStatus: null });
     }
     if (normalized.usage) {
       chatStore().setState({ usage: normalized.usage });
+    }
+    if (normalized.contextLedger) {
+      chatStore().setState({ contextLedger: normalized.contextLedger });
     }
   } else if (normalized.kind === 'memory_nudge' && normalized.memory) {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
@@ -318,14 +325,67 @@ function finalizeAssistantTextSegment(messageId: string, text: string): void {
 function upsertTool(messageId: string, tool: ChatToolEvent): void {
   updateAssistant(messageId, message => {
     const tools = message.tools ?? [];
-    const index = tools.findIndex(item => item.callId === tool.callId);
+    const exactIndex = tools.findIndex(item => item.callId === tool.callId);
+    const fallbackIndex = exactIndex === -1 ? findRunningToolByName(tools, tool) : -1;
+    const index = exactIndex === -1 ? fallbackIndex : exactIndex;
     if (index === -1) {
       const nextTools = [...tools, tool];
       return { ...message, tools: nextTools, parts: appendToolPart(ensureParts(message), tool) };
     }
     const next = tools.slice();
-    next[index] = { ...next[index], ...tool };
+    next[index] = mergeToolEvent(next[index], tool, exactIndex === -1);
     return { ...message, tools: next };
+  });
+}
+
+function findRunningToolByName(tools: ChatToolEvent[], tool: ChatToolEvent): number {
+  if (tool.status !== 'success' && tool.status !== 'error') return -1;
+  for (let index = tools.length - 1; index >= 0; index -= 1) {
+    const previous = tools[index];
+    if (previous.toolName !== tool.toolName) continue;
+    if (previous.status === 'running' || previous.status === 'waiting_approval') return index;
+  }
+  return -1;
+}
+
+function mergeToolEvent(previous: ChatToolEvent, incoming: ChatToolEvent, preserveIdentity: boolean): ChatToolEvent {
+  const merged = { ...previous, ...incoming };
+  if (!preserveIdentity) return merged;
+  return {
+    ...merged,
+    id: previous.id,
+    callId: previous.callId,
+    requestId: incoming.requestId || previous.requestId,
+    startedAt: incoming.startedAt || previous.startedAt,
+  };
+}
+
+function finalizeOpenTools(messageId: string, status: 'success' | 'error'): void {
+  const now = Date.now();
+  updateAssistant(messageId, message => {
+    const tools = message.tools ?? [];
+    let changed = false;
+    const nextTools = tools.map(tool => {
+      if (tool.status !== 'running' && tool.status !== 'waiting_approval') return tool;
+      changed = true;
+      const result =
+        tool.result ??
+        (status === 'error'
+          ? '[Run ended before this tool returned a result]'
+          : '[Run completed without a separate tool result event]');
+      return {
+        ...tool,
+        result,
+        status,
+        finishedAt: tool.finishedAt || now,
+        summary: tool.summary || summarizeToolValue(result),
+        errorHint:
+          status === 'error'
+            ? tool.errorHint || 'This run ended before the tool returned a separate result.'
+            : tool.errorHint,
+      };
+    });
+    return changed ? { ...message, tools: nextTools } : message;
   });
 }
 

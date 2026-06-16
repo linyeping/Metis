@@ -55,6 +55,16 @@ _STRATEGY_MAP: Dict[str, str] = {
     "list_directory": "tree_compact",
     # desktop
     "desktop_window_list": "json_summary",
+    "desktop_win2_status": "json_summary",
+    "desktop_win2_observe": "json_summary",
+    "desktop_win2_action": "json_summary",
+    "desktop_win2_task": "json_summary",
+    "preview_browser_status": "json_summary",
+    "preview_browser_navigate": "json_summary",
+    "preview_browser_observe": "json_summary",
+    "preview_browser_action": "json_summary",
+    "preview_browser_screenshot": "json_summary",
+    "preview_browser_verify": "json_summary",
     # browser
     "browse_web": "browser_cap",
     "browse_and_extract": "browser_cap",

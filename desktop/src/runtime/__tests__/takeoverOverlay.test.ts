@@ -77,6 +77,22 @@ describe('takeoverOverlay 激活逻辑', () => {
     expect(overlaySetActive).toHaveBeenCalledWith(false);
   });
 
+  it('Win2 和桌面专家工具运行时也会亮起覆盖层', () => {
+    for (const toolName of ['desktop_win2_task', 'desktop_win2_action', 'desktop_expert']) {
+      overlaySetActive.mockClear();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      useChatStore.setState({
+        streaming: true,
+        runtimeStatus: { phase: 'tool_running', message: '', display: '', severity: 'working', toolName },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+      expect(overlaySetActive).toHaveBeenCalledWith(true);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      useChatStore.setState({ streaming: false } as any);
+    }
+  });
+
   it('非 desktop 控制工具不触发覆盖层', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     useChatStore.setState({
