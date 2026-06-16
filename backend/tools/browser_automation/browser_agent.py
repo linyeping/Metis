@@ -82,6 +82,20 @@ class BrowserLLMConfig:
     warnings: list[str] = field(default_factory=list)
 
 
+class _LegacyBrowserUseLLMProxy:
+    """Expose browser-use metadata without mutating provider SDK objects."""
+
+    def __init__(self, inner: Any, *, provider: str, model: str, base_url: str) -> None:
+        self._inner = inner
+        self.provider = provider
+        self.model = model
+        self.model_name = model
+        self.base_url = base_url
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 # ── Detect system browser ─────────────────────────────────────────────
 
 def _detect_system_browser() -> tuple[str, str]:
@@ -310,10 +324,12 @@ def _build_browser_use_llm(config: BrowserLLMConfig | None = None) -> tuple[Any,
             if config.base_url:
                 kwargs["base_url"] = config.base_url
             llm = ChatOpenAI(**kwargs)
-            object.__setattr__(llm, "provider", "openai")
-            object.__setattr__(llm, "model", config.model or "gpt-4o-mini")
-            object.__setattr__(llm, "model_name", config.model or "gpt-4o-mini")
-            return llm, config
+            return _LegacyBrowserUseLLMProxy(
+                llm,
+                provider="openai",
+                model=config.model or "gpt-4o-mini",
+                base_url=config.base_url,
+            ), config
         except Exception as legacy_exc:
             raise RuntimeError(
                 "browser-use LLM 初始化失败。"
