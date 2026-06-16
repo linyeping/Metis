@@ -19,6 +19,7 @@ P5 审计说明（与 Tools/registry.py 对照）：
 - auto_install_package / git_commit_pr：改环境与 git 对象，非工作区源码 chunk 索引职责，不纳入。
 - extract_method：仅返回文本建议，不落盘，不纳入。
 - generate_image：当前实现仅请求远程 API，不写工作区文件，不纳入。
+- pdf_create / docx_create / office_report_from_code_run 等 artifact 工具可能写文件，但非源码扩展会在 update_index_for_file 中自然跳过。
 """
 from __future__ import annotations
 
@@ -51,6 +52,15 @@ FILE_MODIFICATION_TOOLS: FrozenSet[str] = frozenset(
         "rename_file_update_refs",
         "delete_file",
         "delete_directory",
+        "pdf_create",
+        "pdf_merge_split",
+        "pdf_render_pages",
+        "pdf_screenshot_page",
+        "docx_create",
+        "docx_edit",
+        "docx_to_pdf",
+        "docx_render_pages",
+        "office_report_from_code_run",
         "rename_symbol",
         "undo_last_edit",
     }
@@ -312,7 +322,7 @@ def realtime_index_hook(tool_name: str, kwargs: Dict[str, Any], result: str) -> 
         _invalidate_index_under_directory(str(dir_path), workspace_root)
         return
 
-    file_path = kwargs.get("file_path") or kwargs.get("path")
+    file_path = kwargs.get("file_path") or kwargs.get("path") or kwargs.get("output_path")
     if not file_path:
         return
 

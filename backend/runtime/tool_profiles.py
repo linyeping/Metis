@@ -25,6 +25,18 @@ LEAN_PROFILE = frozenset(
         "browse_and_extract",
         "desktop_screenshot",
         "desktop_action",
+        "pdf_info",
+        "pdf_extract_text",
+        "pdf_render_pages",
+        "pdf_screenshot_page",
+        "pdf_merge_split",
+        "pdf_create",
+        "office_report_from_code_run",
+        "docx_create",
+        "docx_edit",
+        "docx_to_pdf",
+        "docx_render_pages",
+        "docx_inspect_layout",
     }
 )
 

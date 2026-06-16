@@ -41,6 +41,7 @@ def test_registers_win2_tools():
         "desktop_win2_observe",
         "desktop_win2_action",
         "desktop_win2_task",
+        "desktop_win2_verify",
     }:
         assert registry.get(name) is not None
 
@@ -55,6 +56,17 @@ def test_win2_action_schema_matches_manual_actions():
     assert props["keys"]["type"] == "array"
     for name in {"start_x", "start_y", "end_x", "end_y"}:
         assert name in props
+
+
+def test_win2_verify_schema_advertises_evidence_chain():
+    registry = ToolRegistry()
+    register_desktop_tools(registry)
+    tool = registry.get("desktop_win2_verify")
+
+    assert tool is not None
+    assert "evidence_chain" in tool.description
+    assert "assertion" in tool.parameters["properties"]
+    assert "require_foreground" in tool.parameters["properties"]
 
 
 def test_win2_manual_hotkey_and_drag_params_are_passed(monkeypatch):
@@ -88,6 +100,84 @@ def test_win2_manual_hotkey_and_drag_params_are_passed(monkeypatch):
     assert captured[0][1].params["keys"] == ["ctrl", "l"]
     assert captured[1][1].params["start_x"] == 10
     assert captured[1][1].params["end_y"] == 40
+
+
+def test_win2_scroll_uses_pagedown_fallback_when_wheel_does_not_move(monkeypatch):
+    actions = []
+    probes = [
+        {"available": True, "signature": "before"},
+        {"available": True, "signature": "before"},
+        {"available": True, "signature": "after"},
+    ]
+    monkeypatch.setattr(win2_loop, "win2_enabled", lambda: True)
+    monkeypatch.setattr(win2_loop.config, "assert_automation_allowed", lambda: None)
+    monkeypatch.setattr(
+        win2_loop,
+        "_resolve_window",
+        lambda hwnd=0, title="": SimpleNamespace(hwnd=123, title="Demo", exe_name="demo.exe"),
+    )
+    monkeypatch.setattr(win2_loop, "_capture_scroll_probe", lambda hwnd: probes.pop(0))
+
+    def fake_scroll(hwnd, x, y, delta=-3):
+        actions.append(("wheel", hwnd, x, y, delta))
+        return {"ok": True, "clicks": delta}
+
+    def fake_key(hwnd, key):
+        actions.append(("key", hwnd, key))
+        return {"ok": True, "key": key}
+
+    monkeypatch.setattr(
+        "backend.tools.desk_automation.capture.window_manager.scroll_in_window",
+        fake_scroll,
+    )
+    monkeypatch.setattr(
+        "backend.tools.desk_automation.capture.window_manager.press_key_in_window",
+        fake_key,
+    )
+
+    result = win2_loop.act(hwnd=123, action="scroll", x=20, y=30, scroll_delta=-4)
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["fallback_used"] is True
+    assert payload["method"] == "pagedown"
+    assert payload["scroll_verification"]["changed"] is True
+    assert [item["method"] for item in payload["attempts"]] == ["wheel", "pagedown"]
+    assert actions == [("wheel", 123, 20, 30, -4), ("key", 123, "pagedown")]
+
+
+def test_win2_scroll_reports_no_visible_change_after_bounded_fallbacks(monkeypatch):
+    probes = [
+        {"available": True, "signature": "same"},
+        {"available": True, "signature": "same"},
+        {"available": True, "signature": "same"},
+        {"available": True, "signature": "same"},
+    ]
+    monkeypatch.setattr(win2_loop, "win2_enabled", lambda: True)
+    monkeypatch.setattr(win2_loop.config, "assert_automation_allowed", lambda: None)
+    monkeypatch.setattr(
+        win2_loop,
+        "_resolve_window",
+        lambda hwnd=0, title="": SimpleNamespace(hwnd=123, title="Demo", exe_name="demo.exe"),
+    )
+    monkeypatch.setattr(win2_loop, "_capture_scroll_probe", lambda hwnd: probes.pop(0))
+    monkeypatch.setattr(
+        "backend.tools.desk_automation.capture.window_manager.scroll_in_window",
+        lambda hwnd, x, y, delta=-3: {"ok": True, "clicks": delta},
+    )
+    monkeypatch.setattr(
+        "backend.tools.desk_automation.capture.window_manager.press_key_in_window",
+        lambda hwnd, key: {"ok": True, "key": key},
+    )
+    monkeypatch.setattr(win2_loop, "_press_hotkey_in_window", lambda hwnd, keys: {"ok": True, "keys": keys})
+
+    result = win2_loop.act(hwnd=123, action="scroll", x=20, y=30, scroll_delta=3)
+
+    payload = result["result"]
+    assert payload["fallback_used"] is True
+    assert payload["scroll_verification"]["changed"] is False
+    assert payload["warning"].startswith("Scroll did not produce")
+    assert [item["method"] for item in payload["attempts"]] == ["wheel", "pageup", "ctrl+home"]
 
 
 def test_batch_planner_receives_win2_extra_context(monkeypatch):
@@ -138,7 +228,59 @@ def test_desktop_expert_prefers_win2_tools():
     definition = expert_tools._EXPERT_DEFINITIONS["desktop_expert"]
     assert "desktop_win2_task" in definition["tool_whitelist"]
     assert "desktop_win2_observe" in definition["tool_whitelist"]
+    assert "desktop_win2_verify" in definition["tool_whitelist"]
     assert definition["max_turns"] > 5
+
+
+def test_win2_verify_returns_checks_and_evidence(monkeypatch, tmp_path):
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    monkeypatch.setattr(win2_loop, "win2_enabled", lambda: True)
+    monkeypatch.setattr(
+        win2_loop,
+        "_resolve_window",
+        lambda hwnd=0, title="": SimpleNamespace(hwnd=123, title="Demo App", exe_name="demo.exe", is_foreground=True),
+    )
+    monkeypatch.setattr(
+        win2_loop,
+        "_capture_observation",
+        lambda hwnd, include_ocr=False: win2_loop.Win2Observation(
+            hwnd=123,
+            title="Demo App",
+            exe="demo.exe",
+            rect={"width": 800, "height": 600},
+            screenshot_path=str(shot),
+            screenshot_width=800,
+            screenshot_height=600,
+            accessibility={
+                "available": True,
+                "elements": [
+                    {
+                        "text": "hello world",
+                        "class_name": "Edit",
+                        "rect": {"left": 10, "top": 20, "width": 200, "height": 30},
+                    }
+                ],
+            },
+        ),
+    )
+
+    result = win2_loop.verify(
+        hwnd=123,
+        assertion='检查输入框是否真的写入 "hello"',
+        require_foreground=True,
+    )
+
+    assert result["ok"] is True
+    assert result["checks"]["window_foreground"] is True
+    assert result["checks"]["text_visible"] is True
+    assert result["checks"]["screenshot_captured"] is True
+    assert result["evidence_chain"][-1]["kind"] == "text_match"
+    assert result["evidence_schema"] == "metis.verifier.evidence_chain.v2"
+    assert result["verdict"]["ok"] is True
+    assert result["verdict"]["surface"] == "desktop_win2"
+    assert result["evidence_chain_v2"][0]["kind"] == "window"
+    assert any(item.get("check") == "text_visible" for item in result["evidence_chain_v2"])
 
 
 def test_desktop_vision_task_returns_win2_success(monkeypatch):

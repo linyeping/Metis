@@ -92,6 +92,22 @@ from backend.tools.coding.workflow_features.subagents.summon_context_gatherer im
 from backend.tools.coding.workflow_features.subagents.task_dispatch import task_dispatch
 from backend.tools.coding.workflow_features.subagents.run_parallel_tasks import run_parallel_tasks
 from backend.tools.coding.workflow_features.subagents.run_task_graph import run_task_graph
+from backend.tools.artifacts.docx_tools import (
+    docx_create,
+    docx_edit,
+    docx_inspect_layout,
+    docx_render_pages,
+    docx_to_pdf,
+)
+from backend.tools.artifacts.pdf_tools import (
+    pdf_create,
+    pdf_extract_text,
+    pdf_info,
+    pdf_merge_split,
+    pdf_render_pages,
+    pdf_screenshot_page,
+)
+from backend.tools.artifacts.report_tools import office_report_from_code_run
 
 try:
     from backend.tools.coding.workflow_features.hooks.post_tool_hook import post_tool_hook
@@ -140,6 +156,15 @@ WRITE_LIKE_TOOLS: Set[str] = {
     "rename_file_update_refs",
     "delete_file",
     "delete_directory",
+    "pdf_create",
+    "pdf_merge_split",
+    "docx_create",
+    "docx_edit",
+    "docx_to_pdf",
+    "docx_render_pages",
+    "pdf_render_pages",
+    "pdf_screenshot_page",
+    "office_report_from_code_run",
 }
 
 AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
@@ -210,6 +235,18 @@ AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
     "run_task_graph": run_task_graph,
     "manage_mcp_servers": manage_mcp_servers,
     "load_workflow_guidelines": load_workflow_guidelines,
+    "pdf_info": pdf_info,
+    "pdf_extract_text": pdf_extract_text,
+    "pdf_render_pages": pdf_render_pages,
+    "pdf_screenshot_page": pdf_screenshot_page,
+    "pdf_merge_split": pdf_merge_split,
+    "pdf_create": pdf_create,
+    "docx_create": docx_create,
+    "docx_edit": docx_edit,
+    "docx_to_pdf": docx_to_pdf,
+    "docx_render_pages": docx_render_pages,
+    "docx_inspect_layout": docx_inspect_layout,
+    "office_report_from_code_run": office_report_from_code_run,
 }
 
 

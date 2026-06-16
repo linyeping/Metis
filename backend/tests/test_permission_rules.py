@@ -103,6 +103,50 @@ def test_permission_audit_redacts_and_truncates_arguments(isolated_permissions: 
     assert len(audit["arguments"]["content"]) < 230
 
 
+def test_permissions_endpoint_exposes_control_plane(isolated_permissions: Any) -> None:
+    client = isolated_permissions
+    response = client.post(
+        "/permissions",
+        json={"tool": "execute_bash_command", "action": "allow", "source": "settings"},
+    )
+    assert response.status_code == 200
+
+    payload = client.get("/permissions").get_json()
+    assert payload["control_plane"]["version"] == "v2"
+    assert payload["control_plane"]["dangerous_allow_count"] == 1
+    assert payload["rules"][0]["dangerous_allow"] is True
+
+
+def test_permission_audit_records_control_plane_reason(isolated_permissions: Any) -> None:
+    client = isolated_permissions
+    request_id = "perm-test-control-plane"
+    web_app._permission_locks[request_id] = threading.Event()
+    web_app._permission_contexts[request_id] = {
+        "request_id": request_id,
+        "call_id": "call-control-plane",
+        "tool": "write_file",
+        "arguments": {"path": "notes.md"},
+        "mode": "edit",
+        "decision": {
+            "source": "registry",
+            "reason": "Tool registry approval metadata was applied.",
+            "risk_level": "medium",
+        },
+    }
+
+    response = client.post(
+        "/permission",
+        json={"request_id": request_id, "approved": True, "remember": ""},
+    )
+    assert response.status_code == 200
+
+    audit = client.get("/permissions").get_json()["audit"][0]
+    assert audit["decision_source"] == "registry"
+    assert audit["decision_reason"] == "Tool registry approval metadata was applied."
+    assert audit["risk_level"] == "medium"
+    assert audit["mode"] == "edit"
+
+
 def test_composer_full_access_enables_cross_workspace_read_boundary(isolated_permissions: Any) -> None:
     client = isolated_permissions
 

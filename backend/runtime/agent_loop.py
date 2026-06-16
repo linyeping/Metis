@@ -16,6 +16,7 @@ from .error_catalog import classify_llm_error, is_non_retryable_llm_error
 from .context_budget import context_ledger
 from .context_eviction import evict_tool_results, maybe_auto_compact_messages
 from .edit_guard import EditGuard
+from .hook_lifecycle_bus import emit_hook_lifecycle
 from .image_utils import build_image_content_block, extract_image_paths
 from .llm_backends import LLMBackend, LLMResponse, ToolCall, Usage, get_backend
 from .llm_backends._common import sanitize_for_log
@@ -25,6 +26,17 @@ from .loop_discipline import (
     compact_todo_block,
     workspace_todo_block,
 )
+from .model_router import (
+    ROUTE_MARKER,
+    TaskRoute,
+    build_task_route,
+    desktop_control_tools,
+    prioritized_tools_for_route,
+    render_route_hint,
+    router_enabled,
+    should_block_desktop_control,
+)
+from .permission_control import evaluate_permission
 from .result_compactor import ResultCompactor
 from .tool_call_tracker import ToolCallTracker
 from .tool_errors import teaching_error_text
@@ -203,6 +215,12 @@ class AgentConfig:
     session_id: str = ""
     permission_checker: Optional[Callable[[str, Dict[str, Any]], Optional[str]]] = None
     tool_boundary_overrides: Optional[Callable[[str, Dict[str, Any]], Dict[str, bool]]] = None
+    routing_task_type: str = ""
+    routing_model_role: str = ""
+    routing_reason: str = ""
+    routing_tool_guidance: str = ""
+    routing_preferred_tools: List[str] = field(default_factory=list)
+    model_fallbacks: List[str] = field(default_factory=list)
 
 
 # FABLEADV-25: 环境探测结果记忆化。原实现每个 run 现探测、带 20ms 超时——
@@ -300,6 +318,10 @@ def _prepare_working_messages(messages: List[Dict[str, Any]], config: AgentConfi
     env_context = _build_environment_context()
     if env_context:
         _insert_environment_context_message(working_messages, env_context)
+    route_hint = _route_hint_message(config)
+    if route_hint:
+        working_messages = _without_route_hint(working_messages)
+        working_messages.append({"role": "user", "content": route_hint})
     return working_messages
 
 
@@ -430,6 +452,96 @@ def _clear_run_todos(workspace_root: str = "") -> None:
         logger.debug("failed to clear run todo state", exc_info=True)
 
 
+def _config_with_task_route(config: AgentConfig, messages: List[Dict[str, Any]]) -> AgentConfig:
+    if not router_enabled() or config.routing_task_type:
+        return config
+    if str(config.llm_backend or "").strip().lower() == "fake":
+        return config
+    try:
+        route = build_task_route(
+            messages,
+            llm_backend=config.llm_backend,
+            llm_base_url=config.llm_base_url,
+            llm_model=config.llm_model,
+        )
+    except Exception:
+        logger.debug("task routing failed; using current model/tool order", exc_info=True)
+        return config
+    next_model = route.selected_model or config.llm_model
+    logger.info(
+        "task route type=%s role=%s model=%s fallback=%s reason=%s",
+        route.task_type,
+        route.model_role,
+        next_model,
+        route.fallback_models[:4],
+        route.reason,
+    )
+    return replace(
+        config,
+        llm_model=next_model,
+        routing_task_type=route.task_type,
+        routing_model_role=route.model_role,
+        routing_reason=route.reason,
+        routing_tool_guidance=route.tool_guidance,
+        routing_preferred_tools=list(route.preferred_tools),
+        model_fallbacks=list(route.fallback_models),
+    )
+
+
+def _route_hint_message(config: AgentConfig) -> str:
+    if not config.routing_task_type:
+        return ""
+    return render_route_hint(
+        TaskRoute(
+            task_type=config.routing_task_type,
+            model_role=config.routing_model_role,
+            selected_model=config.llm_model,
+            fallback_models=list(config.model_fallbacks or []),
+            preferred_tools=list(config.routing_preferred_tools or []),
+            reason=config.routing_reason,
+            tool_guidance=config.routing_tool_guidance,
+        )
+    )
+
+
+def _without_route_hint(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        message
+        for message in messages
+        if ROUTE_MARKER not in str((message or {}).get("content") or "")
+    ]
+
+
+def _routing_status_message(config: AgentConfig) -> str:
+    role = config.routing_model_role or "current"
+    task_type = config.routing_task_type or "task"
+    return f"已按 {task_type} 任务选择 {role} 路由：{config.llm_model}"
+
+
+def _model_fallback_status_message(current: AgentConfig, fallback: AgentConfig) -> str:
+    return f"模型 {current.llm_model or 'current'} 调用失败，已自动切换到 {fallback.llm_model} 重试。"
+
+
+def _next_model_fallback_config(config: AgentConfig, exc: BaseException) -> Optional[AgentConfig]:
+    if not config.model_fallbacks:
+        return None
+    info = classify_llm_error(exc, recoverable=True)
+    if info.code in {"LLM_AUTH_FAILED", "LLM_FORBIDDEN", "LLM_API_KEY_MISSING"}:
+        return None
+    current = str(config.llm_model or "").strip().lower()
+    for model in config.model_fallbacks:
+        candidate = str(model or "").strip()
+        if not candidate or candidate.lower() == current:
+            continue
+        remaining = [
+            item
+            for item in config.model_fallbacks
+            if str(item or "").strip().lower() not in {current, candidate.lower()}
+        ]
+        return replace(config, llm_model=candidate, model_fallbacks=remaining)
+    return None
+
+
 def _append_turn_budget_hint(
     messages: List[Dict[str, Any]],
     *,
@@ -537,6 +649,26 @@ def _log_context_ledger(
     return payload
 
 
+def _emit_agent_lifecycle(
+    kind: str,
+    config: Optional[AgentConfig],
+    *,
+    ok: Optional[bool] = None,
+    status: str = "",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    try:
+        emit_hook_lifecycle(
+            kind,
+            workspace_root=config.workspace_root if config else "",
+            ok=ok,
+            status=status,
+            metadata=metadata or {},
+        )
+    except Exception:
+        logger.debug("failed to emit hook lifecycle event %s", kind, exc_info=True)
+
+
 def _done_event(
     turn_count: int,
     tool_call_count: int,
@@ -554,6 +686,19 @@ def _done_event(
         except Exception:
             logger.debug("failed to build done context ledger", exc_info=True)
             context_payload = {}
+    _emit_agent_lifecycle(
+        "agent.stop",
+        config,
+        ok=True,
+        status="stopped",
+        metadata={
+            "turns": turn_count,
+            "tool_calls": tool_call_count,
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+        },
+    )
     return DoneEvent(
         total_turns=turn_count,
         total_tool_calls=tool_call_count,
@@ -709,6 +854,7 @@ def run(
 ) -> Generator[Event, Optional[bool], None]:
     """Run the ReAct loop and yield events for UI or CLI consumers."""
     registry = registry or get_registry()
+    config = _config_with_task_route(config, messages)
     backend = backend or _create_backend(config)
 
     activated_deferred: set[str] = set()
@@ -742,6 +888,21 @@ def run(
         config.llm_backend,
         config.llm_model,
     )
+    _emit_agent_lifecycle(
+        "agent.start",
+        config,
+        ok=None,
+        status="starting",
+        metadata={
+            "message_count": len(messages),
+            "tool_count": len(tools),
+            "execution_mode": config.execution_mode,
+            "backend": config.llm_backend,
+            "model": config.llm_model,
+        },
+    )
+    if config.routing_task_type:
+        yield _runtime_status_event("model_routing", _routing_status_message(config), recoverable=True)
     yield _runtime_status_event("starting", "Agent runtime started")
 
     while turn_count < config.max_turns:
@@ -769,7 +930,7 @@ def run(
                 recoverable=False,
             )
             yield _context_limit_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
         turn_count += 1
         yield _runtime_status_event(
@@ -797,6 +958,25 @@ def run(
             consecutive_errors = 0
         except Exception as exc:
             consecutive_errors += 1
+            fallback_config = _next_model_fallback_config(config, exc)
+            if fallback_config is not None:
+                yield _runtime_status_event(
+                    "model_fallback",
+                    _model_fallback_status_message(config, fallback_config),
+                    turn=turn_count,
+                    tool_calls=tool_call_count,
+                    recoverable=True,
+                )
+                config = fallback_config
+                backend = _create_backend(config)
+                tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
+                working_messages = _without_route_hint(working_messages)
+                route_hint = _route_hint_message(config)
+                if route_hint:
+                    working_messages.append({"role": "user", "content": route_hint})
+                consecutive_errors = 0
+                turn_count -= 1
+                continue
             message = (
                 f"LLM call failed (attempt {consecutive_errors}): "
                 f"{type(exc).__name__}: {sanitize_for_log(exc)}"
@@ -819,7 +999,7 @@ def run(
                     recoverable=False,
                 )
                 yield _llm_error_event(exc, message=message, recoverable=False)
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                 return
             yield _llm_error_event(exc, message=message, recoverable=True)
             yield _runtime_status_event(
@@ -870,7 +1050,7 @@ def run(
             final_text = (continuation_buffer + (response.content or "")) or "(No response from LLM)"
             yield ContentEvent(text=final_text + "\n\n[输出多次超长被截断，请把任务拆小或缩小单次写入范围]")
             yield _runtime_status_event("completed", "Agent runtime completed", turn=turn_count, tool_calls=tool_call_count)
-            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
 
         if response.tool_calls:
@@ -1080,7 +1260,7 @@ def run(
                 turn=turn_count,
                 tool_calls=tool_call_count,
             )
-            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             logger.info("agent run completed turns=%s tool_calls=%s", turn_count, tool_call_count)
             return
 
@@ -1091,7 +1271,7 @@ def run(
             turn=turn_count,
             tool_calls=tool_call_count,
         )
-        yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+        yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
         logger.info("agent run completed turns=%s tool_calls=%s", turn_count, tool_call_count)
         return
 
@@ -1130,6 +1310,7 @@ def run_stream(
 ) -> Generator[Event, Optional[bool], None]:
     """Streaming variant of run(). Yields text chunks before final content events."""
     registry = registry or get_registry()
+    config = _config_with_task_route(config, messages)
     backend = backend or _create_backend(config)
 
     activated_deferred: set[str] = set()
@@ -1166,6 +1347,22 @@ def run_stream(
         config.llm_backend,
         config.llm_model,
     )
+    _emit_agent_lifecycle(
+        "agent.start",
+        config,
+        ok=None,
+        status="starting",
+        metadata={
+            "message_count": len(messages),
+            "tool_count": len(tools),
+            "execution_mode": config.execution_mode,
+            "backend": config.llm_backend,
+            "model": config.llm_model,
+            "streaming": True,
+        },
+    )
+    if config.routing_task_type:
+        yield _runtime_status_event("model_routing", _routing_status_message(config), recoverable=True)
     yield _runtime_status_event("starting", "Agent runtime started")
 
     while turn_count < config.max_turns:
@@ -1173,7 +1370,7 @@ def run_stream(
             logger.info("agent stream canceled before turn")
             yield _runtime_status_event("canceled", "Agent runtime canceled", recoverable=False)
             yield _cancelled_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
         working_messages = _refresh_todo_context_message(working_messages, config.workspace_root)
         working_messages = _append_turn_budget_hint(
@@ -1199,7 +1396,7 @@ def run_stream(
                 recoverable=False,
             )
             yield _context_limit_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
         turn_count += 1
         yield _runtime_status_event(
@@ -1239,10 +1436,29 @@ def run_stream(
                 recoverable=False,
             )
             yield _cancelled_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
         except Exception as exc:
             consecutive_errors += 1
+            fallback_config = _next_model_fallback_config(config, exc)
+            if fallback_config is not None:
+                yield _runtime_status_event(
+                    "model_fallback",
+                    _model_fallback_status_message(config, fallback_config),
+                    turn=turn_count,
+                    tool_calls=tool_call_count,
+                    recoverable=True,
+                )
+                config = fallback_config
+                backend = _create_backend(config)
+                tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
+                working_messages = _without_route_hint(working_messages)
+                route_hint = _route_hint_message(config)
+                if route_hint:
+                    working_messages.append({"role": "user", "content": route_hint})
+                consecutive_errors = 0
+                turn_count -= 1
+                continue
             message = (
                 f"LLM call failed (attempt {consecutive_errors}): "
                 f"{type(exc).__name__}: {sanitize_for_log(exc)}"
@@ -1265,7 +1481,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _llm_error_event(exc, message=message, recoverable=False)
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                 return
             yield _llm_error_event(exc, message=message, recoverable=True)
             yield _runtime_status_event(
@@ -1286,7 +1502,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _cancelled_error_event()
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                 return
             turn_count -= 1
             continue
@@ -1330,11 +1546,30 @@ def run_stream(
                 recoverable=False,
             )
             yield _cancelled_error_event()
-            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
         except Exception as exc:
             consecutive_errors += 1
             message = f"Stream error: {type(exc).__name__}: {sanitize_for_log(exc)}"
+            fallback_config = _next_model_fallback_config(config, exc)
+            if not accumulated_text and fallback_config is not None:
+                yield _runtime_status_event(
+                    "model_fallback",
+                    _model_fallback_status_message(config, fallback_config),
+                    turn=turn_count,
+                    tool_calls=tool_call_count,
+                    recoverable=True,
+                )
+                config = fallback_config
+                backend = _create_backend(config)
+                tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
+                working_messages = _without_route_hint(working_messages)
+                route_hint = _route_hint_message(config)
+                if route_hint:
+                    working_messages.append({"role": "user", "content": route_hint})
+                consecutive_errors = 0
+                turn_count -= 1
+                continue
             logger.warning(
                 "llm stream read failed attempt=%s recoverable=%s error=%s",
                 consecutive_errors,
@@ -1353,7 +1588,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _llm_error_event(exc, message=message, recoverable=False)
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                 return
             yield _llm_error_event(exc, message=message, recoverable=True)
             yield _runtime_status_event(
@@ -1374,7 +1609,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _cancelled_error_event()
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                 return
             turn_count -= 1
             continue
@@ -1425,7 +1660,7 @@ def run_stream(
             final_text = (continuation_buffer + (response.content or "")) or "(No response from LLM)"
             yield ContentEvent(text=final_text + "\n\n[输出多次超长被截断，请把任务拆小或缩小单次写入范围]")
             yield _runtime_status_event("completed", "Agent runtime completed", turn=turn_count, tool_calls=tool_call_count)
-            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
 
         if response.tool_calls:
@@ -1468,7 +1703,7 @@ def run_stream(
                             recoverable=False,
                         )
                         yield _cancelled_error_event()
-                        yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                        yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                         return
                     tool_call_count += 1
                     logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
@@ -1511,7 +1746,7 @@ def run_stream(
                         recoverable=False,
                     )
                     yield _repeated_tool_error_event(tool_call, hint=loop_hint)
-                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                     return
                 if is_cancel_requested(cancel_event):
                     yield _runtime_status_event(
@@ -1524,7 +1759,7 @@ def run_stream(
                         recoverable=False,
                     )
                     yield _cancelled_error_event()
-                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                     return
                 yield ToolCallEvent(
                     tool_name=tool_call.name,
@@ -1644,7 +1879,7 @@ def run_stream(
                         recoverable=False,
                     )
                     yield _cancelled_error_event()
-                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                    yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                     return
                 tool_call_count += 1
                 logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
@@ -1706,7 +1941,7 @@ def run_stream(
                     recoverable=False,
                 )
                 yield _context_limit_error_event()
-                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+                yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                 return
             continue
 
@@ -1725,7 +1960,7 @@ def run_stream(
                 turn=turn_count,
                 tool_calls=tool_call_count,
             )
-            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+            yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             logger.info("agent stream completed turns=%s tool_calls=%s", turn_count, tool_call_count)
             return
 
@@ -1736,7 +1971,7 @@ def run_stream(
             turn=turn_count,
             tool_calls=tool_call_count,
         )
-        yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger)
+        yield _done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
         logger.info("agent stream completed turns=%s tool_calls=%s", turn_count, tool_call_count)
         return
 
@@ -1854,6 +2089,9 @@ def _tool_schemas_for_config(
             logger.warning("invalid METIS_TOOL_PROFILE=%r; using lean profile", requested_profile)
         tools = registry.get_schemas_for_profile(profile, format="openai", activated=activated)
 
+    tools = _include_preferred_tool_schemas(registry, tools, config.routing_preferred_tools)
+    tools = _filter_desktop_control_tools_for_route(tools, config)
+
     capabilities = detect_from_model_name(config.llm_model)
     forced_tier = os.environ.get("METIS_TOOL_TIER", "").strip()
     tier = capabilities.tier
@@ -1890,6 +2128,8 @@ def _tool_schemas_for_config(
             if schema:
                 tools.append(schema)
 
+    tools = prioritized_tools_for_route(tools, config.routing_preferred_tools)
+
     logger.info(
         "model capability detected tier=%s family=%s model=%s method=%s profile=%s tools=%s",
         tier,
@@ -1900,6 +2140,48 @@ def _tool_schemas_for_config(
         len(tools),
     )
     return tools
+
+
+def _filter_desktop_control_tools_for_route(
+    tools: List[Dict[str, Any]],
+    config: AgentConfig,
+) -> List[Dict[str, Any]]:
+    if config.enabled_tools or not should_block_desktop_control(config.routing_task_type):
+        return tools
+    blocked = desktop_control_tools()
+    filtered = [
+        tool
+        for tool in tools
+        if _tool_name_from_openai_schema(tool) not in blocked
+    ]
+    if len(filtered) != len(tools):
+        logger.info(
+            "computer use router guard blocked desktop control tools route=%s removed=%s",
+            config.routing_task_type,
+            sorted({_tool_name_from_openai_schema(tool) for tool in tools} & blocked),
+        )
+    return filtered
+
+
+def _include_preferred_tool_schemas(
+    registry: ToolRegistry,
+    tools: List[Dict[str, Any]],
+    preferred_tools: List[str],
+) -> List[Dict[str, Any]]:
+    if not preferred_tools:
+        return tools
+    names = {_tool_name_from_openai_schema(tool) for tool in tools}
+    out = list(tools)
+    for name in preferred_tools:
+        canonical = registry.resolve_name(str(name or "").strip())
+        if not canonical or canonical in names:
+            continue
+        schema = registry.openai_schema_for(canonical)
+        if not schema:
+            continue
+        out.append(schema)
+        names.add(canonical)
+    return out
 
 
 def _deferred_catalog_message(
@@ -2057,10 +2339,20 @@ def _permission_action(
             return decision
     if registry is not None and hasattr(registry, "tool_requires_approval"):
         try:
-            return "ask" if registry.tool_requires_approval(tool_name, mode, arguments) else "allow"
+            return evaluate_permission(
+                mode=mode,
+                tool_name=tool_name,
+                arguments=arguments,
+                registry_requires_approval=registry.tool_requires_approval(tool_name, mode, arguments),
+            ).action
         except Exception:
             pass
-    return "ask" if _needs_permission(mode, tool_name) else "allow"
+    return evaluate_permission(
+        mode=mode,
+        tool_name=tool_name,
+        arguments=arguments,
+        registry_requires_approval=_needs_permission(mode, tool_name),
+    ).action
 
 
 def _execute_tool_with_hooks(
@@ -2200,14 +2492,6 @@ def _execute_tool_with_hooks_sync(
             workspace_root=workspace_root or None,
         )
         raise_if_cancelled(cancel_event)
-        try:
-            from backend.tools.coding.workflow_features.hooks.hook_runner import run_post_hooks
-
-            hook_output = run_post_hooks(tool_call.name, tool_call.arguments, result)
-            if hook_output:
-                result = f"{result}\n\n{hook_output}"
-        except Exception as exc:
-            result = f"{result}\n\n🪝 Hook error: {type(exc).__name__}: {sanitize_for_log(exc)}"
         if edit_guard is not None:
             result = edit_guard.after_execute(
                 canonical_tool_name,

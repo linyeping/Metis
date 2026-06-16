@@ -59,6 +59,7 @@ _STRATEGY_MAP: Dict[str, str] = {
     "desktop_win2_observe": "json_summary",
     "desktop_win2_action": "json_summary",
     "desktop_win2_task": "json_summary",
+    "desktop_win2_verify": "json_summary",
     "preview_browser_status": "json_summary",
     "preview_browser_navigate": "json_summary",
     "preview_browser_observe": "json_summary",

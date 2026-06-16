@@ -612,6 +612,7 @@ export interface PermissionRule {
   source: string;
   createdAt: number;
   updatedAt: number;
+  dangerousAllow?: boolean;
 }
 
 export interface PermissionAuditEntry {
@@ -629,11 +630,26 @@ export interface PermissionAuditEntry {
   ruleId: string;
   source: string;
   arguments: unknown;
+  decisionSource?: string;
+  decisionReason?: string;
+  riskLevel?: string;
+  mode?: string;
+}
+
+export interface PermissionControlPlanePayload {
+  version: string;
+  mode: string;
+  decisionOrder: string[];
+  availableModes: string[];
+  dangerousAllowRules: PermissionRule[];
+  dangerousAllowCount: number;
+  notes: string[];
 }
 
 export interface PermissionStatePayload {
   rules: PermissionRule[];
   audit: PermissionAuditEntry[];
+  controlPlane?: PermissionControlPlanePayload;
   path: string;
   legacyPath: string;
   auditPath: string;

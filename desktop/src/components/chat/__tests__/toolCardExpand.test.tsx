@@ -92,4 +92,85 @@ describe('ToolCard 单步展开', () => {
     act(() => rootB.unmount());
     containerB.remove();
   });
+
+  it('显示 verifier v2 证据链摘要', () => {
+    renderCard({
+      toolCallId: 'verify_1',
+      toolName: 'preview_browser_verify',
+      args: { assertion: '确认登录按钮可见并可点击' },
+      result: {
+        ok: true,
+        evidence_schema: 'metis.verifier.evidence_chain.v2',
+        verdict: {
+          ok: true,
+          summary: 'Verified: 2/2 checks passed. 确认登录按钮可见并可点击',
+          passed: 2,
+          failed: 0,
+          total: 2,
+        },
+        checks: {
+          button_visible: true,
+          button_clickable: true,
+        },
+        evidence_chain_v2: [
+          {
+            kind: 'page',
+            ok: true,
+            summary: 'Observed Preview page: Metis Login',
+          },
+          {
+            kind: 'check',
+            check: 'button_clickable',
+            ok: true,
+            summary: 'button clickable: passed',
+          },
+        ],
+      },
+      metisStatus: 'success',
+    });
+
+    const summary = container.querySelector('.tool-browser-activity-summary')?.textContent || '';
+    expect(summary).toContain('验收证据');
+    expect(summary).toContain('Verified: 2/2 checks passed');
+    expect(summary).toContain('button clickable: passed');
+  });
+
+  it('显示 code-to-report artifact 活动摘要和步骤', () => {
+    renderCard({
+      toolCallId: 'report_1',
+      toolName: 'office_report_from_code_run',
+      args: { output_path: 'output/docx/lab.docx' },
+      result: {
+        ok: true,
+        schema: 'metis.artifact.code_report.v1',
+        output_path: 'D:/workspace/output/docx/lab.docx',
+        artifact_activity: {
+          kind: 'code_to_report',
+          summary: 'done: D:/workspace/output/docx/lab.docx; artifacts=2',
+          output_path: 'D:/workspace/output/docx/lab.docx',
+          artifacts: [
+            { path: 'D:/workspace/output/report_artifacts/lab/plot.png', kind: 'image' },
+            { path: 'D:/workspace/output/report_artifacts/lab/results.csv', kind: 'text' },
+          ],
+          items: [
+            { event: 'write_code', title: 'Write Python script', ok: true, path: 'D:/workspace/output/report_artifacts/lab/analysis.py' },
+            { event: 'run_code', title: 'Run code', ok: true, detail: 'exit 0 in 42ms' },
+            { event: 'write_report', title: 'Write DOCX report', ok: true, path: 'D:/workspace/output/docx/lab.docx' },
+          ],
+        },
+      },
+      metisStatus: 'success',
+    });
+
+    const summary = container.querySelector('.tool-artifact-activity-summary')?.textContent || '';
+    expect(summary).toContain('done: D:/workspace/output/docx/lab.docx');
+
+    const head = container.querySelector('.tool-card-head') as HTMLButtonElement;
+    act(() => head.click());
+
+    const timeline = container.querySelector('.tool-artifact-activity-timeline')?.textContent || '';
+    expect(timeline).toContain('报告活动');
+    expect(timeline).toContain('Write Python script');
+    expect(timeline).toContain('exit 0 in 42ms');
+  });
 });

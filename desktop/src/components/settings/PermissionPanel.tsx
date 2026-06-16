@@ -251,9 +251,17 @@ export const PermissionPanel = memo(function PermissionPanel({
           <strong>{rules.filter(rule => rule.action === 'deny').length}</strong>
           <span>{t('拒绝规则')}</span>
         </article>
+        <article>
+          <strong>{permissions?.controlPlane?.dangerousAllowCount ?? rules.filter(rule => rule.dangerousAllow).length}</strong>
+          <span>{t('高风险放行')}</span>
+        </article>
       </div>
 
       <div className="permission-paths">
+        <div>
+          <span>{t('控制面')}</span>
+          <code>{permissions?.controlPlane ? `${permissions.controlPlane.version} · ${permissions.controlPlane.mode}` : t('等待后端返回')}</code>
+        </div>
         <div>
           <span>{t('规则文件')}</span>
           <code>{permissions?.path || t('等待后端返回')}</code>

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import json
 import logging
 import os
@@ -56,6 +55,22 @@ from backend.core.paths import legacy_miro_path, metis_dir, metis_path  # noqa: 
 from backend.runtime.tool_registry import get_registry  # noqa: E402
 from backend.runtime.error_catalog import ErrorInfo, classify_llm_error  # noqa: E402
 from backend.runtime.path_safety import validate_tool_paths  # noqa: E402
+from backend.runtime.context_control import (  # noqa: E402
+    build_compact_state_v2,
+    compact_boundary_index as context_compact_boundary_index,
+    compact_state_after_truncate as context_compact_state_after_truncate,
+    model_context_for_history as context_model_context_for_history,
+    normalize_compact_state as context_normalize_compact_state,
+)
+from backend.runtime.permission_control import (  # noqa: E402
+    evaluate_permission,
+    evaluate_rule_layer,
+    is_dangerous_allow_rule,
+    normalize_permission_rule,
+    permission_control_payload,
+    permission_rule_matches,
+    permission_rule_payload,
+)
 from backend.web.error_handlers import register_error_handlers  # noqa: E402
 from backend.web.llm_state import (  # noqa: E402
     build_agent_config,
@@ -425,32 +440,13 @@ def _load_permission_document(workspace_root: str = "") -> Dict[str, Any]:
 
 
 def _normalize_permission_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
-    now = time.time()
-    action = str(rule.get("action") or "ask").strip().lower()
-    if action not in {"allow", "deny", "ask"}:
-        action = "ask"
-    args_match = rule.get("args_match", {})
-    if not isinstance(args_match, dict):
-        args_match = {}
-    return {
-        "id": str(rule.get("id") or uuid.uuid4()),
-        "tool": str(rule.get("tool") or "*").strip() or "*",
-        "action": action,
-        "args_match": {
-            str(key): str(value)
-            for key, value in args_match.items()
-            if str(key).strip() and str(value).strip()
-        },
-        "source": str(rule.get("source") or "workspace").strip() or "workspace",
-        "created_at": float(rule.get("created_at") or now),
-        "updated_at": float(rule.get("updated_at") or rule.get("created_at") or now),
-    }
+    return normalize_permission_rule(rule)
 
 
 def _permission_rules(workspace_root: str = "") -> List[Dict[str, Any]]:
     document = _load_permission_document(workspace_root)
     return [
-        _normalize_permission_rule(rule)
+        normalize_permission_rule(rule)
         for rule in document.get("rules", [])
         if isinstance(rule, dict)
     ]
@@ -468,15 +464,9 @@ def _load_permission_rules(workspace_root: str = "") -> List[Dict[str, Any]]:
 
 
 def _permission_rule_payload(rule: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": str(rule.get("id") or ""),
-        "tool": str(rule.get("tool") or "*"),
-        "action": str(rule.get("action") or "ask"),
-        "args_match": dict(rule.get("args_match") or {}),
-        "source": str(rule.get("source") or "workspace"),
-        "created_at": float(rule.get("created_at") or 0),
-        "updated_at": float(rule.get("updated_at") or 0),
-    }
+    payload = permission_rule_payload(rule)
+    payload["dangerous_allow"] = is_dangerous_allow_rule(rule)
+    return payload
 
 
 def _create_permission_rule(
@@ -550,6 +540,10 @@ def _append_permission_audit(entry: Dict[str, Any], workspace_root: str = "") ->
         "rule_id": str(entry.get("rule_id") or ""),
         "source": str(entry.get("source") or "permission_dialog"),
         "arguments": _sanitize_permission_args(entry.get("arguments") or {}),
+        "decision_source": str(entry.get("decision_source") or ""),
+        "decision_reason": str(entry.get("decision_reason") or ""),
+        "risk_level": str(entry.get("risk_level") or ""),
+        "mode": str(entry.get("mode") or _runtime_state.execution_mode or "auto"),
     }
     os.makedirs(os.path.dirname(paths["audit"]), exist_ok=True)
     with open(paths["audit"], "a", encoding="utf-8") as handle:
@@ -580,16 +574,7 @@ def _read_permission_audit(limit: int = 50, workspace_root: str = "") -> List[Di
 
 
 def _permission_rule_matches(rule: Dict[str, Any], tool_name: str, arguments: Dict[str, Any]) -> bool:
-    rule_tool = str(rule.get("tool", ""))
-    if rule_tool and rule_tool != "*" and not fnmatch.fnmatch(tool_name, rule_tool):
-        return False
-    args_match = rule.get("args_match", {})
-    if isinstance(args_match, dict) and args_match:
-        for key, pattern in args_match.items():
-            value = str(arguments.get(str(key), ""))
-            if not fnmatch.fnmatch(value, str(pattern)):
-                return False
-    return True
+    return permission_rule_matches(rule, tool_name, arguments)
 
 
 def _is_composer_full_access_rule(rule: Dict[str, Any]) -> bool:
@@ -629,29 +614,17 @@ def _permission_checker_for_workspace(workspace_root: str) -> Any:
 
 
 def _check_permission_rules(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Optional[str]:
-    """Return allow, deny, ask, or None based on .miro/permissions.json."""
+    """Return allow, deny, ask, or None based on workspace permission rules."""
     root = os.path.abspath(workspace_root or _active_workspace_root())
     safety = validate_tool_paths(tool_name, arguments, workspace_root=root)
-    if not safety.allowed:
-        return "deny"
-
-    rules = sorted(
-        _load_permission_rules(root),
-        key=lambda rule: (
-            0 if dict(rule.get("args_match") or {}) else 1,
-            0 if str(rule.get("source") or "") == "composer_access" else 1,
-            -float(rule.get("updated_at") or rule.get("created_at") or 0),
-        ),
+    decision = evaluate_rule_layer(
+        tool_name=tool_name,
+        arguments=arguments,
+        rules=_load_permission_rules(root),
+        mode=_runtime_state.execution_mode,
+        hard_deny_reason="" if safety.allowed else safety.error_text(),
     )
-    for rule in rules:
-        if not isinstance(rule, dict):
-            continue
-        if not _permission_rule_matches(rule, tool_name, arguments):
-            continue
-        action = str(rule.get("action", "ask")).lower()
-        if action in {"allow", "deny", "ask"}:
-            return action
-    return None
+    return decision.action if decision.action in {"allow", "deny", "ask"} else None
 
 
 def _save_active_session() -> None:
@@ -773,38 +746,15 @@ def _safe_float(value: Any, fallback: float = 0.0) -> float:
 
 
 def _normalize_compact_state(value: Any) -> Dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    summary = str(value.get("summary") or "").strip()
-    if not summary:
-        return {}
-    return {
-        "summary": summary,
-        "boundary_message_id": str(value.get("boundary_message_id") or ""),
-        "boundary_index": max(0, _safe_int(value.get("boundary_index"), 0)),
-        "compacted_at": _safe_float(value.get("compacted_at"), 0.0),
-        "compact_count": max(0, _safe_int(value.get("compact_count"), 0)),
-    }
+    return context_normalize_compact_state(value)
 
 
 def _compact_boundary_index(history: List[Dict[str, Any]], compact_state: Any) -> int:
-    state = _normalize_compact_state(compact_state)
-    if not state:
-        return 0
-    boundary_id = str(state.get("boundary_message_id") or "")
-    if boundary_id:
-        for index, message in enumerate(history):
-            if isinstance(message, dict) and str(message.get("id") or "") == boundary_id:
-                return index
-    return min(max(0, _safe_int(state.get("boundary_index"), 0)), len(history))
+    return context_compact_boundary_index(history, compact_state)
 
 
 def _model_context_for_history(history: List[Dict[str, Any]], compact_state: Any) -> List[Dict[str, Any]]:
-    state = _normalize_compact_state(compact_state)
-    if not state:
-        return list(history)
-    boundary_index = _compact_boundary_index(history, state)
-    return [{"role": "system", "content": state["summary"]}] + list(history[boundary_index:])
+    return context_model_context_for_history(history, compact_state)
 
 
 def _model_context_with_skill_invocation(
@@ -832,19 +782,7 @@ def _compact_state_after_truncate(
     new_history: List[Dict[str, Any]],
     compact_state: Any,
 ) -> Dict[str, Any]:
-    state = _normalize_compact_state(compact_state)
-    if not state:
-        return {}
-    boundary_index = _compact_boundary_index(original_history, state)
-    if len(new_history) <= boundary_index:
-        return {}
-    boundary_id = str(state.get("boundary_message_id") or "")
-    if boundary_id and not any(str(message.get("id") or "") == boundary_id for message in new_history if isinstance(message, dict)):
-        return {}
-    return {
-        **state,
-        "boundary_index": _compact_boundary_index(new_history, state),
-    }
+    return context_compact_state_after_truncate(original_history, new_history, compact_state)
 
 
 def _compact_summary_from_messages(messages: List[Dict[str, Any]]) -> str:
@@ -1692,6 +1630,15 @@ def _stream_agent_response(
             lock: Optional[threading.Event] = None
             if isinstance(event, PermissionRequestEvent):
                 lock = threading.Event()
+                safety = validate_tool_paths(event.tool_name, event.arguments or {}, workspace_root=config.workspace_root)
+                permission_decision = evaluate_permission(
+                    mode=mode,
+                    tool_name=event.tool_name,
+                    arguments=event.arguments or {},
+                    rules=_load_permission_rules(config.workspace_root),
+                    hard_deny_reason="" if safety.allowed else safety.error_text(),
+                    registry_requires_approval=True,
+                )
                 with _perm_dict_lock:
                     _permission_locks[event.request_id] = lock
                     _permission_contexts[event.request_id] = {
@@ -1700,6 +1647,8 @@ def _stream_agent_response(
                         "tool": event.tool_name,
                         "arguments": event.arguments,
                         "workspace_root": config.workspace_root,
+                        "mode": mode,
+                        "decision": permission_decision.to_dict(),
                         "created_at": time.time(),
                     }
 
@@ -1834,6 +1783,9 @@ def _stream_agent_response(
                             "approved": False,
                             "remember": "",
                             "source": "permission_timeout",
+                            "decision_source": (context.get("decision") or {}).get("source") if isinstance(context.get("decision"), dict) else "",
+                            "decision_reason": (context.get("decision") or {}).get("reason") if isinstance(context.get("decision"), dict) else "",
+                            "risk_level": (context.get("decision") or {}).get("risk_level") if isinstance(context.get("decision"), dict) else "",
                         },
                         workspace_root=config.workspace_root,
                     )
@@ -2981,6 +2933,7 @@ def handle_permission() -> Any:
         arguments = raw_args if isinstance(raw_args, dict) else {}
     call_id = str(context.get("call_id") or data.get("call_id") or "")
     workspace_root = str(context.get("workspace_root") or "")
+    decision = context.get("decision") if isinstance(context.get("decision"), dict) else {}
     rule_id = ""
     if remember in {"allow", "deny"} and tool_name:
         rule = _create_permission_rule(
@@ -3002,6 +2955,10 @@ def handle_permission() -> Any:
             "remember": remember,
             "rule_id": rule_id,
             "source": "permission_dialog",
+            "mode": str(context.get("mode") or _runtime_state.execution_mode or "auto"),
+            "decision_source": str(decision.get("source") or ""),
+            "decision_reason": str(decision.get("reason") or ""),
+            "risk_level": str(decision.get("risk_level") or ""),
         },
         workspace_root=workspace_root,
     )
@@ -3018,11 +2975,13 @@ def handle_permission() -> Any:
 def list_permissions() -> Any:
     root = _active_workspace_root()
     paths = _permission_paths(root)
-    rules = [_permission_rule_payload(rule) for rule in _permission_rules(root)]
+    rules_raw = _permission_rules(root)
+    rules = [_permission_rule_payload(rule) for rule in rules_raw]
     return jsonify(
         {
             "rules": rules,
             "audit": _read_permission_audit(limit=50, workspace_root=root),
+            "control_plane": permission_control_payload(mode=_runtime_state.execution_mode, rules=rules_raw),
             "path": paths["config"],
             "legacy_path": paths["legacy_config"],
             "audit_path": paths["audit"],
@@ -3149,13 +3108,15 @@ def compact() -> Any:
     boundary_message_id = ""
     if boundary_index < len(history):
         boundary_message_id = str(history[boundary_index].get("id") or "")
-    compact_state = {
-        "summary": summary,
-        "boundary_message_id": boundary_message_id,
-        "boundary_index": boundary_index,
-        "compacted_at": time.time(),
-        "compact_count": _safe_int(current_state.get("compact_count"), 0) + 1,
-    }
+    compact_state = build_compact_state_v2(
+        history,
+        summary=summary,
+        keep_recent=keep_recent,
+        previous_state=current_state,
+        compacted_at=time.time(),
+    )
+    boundary_index = _safe_int(compact_state.get("boundary_index"), boundary_index)
+    boundary_message_id = str(compact_state.get("boundary_message_id") or boundary_message_id)
     get_session_manager().update_session(session_id, compact_state=compact_state)
     if session_id == _runtime_state.active_session_id:
         _runtime_state.chat_history = history
@@ -3174,6 +3135,9 @@ def compact() -> Any:
             "boundary_index": boundary_index,
             "boundary_message_id": boundary_message_id,
             "compact_count": compact_state["compact_count"],
+            "version": compact_state.get("version", 1),
+            "source_message_count": compact_state.get("source_message_count", 0),
+            "preserved_message_count": len(compact_state.get("preserved_message_ids") or []),
         }
     )
     _runtime_state.last_compact_status = payload

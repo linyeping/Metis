@@ -15,6 +15,8 @@ _SYSTEM_MARKER_CATEGORIES = {
     "[可用技能 / Available Skills]": "skills",
     "[Desktop Automation Skill Reference]": "skills",
     "[User METIS.md]": "memory",
+    "[Project Memory — from previous sessions]": "memory",
+    "[Metis Project Profile]": "memory",
 }
 _MODEL_CONTEXT_LIMITS: Dict[str, int] = {
     "deepseek-v4-flash": 1_000_000,

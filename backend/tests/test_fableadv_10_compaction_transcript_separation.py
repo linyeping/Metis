@@ -7,6 +7,7 @@ from typing import Any, Dict, Generator, List, Tuple
 import pytest
 
 from backend.runtime.agent_loop import AgentConfig, ContentEvent, DoneEvent, ToolCallEvent
+from backend.runtime.context_control import COMPACT_MARKER
 from backend.runtime.tool_registry import ToolRegistry
 from backend.web import app as web_app
 from backend.web import session_routes as web_session_routes
@@ -112,9 +113,12 @@ def test_manual_compact_preserves_history_and_writes_compact_state(
     assert payload["history_count"] == len(original_history)
     assert saved is not None
     assert saved.history == original_history
+    assert saved.compact_state["version"] == 2
     assert saved.compact_state["summary"].startswith("[Context Summary]")
     assert saved.compact_state["boundary_index"] == len(original_history) - 4
     assert saved.compact_state["boundary_message_id"] == original_history[-4]["id"]
+    assert saved.compact_state["preserved_message_ids"] == [message["id"] for message in original_history[-4:]]
+    assert payload["version"] == 2
     assert web_app._runtime_state.chat_history == original_history
 
 
@@ -156,6 +160,50 @@ def test_chat_sync_uses_summary_plus_boundary_tail_after_compaction(
     assert saved is not None
     assert [message["content"] for message in saved.history[-2:]] == ["next message", "assistant after compact"]
     assert saved.history[0]["content"] == "message-1"
+
+
+def test_chat_sync_renders_v2_compact_state_for_model_context(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, session_manager = isolated_flask_app
+    session = session_manager.create_session("Model context v2", workspace_id=web_app._runtime_state.active_workspace_id)
+    history = _history()
+    compact_state = {
+        "version": 2,
+        "summary": "[Context Summary]\nmessages 1-4",
+        "boundary_message_id": "m5",
+        "boundary_index": 4,
+        "compacted_at": 1.0,
+        "compact_count": 1,
+        "sections": {
+            "current_work": ["Continue the compact v2 task."],
+            "changed_files": ["backend/runtime/context_control.py"],
+            "tool_evidence": ["write_file: success (backend/runtime/context_control.py)"],
+        },
+        "rehydration_hints": ["Re-run read tools when exact omitted code matters."],
+        "preserved_message_ids": ["m5", "m6", "m7", "m8"],
+    }
+    session_manager.update_session(session.id, history=history, compact_state=compact_state)
+    web_app._runtime_state.activate_session(session.id, history=list(history), compact_state=compact_state, mode="auto")
+    captured: Dict[str, Any] = {}
+
+    def fake_run(messages: List[Dict[str, Any]], config: AgentConfig) -> Generator[Any, None, None]:
+        captured["messages"] = messages
+        yield ContentEvent(text="assistant after compact")
+        yield DoneEvent(total_turns=1, prompt_tokens=8)
+
+    monkeypatch.setattr(web_app, "run", fake_run)
+
+    with app.test_client() as client:
+        response = client.post("/chat/sync", json={"message": "next message"})
+
+    assert response.status_code == 200
+    model_messages = captured["messages"]
+    assert model_messages[0]["content"].startswith(COMPACT_MARKER)
+    assert "## Changed Files" in model_messages[0]["content"]
+    assert [message["content"] for message in model_messages[1:-1]] == [f"message-{index}" for index in range(5, 9)]
+    assert model_messages[-1]["content"] == "next message"
 
 
 def test_manual_compact_rejects_active_run(isolated_flask_app: Any) -> None:

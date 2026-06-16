@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from backend.core.paths import metis_dir, metis_path
 
 
-BUILTIN_SKILLS_VERSION = 6
+BUILTIN_SKILLS_VERSION = 9
 SKILL_INDEX_DEFAULT_CONTEXT_WINDOW = 128_000
 SKILL_INDEX_MAX_TOKENS_FLOOR = 320
 SKILL_INDEX_MAX_TOKENS_CEILING = 2_048

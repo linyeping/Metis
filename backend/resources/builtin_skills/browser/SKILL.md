@@ -23,8 +23,10 @@ allowed-tools: [preview_browser_status, preview_browser_navigate, preview_browse
    - 需要用户真实登录态时才设置 `use_login=True`。
 
 3. 外部动态网站需要多步浏览：
-   - 使用 `browse_web(task, url="", max_steps=15, use_login=False)`。
+   - 使用 `browse_web(task, url="", max_steps=15, use_login=False, show_browser=False)`。
+   - 用户明确说“打开浏览器给我看”、或任务需要播放/观看/听音乐/视频/直播时，设置 `show_browser=True`，因为 headless 浏览器不适合音视频播放验收。
    - 需要 GitHub/Gmail/后台等真实登录态时，只有在用户明确要求登录态或账号上下文时才设置 `use_login=True`。
+   - 抖音/TikTok、B站、YouTube 等音视频站点可能触发登录、验证码、反自动化或自动播放限制；失败时要报告具体阻断原因，并建议切到 `/computer` 由可见桌面浏览器加截图 verifier 验收。
 
 4. 只有浏览器工具确实处理不了时才切到 `/computer`：
    - CAPTCHA、原生系统弹窗、浏览器外安装器、非网页软件窗口。

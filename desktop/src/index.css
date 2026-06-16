@@ -2034,6 +2034,24 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   --thread-dock-height: 96px;
 }
 
+.thread-shell::before {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 42px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--bg) 0%,
+    color-mix(in srgb, var(--bg) 92%, transparent) 38%,
+    color-mix(in srgb, var(--bg) 54%, transparent) 72%,
+    transparent 100%
+  );
+  content: '';
+}
+
 /* FABLEADV-33: 底部 dock 悬浮叠在消息流上方 → composer 磨砂玻璃后能透出滚动内容。
    dock 本身点击穿透，只有内部的 composer/状态条接收点击（侧边留白让消息可点/可滚）。 */
 .thread-dock {
@@ -3259,9 +3277,18 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   background: color-mix(in srgb, var(--panel) 92%, var(--warning) 8%);
 }
 
+.tool-artifact-activity-summary {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+  background: color-mix(in srgb, var(--panel) 93%, var(--success) 7%);
+}
+
 .tool-browser-activity-summary svg {
   flex: 0 0 auto;
   color: var(--accent);
+}
+
+.tool-artifact-activity-summary svg {
+  color: var(--success);
 }
 
 .tool-browser-activity-summary[data-errors='true'] svg {
@@ -3288,6 +3315,99 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 
 .tool-browser-activity-summary code {
   flex: 1 1 auto;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tool-artifact-activity-timeline {
+  display: grid;
+  gap: 7px;
+  margin: 2px 0 8px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, var(--success));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-secondary) 84%, var(--success) 6%);
+}
+
+.tool-artifact-activity-timeline header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tool-artifact-activity-timeline header code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-artifact-activity-steps {
+  display: grid;
+  gap: 5px;
+}
+
+.tool-artifact-activity-step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+}
+
+.tool-artifact-activity-step > span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--success) 52%, var(--border));
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.tool-artifact-activity-step[data-ok='false'] > span {
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
+  color: var(--danger);
+}
+
+.tool-artifact-activity-step > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tool-artifact-activity-step strong,
+.tool-artifact-activity-step small,
+.tool-artifact-activity-step code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-artifact-activity-step strong {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.tool-artifact-activity-step small {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.tool-artifact-activity-step code {
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 10px;
@@ -5351,7 +5471,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   display: grid;
   height: 100%;
   min-height: 0;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto;
   gap: 8px;
   padding: 8px;
   overflow: hidden;
@@ -5388,7 +5508,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 /* FABLEADV-31: Plan 面板的实时任务清单 */
 .plan-card-todos {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 8px;
   min-height: 0;
 }
@@ -5400,14 +5520,101 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   gap: 8px;
 }
 
+.plan-card-todos-head div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
 .plan-card-todos-head strong {
   color: var(--text);
   font-size: var(--ui-font-size-sm);
 }
 
-.plan-card-todos-head span {
+.plan-card-todos-head span,
+.plan-card-todos-head em {
   color: var(--text-faint);
   font-size: var(--ui-font-size-xs);
+  font-style: normal;
+}
+
+.plan-card-todos-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-card-todos-head em {
+  flex: 0 0 auto;
+}
+
+.plan-progress-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+}
+
+.plan-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 72%, #2da66e);
+  transition: width 180ms ease;
+}
+
+.plan-step-focus {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+}
+
+.plan-step-focus[data-status='active'] {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 62%, transparent);
+}
+
+.plan-step-focus[data-status='blocked'],
+.plan-step-focus[data-status='failed'],
+.plan-step-focus[data-status='canceled'] {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--border));
+  background: color-mix(in srgb, var(--danger-soft) 56%, transparent);
+}
+
+.plan-step-focus div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.plan-step-focus span,
+.plan-step-focus p {
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-step-focus strong,
+.plan-step-focus p {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+}
+
+.plan-step-focus strong {
+  color: var(--text);
+  font-size: var(--ui-font-size-sm);
+  line-height: 1.35;
+  -webkit-line-clamp: 2;
+}
+
+.plan-step-focus p {
+  margin: 0;
+  line-height: 1.4;
+  -webkit-line-clamp: 2;
 }
 
 .plan-todo-list {
@@ -5424,7 +5631,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 
 .plan-todo-item {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
   padding: 6px 6px;
@@ -5466,6 +5673,185 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 .plan-todo-item[data-status='done'] span {
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--text-faint) 55%, transparent);
+}
+
+.plan-todo-item[data-status='blocked'],
+.plan-todo-item[data-status='failed'] {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.plan-todo-item[data-status='blocked'] .plan-todo-icon,
+.plan-todo-item[data-status='failed'] .plan-todo-icon,
+.plan-todo-item[data-status='canceled'] .plan-todo-icon {
+  color: var(--danger);
+}
+
+.plan-todo-item[data-status='canceled'] {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+}
+
+.plan-todo-item > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plan-todo-item > em {
+  align-self: start;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-tertiary) 84%, transparent);
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+  font-style: normal;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.plan-action-panel,
+.plan-run-monitor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+}
+
+.plan-action-head,
+.plan-run-monitor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-action-head {
+  align-items: start;
+}
+
+.plan-action-head strong,
+.plan-run-monitor strong {
+  color: var(--text);
+  font-size: var(--ui-font-size-sm);
+}
+
+.plan-action-head span,
+.plan-run-monitor header span {
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-action-head div,
+.plan-run-monitor header div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.plan-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.plan-action-grid button,
+.plan-run-monitor header button {
+  display: inline-flex;
+  min-width: 0;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-action-grid button:hover,
+.plan-run-monitor header button:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.plan-action-grid button:disabled,
+.plan-run-monitor header button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.plan-action-grid button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-run-monitor header button {
+  width: 27px;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.plan-run-monitor[data-active='true'] {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+.plan-run-note {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+  line-height: 1.4;
+}
+
+.plan-run-note[data-tone='error'] {
+  color: var(--danger);
+}
+
+.plan-run-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-run-row > span:not(.run-status-dot) {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.plan-run-row strong,
+.plan-run-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-run-row small {
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-run-row:hover strong {
+  color: var(--accent);
 }
 
 .plan-card-metrics {
@@ -10214,7 +10600,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 
 .permission-summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: 8px;
 }
 
@@ -11659,11 +12045,42 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   outline: none;
 }
 
+.cron-form textarea[aria-invalid='true'] {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 13%, transparent);
+}
+
+.cron-submit-button[aria-disabled='true']:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  color: var(--text-muted);
+}
+
+.cron-form-hint {
+  grid-column: 1 / -1;
+  min-height: 18px;
+  margin: -2px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cron-form-hint[data-tone='danger'] {
+  color: var(--danger);
+}
+
 .cron-panel > header button:disabled,
 .cron-form button:disabled,
 .cron-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+  transform: none;
+}
+
+.cron-panel > header button:disabled:hover,
+.cron-form button:disabled:hover,
+.cron-actions button:disabled:hover {
+  border-color: var(--border);
+  background: var(--bg-tertiary);
   transform: none;
 }
 

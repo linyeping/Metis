@@ -26,6 +26,15 @@ WRITE_LIKE_TOOLS = {
     "rename_file_update_refs",
     "robust_replace_in_file",
     "write_file",
+    "pdf_create",
+    "pdf_merge_split",
+    "pdf_render_pages",
+    "pdf_screenshot_page",
+    "docx_create",
+    "docx_edit",
+    "docx_to_pdf",
+    "docx_render_pages",
+    "office_report_from_code_run",
 }
 
 
@@ -301,6 +310,24 @@ def _tool_paths(tool_name: str, arguments: Dict[str, Any]) -> Iterable[str]:
         return [value] if value else []
     if tool_name in {"delete_file", "delete_directory"}:
         value = str(arguments.get("path") or arguments.get("file_path") or "").strip()
+        return [value] if value else []
+    if tool_name in {"pdf_create", "pdf_merge_split", "docx_create"}:
+        value = str(arguments.get("output_path") or "").strip()
+        return [value] if value else []
+    if tool_name == "office_report_from_code_run":
+        paths = [
+            str(arguments.get("output_path") or "").strip(),
+            str(arguments.get("artifacts_dir") or "").strip(),
+        ]
+        return [path for path in paths if path]
+    if tool_name == "docx_edit":
+        value = str(arguments.get("output_path") or arguments.get("path") or "").strip()
+        return [value] if value else []
+    if tool_name in {"pdf_render_pages", "docx_to_pdf", "docx_render_pages"}:
+        value = str(arguments.get("output_dir") or "").strip()
+        return [value] if value else []
+    if tool_name == "pdf_screenshot_page":
+        value = str(arguments.get("output_path") or arguments.get("output_dir") or "").strip()
         return [value] if value else []
     if tool_name == "rename_file_update_refs":
         paths = [

@@ -72,6 +72,7 @@ _LAYER_ORDER = {
     "workspace_hint": 10,
     "skills_index": 10,
     "repo_map_hint": 11,
+    "project_profile": 12,
     "workspace_memory": 12,
     "user_memory": 13,
     "agent_state_hint": 20,
@@ -133,6 +134,10 @@ def _workspace_memory_hint_enabled() -> bool:
     return _env_flag("MIRO_CONTEXT_WORKSPACE_MEMORY_HINT")
 
 
+def _project_profile_enabled() -> bool:
+    return _env_flag("METIS_CONTEXT_PROJECT_PROFILE", default="1")
+
+
 def _desk_skill_hint_enabled() -> bool:
     """SKILL.md 注入：默认开启，但仅在桌面自动化实际可用时生效。"""
     if not _env_flag("MIRO_CONTEXT_DESK_SKILL"):
@@ -164,6 +169,7 @@ def resolve_runtime_flags(
     include_desk_skill: Optional[bool] = None,
     include_skills_index: Optional[bool] = None,
     include_tool_strategy_hint: Optional[bool] = None,
+    include_project_profile: Optional[bool] = None,
     include_workspace_memory_hint: Optional[bool] = None,
 ) -> Dict[str, bool]:
     """解析显式入参与环境变量，得到本次 runtime 的开关。"""
@@ -217,6 +223,11 @@ def resolve_runtime_flags(
             _tool_strategy_hint_enabled()
             if include_tool_strategy_hint is None
             else include_tool_strategy_hint
+        ),
+        "include_project_profile": (
+            _project_profile_enabled()
+            if include_project_profile is None
+            else include_project_profile
         ),
         "include_workspace_memory_hint": (
             _workspace_memory_hint_enabled()
@@ -281,6 +292,7 @@ def compile_prompt_runtime(
     include_desk_skill: Optional[bool] = None,
     include_skills_index: Optional[bool] = None,
     include_tool_strategy_hint: Optional[bool] = None,
+    include_project_profile: Optional[bool] = None,
     include_workspace_memory_hint: Optional[bool] = None,
 ) -> PromptRuntimeSnapshot:
     """
@@ -289,7 +301,7 @@ def compile_prompt_runtime(
     运行时层顺序遵循“越稳定越靠前”：
     1. base_system_prompt（按模型 tier 做轻量裁剪或补强）
     2. static: tool strategy / desktop skill / mode / workflow / fixed rules
-    3. session: workspace hint / repo map / workspace memory / user memory
+    3. session: workspace hint / repo map / project profile / workspace memory / user memory
     4. request: agent state / open files / terminal snapshots
     """
     flags = resolve_runtime_flags(
@@ -303,6 +315,7 @@ def compile_prompt_runtime(
         include_desk_skill=include_desk_skill,
         include_skills_index=include_skills_index,
         include_tool_strategy_hint=include_tool_strategy_hint,
+        include_project_profile=include_project_profile,
         include_workspace_memory_hint=include_workspace_memory_hint,
     )
     layers: List[PromptRuntimeLayer] = []
@@ -411,6 +424,24 @@ def compile_prompt_runtime(
                         name="workspace_memory",
                         content=mem_block,
                         source="core.memory.workspace_memory",
+                        stability="session",
+                    )
+                )
+        except Exception:
+            pass
+
+    if flags["include_project_profile"] and workspace_root:
+        try:
+            from backend.core.memory.project_profile import ensure_project_profile
+
+            profile = ensure_project_profile(workspace_root)
+            block = profile.to_prompt_block()
+            if block:
+                layers.append(
+                    PromptRuntimeLayer(
+                        name="project_profile",
+                        content=block,
+                        source="core.memory.project_profile",
                         stability="session",
                     )
                 )
@@ -573,6 +604,7 @@ def build_runtime_messages(
     include_desk_skill: Optional[bool] = None,
     include_skills_index: Optional[bool] = None,
     include_tool_strategy_hint: Optional[bool] = None,
+    include_project_profile: Optional[bool] = None,
     include_workspace_memory_hint: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
     """生成发送给 LLM 的 messages，并保留显式 runtime 编译入口。"""
@@ -592,6 +624,7 @@ def build_runtime_messages(
         include_desk_skill=include_desk_skill,
         include_skills_index=include_skills_index,
         include_tool_strategy_hint=include_tool_strategy_hint,
+        include_project_profile=include_project_profile,
         include_workspace_memory_hint=include_workspace_memory_hint,
     )
     return [{"role": "system", "content": snapshot.final_system_prompt}] + list(history_turns)

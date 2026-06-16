@@ -32,3 +32,11 @@ backend/output/
 backend/others/
 docs/dev-log/
 .codex-acceptance/
+.agent_todos.json
+NEWUPDATE.md
+.metis/.gitignore
+.metis/audit/
+.metis/cache/
+.metis/memory.json
+.metis/project-profile.json
+.metis/tool-permissions.jsonl

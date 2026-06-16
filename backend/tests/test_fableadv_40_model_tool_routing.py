@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+import threading
+from typing import Any, Dict, Generator, List, Optional
+
+from backend.runtime import agent_loop
+from backend.runtime.agent_loop import AgentConfig, ContentEvent, RuntimeStatusEvent
+from backend.runtime.llm_backends import LLMBackend, LLMResponse
+from backend.runtime.model_router import ROUTE_MARKER, build_task_route
+from backend.runtime.tool_registry import ToolRegistry, register_desktop_tools
+
+
+def test_router_selects_stronger_deepseek_model_for_code_tasks() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "修复 desktop/src/App.tsx 里的状态问题并跑 typecheck"}],
+        llm_backend="deepseek",
+        llm_base_url="https://api.deepseek.com",
+        llm_model="deepseek-v4-flash",
+    )
+
+    assert route.task_type == "code"
+    assert route.model_role == "code"
+    assert route.selected_model == "deepseek-v4-pro"
+    assert route.preferred_tools[:3] == ["generate_repo_map", "grep_search", "glob_search"]
+
+
+def test_router_prioritizes_preview_browser_for_local_page_tasks() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "检查 localhost 页面为什么白屏，抓 console error"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+    )
+
+    assert route.task_type == "browser"
+    assert route.preferred_tools[:4] == [
+        "preview_browser_status",
+        "preview_browser_navigate",
+        "preview_browser_observe",
+        "preview_browser_action",
+    ]
+
+
+def test_router_uses_background_artifact_workflow_for_report_code_tasks() -> None:
+    route = build_task_route(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "你可以看到我的电脑屏幕吗？WPS 和 PyCharm 我都打开了。"
+                    "请根据实验报告要求写代码、运行结果、生成图表并完成 Word 作业。"
+                ),
+            }
+        ],
+        llm_backend="deepseek",
+        llm_base_url="https://api.deepseek.com",
+        llm_model="deepseek-v4-flash",
+    )
+
+    assert route.task_type == "artifact_workflow"
+    assert route.model_role == "code"
+    assert route.preferred_tools[:4] == ["load_skill", "read_file", "read_multiple_files", "write_file"]
+    assert route.preferred_tools.index("office_report_from_code_run") < route.preferred_tools.index("docx_create")
+    assert "docx_create" in route.preferred_tools
+    assert "docx_render_pages" in route.preferred_tools
+    assert "pdf_create" in route.preferred_tools
+    assert "pdf_render_pages" in route.preferred_tools
+    assert "background artifact workflow" in route.tool_guidance
+    assert "Do not use Computer Use" in route.tool_guidance
+
+
+def test_router_keeps_desktop_for_explicit_ui_control() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "帮我点击 WPS 里的提交按钮，然后滚动检查页面底部。"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o",
+    )
+
+    assert route.task_type == "desktop"
+    assert route.preferred_tools[:3] == [
+        "desktop_win2_status",
+        "desktop_win2_observe",
+        "desktop_win2_action",
+    ]
+
+
+def test_route_hint_is_appended_after_user_message_not_system_prefix(monkeypatch: Any) -> None:
+    monkeypatch.setattr(agent_loop, "_build_environment_context", lambda: "")
+    config = AgentConfig(
+        llm_backend="deepseek",
+        llm_model="deepseek-v4-pro",
+        system_prompt="Base prompt.",
+        routing_task_type="code",
+        routing_model_role="code",
+        routing_reason="test",
+        routing_tool_guidance="Use repo tools first.",
+        routing_preferred_tools=["grep_search", "read_file"],
+        model_fallbacks=["deepseek-v4-pro", "deepseek-v4-flash"],
+    )
+
+    working = agent_loop._prepare_working_messages([{"role": "user", "content": "修复代码"}], config)
+
+    assert working[0]["role"] == "system"
+    assert ROUTE_MARKER not in str(working[0]["content"])
+    assert working[-1]["role"] == "user"
+    assert ROUTE_MARKER in str(working[-1]["content"])
+
+
+def test_lean_tool_profile_exposes_preview_and_win2_tools() -> None:
+    registry = ToolRegistry()
+    register_desktop_tools(registry)
+    config = AgentConfig(
+        llm_backend="deepseek",
+        llm_model="deepseek-v4-flash",
+        routing_preferred_tools=["preview_browser_observe", "desktop_win2_status"],
+    )
+
+    schemas = agent_loop._tool_schemas_for_config(registry, config)
+    names = [schema["function"]["name"] for schema in schemas]
+
+    assert "preview_browser_observe" in names
+    assert "desktop_win2_status" in names
+    assert names.index("preview_browser_observe") < names.index("desktop_win2_status")
+
+
+def test_artifact_workflow_blocks_desktop_control_tools() -> None:
+    registry = ToolRegistry()
+    from backend.runtime.tool_registry import register_builtin_tools
+
+    register_builtin_tools(registry)
+    register_desktop_tools(registry)
+    config = AgentConfig(
+        llm_backend="deepseek",
+        llm_model="deepseek-v4-pro",
+        routing_task_type="artifact_workflow",
+        routing_preferred_tools=[
+            "desktop_win2_status",
+            "desktop_win2_observe",
+            "desktop_win2_action",
+            "desktop_win2_task",
+        ],
+    )
+
+    schemas = agent_loop._tool_schemas_for_config(registry, config)
+    names = {schema["function"]["name"] for schema in schemas}
+
+    assert "desktop_win2_status" in names
+    assert "desktop_win2_observe" in names
+    assert "office_report_from_code_run" in names
+    assert "docx_create" in names
+    assert "pdf_render_pages" in names
+    assert "desktop_win2_action" not in names
+    assert "desktop_win2_task" not in names
+    assert "desktop_action" not in names
+
+
+class _FailOnceBackend(LLMBackend):
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> LLMResponse:
+        raise TimeoutError("primary model timed out")
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Generator[str, None, LLMResponse]:
+        raise TimeoutError("primary model timed out")
+        yield ""
+
+
+class _GoodBackend(LLMBackend):
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> LLMResponse:
+        return LLMResponse(content="fallback ok")
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Generator[str, None, LLMResponse]:
+        yield "fallback ok"
+        return LLMResponse(content="fallback ok")
+
+
+def test_model_failure_switches_to_fallback_without_raw_error(monkeypatch: Any) -> None:
+    monkeypatch.setattr(agent_loop, "_build_environment_context", lambda: "")
+    monkeypatch.setattr(agent_loop, "_create_backend", lambda config: _GoodBackend())
+    config = AgentConfig(
+        llm_backend="deepseek",
+        llm_model="bad-model",
+        model_fallbacks=["bad-model", "good-model"],
+        max_turns=2,
+    )
+
+    events = list(
+        agent_loop.run(
+            [{"role": "user", "content": "你好"}],
+            config,
+            registry=ToolRegistry(),
+            backend=_FailOnceBackend(),
+        )
+    )
+
+    assert any(isinstance(event, RuntimeStatusEvent) and event.phase == "model_fallback" for event in events)
+    assert any(isinstance(event, ContentEvent) and event.text == "fallback ok" for event in events)
+    assert not any(getattr(event, "type", "") == "error" for event in events)

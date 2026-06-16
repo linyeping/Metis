@@ -32,6 +32,9 @@ SAFE_TOOLS: frozenset[str] = frozenset(
         "read_workspace_memory",
         "load_skill",
         "check_dev_environment",
+        "pdf_info",
+        "pdf_extract_text",
+        "docx_inspect_layout",
         "desktop_win2_status",
         "desktop_win2_observe",
         "desktop_screenshot",
@@ -61,6 +64,15 @@ DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
         "install_dev_runtime",
         "setup_workspace",
         "manage_mcp_servers",
+        "pdf_create",
+        "pdf_merge_split",
+        "pdf_render_pages",
+        "pdf_screenshot_page",
+        "docx_create",
+        "docx_edit",
+        "docx_to_pdf",
+        "docx_render_pages",
+        "office_report_from_code_run",
         "desktop_action",
         "desktop_vision_task",
         "desktop_win2_action",
@@ -132,6 +144,8 @@ def infer_toolset(name: str, source: str = "", description: str = "") -> str:
         return "git"
     if tool in {"check_dev_environment", "install_dev_runtime", "setup_workspace"}:
         return "environment"
+    if tool.startswith("pdf_") or tool.startswith("docx_") or tool.startswith("office_report_"):
+        return "artifact"
     if tool.startswith("web_") or tool.startswith("browse_") or "web" in text:
         return "web"
     if tool in {

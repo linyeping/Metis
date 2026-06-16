@@ -69,7 +69,9 @@ _EXPERT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Window2 coordinates are relative to the captured target window, not "
             "the full desktop.\n"
             "- After every meaningful action, observe the target window again and "
-            "verify whether the goal advanced before continuing.\n"
+            "verify whether the goal advanced before continuing. Use "
+            "desktop_win2_verify for acceptance evidence such as window focus, "
+            "visible text, typed content, and screenshot proof.\n"
             "- For any multi-step GUI task (open app, search, navigate, fill a form), "
             "prefer desktop_win2_task. Fall back to desktop_vision_task only when "
             "Window2 cannot resolve/capture the target window or the UI is a game/canvas "
@@ -81,7 +83,7 @@ _EXPERT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "- Report clear success/failure status.\n"
         ),
         "tool_whitelist": {
-            "desktop_win2_status", "desktop_win2_observe", "desktop_win2_action",
+            "desktop_win2_status", "desktop_win2_observe", "desktop_win2_action", "desktop_win2_verify",
             "desktop_win2_task",
             "desktop_screenshot", "desktop_action", "desktop_vision_task",
             "desktop_inventory", "desktop_window_list",

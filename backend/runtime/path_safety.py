@@ -16,6 +16,13 @@ READ_TOOLS = {
     "grep_search",
     "glob_search",
     "semantic_search",
+    "pdf_info",
+    "pdf_extract_text",
+    "pdf_render_pages",
+    "pdf_screenshot_page",
+    "docx_to_pdf",
+    "docx_render_pages",
+    "docx_inspect_layout",
 }
 
 WRITE_TOOLS = {
@@ -27,6 +34,11 @@ WRITE_TOOLS = {
     "delete_file",
     "delete_directory",
     "create_directory",
+    "pdf_create",
+    "pdf_merge_split",
+    "docx_create",
+    "docx_edit",
+    "office_report_from_code_run",
 }
 
 PATH_KEYS = (
@@ -37,11 +49,16 @@ PATH_KEYS = (
     "source_path",
     "old_path",
     "new_path",
+    "output_path",
+    "output_dir",
+    "script_path",
+    "working_dir",
+    "artifacts_dir",
     "root",
     "cwd",
 )
 
-LIST_PATH_KEYS = ("paths", "files", "file_paths")
+LIST_PATH_KEYS = ("paths", "files", "file_paths", "input_paths")
 
 SECRET_BASENAMES = {
     ".env",

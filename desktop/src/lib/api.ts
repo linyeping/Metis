@@ -266,6 +266,7 @@ function permissionRuleFromRecord(row: Record<string, unknown>): PermissionRule 
     source: stringValue(row.source),
     createdAt: numberValue(row.created_at ?? row.createdAt),
     updatedAt: numberValue(row.updated_at ?? row.updatedAt),
+    dangerousAllow: Boolean(row.dangerous_allow ?? row.dangerousAllow),
   };
 }
 
@@ -285,6 +286,24 @@ function permissionAuditFromRecord(row: Record<string, unknown>): PermissionAudi
     ruleId: stringValue(row.rule_id ?? row.ruleId),
     source: stringValue(row.source),
     arguments: row.arguments,
+    decisionSource: stringValue(row.decision_source ?? row.decisionSource),
+    decisionReason: stringValue(row.decision_reason ?? row.decisionReason),
+    riskLevel: stringValue(row.risk_level ?? row.riskLevel),
+    mode: stringValue(row.mode),
+  };
+}
+
+function permissionControlPlaneFromRecord(row: Record<string, unknown>) {
+  const dangerousRaw = row.dangerous_allow_rules ?? row.dangerousAllowRules;
+  const dangerous = Array.isArray(dangerousRaw) ? dangerousRaw : [];
+  return {
+    version: stringValue(row.version),
+    mode: stringValue(row.mode),
+    decisionOrder: stringArray(row.decision_order ?? row.decisionOrder),
+    availableModes: stringArray(row.available_modes ?? row.availableModes),
+    dangerousAllowRules: dangerous.map(item => permissionRuleFromRecord(recordValue(item))),
+    dangerousAllowCount: numberValue(row.dangerous_allow_count ?? row.dangerousAllowCount),
+    notes: stringArray(row.notes),
   };
 }
 
@@ -1124,6 +1143,9 @@ export async function getPermissions(): Promise<PermissionStatePayload> {
   return {
     rules: rules.map(item => permissionRuleFromRecord(recordValue(item))),
     audit: audit.map(item => permissionAuditFromRecord(recordValue(item))),
+    controlPlane: Object.keys(recordValue(data.control_plane ?? data.controlPlane)).length
+      ? permissionControlPlaneFromRecord(recordValue(data.control_plane ?? data.controlPlane))
+      : undefined,
     path: stringValue(data.path),
     legacyPath: stringValue(data.legacy_path ?? data.legacyPath),
     auditPath: stringValue(data.audit_path ?? data.auditPath),

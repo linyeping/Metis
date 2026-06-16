@@ -17,8 +17,10 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .cancellation import OperationCancelled, raise_if_cancelled
+from .evidence_chain import build_verifier_evidence_payload
+from .hook_lifecycle_bus import emit_hook_lifecycle
 from .schema_converter import openai_to_anthropic, openai_to_gemini
-from .path_safety import validate_tool_paths
+from .path_safety import WRITE_TOOLS, validate_tool_paths
 from .tool_errors import looks_like_tool_error, teaching_error_text
 from .tool_profiles import normalize_tool_profile, tool_names_for_profile
 from backend.core.paths import legacy_miro_path, metis_path
@@ -47,6 +49,50 @@ class ToolDefinition:
     destructive: Optional[bool] = None
     # FABLEADV-23: deferred 工具默认不进 schema，只在目录里列名，由 search_tools 按需激活。
     deferred: bool = False
+
+
+def _append_hook_output(result: str, hook_output: str) -> str:
+    text = str(hook_output or "").strip()
+    if not text:
+        return result
+    return f"{result}\n\n{text}"
+
+
+def _emit_file_changed_if_needed(
+    tool_name: str,
+    arguments: Dict[str, Any],
+    result: str,
+    *,
+    workspace_root: str = "",
+) -> None:
+    if tool_name not in WRITE_TOOLS and tool_name not in {"apply_patch", "edit_notebook"}:
+        return
+    path = _first_argument_path(arguments)
+    operation = "modified"
+    if tool_name in {"write_file", "append_to_file"}:
+        operation = "written"
+    elif tool_name in {"delete_file", "delete_directory"}:
+        operation = "deleted"
+    elif tool_name == "rename_file_update_refs":
+        operation = "renamed"
+    emit_hook_lifecycle(
+        "file.changed",
+        tool_name=tool_name,
+        arguments=arguments,
+        workspace_root=workspace_root,
+        result=result,
+        ok=True,
+        status=operation,
+        metadata={"path": path, "operation": operation},
+    )
+
+
+def _first_argument_path(arguments: Dict[str, Any]) -> str:
+    for key in ("file_path", "path", "target_path", "directory_path", "new_path", "old_path"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def deferred_tools_enabled() -> bool:
@@ -280,24 +326,71 @@ class ToolRegistry:
         tool = self.get(name)
         if not tool:
             preview = ", ".join(self.tool_names[:20])
+            emit_hook_lifecycle(
+                "tool.error",
+                tool_name=str(name or ""),
+                arguments=arguments if isinstance(arguments, dict) else {},
+                workspace_root=workspace_root or "",
+                ok=False,
+                status="unknown_tool",
+                error=f"Unknown tool '{name}'",
+                run_configured_hooks=False,
+            )
             return f"Error: Unknown tool '{name}'. Available tools include: {preview}"
         if not self.is_available(name):
+            emit_hook_lifecycle(
+                "tool.skip",
+                tool_name=tool.name,
+                arguments=arguments if isinstance(arguments, dict) else {},
+                workspace_root=workspace_root or "",
+                ok=False,
+                status="unavailable",
+                error=f"Tool '{name}' is not available",
+            )
             return f"Error: Tool '{name}' is not available in the current environment"
         if not isinstance(arguments, dict):
+            emit_hook_lifecycle(
+                "tool.error",
+                tool_name=tool.name,
+                arguments={},
+                workspace_root=workspace_root or "",
+                ok=False,
+                status="invalid_arguments",
+                error=f"Tool arguments for '{name}' must be an object",
+            )
             return f"Error: Tool arguments for '{name}' must be an object"
         arguments = dict(arguments)
         if tool.name == "todo_write" and "path" not in arguments and workspace_root:
             arguments["path"] = os.path.join(str(workspace_root), ".agent_todos.json")
         if tool.name == "load_skill" and "workspace_root" not in arguments and workspace_root:
             arguments["workspace_root"] = str(workspace_root)
+        emit_hook_lifecycle(
+            "tool.start",
+            tool_name=tool.name,
+            arguments=arguments,
+            workspace_root=workspace_root or "",
+            ok=None,
+            status="starting",
+        )
         safety = validate_tool_paths(tool.name, arguments, workspace_root=workspace_root)
         if not safety.allowed:
-            return teaching_error_text(
+            out = teaching_error_text(
                 tool.name,
                 arguments,
                 safety.error_text(),
                 workspace_root=workspace_root or "",
             )
+            dispatch = emit_hook_lifecycle(
+                "tool.skip",
+                tool_name=tool.name,
+                arguments=arguments,
+                workspace_root=workspace_root or "",
+                result=out,
+                ok=False,
+                status=safety.code or "path_safety_denied",
+                error=safety.error_text(),
+            )
+            return _append_hook_output(out, dispatch.display_output)
         try:
             raise_if_cancelled(cancel_event)
             result = tool.execute_fn(**arguments)
@@ -316,17 +409,59 @@ class ToolRegistry:
                     out,
                     workspace_root=workspace_root or "",
                 )
+                dispatch = emit_hook_lifecycle(
+                    "tool.error",
+                    tool_name=tool.name,
+                    arguments=arguments,
+                    workspace_root=workspace_root or "",
+                    result=out,
+                    ok=False,
+                    status="tool_returned_error",
+                    error=out[:1000],
+                )
+                return _append_hook_output(out, dispatch.display_output)
+            dispatch = emit_hook_lifecycle(
+                "tool.finish",
+                tool_name=tool.name,
+                arguments=arguments,
+                workspace_root=workspace_root or "",
+                result=out,
+                ok=True,
+                status="finished",
+            )
+            _emit_file_changed_if_needed(tool.name, arguments, out, workspace_root=workspace_root or "")
+            out = _append_hook_output(out, dispatch.display_output)
             return out
         except OperationCancelled:
+            emit_hook_lifecycle(
+                "tool.error",
+                tool_name=tool.name,
+                arguments=arguments,
+                workspace_root=workspace_root or "",
+                ok=False,
+                status="cancelled",
+                error="Tool execution cancelled",
+            )
             raise
         except Exception as exc:
             logger.exception("tool execution failed name=%s", tool.name)
-            return teaching_error_text(
+            out = teaching_error_text(
                 tool.name,
                 arguments,
                 f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
                 workspace_root=workspace_root or "",
             )
+            dispatch = emit_hook_lifecycle(
+                "tool.error",
+                tool_name=tool.name,
+                arguments=arguments,
+                workspace_root=workspace_root or "",
+                result=out,
+                ok=False,
+                status="exception",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return _append_hook_output(out, dispatch.display_output)
 
     @property
     def tool_count(self) -> int:
@@ -925,6 +1060,33 @@ def _extract_preview_natural_target(assertion: str, nouns: List[str]) -> str:
     return ""
 
 
+def _extract_preview_visible_text(assertion: str) -> str:
+    text = _preview_text(assertion)
+    if not text:
+        return ""
+    quoted = re.search(r"[\"'“”‘’「」『』]([^\"'“”‘’「」『』]{1,80})[\"'“”‘’「」『』]", text)
+    if quoted:
+        return quoted.group(1).strip()
+    patterns = [
+        r"(?:出现|显示|看到|包含|提示)\s*([^，。,.；;!?！？]{1,80}?)(?:提示|文案|文本|toast|message)?(?:$|[，。,.；;!?！？])",
+        r"(?:success|successful|succeeded|submitted|saved)\s+([^，。,.；;!?！？]{1,80})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        value = re.sub(r"^(成功|错误|失败|the|a|an)\s*", "", value, flags=re.IGNORECASE).strip()
+        if value and value not in {"成功", "成功提示", "提示", "页面"}:
+            return value
+    if any(word in text for word in ["成功提示", "提交成功", "保存成功", "已提交", "已保存"]):
+        for value in ["提交成功", "保存成功", "成功", "已提交", "已保存"]:
+            if value in text:
+                return value
+        return "成功"
+    return ""
+
+
 def _preview_assertion_has_any(assertion: str, words: List[str]) -> bool:
     folded = _preview_casefold(assertion)
     return any(_preview_casefold(word) in folded for word in words)
@@ -1153,6 +1315,36 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
 
         return format_tool_result(run_task(goal=goal, max_steps=max_steps))
 
+    def desktop_win2_verify(
+        hwnd: int = 0,
+        title: str = "",
+        assertion: str = "",
+        text_contains: str = "",
+        title_contains: str = "",
+        exe_contains: str = "",
+        require_foreground: bool = False,
+        require_text_visible: bool = False,
+        require_screenshot: bool = True,
+        include_ocr: bool = False,
+    ) -> str:
+        """Verify a desktop window state with screenshot/accessibility evidence."""
+        from backend.tools.desk_automation.providers.win2_loop import format_tool_result, verify as _win2_verify
+
+        return format_tool_result(
+            _win2_verify(
+                hwnd=hwnd,
+                title=title,
+                assertion=assertion,
+                text_contains=text_contains,
+                title_contains=title_contains,
+                exe_contains=exe_contains,
+                require_foreground=require_foreground,
+                require_text_visible=require_text_visible,
+                require_screenshot=require_screenshot,
+                include_ocr=include_ocr,
+            )
+        )
+
     def _preview_bridge_json(kind: str, payload: dict[str, Any] | None = None, timeout: float = 12.0) -> str:
         from backend.web.preview_bridge import request_preview_command
 
@@ -1264,6 +1456,8 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
 
         assertion_text = _preview_text(assertion)
         if assertion_text:
+            if not visible_text:
+                visible_text = _extract_preview_visible_text(assertion_text)
             if not button_text:
                 button_text = _extract_preview_natural_target(assertion_text, ["按钮", "button"])
             if not input_label:
@@ -1420,28 +1614,63 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
                 {"screenshot_health": screenshot_health},
             )
 
-        return json.dumps(
+        diagnostics_compact = _compact_preview_diagnostics(diagnostics)
+        evidence_seed: list[dict[str, Any]] = [
             {
-                "ok": all(checks.values()),
-                "checks": checks,
-                "check_details": check_details,
-                "assertion": assertion_text,
+                "kind": "page",
+                "ok": True,
                 "url": url,
                 "title": title,
-                "text_preview": haystack[:1000],
-                "matched_elements": {
-                    "button": _compact_preview_element(button),
-                    "input": _compact_preview_element(input_element),
-                },
-                "dom_summary": dom_summary,
-                "page_health": page_health,
-                "screenshot": screenshot_summary,
-                "diagnostics": _compact_preview_diagnostics(diagnostics),
-                "browser_activity": _compact_preview_browser_activity(observed.get("browser_activity", {})),
+                "summary": f"Observed Preview page: {title or url or 'current page'}",
+                "detail": {"dom_summary": dom_summary, "page_health": page_health},
             },
-            ensure_ascii=False,
-            indent=2,
+            {
+                "kind": "diagnostics",
+                "ok": True,
+                "summary": "Preview diagnostics captured",
+                "detail": diagnostics_compact,
+            },
+        ]
+        if require_screenshot_not_blank:
+            evidence_seed.append(
+                {
+                    "kind": "screenshot",
+                    "ok": bool(screenshot_summary.get("ok")),
+                    "url": screenshot_summary.get("url", ""),
+                    "title": screenshot_summary.get("title", ""),
+                    "summary": "Preview screenshot captured for visual verification",
+                    "detail": screenshot_summary,
+                }
+            )
+        verification = build_verifier_evidence_payload(
+            surface="preview_browser",
+            assertion=assertion_text,
+            checks=checks,
+            check_details=check_details,
+            evidence=evidence_seed,
+            subject={"url": url, "title": title},
         )
+        payload = {
+            "ok": bool(verification["verdict"]["ok"]),
+            "checks": checks,
+            "check_details": check_details,
+            "assertion": assertion_text,
+            "url": url,
+            "title": title,
+            "text_preview": haystack[:1000],
+            "matched_elements": {
+                "button": _compact_preview_element(button),
+                "input": _compact_preview_element(input_element),
+            },
+            "dom_summary": dom_summary,
+            "page_health": page_health,
+            "screenshot": screenshot_summary,
+            "diagnostics": diagnostics_compact,
+            "browser_activity": _compact_preview_browser_activity(observed.get("browser_activity", {})),
+            **verification,
+            "evidence_chain": verification["evidence_chain_v2"],
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def desktop_inventory(query: str = "all") -> str:
         results: Dict[str, Any] = {}
@@ -1691,7 +1920,9 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
                 "Perform a single Window2-style action inside a specific window. "
                 "Use window-relative coordinates from desktop_win2_observe. "
                 "Supported actions: activate, click, double_click, right_click, "
-                "type, key, hotkey, scroll, drag, move, wait."
+                "type, key, hotkey, scroll, drag, move, wait. Scroll actions verify "
+                "visible movement and fall back to PageUp/PageDown or Ctrl+Home/End "
+                "when wheel scrolling does not visibly move the target."
             ),
             parameters={
                 "type": "object",
@@ -1753,6 +1984,38 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
             },
             execute_fn=desktop_win2_task,
             source="desktop",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="desktop_win2_verify",
+            description=(
+                "Computer Use verifier for a desktop window. Captures the target "
+                "window and returns checks plus an evidence_chain explaining why "
+                "the task is considered complete or failed. Use after clicks, "
+                "window switches, and text entry to verify title/exe, visible text, "
+                "foreground focus, OCR/accessibility matches, and screenshot evidence."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "hwnd": {"type": "integer", "description": "Window handle. Optional when title is provided."},
+                    "title": {"type": "string", "description": "Window title substring when hwnd is unknown."},
+                    "assertion": {"type": "string", "description": "One-sentence acceptance assertion, e.g. 检查输入框是否真的写入 hello."},
+                    "text_contains": {"type": "string", "description": "Text expected in title/accessibility/OCR."},
+                    "title_contains": {"type": "string", "description": "Window title substring expected."},
+                    "exe_contains": {"type": "string", "description": "Executable name substring expected."},
+                    "require_foreground": {"type": "boolean", "description": "Require the window to be foreground/focused."},
+                    "require_text_visible": {"type": "boolean", "description": "Require text_contains/assertion text to be visible."},
+                    "require_screenshot": {"type": "boolean", "description": "Require a captured screenshot path and dimensions."},
+                    "include_ocr": {"type": "boolean", "description": "Run OCR for text verification when accessibility is insufficient."},
+                },
+                "required": [],
+            },
+            execute_fn=desktop_win2_verify,
+            source="desktop",
+            requires_approval=False,
+            destructive=False,
         )
     )
     registry.register(

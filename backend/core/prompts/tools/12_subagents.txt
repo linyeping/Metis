@@ -336,29 +336,27 @@ delegate_browser(
 ---
 
 ## 5. delegate_best_of_n
-**Purpose**: Run task in isolated git worktree for parallel attempts or experiments
+**Purpose**: Run write-capable attempts in isolated git worktrees for parallel approaches or experiments
 
 **Parameters**:
 - `task_description` (required): Task to run in isolation
-- `branch_name` (optional): Branch name for worktree
+- `n` (optional): Number of attempts, capped at 3
+- `workspace_root` (optional): Source git workspace, default "."
 
 **Usage**:
 ```python
-# Parallel attempts
+# Run three isolated attempts and compare the results
 delegate_best_of_n(
-    task_description="Implement caching - approach 1: Redis",
-    branch_name="cache-redis"
-)
-
-delegate_best_of_n(
-    task_description="Implement caching - approach 2: In-memory",
-    branch_name="cache-memory"
+    task="Implement caching and compare reasonable approaches",
+    n=3,
+    workspace_root="."
 )
 
 # Isolated experiment
 delegate_best_of_n(
-    task_description="Try refactoring with different architecture",
-    branch_name="experiment-refactor"
+    task="Try refactoring with a different architecture",
+    n=1,
+    workspace_root="."
 )
 ```
 
@@ -367,9 +365,7 @@ delegate_best_of_n(
 1. **Best-of-N parallel attempts**:
    ```python
    # Try multiple approaches simultaneously
-   delegate_best_of_n(task_description="Approach 1: ...", branch_name="attempt-1")
-   delegate_best_of_n(task_description="Approach 2: ...", branch_name="attempt-2")
-   delegate_best_of_n(task_description="Approach 3: ...", branch_name="attempt-3")
+   delegate_best_of_n(task="Try three approaches for the caching task", n=3)
    
    # Compare results and choose best
    ```
@@ -378,16 +374,17 @@ delegate_best_of_n(
    ```python
    # Experiment without affecting main code
    delegate_best_of_n(
-       task_description="Experiment with new library",
-       branch_name="experiment"
+       task="Experiment with a new library",
+       n=1
    )
    ```
 
 **Features**:
-- **Isolated**: Own branch and working directory
+- **Hard isolation**: Each attempt gets its own git worktree and branch
 - **Parallel**: Multiple attempts simultaneously
-- **Safe**: Doesn't affect main code
-- **Git worktree**: Proper git isolation
+- **Safe by default**: If a git worktree cannot be created, the tool refuses to run instead of writing in the main workspace
+- **Inspectable**: Worktree paths and branch names are returned in the result
+- **HEAD based**: Attempts are created from `HEAD`; uncommitted main-workspace changes are reported but not mirrored automatically
 
 ---
 

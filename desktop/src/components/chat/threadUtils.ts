@@ -136,6 +136,10 @@ export function toolDisplayName(name: string): string {
 
 export function toolCommandPreview(toolName: string, args: unknown, result: unknown): string {
   const name = toolName.toLowerCase();
+  if (name === 'office_report_from_code_run') {
+    const command = firstStringField(args, ['command', 'script_path']);
+    return command ? `$ ${command}` : '';
+  }
   if (!/(shell|terminal|cmd|bash|powershell|execute|run|command)/.test(name)) return '';
   const command = firstStringField(args, ['command', 'cmd', 'shell_command', 'script', 'code']);
   if (command) return `$ ${command}`;

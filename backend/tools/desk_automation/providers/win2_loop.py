@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sys
@@ -9,6 +10,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from backend.runtime.evidence_chain import build_verifier_evidence_payload
 
 from .. import config
 from ..orchestrator.screen_reader import ActionType, ScreenAction, call_vision_llm_batch
@@ -131,6 +134,14 @@ def act(
                 "action": "activate",
                 "hwnd": win.hwnd,
             }
+        if str(action or "").strip().lower() == "scroll":
+            result = _execute_scroll_with_fallback(
+                win.hwnd,
+                x=int(x),
+                y=int(y),
+                delta=_normalize_scroll_delta(scroll_delta),
+            )
+            return {"ok": True, "provider": WIN2_PROVIDER_NAME, "action": action, "result": result}
         result = _execute_action(
             win.hwnd,
             ScreenAction(
@@ -153,6 +164,137 @@ def act(
         return {"ok": True, "provider": WIN2_PROVIDER_NAME, "action": action, "result": result}
     except Exception as exc:
         return _error(f"{type(exc).__name__}: {exc}", fallback=True)
+
+
+def verify(
+    hwnd: int = 0,
+    title: str = "",
+    assertion: str = "",
+    text_contains: str = "",
+    title_contains: str = "",
+    exe_contains: str = "",
+    require_foreground: bool = False,
+    require_text_visible: bool = False,
+    require_screenshot: bool = True,
+    include_ocr: bool = False,
+) -> dict[str, Any]:
+    """Verify a desktop state with screenshot/accessibility evidence."""
+    if not win2_enabled():
+        return _error("Win2 provider disabled or unavailable", fallback=True)
+    assertion_text = str(assertion or "").strip()
+    derived = _derive_win2_verification(assertion_text)
+    text_contains = str(text_contains or derived.get("text_contains") or "").strip()
+    title_contains = str(title_contains or derived.get("title_contains") or "").strip()
+    exe_contains = str(exe_contains or "").strip()
+    require_foreground = bool(require_foreground or derived.get("require_foreground"))
+    require_text_visible = bool(require_text_visible or derived.get("require_text_visible") or text_contains)
+    require_screenshot = bool(require_screenshot or derived.get("require_screenshot"))
+
+    try:
+        win = _resolve_window(hwnd=hwnd, title=title)
+        if win is None:
+            return _error("No matching window", fallback=True)
+        obs = _capture_observation(win.hwnd, include_ocr=include_ocr or bool(text_contains))
+        refreshed = _resolve_window(hwnd=win.hwnd) or win
+    except Exception as exc:
+        return _error(f"Verification observation failed: {type(exc).__name__}: {exc}", fallback=True)
+
+    checks: dict[str, bool] = {}
+    details: dict[str, Any] = {}
+    evidence_chain: list[dict[str, Any]] = [
+        {
+            "kind": "window",
+            "hwnd": obs.hwnd,
+            "title": obs.title,
+            "exe": obs.exe,
+            "is_foreground": bool(getattr(refreshed, "is_foreground", False)),
+        }
+    ]
+
+    def add_check(name: str, ok: bool, detail: dict[str, Any] | None = None) -> None:
+        checks[name] = bool(ok)
+        if detail is not None:
+            details[name] = detail
+
+    if title_contains:
+        add_check(
+            "title_contains",
+            _contains(obs.title, title_contains),
+            {"query": title_contains, "title": obs.title},
+        )
+    if exe_contains:
+        add_check(
+            "exe_contains",
+            _contains(obs.exe, exe_contains),
+            {"query": exe_contains, "exe": obs.exe},
+        )
+    if require_foreground:
+        add_check(
+            "window_foreground",
+            bool(getattr(refreshed, "is_foreground", False)),
+            {"hwnd": obs.hwnd, "title": obs.title},
+        )
+    if require_screenshot:
+        screenshot_ok = bool(obs.screenshot_path and os.path.isfile(obs.screenshot_path) and obs.screenshot_width > 0 and obs.screenshot_height > 0)
+        add_check(
+            "screenshot_captured",
+            screenshot_ok,
+            {
+                "path": obs.screenshot_path,
+                "width": obs.screenshot_width,
+                "height": obs.screenshot_height,
+            },
+        )
+        evidence_chain.append(
+            {
+                "kind": "screenshot",
+                "ok": screenshot_ok,
+                "path": obs.screenshot_path,
+                "width": obs.screenshot_width,
+                "height": obs.screenshot_height,
+            }
+        )
+
+    matched_sources = _find_observation_text_sources(obs, text_contains) if text_contains else []
+    if require_text_visible:
+        add_check(
+            "text_visible",
+            bool(matched_sources),
+            {"query": text_contains, "matched_sources": matched_sources[:8]},
+        )
+        evidence_chain.append(
+            {
+                "kind": "text_match",
+                "query": text_contains,
+                "matched": bool(matched_sources),
+                "sources": matched_sources[:5],
+            }
+        )
+
+    if not checks:
+        add_check("window_observed", True, {"hwnd": obs.hwnd, "title": obs.title})
+
+    verification = build_verifier_evidence_payload(
+        surface="desktop_win2",
+        assertion=assertion_text,
+        checks=checks,
+        check_details=details,
+        evidence=evidence_chain,
+        subject={"hwnd": obs.hwnd, "title": obs.title, "exe": obs.exe},
+    )
+    ok = bool(verification["verdict"]["ok"])
+    return {
+        "ok": ok,
+        "provider": WIN2_PROVIDER_NAME,
+        "status": "verified" if ok else "failed",
+        "assertion": assertion_text,
+        "checks": checks,
+        "check_details": details,
+        "evidence_chain": evidence_chain,
+        **verification,
+        "observation": _observation_for_log(obs),
+        "fallback_recommended": not ok and not (obs.accessibility or obs.ocr_items),
+    }
 
 
 def run_task(goal: str, max_steps: int = 20, prefer_existing: bool = False) -> dict[str, Any]:
@@ -433,6 +575,137 @@ def _plan_actions(goal: str, obs: Win2Observation, history: list[dict[str, Any]]
     )
 
 
+def _normalize_scroll_delta(value: Any) -> int:
+    try:
+        delta = int(value or 0)
+    except (TypeError, ValueError):
+        delta = 0
+    return delta or -3
+
+
+def _execute_scroll_with_fallback(hwnd: int, x: int, y: int, *, delta: int = -3) -> dict[str, Any]:
+    """Scroll with verification and bounded fallback actions."""
+    from ..capture.window_manager import press_key_in_window, scroll_in_window
+
+    config.assert_automation_allowed()
+    delta = _normalize_scroll_delta(delta)
+    direction = "down" if delta < 0 else "up"
+    before = _capture_scroll_probe(hwnd)
+    attempts: list[dict[str, Any]] = []
+
+    primary_result = scroll_in_window(hwnd, int(x), int(y), delta=delta)
+    after = _capture_scroll_probe(hwnd)
+    changed = _scroll_probe_changed(before, after)
+    attempts.append(
+        {
+            "method": "wheel",
+            "delta": delta,
+            "changed": changed,
+            "result": primary_result,
+        }
+    )
+    if changed or not before.get("available") or not after.get("available"):
+        return {
+            "ok": True,
+            "method": "wheel",
+            "direction": direction,
+            "attempts": attempts,
+            "scroll_verification": _scroll_verification_payload(before, after, changed),
+        }
+
+    fallback_keys = ["pagedown", "end"] if direction == "down" else ["pageup", "home"]
+    previous = after
+    for index, key in enumerate(fallback_keys):
+        if key in {"end", "home"}:
+            key_result = _press_hotkey_in_window(hwnd, ["ctrl", key])
+            method = f"ctrl+{key}"
+        else:
+            key_result = press_key_in_window(hwnd, key)
+            method = key
+        next_probe = _capture_scroll_probe(hwnd)
+        changed = _scroll_probe_changed(previous, next_probe)
+        attempts.append(
+            {
+                "method": method,
+                "changed": changed,
+                "result": key_result,
+            }
+        )
+        if changed:
+            return {
+                "ok": True,
+                "method": method,
+                "direction": direction,
+                "fallback_used": True,
+                "attempts": attempts,
+                "scroll_verification": _scroll_verification_payload(before, next_probe, True),
+            }
+        previous = next_probe
+
+    return {
+        "ok": True,
+        "method": "wheel",
+        "direction": direction,
+        "fallback_used": True,
+        "attempts": attempts,
+        "scroll_verification": _scroll_verification_payload(before, previous, False),
+        "warning": "Scroll did not produce a visible window change after bounded fallbacks.",
+    }
+
+
+def _press_hotkey_in_window(hwnd: int, keys: list[str]) -> dict[str, Any]:
+    from ..capture.window_manager import activate_window
+    from ..input.actions import hotkey
+
+    activate_window(hwnd)
+    time.sleep(0.1)
+    return hotkey(*keys)
+
+
+def _capture_scroll_probe(hwnd: int) -> dict[str, Any]:
+    try:
+        obs = _capture_observation(hwnd, include_ocr=False)
+        digest = ""
+        size = 0
+        if obs.screenshot_path and os.path.isfile(obs.screenshot_path):
+            data = Path(obs.screenshot_path).read_bytes()
+            digest = hashlib.sha1(data).hexdigest()
+            size = len(data)
+        return {
+            "available": True,
+            "signature": digest,
+            "size": size,
+            "title": obs.title,
+            "exe": obs.exe,
+            "screenshot_path": obs.screenshot_path,
+            "width": obs.screenshot_width,
+            "height": obs.screenshot_height,
+        }
+    except Exception as exc:
+        return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _scroll_probe_changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
+    if not before.get("available") or not after.get("available"):
+        return False
+    before_sig = str(before.get("signature") or "")
+    after_sig = str(after.get("signature") or "")
+    return bool(before_sig and after_sig and before_sig != after_sig)
+
+
+def _scroll_verification_payload(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    changed: bool,
+) -> dict[str, Any]:
+    return {
+        "ok": bool(changed),
+        "changed": bool(changed),
+        "before": before,
+        "after": after,
+    }
+
+
 def _execute_action(hwnd: int, action: ScreenAction) -> dict[str, Any]:
     from ..capture.window_manager import (
         activate_window,
@@ -468,11 +741,11 @@ def _execute_action(hwnd: int, action: ScreenAction) -> dict[str, Any]:
             keys = [keys]
         return hotkey(*[_normalize_key(str(k)) for k in keys])
     if kind == ActionType.SCROLL:
-        return scroll_in_window(
+        return _execute_scroll_with_fallback(
             hwnd,
             int(p.get("x", 0)),
             int(p.get("y", 0)),
-            delta=int(p.get("clicks", p.get("scroll_delta", -3)) or -3),
+            delta=_normalize_scroll_delta(p.get("clicks", p.get("scroll_delta", -3))),
         )
     if kind == ActionType.DRAG:
         activate_window(hwnd)
@@ -626,6 +899,101 @@ def _format_accessibility_for_prompt(accessibility: dict[str, Any]) -> str:
             f"{rect.get('width', '?')},{rect.get('height', '?')})"
         )
     return "\n".join(lines) + "\n"
+
+
+def _derive_win2_verification(assertion: str) -> dict[str, Any]:
+    text = str(assertion or "").strip()
+    if not text:
+        return {}
+    derived: dict[str, Any] = {}
+    lowered = _norm_text(text)
+    if any(word in lowered for word in ["窗口切换", "切换成功", "激活", "foreground", "focused"]):
+        derived["require_foreground"] = True
+    if any(word in lowered for word in ["截图", "screenshot", "截屏"]):
+        derived["require_screenshot"] = True
+    quoted = _quoted_text(text)
+    if quoted:
+        derived["text_contains"] = quoted
+        derived["require_text_visible"] = True
+    elif any(word in lowered for word in ["写入", "输入", "出现", "显示", "可见", "visible"]):
+        visible = _extract_win2_visible_text(text)
+        if visible:
+            derived["text_contains"] = visible
+            derived["require_text_visible"] = True
+    title_target = _extract_win2_title_target(text)
+    if title_target:
+        derived["title_contains"] = title_target
+    return derived
+
+
+def _quoted_text(value: str) -> str:
+    match = re.search(r"[\"'“”‘’「」『』]([^\"'“”‘’「」『』]{1,80})[\"'“”‘’「」『』]", value)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_win2_visible_text(value: str) -> str:
+    for pattern in [
+        r"(?:写入|输入|出现|显示|看到|可见)\s*([^，。,.；;!?！？]{1,80})",
+        r"(?:contains|shows|visible)\s+([^，。,.；;!?！？]{1,80})",
+    ]:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        text = match.group(1).strip()
+        text = re.sub(r"(?:是否|真的|成功|了吗|了|$)", "", text).strip()
+        if text:
+            return text
+    return ""
+
+
+def _extract_win2_title_target(value: str) -> str:
+    for pattern in [
+        r"(?:切换到|打开|激活|进入)\s*([^，。,.；;!?！？]{1,60}?)(?:窗口|应用|软件|页面)?(?:$|[，。,.；;!?！？])",
+        r"(?:window|app)\s+([^，。,.；;!?！？]{1,60})",
+    ]:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        target = match.group(1).strip()
+        target = re.sub(r"(?:窗口|应用|软件|页面)$", "", target).strip()
+        if target:
+            return target
+    return ""
+
+
+def _contains(haystack: Any, needle: Any) -> bool:
+    query = _norm_text(needle)
+    return bool(query) and query in _norm_text(haystack)
+
+
+def _find_observation_text_sources(obs: Win2Observation, query: str) -> list[dict[str, Any]]:
+    if not str(query or "").strip():
+        return []
+    sources: list[dict[str, Any]] = []
+    if _contains(obs.title, query):
+        sources.append({"source": "title", "text": obs.title})
+    if _contains(obs.exe, query):
+        sources.append({"source": "exe", "text": obs.exe})
+    accessibility = obs.accessibility if isinstance(obs.accessibility, dict) else {}
+    for item in accessibility.get("elements") or []:
+        if not isinstance(item, dict):
+            continue
+        text = " ".join(str(item.get(key) or "") for key in ("text", "class_name", "role")).strip()
+        if _contains(text, query):
+            sources.append(
+                {
+                    "source": "accessibility",
+                    "text": text[:240],
+                    "rect": item.get("rect") if isinstance(item.get("rect"), dict) else {},
+                }
+            )
+    for item in obs.ocr_items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or item.get("label") or "").strip()
+        if _contains(text, query):
+            sources.append({"source": "ocr", "text": text[:240], "rect": item.get("rect") or item.get("bbox") or {}})
+    return sources
 
 
 def _goal_terms(goal: str) -> list[str]:

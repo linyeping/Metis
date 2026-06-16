@@ -181,6 +181,39 @@ def test_preview_browser_verify_supports_browser_verifier(monkeypatch) -> None:
     assert result["checks"]["no_console_errors"] is True
     assert result["checks"]["no_network_failures"] is True
     assert result["checks"]["screenshot_not_blank"] is True
+    assert result["evidence_schema"] == "metis.verifier.evidence_chain.v2"
+    assert result["verdict"]["ok"] is True
+    assert result["verdict"]["surface"] == "preview_browser"
+    assert result["evidence_chain_v2"][0]["kind"] == "page"
+    assert result["evidence_chain"] == result["evidence_chain_v2"]
     assert result["matched_elements"]["button"]["text"] == "登录"
     assert result["matched_elements"]["input"]["placeholder"] == "邮箱"
     assert calls == ["observe", "screenshot"]
+
+
+def test_preview_browser_verify_extracts_success_prompt_from_assertion(monkeypatch) -> None:
+    def fake_request_preview_command(kind: str, payload: dict[str, object], timeout: int = 12) -> dict[str, object]:
+        assert kind == "observe"
+        return {
+            "ok": True,
+            "url": "http://localhost:5174/form",
+            "title": "Form",
+            "text": "保存成功",
+            "elements": [],
+            "diagnostics": {"counts": {}},
+            "dom_summary": {},
+            "page_health": {"status": "ok", "blank": False, "reasons": []},
+        }
+
+    monkeypatch.setattr(preview_bridge, "request_preview_command", fake_request_preview_command)
+    registry = ToolRegistry()
+    register_desktop_tools(registry)
+    verify = registry.get("preview_browser_verify")
+
+    assert verify is not None
+    result = json.loads(verify.execute_fn(assertion="确认提交后出现保存成功提示"))
+
+    assert result["ok"] is True
+    assert result["checks"]["visible_text"] is True
+    assert result["verdict"]["ok"] is True
+    assert result["check_details"]["visible_text"]["query"] == "保存成功"

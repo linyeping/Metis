@@ -93,6 +93,24 @@ def test_new_116_browser_types_and_dependency_fallback(monkeypatch) -> None:
     assert "browser-use" in browse_web("check docs")
 
 
+def test_browser_show_browser_runs_visible_without_user_profile(monkeypatch) -> None:
+    captured: dict[str, BrowserTask] = {}
+
+    def fake_run(task: BrowserTask) -> BrowserResult:
+        captured["task"] = task
+        return BrowserResult(ok=True, output="ok")
+
+    monkeypatch.setattr("backend.tools.browser_automation.tools.run_browser_task", fake_run)
+
+    assert "ok" in browse_web("play a song", show_browser=True)
+    assert captured["task"].headless is False
+    assert captured["task"].use_user_profile is False
+
+    browse_web("open github", use_login=True)
+    assert captured["task"].headless is False
+    assert captured["task"].use_user_profile is True
+
+
 def test_fableadv_50_browser_use_native_openai_compatible_llm() -> None:
     config = BrowserLLMConfig(
         provider_id="custom-openai",

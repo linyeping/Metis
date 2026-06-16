@@ -409,7 +409,7 @@ def build_agent_config(
     #   - agent_state/open_files/terminal：每轮易变
     #   - repo_map/workspace_memory：随文件/记忆改动而变
     # 这些信息本就可由模型经工具按需获取（符合工具化设计），todo 也已在末尾消息单独刷新。
-    # 前缀只保留真正稳定的层（base、固定规则、cwd、skills 索引、用户 METIS.md），以最大化缓存命中。
+    # 前缀只保留真正稳定的层（base、固定规则、cwd、skills 索引、Project Profile、用户 METIS.md），以最大化缓存命中。
     prompt_snapshot = compile_prompt_runtime(
         system_prompt,
         user_memory_text=user_memory_text,

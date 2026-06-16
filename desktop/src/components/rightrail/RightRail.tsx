@@ -33,7 +33,7 @@ import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getWorkspaceFile, getWorkspaceTree } from '../../lib/api';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import type { BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, ChatTodoItem, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -63,11 +63,78 @@ const workspaceCardColumns: Array<{ id: WorkspaceCardColumnId; cards: WorkspaceC
   { id: 'right', cards: ['activity', 'plan'] },
 ];
 
-function planTodoStatus(raw?: string): 'done' | 'active' | 'pending' {
+type PlanTodoStatus = 'done' | 'active' | 'pending' | 'blocked' | 'failed' | 'canceled';
+type PlanActionKind = 'retry' | 'strategy' | 'manual';
+
+function planTodoStatus(raw?: string): PlanTodoStatus {
   const value = String(raw || '').trim().toLowerCase();
   if (['done', 'completed', 'complete', 'finished'].includes(value)) return 'done';
   if (['in_progress', 'in-progress', 'active', 'doing', 'running'].includes(value)) return 'active';
+  if (['blocked', 'blocker', 'stuck', 'waiting'].includes(value)) return 'blocked';
+  if (['failed', 'failure', 'error'].includes(value)) return 'failed';
+  if (['cancelled', 'canceled', 'cancel'].includes(value)) return 'canceled';
   return 'pending';
+}
+
+function planTodoStatusLabel(status: PlanTodoStatus): string {
+  if (status === 'done') return '完成';
+  if (status === 'active') return '进行中';
+  if (status === 'blocked') return '受阻';
+  if (status === 'failed') return '失败';
+  if (status === 'canceled') return '取消';
+  return '待办';
+}
+
+function planTodoLabel(item: ChatTodoItem | null | undefined, index: number, t: (text: string) => string): string {
+  if (!item) return '';
+  return String(item.content || item.task || item.title || item.id || `${t('任务 ')}${index + 1}`).trim();
+}
+
+function planTodoDetail(item: ChatTodoItem | null | undefined): string {
+  if (!item) return '';
+  const record = item as Record<string, unknown>;
+  for (const key of ['note', 'error', 'reason', 'summary', 'result']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function planFocusTodo(todos: ChatTodoItem[]): { item: ChatTodoItem | null; index: number; status: PlanTodoStatus | 'idle' } {
+  const indexed = todos.map((item, index) => ({ item, index, status: planTodoStatus(item.status) }));
+  return (
+    indexed.find(row => row.status === 'active') ||
+    indexed.find(row => row.status === 'failed' || row.status === 'blocked') ||
+    indexed.find(row => row.status === 'pending') ||
+    indexed[indexed.length - 1] || { item: null, index: -1, status: 'idle' }
+  );
+}
+
+function planOverviewText(
+  total: number,
+  doneCount: number,
+  activeCount: number,
+  issueCount: number,
+  runtimeStatus: RuntimeStatus | null,
+  t: (text: string) => string,
+): string {
+  if (runtimeStatus?.phase === 'todo_progress' && runtimeStatus.display) return runtimeStatus.display;
+  if (issueCount > 0) return t('有步骤受阻，可以重试或换策略。');
+  if (activeCount > 0) return t('智能体正在推进当前步骤。');
+  if (total > 0 && doneCount >= total) return t('任务清单已完成。');
+  if (total > 0) return t('等待智能体继续执行下一步。');
+  return t('等待任务清单。');
+}
+
+function buildPlanFollowUpPrompt(kind: PlanActionKind, stepLabel: string): string {
+  const target = stepLabel ? `当前步骤：${stepLabel}` : '当前没有可见任务清单项。';
+  if (kind === 'retry') {
+    return `${target}\n请继续执行任务清单中的当前步骤。先简短说明刚才失败或卡住的原因，然后重试该步骤；重试后用 todo_write 更新每步状态，并给出可验证的完成证据。`;
+  }
+  if (kind === 'strategy') {
+    return `${target}\n当前步骤受阻。请先用 todo_write 标记障碍，再换一种策略或工具继续，不要重复已经失败的路径；完成后更新任务清单，并说明新的验收证据。`;
+  }
+  return '我已经手动接管并完成或调整了当前界面状态。请重新观察当前状态，更新 todo_write，然后从任务清单的下一步继续；如果当前步骤已完成，请标记完成并继续后续步骤。';
 }
 
 function workspaceColumnWidth(
@@ -96,6 +163,10 @@ export function RightRail({ backendReady }: RightRailProps) {
   const webPreviewUrl = useUiStore(state => state.webPreviewUrl);
   const subagents = useChatStore(state => state.subagents);
   const planTodos = useChatStore(state => state.planTodos);
+  const streaming = useChatStore(state => state.streaming);
+  const runtimeStatus = useChatStore(state => state.runtimeStatus);
+  const sendChat = useChatStore(state => state.send);
+  const rewindLatest = useChatStore(state => state.rewindLatest);
   const loadChatSession = useChatStore(state => state.loadSession);
   const activateWebPreviewTab = useUiStore(state => state.activateWebPreviewTab);
   const closeWebPreviewTab = useUiStore(state => state.closeWebPreviewTab);
@@ -130,6 +201,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const [auditBusy, setAuditBusy] = useState(false);
   const [devDetailsOpen, setDevDetailsOpen] = useState(false);
   const [workspaceSettling, setWorkspaceSettling] = useState(false);
+  const [planActionBusy, setPlanActionBusy] = useState<PlanActionKind | 'rewind' | ''>('');
   const previewHostRef = useRef<HTMLDivElement | null>(null);
   const zoomFrameRef = useRef<number | null>(null);
   const workspaceDeckRef = useRef<HTMLDivElement | null>(null);
@@ -150,6 +222,29 @@ export function RightRail({ backendReady }: RightRailProps) {
         : null,
     [activeDiffFile?.preview, activeDiffPreview, diffRevertItems, diffRevertSummaryId, diffSummary],
   );
+
+  const submitPlanFollowUp = useCallback(
+    async (kind: PlanActionKind, stepLabel: string) => {
+      if (streaming || planActionBusy) return;
+      setPlanActionBusy(kind);
+      try {
+        await sendChat(buildPlanFollowUpPrompt(kind, stepLabel));
+      } finally {
+        setPlanActionBusy('');
+      }
+    },
+    [planActionBusy, sendChat, streaming],
+  );
+
+  const rewindPlanStep = useCallback(async () => {
+    if (streaming || planActionBusy) return;
+    setPlanActionBusy('rewind');
+    try {
+      await rewindLatest();
+    } finally {
+      setPlanActionBusy('');
+    }
+  }, [planActionBusy, rewindLatest, streaming]);
 
   const loadTree = async () => {
     if (!backendReady) {
@@ -1172,29 +1267,57 @@ export function RightRail({ backendReady }: RightRailProps) {
   const renderPlanPanel = () => {
     const todos = planTodos ?? [];
     const total = todos.length;
-    const doneCount = total > 0 ? todos.filter(item => planTodoStatus(item.status) === 'done').length : 0;
+    const statuses = todos.map(item => planTodoStatus(item.status));
+    const doneCount = total > 0 ? statuses.filter(status => status === 'done').length : 0;
+    const activeCount = statuses.filter(status => status === 'active').length;
+    const issueCount = statuses.filter(status => status === 'failed' || status === 'blocked').length;
+    const canceledCount = statuses.filter(status => status === 'canceled').length;
+    const focus = planFocusTodo(todos);
+    const focusLabel = planTodoLabel(focus.item, focus.index, t);
+    const focusDetail = planTodoDetail(focus.item);
+    const progress = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+    const actionsLocked = streaming || Boolean(planActionBusy);
+    const canTargetStep = Boolean(focusLabel);
     return (
     <div className="plan-card-pane">
       {total > 0 ? (
         <div className="plan-card-todos">
           <div className="plan-card-todos-head">
-            <strong>{t('任务清单')}</strong>
-            <span>{doneCount}/{total} {t('完成')}</span>
+            <div>
+              <strong>{t('任务清单')}</strong>
+              <span>{planOverviewText(total, doneCount, activeCount, issueCount + canceledCount, runtimeStatus, t)}</span>
+            </div>
+            <em>{doneCount}/{total} {t('完成')}</em>
+          </div>
+          <div className="plan-progress-track" aria-label={t('任务进度')}>
+            <span style={{ width: `${progress}%` }} />
+          </div>
+          <div className="plan-step-focus" data-status={focus.status}>
+            <div>
+              <span>{focus.status === 'idle' ? t('当前步骤') : t(planTodoStatusLabel(focus.status))}</span>
+              <strong>{focusLabel || t('等待任务清单')}</strong>
+            </div>
+            {focusDetail ? <p>{focusDetail}</p> : <p>{t('失败时可以重试当前步骤，或要求 Metis 换一种策略继续。')}</p>}
           </div>
           <ul className="plan-todo-list">
             {todos.map((item, index) => {
               const status = planTodoStatus(item.status);
-              const label = String(item.content || item.task || item.title || item.id || `${t('任务 ')}${index + 1}`);
+              const label = planTodoLabel(item, index, t);
               return (
                 <li key={String(item.id ?? index)} className="plan-todo-item" data-status={status}>
                   {status === 'done' ? (
                     <CircleCheck size={15} className="plan-todo-icon" />
                   ) : status === 'active' ? (
                     <LoaderCircle size={15} className="plan-todo-icon spin" />
+                  ) : status === 'failed' || status === 'blocked' ? (
+                    <AlertTriangle size={15} className="plan-todo-icon" />
+                  ) : status === 'canceled' ? (
+                    <X size={15} className="plan-todo-icon" />
                   ) : (
                     <Circle size={15} className="plan-todo-icon" />
                   )}
                   <span>{label}</span>
+                  <em>{t(planTodoStatusLabel(status))}</em>
                 </li>
               );
             })}
@@ -1207,6 +1330,56 @@ export function RightRail({ backendReady }: RightRailProps) {
           <span>{t('任务清单：智能体规划任务后，这里实时显示进度——完成打钩、进行中转圈、待办空心圆。')}</span>
         </div>
       )}
+      <div className="plan-action-panel" data-streaming={streaming}>
+        <div className="plan-action-head">
+          <strong>{t('任务编排')}</strong>
+          <span>{streaming ? t('当前运行中，完成或停止后可接管。') : t('失败后可从这里续跑。')}</span>
+        </div>
+        <div className="plan-action-grid">
+          <button
+            type="button"
+            disabled={actionsLocked || !canTargetStep}
+            title={t('重试当前步骤')}
+            onClick={() => void submitPlanFollowUp('retry', focusLabel)}
+          >
+            <RefreshCw className={planActionBusy === 'retry' ? 'spin' : undefined} size={13} />
+            <span>{t('重试当前')}</span>
+          </button>
+          <button
+            type="button"
+            disabled={actionsLocked || !canTargetStep}
+            title={t('换一种策略继续')}
+            onClick={() => void submitPlanFollowUp('strategy', focusLabel)}
+          >
+            <ArrowRight size={13} />
+            <span>{t('换策略')}</span>
+          </button>
+          <button
+            type="button"
+            disabled={actionsLocked}
+            title={t('回到上一个检查点')}
+            onClick={() => void rewindPlanStep()}
+          >
+            <ArrowLeft size={13} />
+            <span>{t('回到上步')}</span>
+          </button>
+          <button
+            type="button"
+            disabled={actionsLocked}
+            title={t('手动接管后继续')}
+            onClick={() => void submitPlanFollowUp('manual', focusLabel)}
+          >
+            <Check size={13} />
+            <span>{t('接管后继续')}</span>
+          </button>
+        </div>
+      </div>
+      <PlanRunMonitor
+        backendReady={backendReady}
+        loadChatSession={loadChatSession}
+        selectSession={selectSession}
+        sessions={sessions}
+      />
       <div className="plan-card-metrics">
         <span>
           <b>{sessions.length}</b>
@@ -1411,6 +1584,118 @@ function relativeActivityTime(value: string, t: (text: string) => string): strin
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function PlanRunMonitor({
+  backendReady,
+  loadChatSession,
+  selectSession,
+  sessions,
+}: {
+  backendReady: boolean;
+  sessions: SessionMeta[];
+  selectSession: (sessionId: string) => Promise<void>;
+  loadChatSession: (sessionId: string | null, options?: { force?: boolean }) => Promise<void>;
+}) {
+  const t = useT();
+  const [runs, setRuns] = useState<ChatRunPayload[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
+  const activeRuns = useMemo(() => runs.filter(run => isActiveRunStatus(run.status)), [runs]);
+  const latestRun = activeRuns[0] || runs[0] || null;
+  const latestSession = latestRun ? sessionById.get(latestRun.sessionId) : undefined;
+  const latestActive = latestRun ? isActiveRunStatus(latestRun.status) : false;
+  const elapsed = latestRun
+    ? formatElapsed(latestRun.startedAt || latestRun.createdAt, latestRun.finishedAt || (latestActive ? Date.now() / 1000 : latestRun.updatedAt))
+    : '';
+
+  const refresh = useCallback(async () => {
+    if (!backendReady) return;
+    setBusy(true);
+    try {
+      const payload = await getChatRuns();
+      setRuns(payload.runs);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [backendReady]);
+
+  useEffect(() => {
+    if (!backendReady) {
+      setRuns([]);
+      return undefined;
+    }
+    let disposed = false;
+    const refreshSafely = async () => {
+      if (disposed) return;
+      await refresh();
+    };
+    void refreshSafely();
+    const timer = window.setInterval(() => void refreshSafely(), 2500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [backendReady, refresh]);
+
+  const jumpToRunSession = async () => {
+    if (!latestRun?.sessionId) return;
+    await selectSession(latestRun.sessionId);
+    await loadChatSession(latestRun.sessionId);
+  };
+
+  return (
+    <section className="plan-run-monitor" data-active={latestActive}>
+      <header>
+        <div>
+          <strong>{t('长任务模式')}</strong>
+          <span>
+            {latestActive
+              ? `${activeRuns.length} ${t('运行中')} · ${latestRun?.phase || t('执行中')}`
+              : latestRun
+                ? `${t('最近任务')} · ${t(statusLabel(latestRun.status))}`
+                : t('暂无后台任务')}
+          </span>
+        </div>
+        <button type="button" title={t('刷新后台任务')} disabled={!backendReady} onClick={() => void refresh()}>
+          <RefreshCw className={busy ? 'spin' : undefined} size={13} />
+        </button>
+      </header>
+      {!backendReady ? (
+        <p className="plan-run-note">
+          <LoaderCircle className="spin" size={13} />
+          {t('后端连接后显示可恢复任务。')}
+        </p>
+      ) : error ? (
+        <p className="plan-run-note" data-tone="error">
+          <AlertTriangle size={13} />
+          {error}
+        </p>
+      ) : latestRun ? (
+        <button className="plan-run-row" type="button" onClick={() => void jumpToRunSession()}>
+          <span className="run-status-dot" data-tone={latestRun.status === 'failed' ? 'error' : latestActive ? 'running' : 'done'} />
+          <span>
+            <strong>{latestSession?.title || latestRun.sessionId || 'Metis run'}</strong>
+            <small>
+              {t(statusLabel(latestRun.status))}
+              {elapsed ? ` · ${elapsed}` : ''}
+              {latestRun.lastSeq || latestRun.eventCount ? ` · #${latestRun.lastSeq || latestRun.eventCount}` : ''}
+            </small>
+          </span>
+          <ArrowRight size={13} />
+        </button>
+      ) : (
+        <p className="plan-run-note">
+          <Network size={13} />
+          {t('关闭页面再回来，也会在这里接回最近任务。')}
+        </p>
+      )}
+    </section>
+  );
 }
 
 function RunActivityCenter({

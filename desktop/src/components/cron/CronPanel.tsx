@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, Clock3, Edit3, Play, Plus, Power, RotateCcw, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createCronTask,
   deleteCronTask,
@@ -30,6 +30,8 @@ export function CronPanel() {
   const [editingId, setEditingId] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [validationMessage, setValidationMessage] = useState('');
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const workspaces = useSessionStore(state => state.workspaces);
   const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
   const selectSession = useSessionStore(state => state.selectSession);
@@ -68,25 +70,32 @@ export function CronPanel() {
     setSchedule('every 1 minute');
     setPrompt('');
     setEditingId('');
+    setValidationMessage('');
   };
 
   const submit = async () => {
-    if (!prompt.trim()) return;
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      setValidationMessage(t('先填写要定时执行的任务 prompt。'));
+      promptInputRef.current?.focus();
+      return;
+    }
     setBusy('submit');
     setError('');
+    setValidationMessage('');
     try {
       if (editingId) {
         await updateCronTask(editingId, {
           name: name.trim() || 'Scheduled task',
           schedule,
-          prompt,
+          prompt: trimmedPrompt,
           workspaceId: activeWorkspaceId,
         });
       } else {
         await createCronTask({
           name: name.trim() || 'Scheduled task',
           schedule,
-          prompt,
+          prompt: trimmedPrompt,
           workspaceId: activeWorkspaceId,
         });
       }
@@ -105,6 +114,7 @@ export function CronPanel() {
     setSchedule(task.schedule || 'every 1 minute');
     setPrompt(task.prompt);
     setError('');
+    setValidationMessage('');
   };
 
   const runTask = async (task: CronTask) => {
@@ -205,12 +215,24 @@ export function CronPanel() {
           ))}
         </select>
         <textarea
+          ref={promptInputRef}
           className="cron-prompt-input"
           value={prompt}
           placeholder={t('要定时执行的任务 prompt')}
-          onChange={event => setPrompt(event.target.value)}
+          aria-invalid={Boolean(validationMessage)}
+          onChange={event => {
+            setPrompt(event.target.value);
+            if (event.target.value.trim()) setValidationMessage('');
+          }}
         />
-        <button className="cron-submit-button" type="button" disabled={busy === 'submit' || !prompt.trim()} onClick={() => void submit()}>
+        <button
+          className="cron-submit-button"
+          type="button"
+          disabled={busy === 'submit'}
+          aria-disabled={!prompt.trim()}
+          title={!prompt.trim() ? t('填写任务 prompt 后即可新建任务') : undefined}
+          onClick={() => void submit()}
+        >
           {editingId ? <CheckCircle2 size={15} /> : <Plus size={15} />}
           {busy === 'submit' ? t('保存中') : editingId ? t('保存修改') : t('新建任务')}
         </button>
@@ -220,6 +242,9 @@ export function CronPanel() {
             {t('取消编辑')}
           </button>
         )}
+        <p className="cron-form-hint" data-tone={validationMessage ? 'danger' : 'muted'}>
+          {validationMessage || t('填写 prompt 后，Metis 会按所选计划运行并把结果保存成新会话。')}
+        </p>
       </section>
       <section className="cron-list">
         {tasks.length === 0 && (

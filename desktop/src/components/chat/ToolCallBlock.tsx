@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   FileDiff,
   FileText,
+  PackageCheck,
 } from 'lucide-react';
 import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
@@ -80,6 +81,32 @@ type BrowserActivityCardSummary = {
   errors: number;
   last: string;
   summary: string;
+};
+
+type EvidenceChainCardSummary = {
+  errors: number;
+  last: string;
+  summary: string;
+};
+
+type ArtifactActivityCardSummary = {
+  artifactCount: number;
+  errors: number;
+  last: string;
+  outputPath: string;
+  summary: string;
+  items: ArtifactActivityItem[];
+};
+
+type ArtifactActivityItem = {
+  at?: string;
+  command?: string;
+  detail?: string;
+  duration_ms?: number;
+  event?: string;
+  ok?: boolean;
+  path?: string;
+  title?: string;
 };
 
 const ToolActivityContext = createContext<ToolActivityContextValue>({ collapseSignal: 0, expandSignal: 0 });
@@ -177,13 +204,15 @@ export function ToolCard({
   const setWebPreviewUrl = useUiStore(state => state.setWebPreviewUrl);
   const status = metisStatus || (result === undefined ? 'running' : isToolError(result) ? 'error' : 'success');
   const commandPreview = useMemo(() => toolCommandPreview(toolName, args, result), [args, result, toolName]);
+  const artifactActivity = useMemo(() => artifactActivitySummaryFromResult(result, t), [result, t]);
   const summary = useMemo(
-    () => commandPreview || metisSummary || compact(result ?? args),
-    [args, commandPreview, metisSummary, result],
+    () => artifactActivity?.summary || commandPreview || metisSummary || compact(result ?? args),
+    [args, artifactActivity?.summary, commandPreview, metisSummary, result],
   );
   const fileChangePreview = useMemo(() => buildFileChangePreview(toolName, args, result), [args, result, toolName]);
   const fileChangeCounts = useMemo(() => (fileChangePreview ? countDiffLines(fileChangePreview) : null), [fileChangePreview]);
   const browserActivity = useMemo(() => browserActivitySummaryFromResult(result, t), [result, t]);
+  const evidenceChain = useMemo(() => evidenceChainSummaryFromResult(result, t), [result, t]);
   const autoOpenedDiffRef = useRef('');
   const autoOpenedWebRef = useRef('');
   const elapsed = elapsedText(metisStartedAt, metisFinishedAt);
@@ -258,6 +287,20 @@ export function ToolCard({
           {browserActivity.last && <code>{browserActivity.last}</code>}
         </div>
       )}
+      {evidenceChain && (
+        <div className="tool-browser-activity-summary" data-blocked={false} data-errors={evidenceChain.errors > 0}>
+          <ClipboardCheck size={12} />
+          <span>{evidenceChain.summary}</span>
+          {evidenceChain.last && <code>{evidenceChain.last}</code>}
+        </div>
+      )}
+      {artifactActivity && (
+        <div className="tool-browser-activity-summary tool-artifact-activity-summary" data-blocked={false} data-errors={artifactActivity.errors > 0}>
+          <PackageCheck size={12} />
+          <span>{artifactActivity.summary}</span>
+          {artifactActivity.last && <code>{artifactActivity.last}</code>}
+        </div>
+      )}
       <div className="tool-card-actions">
         <button
           className="tool-card-open"
@@ -282,9 +325,37 @@ export function ToolCard({
       {open ? (
         <div className="tool-activity-details">
           {commandPreview && <pre className="tool-command-preview">{commandPreview}</pre>}
+          {artifactActivity && <ToolArtifactActivityTimeline activity={artifactActivity} />}
           {fileChangePreview ? <ToolInlineDiffPreview preview={fileChangePreview} /> : <pre>{details}</pre>}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ToolArtifactActivityTimeline({ activity }: { activity: ArtifactActivityCardSummary }) {
+  const t = useT();
+  return (
+    <div className="tool-artifact-activity-timeline" aria-label={t('报告活动')}>
+      <header>
+        <span>{t('报告活动')}</span>
+        <code>{compactPath(activity.outputPath || activity.last || '')}</code>
+      </header>
+      <div className="tool-artifact-activity-steps">
+        {activity.items.map((item, index) => (
+          <div className="tool-artifact-activity-step" data-ok={item.ok !== false} key={`${item.event || 'step'}-${index}`}>
+            <span>{item.ok === false ? '!' : '✓'}</span>
+            <div>
+              <strong>{item.title || item.event || `${t('步骤')} ${index + 1}`}</strong>
+              <small>
+                {item.detail || item.command || item.path || ''}
+                {typeof item.duration_ms === 'number' ? ` · ${item.duration_ms}ms` : ''}
+              </small>
+              {item.path && <code>{compactPath(item.path)}</code>}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -377,6 +448,83 @@ function browserActivitySummaryFromResult(result: unknown, t: (text: string) => 
     last: String(lastItem?.summary || lastItem?.error || '').slice(0, 160),
     summary: `${t('浏览器活动')} · ${parts.length > 0 ? parts.join(' · ') : t('暂无记录')}`,
   };
+}
+
+function evidenceChainSummaryFromResult(result: unknown, t: (text: string) => string): EvidenceChainCardSummary | null {
+  const payload = resultObject(result);
+  if (!payload) return null;
+  const checks = payload.checks && typeof payload.checks === 'object' ? payload.checks as Record<string, unknown> : null;
+  const verdict = payload.verdict && typeof payload.verdict === 'object' ? payload.verdict as Record<string, unknown> : null;
+  const evidence = Array.isArray(payload.evidence_chain_v2)
+    ? payload.evidence_chain_v2
+    : Array.isArray(payload.evidenceChainV2)
+      ? payload.evidenceChainV2
+      : Array.isArray(payload.evidence_chain)
+        ? payload.evidence_chain
+        : Array.isArray(payload.evidenceChain)
+          ? payload.evidenceChain
+          : [];
+  if (!checks && evidence.length === 0) return null;
+  const checkValues = checks ? Object.values(checks).map(Boolean) : [];
+  const passed = checkValues.filter(Boolean).length;
+  const failed = Number(verdict?.failed ?? checkValues.length - passed) || 0;
+  const lastEvidence = evidence.length > 0 && typeof evidence[evidence.length - 1] === 'object'
+    ? evidence[evidence.length - 1] as Record<string, unknown>
+    : null;
+  const last = evidenceSummaryText(lastEvidence);
+  const verdictSummary = typeof verdict?.summary === 'string' ? verdict.summary : '';
+  const total = Number(verdict?.total ?? checkValues.length) || checkValues.length;
+  const summary = verdictSummary
+    ? `${t('验收证据')} · ${verdictSummary}`
+    : total > 0
+      ? `${t('验收证据')} · ${passed}/${total} ${t('通过')}`
+      : `${t('验收证据')} · ${evidence.length} ${t('条')}`;
+  return { errors: failed, last, summary };
+}
+
+function artifactActivitySummaryFromResult(result: unknown, t: (text: string) => string): ArtifactActivityCardSummary | null {
+  const payload = resultObject(result);
+  const activity = payload?.artifact_activity || payload?.artifactActivity;
+  if (!activity || typeof activity !== 'object') return null;
+  const row = activity as Record<string, unknown>;
+  const items = Array.isArray(row.items) ? row.items.filter(isArtifactActivityItem) : [];
+  const artifacts = Array.isArray(row.artifacts) ? row.artifacts : [];
+  const errors = items.filter(item => item.ok === false).length;
+  const outputPath = String(row.output_path || row.outputPath || payload?.output_path || '');
+  const lastItem = [...items].reverse().find(item => item.detail || item.path || item.command || item.title);
+  const last = String(lastItem?.detail || lastItem?.path || lastItem?.command || lastItem?.title || outputPath).slice(0, 180);
+  const summary = String(row.summary || '').trim()
+    || `${t('报告活动')} · ${items.length} ${t('步')} · ${artifacts.length} ${t('个产物')}`;
+  return {
+    artifactCount: artifacts.length,
+    errors,
+    items,
+    last,
+    outputPath,
+    summary,
+  };
+}
+
+function isArtifactActivityItem(value: unknown): value is ArtifactActivityItem {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function evidenceSummaryText(item: Record<string, unknown> | null): string {
+  if (!item) return '';
+  const kind = String(item.kind || item.source || '').trim();
+  if (typeof item.summary === 'string' && item.summary.trim()) {
+    return item.summary.slice(0, 180);
+  }
+  if (kind === 'screenshot') {
+    return String(item.path || item.saved_path || '').slice(0, 180);
+  }
+  if (kind === 'text_match') {
+    return `${String(item.query || '').slice(0, 80)} ${item.matched === false ? 'not matched' : 'matched'}`;
+  }
+  if (kind === 'window') {
+    return String(item.title || item.exe || '').slice(0, 160);
+  }
+  return String(item.summary || item.text || kind || '').slice(0, 180);
 }
 
 function resultObject(result: unknown): Record<string, unknown> | null {

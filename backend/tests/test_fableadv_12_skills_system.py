@@ -190,5 +190,26 @@ def test_builtin_browser_skill_refreshes_and_routes_preview_browser(metis_home: 
     assert "preview_browser_navigate" in browser.allowed_tools
     assert "preview_browser_observe" in expanded
     assert "preview_browser_action" in expanded
+    assert "show_browser=True" in expanded
     assert "browse_web" in expanded
     assert "localhost" in expanded
+
+
+def test_builtin_artifact_skills_install_pdf_and_documents_tools(metis_home: Path, tmp_path: Path) -> None:
+    skills = {skill.name: skill for skill in discover_skills(workspace_root=str(tmp_path))}
+
+    assert "pdf" in skills
+    assert "documents" in skills
+    assert "pdf_render_pages" in skills["pdf"].allowed_tools
+    assert "pdf_create" in skills["pdf"].allowed_tools
+    assert "office_report_from_code_run" in skills["documents"].allowed_tools
+    assert "docx_create" in skills["documents"].allowed_tools
+    assert "docx_render_pages" in skills["documents"].allowed_tools
+
+    loaded_pdf = load_skill_content("pdf", workspace_root=str(tmp_path))
+    loaded_documents = load_skill_content("documents", workspace_root=str(tmp_path))
+
+    assert "Allowed tools: pdf_info" in loaded_pdf
+    assert "office_report_from_code_run" in loaded_documents
+    assert "desktop_win2_task" in loaded_documents
+    assert "Prefer background file, code, chart, DOCX, and PDF tools" in loaded_documents

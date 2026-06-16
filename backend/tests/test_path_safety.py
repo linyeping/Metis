@@ -56,6 +56,32 @@ def test_path_safety_denies_write_outside_workspace(tmp_path: Path) -> None:
     assert decision.code == "PATH_OUTSIDE_WORKSPACE"
 
 
+def test_path_safety_denies_artifact_output_outside_workspace(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "outside.pdf"
+
+    decision = validate_tool_paths(
+        "pdf_create",
+        {"output_path": str(outside)},
+        workspace_root=str(tmp_path),
+    )
+
+    assert not decision.allowed
+    assert decision.code == "PATH_OUTSIDE_WORKSPACE"
+
+
+def test_path_safety_denies_code_report_artifact_dir_outside_workspace(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "report-artifacts"
+
+    decision = validate_tool_paths(
+        "office_report_from_code_run",
+        {"output_path": "output/docx/report.docx", "artifacts_dir": str(outside)},
+        workspace_root=str(tmp_path),
+    )
+
+    assert not decision.allowed
+    assert decision.code == "PATH_OUTSIDE_WORKSPACE"
+
+
 def test_path_safety_denies_symlink_write(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("real", encoding="utf-8")

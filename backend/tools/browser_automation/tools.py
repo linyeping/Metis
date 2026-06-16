@@ -20,6 +20,7 @@ def browse_web(
     max_steps: int = 15,
     extract_content: bool = False,
     use_login: bool = False,
+    show_browser: bool = False,
 ) -> str:
     """Browse the web autonomously using the system Chrome / Edge.
 
@@ -28,6 +29,8 @@ def browse_web(
         url: Starting URL (optional)
         max_steps: Maximum browsing steps (default 15, max 50)
         extract_content: If True, also return raw page content
+        show_browser: If True, run a visible browser window without reusing
+                      the user's real profile. Use this for watch/playback tasks.
         use_login: If True, use the user's real browser profile so that
                    logged-in sites (GitHub, Gmail, etc.) are accessible
     """
@@ -36,7 +39,7 @@ def browse_web(
             goal=task,
             start_url=url,
             max_steps=max(1, min(int(max_steps or 15), 50)),
-            headless=not use_login,  # show window when using real profile
+            headless=not (use_login or show_browser),
             extract_content=bool(extract_content),
             use_user_profile=bool(use_login),
         )
@@ -47,12 +50,14 @@ def browse_web(
 
 
 @trace_execution
-def browse_and_extract(url: str, what_to_extract: str, use_login: bool = False) -> str:
+def browse_and_extract(url: str, what_to_extract: str, use_login: bool = False, show_browser: bool = False) -> str:
     """Navigate to a URL and extract specific information.
 
     Args:
         url: The URL to visit
         what_to_extract: Description of what to extract
+        show_browser: If True, run a visible browser window without reusing
+                      the user's real profile.
         use_login: If True, use the user's real browser profile
     """
     result = run_browser_task(
@@ -60,7 +65,7 @@ def browse_and_extract(url: str, what_to_extract: str, use_login: bool = False) 
             goal=f"Extract this from the page: {what_to_extract}",
             start_url=url,
             max_steps=10,
-            headless=not use_login,
+            headless=not (use_login or show_browser),
             extract_content=True,
             use_user_profile=bool(use_login),
         )

@@ -81,7 +81,7 @@ def _dispatch_in_process(prompt: str, st: str, workspace_root: str) -> str:
         if st in ("browser", "browser_use"):
             return delegate_browser(task=prompt, url="")
         if st in ("best_of_n", "bestofn"):
-            return delegate_best_of_n(task=prompt, n=3)
+            return delegate_best_of_n(task=prompt, n=3, workspace_root=root)
         if st in ("context_gatherer", "summon_context", "context"):
             paths: Optional[List[str]] = None
             return summon_context_gatherer(workspace=root, extra_paths=paths, max_depth=2)

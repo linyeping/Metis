@@ -34,7 +34,7 @@ def _route(prompt: str, subagent_type: str, workspace_root: str) -> str:
     if st in ("best_of_n", "bestofn"):
         from backend.tools.coding.workflow_features.subagents.delegate_best_of_n import delegate_best_of_n
 
-        return delegate_best_of_n(task=prompt, n=3)
+        return delegate_best_of_n(task=prompt, n=3, workspace_root=root)
     if st in ("context_gatherer", "summon_context", "context"):
         from backend.tools.coding.workflow_features.subagents.summon_context_gatherer import summon_context_gatherer
 
