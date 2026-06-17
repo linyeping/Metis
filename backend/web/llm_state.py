@@ -373,6 +373,7 @@ def load_persistent_config() -> None:
         "proxy_port": "METIS_PROXY_PORT",
         "proxy_bypass": "METIS_PROXY_BYPASS",
         "terminal_shell": "METIS_TERMINAL_SHELL",
+        "python_path": "METIS_PYTHON",
     }
     for key, env_var in mapping.items():
         value = data.get(key) if isinstance(data, dict) else None

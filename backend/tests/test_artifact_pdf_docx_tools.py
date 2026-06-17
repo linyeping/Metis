@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ def test_pdf_tools_create_info_extract_and_report_renderer_dependency(
     workspace.mkdir()
     backend_cwd.mkdir()
     monkeypatch.chdir(backend_cwd)
+    monkeypatch.setenv("METIS_PYTHON", sys.executable)
 
     with workspace_root_override(str(workspace)):
         created = _json(
@@ -205,6 +207,7 @@ print("period=12.5")
     assert result["status"] == "done"
     assert report.is_file()
     assert result["returncode"] == 0
+    assert result["command"].startswith(sys.executable)
     assert "period=12.5" in result["stdout"]
     assert result["artifact_activity"]["kind"] == "code_to_report"
     assert any(item["event"] == "run_code" and item["ok"] for item in result["activity"])

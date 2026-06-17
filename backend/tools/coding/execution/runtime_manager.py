@@ -19,6 +19,7 @@ from typing import Optional
 
 from backend.tools.coding.foundation.core_mechanisms.log_config import logger
 from backend.tools.coding.foundation.core_mechanisms.trace_execution import trace_execution
+from backend.runtime.python_env import configured_python_executable, subprocess_env_with_configured_python
 
 
 class RuntimeStatus(Enum):
@@ -146,7 +147,7 @@ def _version_for(runtime: RuntimeInfo, cli_name: str) -> tuple[bool, str]:
     if cmd:
         cmd[0] = cli_name
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=subprocess_env_with_configured_python())
     except Exception:
         return False, "unknown"
     output = (result.stdout or result.stderr or "").strip()
@@ -154,6 +155,14 @@ def _version_for(runtime: RuntimeInfo, cli_name: str) -> tuple[bool, str]:
 
 
 def detect_runtime(runtime: RuntimeInfo) -> RuntimeInfo:
+    if runtime.name == "Python":
+        selected = configured_python_executable()
+        if selected:
+            version_ok, version = _version_for(runtime, str(selected))
+            runtime.status = RuntimeStatus.AVAILABLE
+            runtime.path = str(selected)
+            runtime.version = version if version_ok else "configured"
+            return runtime
     for cli_name in runtime.cli_names:
         exe_path = shutil.which(cli_name)
         if not exe_path:
@@ -352,6 +361,8 @@ def check_command_runtime(command: str) -> Optional[dict[str, str]]:
         return None
     runtime = _runtime_by_name(runtime_name)
     if not runtime:
+        return None
+    if runtime.name == "Python" and configured_python_executable():
         return None
     detected = detect_runtime(copy.deepcopy(runtime))
     if detected.status == RuntimeStatus.AVAILABLE and shutil.which(first):

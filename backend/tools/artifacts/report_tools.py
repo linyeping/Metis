@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+from backend.runtime.python_env import python_executable, subprocess_env_with_configured_python
 from backend.tools.coding.foundation.core_mechanisms.path_security import (
     PathSecurityError,
     get_workspace_root,
@@ -174,13 +174,14 @@ def _prepare_execution(
     activity: List[Dict[str, Any]],
 ) -> tuple[Path | None, str, str]:
     inline_code = str(code or "")
+    python = python_executable()
     if inline_code.strip():
         if str(language or "python").strip().lower() not in {"python", "py"}:
             raise ValueError("Inline code execution only supports Python in v1.")
         script = artifact_dir / "analysis.py"
         script.write_text(inline_code, encoding="utf-8")
         _add_activity(activity, "write_code", "Write Python script", True, path=str(script))
-        return script, inline_code, f"{sys.executable} {script}"
+        return script, inline_code, f"{python} {script}"
 
     if str(script_path or "").strip():
         script = safe_path_for_read(script_path)
@@ -189,7 +190,7 @@ def _prepare_execution(
         except UnicodeDecodeError:
             source_code = ""
         _add_activity(activity, "load_code", "Load script", True, path=str(script))
-        return script, source_code, f"{sys.executable} {script}"
+        return script, source_code, f"{python} {script}"
 
     if str(command or "").strip():
         _add_activity(activity, "load_command", "Use provided command", True, detail=str(command).strip())
@@ -209,14 +210,14 @@ def _run_execution(
     activity: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     started = time.time()
-    env = dict(os.environ)
-    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env = subprocess_env_with_configured_python()
     env["METIS_REPORT_ARTIFACTS_DIR"] = str(artifact_dir)
     env["METIS_REPORT_OUTPUT_PATH"] = str(output_path)
     try:
         if script is not None:
+            python = python_executable()
             proc = subprocess.run(
-                [sys.executable, str(script)],
+                [python, str(script)],
                 cwd=str(work_dir),
                 env=env,
                 capture_output=True,
@@ -224,7 +225,7 @@ def _run_execution(
                 timeout=timeout,
                 check=False,
             )
-            command_display = f"{sys.executable} {script}"
+            command_display = f"{python} {script}"
         else:
             proc = subprocess.run(
                 str(command),

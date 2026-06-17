@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
+from backend.runtime.python_env import shell_command_with_configured_python
 from backend.runtime import agent_loop
 from backend.runtime.tool_tiers import TIER_2_TOOLS
 from backend.tools.coding.execution import runtime_manager
@@ -35,6 +37,19 @@ def test_new_120_shell_precheck_message_mentions_install_tool(monkeypatch) -> No
 
     assert 'install_dev_runtime("Python")' in message
     assert "winget install --id Python.Python.3.12" in message
+
+
+def test_new_120_configured_python_satisfies_python_runtime(monkeypatch) -> None:
+    monkeypatch.setenv("METIS_PYTHON", sys.executable)
+    monkeypatch.setattr(runtime_manager.shutil, "which", lambda _name: None)
+
+    assert runtime_manager.check_command_runtime("python -m pip --version") is None
+    assert runtime_manager.check_command_runtime("py -0p") is None
+
+    rewritten = shell_command_with_configured_python("py -0p && python -m pip --version")
+    assert "print(sys.executable)" in rewritten
+    assert sys.executable in rewritten
+    assert " -m pip --version" in rewritten
 
 
 def test_new_120_project_detection_and_cli_install_hints(monkeypatch, tmp_path: Path) -> None:

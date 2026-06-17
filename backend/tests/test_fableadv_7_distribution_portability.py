@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -71,3 +74,18 @@ def test_backend_data_paths_follow_metis_home(monkeypatch: Any, tmp_path: Path) 
     assert Path(db.db_path) == home.resolve() / "session-state.db"
     assert Path(db.sessions_dir) == home.resolve() / "sessions"
     assert Path(db.workspaces_dir) == home.resolve() / "workspaces"
+
+
+def test_persistent_config_loads_python_path(monkeypatch: Any, tmp_path: Path) -> None:
+    home = tmp_path / "data" / "metis"
+    home.mkdir(parents=True)
+    monkeypatch.setenv("METIS_HOME", str(home))
+    monkeypatch.delenv("METIS_PYTHON", raising=False)
+    metis_paths.clear_metis_home_cache()
+    (home / "config.json").write_text(json.dumps({"python_path": sys.executable}), encoding="utf-8")
+
+    from backend.web import llm_state
+
+    llm_state.load_persistent_config()
+
+    assert os.environ["METIS_PYTHON"] == sys.executable

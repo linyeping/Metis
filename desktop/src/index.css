@@ -4714,9 +4714,10 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent));
   border-radius: 10px;
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--bg-elevated);
+  background-clip: padding-box;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   box-shadow: var(--shadow-lg), var(--edge-highlight);
 }
 

@@ -4,6 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from backend.runtime.python_env import shell_command_with_configured_python, subprocess_env_with_configured_python
 from backend.runtime.cancellation import OperationCancelled, current_cancel_event, is_cancel_requested
 from ..core_mechanisms.log_config import logger
 from ..core_mechanisms.path_security import PathSecurityError, get_workspace_root
@@ -168,9 +169,10 @@ def execute_bash_command(
     runtime_message = _runtime_precheck_message(command)
     if runtime_message:
         return runtime_message
+    command_to_run = shell_command_with_configured_python(command)
     
     # ===== 执行命令 =====
-    logger.info(f"🔨 执行命令{desc}: {command} (工作目录: {cwd}, 超时: {timeout}s)")
+    logger.info(f"🔨 执行命令{desc}: {command_to_run} (工作目录: {cwd}, 超时: {timeout}s)")
 
     process = None
     try:
@@ -180,13 +182,14 @@ def execute_bash_command(
             "stderr": subprocess.PIPE,
             "text": True,
             "cwd": cwd,
+            "env": subprocess_env_with_configured_python(),
         }
         if os.name == "nt" and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         elif os.name != "nt":
             popen_kwargs["start_new_session"] = True
 
-        process = subprocess.Popen(command, **popen_kwargs)
+        process = subprocess.Popen(command_to_run, **popen_kwargs)
         cancel_event = current_cancel_event()
         deadline = time.time() + max(1, int(timeout))
         while True:
@@ -196,7 +199,7 @@ def execute_bash_command(
             remaining = deadline - time.time()
             if remaining <= 0:
                 _kill_process_tree(process)
-                raise subprocess.TimeoutExpired(command, timeout)
+                raise subprocess.TimeoutExpired(command_to_run, timeout)
             try:
                 stdout, stderr = process.communicate(timeout=min(0.2, remaining))
                 break
@@ -228,7 +231,7 @@ def execute_bash_command(
             output += f"\n错误输出:\n{stderr}\n"
 
         if exit_code in (9009, 127):
-            output += _runtime_not_found_hint(command)
+            output += _runtime_not_found_hint(command_to_run)
 
         return output.strip()
 

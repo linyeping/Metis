@@ -99,6 +99,13 @@ from backend.web.sessions import get_session_manager  # noqa: E402
 from backend.web.workspaces import get_workspace_manager  # noqa: E402
 from backend.web.runtime_state import RuntimeState  # noqa: E402
 from backend.web.preview_bridge import preview_bridge_bp  # noqa: E402
+from backend.web.file_extractors import (  # noqa: E402
+    MissingParserDependency,
+    UnsupportedFileType,
+    dependency_for_extension,
+    extract_uploaded_file,
+    truncate_text,
+)
 try:
     from backend.bridges.event_contract import agent_event_contract_payload  # noqa: E402
     from backend.bridges.event_serializer import agent_event_payload, sse_data  # noqa: E402
@@ -3756,48 +3763,20 @@ def upload_parse() -> Any:
         return jsonify({"error": f"File too large ({size // 1024}KB). Max 10MB."}), 400
 
     try:
-        if ext == ".pdf":
-            text = _parse_pdf(file)
-        elif ext == ".docx":
-            text = _parse_docx(file)
-        elif ext in (".xlsx", ".xls"):
-            text = _parse_xlsx(file)
-        elif ext == ".csv":
-            text = file.read().decode("utf-8", errors="replace")
-        elif ext in {
-            ".txt",
-            ".md",
-            ".markdown",
-            ".log",
-            ".json",
-            ".yaml",
-            ".yml",
-            ".toml",
-            ".xml",
-            ".py",
-            ".js",
-            ".ts",
-            ".html",
-            ".css",
-        }:
-            text = file.read().decode("utf-8", errors="replace")
-        else:
-            return jsonify({"error": f"Unsupported file type: {ext}"}), 400
-    except ImportError as exc:
+        extracted = extract_uploaded_file(filename, file.read())
+        text, original_count, truncated = truncate_text(extracted.text)
+        ext = extracted.extension
+    except MissingParserDependency as exc:
         return jsonify(
             {
-                "error": f"Missing dependency for {ext} parsing. Run: pip install {_dep_for_ext(ext)}",
-                "detail": str(exc),
+                "error": f"Missing dependency for {ext} parsing. Install: {exc.dependency}",
+                "detail": exc.detail or str(exc),
             }
         ), 503
+    except UnsupportedFileType as exc:
+        return jsonify({"error": str(exc), "dependency": dependency_for_extension(ext)}), 415
     except Exception as exc:
         return jsonify({"error": f"Failed to parse {filename}: {exc}"}), 500
-
-    max_chars = 50000
-    original_count = len(text)
-    truncated = original_count > max_chars
-    if truncated:
-        text = text[:max_chars] + f"\n\n[...truncated, {original_count} total characters...]"
 
     return jsonify(
         {
@@ -3808,69 +3787,6 @@ def upload_parse() -> Any:
             "truncated": truncated,
         }
     )
-
-
-def _parse_pdf(file_obj: Any) -> str:
-    try:
-        import PyPDF2
-    except ImportError:
-        try:
-            import pypdf as PyPDF2
-        except ImportError as exc:
-            raise ImportError("PyPDF2 or pypdf") from exc
-
-    reader = PyPDF2.PdfReader(file_obj)
-    pages = []
-    for index, page in enumerate(reader.pages):
-        page_text = page.extract_text() or ""
-        if page_text.strip():
-            pages.append(f"--- Page {index + 1} ---\n{page_text.strip()}")
-    return "\n\n".join(pages) or "(No extractable text found in PDF)"
-
-
-def _parse_docx(file_obj: Any) -> str:
-    import docx
-
-    document = docx.Document(file_obj)
-    parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
-    for table in document.tables:
-        rows = []
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            rows.append(" | ".join(cells))
-        if rows:
-            parts.append("\n".join(rows))
-    return "\n\n".join(parts) or "(No text found in document)"
-
-
-def _parse_xlsx(file_obj: Any) -> str:
-    import openpyxl
-
-    workbook = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
-    try:
-        sheets = []
-        for sheet_name in workbook.sheetnames:
-            worksheet = workbook[sheet_name]
-            rows = []
-            for row in worksheet.iter_rows(values_only=True):
-                cells = [str(cell) if cell is not None else "" for cell in row]
-                if any(cell.strip() for cell in cells):
-                    rows.append(",".join(cells))
-            if rows:
-                sheets.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
-        return "\n\n".join(sheets) or "(No data found in spreadsheet)"
-    finally:
-        workbook.close()
-
-
-def _dep_for_ext(ext: str) -> str:
-    deps = {
-        ".pdf": "PyPDF2",
-        ".docx": "python-docx",
-        ".xlsx": "openpyxl",
-        ".xls": "openpyxl",
-    }
-    return deps.get(ext, "unknown")
 
 
 
