@@ -60,13 +60,15 @@ export const AboutTab = memo(function AboutTab({
           </article>
         </div>
         {appInfo?.updateUrl && <p className="section-desc">{t('更新源')} {appInfo.updateUrl}</p>}
-        <button type="button" onClick={() => void window.metis?.openExternal?.(appInfo?.githubHome || 'https://github.com/linyeping/Metis')}>
-          <ExternalLink size={14} />
-          GitHub
-        </button>
-        <button type="button" disabled={checkingUpdates} onClick={() => void onCheckUpdates()}>
-          {checkingUpdates ? t('检查中...') : t('检查更新')}
-        </button>
+        <div className="about-actions">
+          <button type="button" onClick={() => void window.metis?.openExternal?.(appInfo?.githubHome || 'https://github.com/linyeping/Metis')}>
+            <ExternalLink size={14} />
+            GitHub
+          </button>
+          <button type="button" disabled={checkingUpdates} onClick={() => void onCheckUpdates()}>
+            {checkingUpdates ? t('检查中...') : t('检查更新')}
+          </button>
+        </div>
         {updateMessage && <p className="section-desc">{updateMessage}</p>}
       </section>
       <section className="settings-section diagnostics-panel">
