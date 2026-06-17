@@ -46,7 +46,7 @@ export const AboutTab = memo(function AboutTab({
           <Info size={16} className="section-icon" />
           <h3>Metis Desktop</h3>
         </div>
-        <p className="section-desc">{t('版本')} {appInfo?.version || '26.6.15'}</p>
+        <p className="section-desc">{t('版本')} {appInfo?.version || '26.6.17'}</p>
         <p className="section-desc">{appInfo?.packaged ? t('已安装版本') : t('开发模式')} · Electron + React + Python</p>
         <div className="about-open-source-grid">
           <article>
