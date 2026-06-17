@@ -6,7 +6,7 @@ from typing import Any, Dict, Generator, List, Optional
 from backend.runtime import agent_loop
 from backend.runtime.agent_loop import AgentConfig, ContentEvent, RuntimeStatusEvent
 from backend.runtime.llm_backends import LLMBackend, LLMResponse
-from backend.runtime.model_router import ROUTE_MARKER, build_task_route
+from backend.runtime.model_router import ROUTE_MARKER, build_task_route, runtime_policy_for_task
 from backend.runtime.tool_registry import ToolRegistry, register_desktop_tools
 
 
@@ -20,8 +20,10 @@ def test_router_selects_stronger_deepseek_model_for_code_tasks() -> None:
 
     assert route.task_type == "code"
     assert route.model_role == "code"
+    assert route.execution_boundary == "repo_plus_runtime"
+    assert route.runtime_policy["recommended_tool"] == "metis_runtime_job"
     assert route.selected_model == "deepseek-v4-pro"
-    assert route.preferred_tools[:3] == ["generate_repo_map", "grep_search", "glob_search"]
+    assert route.preferred_tools[:3] == ["metis_runtime_job", "metis_runtime_job_status", "generate_repo_map"]
 
 
 def test_router_prioritizes_preview_browser_for_local_page_tasks() -> None:
@@ -59,7 +61,10 @@ def test_router_uses_background_artifact_workflow_for_report_code_tasks() -> Non
 
     assert route.task_type == "artifact_workflow"
     assert route.model_role == "code"
-    assert route.preferred_tools[:4] == ["load_skill", "read_file", "read_multiple_files", "write_file"]
+    assert route.execution_boundary == "metis_runtime"
+    assert route.runtime_policy["sandbox_required"] is True
+    assert route.runtime_policy["desktop_control_allowed"] is False
+    assert route.preferred_tools[:4] == ["metis_runtime_job", "metis_runtime_job_status", "load_skill", "read_file"]
     assert route.preferred_tools.index("office_report_from_code_run") < route.preferred_tools.index("docx_create")
     assert "docx_create" in route.preferred_tools
     assert "docx_render_pages" in route.preferred_tools
@@ -67,6 +72,7 @@ def test_router_uses_background_artifact_workflow_for_report_code_tasks() -> Non
     assert "pdf_render_pages" in route.preferred_tools
     assert "background artifact workflow" in route.tool_guidance
     assert "Do not use Computer Use" in route.tool_guidance
+    assert "metis_runtime_job" in route.tool_guidance
 
 
 def test_router_keeps_desktop_for_explicit_ui_control() -> None:
@@ -78,11 +84,34 @@ def test_router_keeps_desktop_for_explicit_ui_control() -> None:
     )
 
     assert route.task_type == "desktop"
+    assert route.execution_boundary == "desktop"
+    assert route.runtime_policy["desktop_control_allowed"] is True
     assert route.preferred_tools[:3] == [
         "desktop_win2_status",
         "desktop_win2_observe",
         "desktop_win2_action",
     ]
+
+
+def test_runtime_policy_matches_claude_style_boundaries() -> None:
+    artifact_policy = runtime_policy_for_task("artifact_workflow", "帮我完成实验报告，跑代码，生成图表")
+    code_policy = runtime_policy_for_task("code", "跑 pytest 并修复失败")
+    strict_policy = runtime_policy_for_task("code", "严格沙箱运行 pytest，不要回退到本机")
+    desktop_policy = runtime_policy_for_task("desktop", "点击 WPS 提交按钮")
+
+    assert artifact_policy["execution_boundary"] == "metis_runtime"
+    assert artifact_policy["recommended_tool"] == "metis_runtime_job"
+    assert artifact_policy["fallback_order"] == ["metis_wsl", "wsl", "docker", "local-copy"]
+    assert artifact_policy["sandbox_mode"] == "copy"
+    assert artifact_policy["desktop_control_allowed"] is False
+
+    assert code_policy["execution_boundary"] == "repo_plus_runtime"
+    assert "test" in code_policy["sandbox_for"]
+    assert strict_policy["strict_sandbox"] is True
+    assert strict_policy["fallback_mode"] == "strict"
+    assert strict_policy["fallback_order"] == ["metis_wsl", "wsl", "docker"]
+    assert "local-copy" not in strict_policy["fallback_order"]
+    assert desktop_policy["execution_boundary"] == "desktop"
 
 
 def test_route_hint_is_appended_after_user_message_not_system_prefix(monkeypatch: Any) -> None:
@@ -153,6 +182,26 @@ def test_artifact_workflow_blocks_desktop_control_tools() -> None:
     assert "desktop_win2_action" not in names
     assert "desktop_win2_task" not in names
     assert "desktop_action" not in names
+
+
+def test_runtime_job_tool_is_exposed_and_prioritized_for_artifact_workflow() -> None:
+    registry = ToolRegistry()
+    from backend.runtime.tool_registry import register_builtin_tools
+
+    register_builtin_tools(registry)
+    config = AgentConfig(
+        llm_backend="deepseek",
+        llm_model="deepseek-v4-pro",
+        routing_task_type="artifact_workflow",
+        routing_preferred_tools=["metis_runtime_job", "metis_runtime_job_status"],
+    )
+
+    schemas = agent_loop._tool_schemas_for_config(registry, config)
+    names = [schema["function"]["name"] for schema in schemas]
+
+    assert "metis_runtime_job" in names
+    assert "metis_runtime_job_status" in names
+    assert names.index("metis_runtime_job") < names.index("metis_runtime_create")
 
 
 class _FailOnceBackend(LLMBackend):

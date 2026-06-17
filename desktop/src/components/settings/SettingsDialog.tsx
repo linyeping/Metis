@@ -1,24 +1,39 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BarChart3, Cpu, Globe, Info, MessageSquare, Monitor, Palette, Plug, Terminal, Wrench, X } from 'lucide-react';
+import { BarChart3, Cpu, Globe, HardDrive, Info, MessageSquare, Monitor, Palette, Plug, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionWritableRoot,
   createPermissionRule,
   deletePermissionWritableRoot,
   deletePermissionRule,
+  getDocumentConverters,
   getMemory,
   getModelCapabilities,
   getPermissions,
   getProviderModels,
   getProviderStatus,
   getProviderUsage,
+  getRuntimeManagerStatus,
   getSettings,
+  runtimeManagerBuildVmAssets,
+  runtimeManagerBuildPlan,
+  runtimeManagerDiagnostics,
+  runtimeManagerImport,
+  runtimeManagerImportPlan,
+  runtimeManagerPackageBundle,
+  runtimeManagerPackageVmBundle,
+  runtimeManagerPrepareBundle,
+  runtimeManagerRepair,
+  runtimeManagerSmoke,
+  runtimeManagerStartupTest,
+  runtimeManagerValidateRelease,
   saveMemory,
   updateSettings,
   verifyProviderConfig,
 } from '../../lib/api';
 import type {
   DiagnosticsPayload,
+  DocumentConverterStatus,
   FontFamily,
   Language,
   MemoryPayload,
@@ -29,6 +44,8 @@ import type {
   ProviderStatusPayload,
   ProviderUsagePayload,
   ProviderValidation,
+  RuntimeManagerCommandResult,
+  RuntimeManagerStatus,
   RuntimeSettings,
   SettingsSection,
   StoragePayload,
@@ -44,6 +61,7 @@ import { ModelTab } from './tabs/ModelTab';
 import { UsageTab } from './tabs/UsageTab';
 import { NetworkTab } from './tabs/NetworkTab';
 import { TerminalTab } from './tabs/TerminalTab';
+import { RuntimeTab } from './tabs/RuntimeTab';
 import { ToolsTab } from './tabs/ToolsTab';
 import { ConnectorsTab } from './tabs/ConnectorsTab';
 import { DesktopTab } from './tabs/DesktopTab';
@@ -75,6 +93,7 @@ const sectionIcons: Record<SettingsSection, typeof Palette> = {
   usage: BarChart3,
   network: Globe,
   terminal: Terminal,
+  runtime: HardDrive,
   tools: Wrench,
   connectors: Plug,
   desktop: Monitor,
@@ -145,6 +164,11 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const [loadingUsage, setLoadingUsage] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsPayload | null>(null);
+  const [documentConverters, setDocumentConverters] = useState<DocumentConverterStatus | null>(null);
+  const [runtimeManager, setRuntimeManager] = useState<RuntimeManagerStatus | null>(null);
+  const [runtimeManagerBusy, setRuntimeManagerBusy] = useState('');
+  const [runtimeManagerMessage, setRuntimeManagerMessage] = useState('');
+  const [runtimeManagerResult, setRuntimeManagerResult] = useState<RuntimeManagerCommandResult | null>(null);
   const [savingDiagnostics, setSavingDiagnostics] = useState(false);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -248,6 +272,28 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     if (!open || active !== 'tools' || permissions) return;
     void refreshPermissions(false);
   }, [active, open, permissions, refreshPermissions]);
+
+  useEffect(() => {
+    if (!open || active !== 'terminal') return;
+    void getDocumentConverters().then(setDocumentConverters).catch(() => setDocumentConverters(null));
+  }, [active, open]);
+
+  const refreshRuntimeManager = useCallback(async () => {
+    setRuntimeManagerBusy(current => current || 'refresh');
+    try {
+      setRuntimeManager(await getRuntimeManagerStatus());
+      setRuntimeManagerMessage('');
+    } catch (error) {
+      setRuntimeManagerMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRuntimeManagerBusy(current => (current === 'refresh' ? '' : current));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || active !== 'runtime') return;
+    void refreshRuntimeManager();
+  }, [active, open, refreshRuntimeManager]);
 
   useEffect(() => {
     if (!open || active !== 'about') return;
@@ -473,6 +519,24 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     }
   }, []);
 
+  const runRuntimeAction = useCallback(
+    async (name: string, action: () => Promise<RuntimeManagerCommandResult>) => {
+      setRuntimeManagerBusy(name);
+      setRuntimeManagerMessage('');
+      try {
+        const result = await action();
+        setRuntimeManagerResult(result);
+        setRuntimeManagerMessage(result.message || (result.ok ? t('操作完成。') : result.error || t('操作未完成。')));
+        await refreshRuntimeManager();
+      } catch (error) {
+        setRuntimeManagerMessage(error instanceof Error ? error.message : String(error));
+      } finally {
+        setRuntimeManagerBusy('');
+      }
+    },
+    [refreshRuntimeManager, t],
+  );
+
   const renderSettingsLoading = () => (
     <div className="settings-placeholder">
       <h3>{tr(language, active)}</h3>
@@ -551,7 +615,45 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
       case 'network':
         return settings ? <NetworkTab onSettingsChange={value => setSettings(value)} settings={settings} /> : renderSettingsLoading();
       case 'terminal':
-        return settings ? <TerminalTab onSettingsChange={value => setSettings(value)} settings={settings} /> : renderSettingsLoading();
+        return settings ? (
+          <TerminalTab
+            documentConverters={documentConverters}
+            onRefreshDocumentConverters={() => getDocumentConverters().then(setDocumentConverters)}
+            onSettingsChange={value => setSettings(value)}
+            settings={settings}
+          />
+        ) : renderSettingsLoading();
+      case 'runtime':
+        return (
+          <RuntimeTab
+            busy={runtimeManagerBusy}
+            message={runtimeManagerMessage}
+            onBuildVmAssets={() =>
+              runRuntimeAction('build-vm-assets', () =>
+                runtimeManagerBuildVmAssets({ dryRun: false, allowNetwork: true, packageBundle: true, profile: 'standard' }),
+              )
+            }
+            onBuildVmAssetsPlan={() => runRuntimeAction('build-vm-assets-plan', () => runtimeManagerBuildVmAssets({ dryRun: true, profile: 'standard' }))}
+            onBuildPlan={() => runRuntimeAction('build-plan', () => runtimeManagerBuildPlan('standard'))}
+            onDiagnostics={(sessionId = '') => runRuntimeAction('diagnostics', () => runtimeManagerDiagnostics(sessionId))}
+            onImport={() => runRuntimeAction('import', runtimeManagerImport)}
+            onImportPlan={() => runRuntimeAction('import-plan', runtimeManagerImportPlan)}
+            onPackageBundle={() => runRuntimeAction('package-bundle', () => runtimeManagerPackageBundle('', 'local'))}
+            onPackageVmBundle={() => runRuntimeAction('package-vm-bundle', () => runtimeManagerPackageVmBundle('', 'direct'))}
+            onPrepareBundle={() => runRuntimeAction('prepare-bundle', () => runtimeManagerPrepareBundle('', 'local'))}
+            onRefresh={refreshRuntimeManager}
+            onRepair={() =>
+              runRuntimeAction('repair-runtime', () =>
+                runtimeManagerRepair({ source: 'auto', allowDownload: Boolean(runtimeManager?.releaseIntegration.downloadAvailable) }),
+              )
+            }
+            onSmoke={() => runRuntimeAction('smoke', runtimeManagerSmoke)}
+            onStartupTest={() => runRuntimeAction('startup-test', runtimeManagerStartupTest)}
+            onValidateRelease={() => runRuntimeAction('validate-release', () => runtimeManagerValidateRelease())}
+            result={runtimeManagerResult}
+            status={runtimeManager}
+          />
+        );
       case 'tools':
         return (
           <ToolsTab

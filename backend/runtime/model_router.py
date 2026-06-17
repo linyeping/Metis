@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List
 
 from backend.bridges.model_capability import detect_from_model_name
 from backend.bridges.provider_registry import resolve_provider_for_config
+from backend.runtime.sandbox_boundary import boundary_policy_for_task
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,8 @@ class TaskRoute:
     task_type: str
     model_role: str
     selected_model: str
+    execution_boundary: str = "direct"
+    runtime_policy: Dict[str, Any] = field(default_factory=dict)
     fallback_models: List[str] = field(default_factory=list)
     preferred_tools: List[str] = field(default_factory=list)
     reason: str = ""
@@ -57,6 +60,8 @@ _DESKTOP_CONTROL_TOOLS = [
     "desktop_window_action",
 ]
 _CODE_TOOLS = [
+    "metis_runtime_job",
+    "metis_runtime_job_status",
     "generate_repo_map",
     "grep_search",
     "glob_search",
@@ -68,13 +73,53 @@ _CODE_TOOLS = [
     "run_tests",
     "check_git_status",
     "git_diff",
+    "metis_rootfs_asset_status",
+    "metis_rootfs_source_status",
+    "metis_rootfs_asset_download",
+    "metis_rootfs_asset_register",
+    "metis_rootfs_builder_status",
+    "metis_rootfs_build",
+    "metis_rootfs_image_builder_status",
+    "metis_rootfs_image_build",
+    "metis_runtime_bundle_package",
+    "metis_runtime_bundle_package_v2",
+    "metis_runtime_bundle_prepare",
+    "metis_vm_direct_assets_prepare",
+    "metis_vm_direct_runner_prepare",
+    "metis_vm_direct_runner_smoke",
+    "metis_vm_hcs_starter_prepare",
+    "metis_vm_hcs_starter_start",
+    "metis_vm_guest_handshake_prepare",
+    "metis_vm_guest_handshake_verify",
+    "metis_vm_rootfs_boot_verifier_prepare",
+    "metis_vm_rootfs_boot_verify",
+    "metis_vm_bundle_status",
+    "metis_vm_pack_adopt_reference",
+    "metis_vm_pack_scaffold",
+    "metis_wsl_runtime_status",
+    "metis_wsl_runtime_import",
+    "metis_sandbox_status",
+    "metis_runtime_create",
+    "metis_runtime_run",
+    "metis_runtime_collect_artifacts",
+    "metis_runtime_export_patch",
+    "metis_runtime_export_diagnostics",
 ]
 _ARTIFACT_WORKFLOW_TOOLS = [
+    "metis_runtime_job",
+    "metis_runtime_job_status",
     "load_skill",
     "read_file",
     "read_multiple_files",
     "write_file",
     "append_to_file",
+    "metis_sandbox_status",
+    "metis_runtime_create",
+    "metis_runtime_run",
+    "metis_runtime_collect_artifacts",
+    "metis_runtime_export_patch",
+    "metis_runtime_export_diagnostics",
+    "metis_runtime_status",
     "office_report_from_code_run",
     "docx_create",
     "docx_edit",
@@ -119,6 +164,7 @@ def build_task_route(
     text = _latest_user_text(messages)
     task_type, reason = classify_task(text)
     model_role = _model_role_for_task(task_type, text)
+    runtime_policy = runtime_policy_for_task(task_type, text)
     selected_model, fallback_models = _select_models(
         model_role,
         llm_backend=llm_backend,
@@ -130,6 +176,8 @@ def build_task_route(
         task_type=task_type,
         model_role=model_role,
         selected_model=selected_model or llm_model,
+        execution_boundary=str(runtime_policy.get("execution_boundary") or "direct"),
+        runtime_policy=runtime_policy,
         fallback_models=fallback_models,
         preferred_tools=preferred_tools,
         reason=reason,
@@ -144,7 +192,23 @@ def render_route_hint(route: TaskRoute) -> str:
         ROUTE_MARKER,
         f"Task type: {route.task_type}.",
         f"Model role: {route.model_role}. Selected model: {route.selected_model or 'current'}.",
+        f"Default execution boundary: {route.execution_boundary}.",
     ]
+    if route.runtime_policy:
+        lines.append(
+            "Runtime policy: "
+            + "; ".join(
+                part
+                for part in [
+                    f"recommended_tool={route.runtime_policy.get('recommended_tool')}",
+                    f"sandbox_mode={route.runtime_policy.get('sandbox_mode')}",
+                    f"fallback_mode={route.runtime_policy.get('fallback_mode')}",
+                    f"fallback={','.join(route.runtime_policy.get('fallback_order') or [])}",
+                    f"desktop_control_allowed={route.runtime_policy.get('desktop_control_allowed')}",
+                ]
+                if part and not part.endswith("=None")
+            )
+        )
     if route.reason:
         lines.append(f"Why: {route.reason}")
     if route.tool_guidance:
@@ -157,6 +221,63 @@ def render_route_hint(route: TaskRoute) -> str:
         "If the preferred route clearly does not fit the visible evidence, state the mismatch briefly and choose the next safer route."
     )
     return "\n".join(lines)
+
+
+def runtime_policy_for_task(task_type: str, text: str = "") -> Dict[str, Any]:
+    """Claude-style execution-boundary policy for the selected task route.
+
+    This is intentionally deterministic: users should not need to say "run this
+    in the sandbox" for code execution, tests, builds, or generated artifacts.
+    """
+    boundary = boundary_policy_for_task(task_type, text).to_dict()
+    if task_type == "artifact_workflow":
+        return {
+            **boundary,
+            "sandbox_required": True,
+            "permission_mode": "ask_for_network_cross_drive_project_write",
+            "sandbox_for": ["code_run", "test", "build", "chart", "report", "doc_render", "pdf_render"],
+        }
+    if task_type == "code":
+        return {
+            **boundary,
+            "sandbox_required": False,
+            "permission_mode": "ask_for_destructive_or_cross_boundary",
+            "sandbox_for": ["test", "build", "script", "repro", "generated_artifact"],
+        }
+    if task_type == "desktop":
+        return {
+            **boundary,
+            "sandbox_required": False,
+            "permission_mode": "ask_for_side_effects",
+            "sandbox_for": [],
+        }
+    if task_type == "browser":
+        return {
+            **boundary,
+            "sandbox_required": False,
+            "permission_mode": "confirm_sensitive_web_side_effects",
+            "sandbox_for": [],
+        }
+    if task_type == "external_lookup":
+        return {
+            **boundary,
+            "sandbox_required": False,
+            "permission_mode": "read_only_web_by_default",
+            "sandbox_for": [],
+        }
+    if task_type == "long_context":
+        return {
+            **boundary,
+            "sandbox_required": False,
+            "permission_mode": "read_only_by_default",
+            "sandbox_for": [],
+        }
+    return {
+        **boundary,
+        "sandbox_required": False,
+        "permission_mode": "normal",
+        "sandbox_for": [],
+    }
 
 
 def classify_task(text: str) -> tuple[str, str]:
@@ -468,7 +589,8 @@ def _preferred_tools_for_task(task_type: str) -> List[str]:
 def _tool_guidance_for_task(task_type: str) -> str:
     if task_type == "artifact_workflow":
         return (
-            "Use a background artifact workflow first: read/generate files, run scripts, create charts, "
+            "Use a background artifact workflow first: call metis_runtime_job for code execution, tests, builds, chart generation, report generation, and document/PDF rendering. "
+            "It creates a runtime session, runs inside the isolated workspace, collects artifacts, exports patch/diagnostics, and returns verifier evidence. "
             "write DOCX/PDF artifacts, and verify outputs. Do not use Computer Use to control PyCharm/WPS "
             "unless the user asks for a specific UI-only action such as clicking a button, submitting a form, "
             "or operating an already-open app window."
@@ -478,7 +600,7 @@ def _tool_guidance_for_task(task_type: str) -> str:
     if task_type == "browser":
         return "Use the in-app Preview Browser first: preview_browser_status/navigate/observe/action/verify. Use external browse_web only when Preview cannot cover the target."
     if task_type == "code":
-        return "Use repo tools first: generate_repo_map/grep_search/read_file before edits, then robust_replace_in_file/write_file and run_tests/typecheck."
+        return "Use repo tools for direct reads/edits. Use metis_runtime_job for commands, tests, builds, repros, generated artifacts, or risky experiments before applying changes to the source project."
     if task_type == "external_lookup":
         return "Use web_search/web_fetch for fresh external facts. Escalate to browse_web only for dynamic or interactive pages."
     if task_type == "long_context":

@@ -1,15 +1,17 @@
 import { memo, useCallback, useState } from 'react';
-import { Check, FolderOpen, RotateCcw, Terminal, Workflow } from 'lucide-react';
-import type { RuntimeSettings } from '../../../lib/types';
+import { Check, FileText, FolderOpen, RefreshCw, RotateCcw, Terminal, Workflow } from 'lucide-react';
+import type { DocumentConverterCandidate, DocumentConverterStatus, RuntimeSettings } from '../../../lib/types';
 import { terminalShellLabel, terminalShellOptions } from '../settingsShared';
 import { useT } from '../../../hooks/useT';
 
 interface TerminalTabProps {
+  documentConverters: DocumentConverterStatus | null;
+  onRefreshDocumentConverters: () => void | Promise<void>;
   onSettingsChange: (value: RuntimeSettings) => void;
   settings: RuntimeSettings;
 }
 
-export const TerminalTab = memo(function TerminalTab({ onSettingsChange, settings }: TerminalTabProps) {
+export const TerminalTab = memo(function TerminalTab({ documentConverters, onRefreshDocumentConverters, onSettingsChange, settings }: TerminalTabProps) {
   const t = useT();
   /* ── Python interpreter local draft ─────────────────────────────── */
   const [draft, setDraft] = useState(settings.pythonPath || '');
@@ -136,6 +138,45 @@ export const TerminalTab = memo(function TerminalTab({ onSettingsChange, setting
         </div>
       </section>
 
+      <section className="settings-section settings-card document-converter-card">
+        <div className="settings-section-header">
+          <FileText size={16} className="section-icon" />
+          <span>
+            <h3>{t('文档转换运行时')}</h3>
+            <p className="section-desc">{t('识别旧版 .doc/.xls/.ppt 依赖的本地或便携转换能力。')}</p>
+          </span>
+          <button type="button" className="document-converter-refresh" onClick={() => void onRefreshDocumentConverters()} title={t('重新检测')}>
+            <RefreshCw size={13} />
+          </button>
+        </div>
+        <div className="document-converter-support">
+          {(['doc', 'xls', 'ppt'] as const).map(ext => (
+            <span key={ext} data-ok={documentConverters?.support[ext] ?? false}>
+              .{ext}
+            </span>
+          ))}
+        </div>
+        <div className="document-converter-grid">
+          {(['soffice', 'antiword', 'xlrd', 'pandoc'] as const).map(name => (
+            <ConverterRow key={name} label={name} converter={documentConverters?.converters[name] ?? null} />
+          ))}
+        </div>
+        {documentConverters?.hints?.length ? (
+          <div className="document-converter-hints">
+            {documentConverters.hints.slice(0, 3).map(hint => (
+              <small key={hint}>{t(hint)}</small>
+            ))}
+          </div>
+        ) : (
+          <small className="python-hint muted">{t('支持 .xls 纯 Python 解析；.doc/.ppt 推荐内置或便携 LibreOffice 转换。')}</small>
+        )}
+        {documentConverters?.recommendedRoots?.length ? (
+          <small className="document-converter-root" title={documentConverters.recommendedRoots[0]}>
+            {t('推荐目录：')}{documentConverters.recommendedRoots[0]}
+          </small>
+        ) : null}
+      </section>
+
       {/* ── Tips ──────────────────────────────────────────────────── */}
       <section className="settings-section">
         <div className="settings-section-header">
@@ -147,3 +188,14 @@ export const TerminalTab = memo(function TerminalTab({ onSettingsChange, setting
     </div>
   );
 });
+
+function ConverterRow({ converter, label }: { converter: DocumentConverterCandidate | null; label: string }) {
+  const t = useT();
+  return (
+    <div className="document-converter-row" data-ok={converter?.available ?? false}>
+      <strong>{label}</strong>
+      <span>{converter?.available ? t('可用') : t('未检测到')}</span>
+      {converter?.path && <small title={converter.path}>{converter.source}: {converter.path}</small>}
+    </div>
+  );
+}

@@ -35,6 +35,30 @@ WRITE_LIKE_TOOLS = {
     "docx_to_pdf",
     "docx_render_pages",
     "office_report_from_code_run",
+    "metis_rootfs_asset_download",
+    "metis_rootfs_build",
+    "metis_rootfs_asset_register",
+    "metis_runtime_bundle_package",
+    "metis_runtime_bundle_package_v2",
+    "metis_runtime_bundle_prepare",
+    "metis_rootfs_image_build",
+    "metis_vm_direct_assets_prepare",
+    "metis_vm_direct_runner_prepare",
+    "metis_vm_direct_runner_smoke",
+    "metis_vm_hcs_starter_prepare",
+    "metis_vm_hcs_starter_start",
+    "metis_vm_guest_handshake_prepare",
+    "metis_vm_guest_handshake_verify",
+    "metis_vm_rootfs_boot_verifier_prepare",
+    "metis_vm_rootfs_boot_verify",
+    "metis_vm_pack_adopt_reference",
+    "metis_vm_pack_scaffold",
+    "metis_wsl_runtime_import",
+    "metis_runtime_create",
+    "metis_runtime_run",
+    "metis_runtime_collect_artifacts",
+    "metis_runtime_export_patch",
+    "metis_runtime_export_diagnostics",
 }
 
 
@@ -320,6 +344,17 @@ def _tool_paths(tool_name: str, arguments: Dict[str, Any]) -> Iterable[str]:
             str(arguments.get("artifacts_dir") or "").strip(),
         ]
         return [path for path in paths if path]
+    if tool_name in {"metis_runtime_create", "metis_runtime_status"}:
+        value = str(arguments.get("root") or "").strip()
+        return [value] if value else []
+    if tool_name in {
+        "metis_runtime_run",
+        "metis_runtime_collect_artifacts",
+        "metis_runtime_export_patch",
+        "metis_runtime_export_diagnostics",
+    }:
+        value = str(arguments.get("output_path") or "").strip()
+        return [value] if value else []
     if tool_name == "docx_edit":
         value = str(arguments.get("output_path") or arguments.get("path") or "").strip()
         return [value] if value else []

@@ -20,6 +20,7 @@ P5 审计说明（与 Tools/registry.py 对照）：
 - extract_method：仅返回文本建议，不落盘，不纳入。
 - generate_image：当前实现仅请求远程 API，不写工作区文件，不纳入。
 - pdf_create / docx_create / office_report_from_code_run 等 artifact 工具可能写文件，但非源码扩展会在 update_index_for_file 中自然跳过。
+- metis_runtime_* 默认写入 .metis/runtime 与 .metis/artifacts，不直接更新源码索引；导出的 patch 由后续真实文件编辑触发索引。
 """
 from __future__ import annotations
 
@@ -61,6 +62,11 @@ FILE_MODIFICATION_TOOLS: FrozenSet[str] = frozenset(
         "docx_to_pdf",
         "docx_render_pages",
         "office_report_from_code_run",
+        "metis_runtime_create",
+        "metis_runtime_run",
+        "metis_runtime_collect_artifacts",
+        "metis_runtime_export_patch",
+        "metis_runtime_export_diagnostics",
         "rename_symbol",
         "undo_last_edit",
     }

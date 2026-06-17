@@ -23,6 +23,7 @@ function readSettingsSources() {
     'src/components/settings/tabs/UsageTab.tsx',
     'src/components/settings/tabs/NetworkTab.tsx',
     'src/components/settings/tabs/TerminalTab.tsx',
+    'src/components/settings/tabs/RuntimeTab.tsx',
     'src/components/settings/tabs/ToolsTab.tsx',
     'src/components/settings/tabs/ConnectorsTab.tsx',
     'src/components/settings/tabs/DesktopTab.tsx',
@@ -120,6 +121,78 @@ test('DeepSeek, slash menu, cache dashboard, and release gates stay wired', () =
   assert.match(rightRail, /cacheHitRate/);
   assert.match(rightRail, /label=\{t\('Cache'\)\}/);
   assert.match(css, /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(72px,\s*1fr\)\)/);
+});
+
+test('Runtime Manager productization stays wired', () => {
+  const main = read('electron/main.cjs');
+  const preload = read('electron/preload.cjs');
+  const globals = read('src/global.d.ts');
+  const backend = read('electron/backend.cjs');
+  const builder = read('electron-builder.yml');
+  const settings = readSettingsSources();
+  const api = read('src/lib/api.ts');
+  const types = read('src/lib/types.ts');
+  const css = read('src/index.css');
+  const routes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'settings_routes.py'), 'utf8');
+  const manager = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'runtime_manager.py'), 'utf8');
+  const runtimeJob = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'runtime_job.py'), 'utf8');
+  const modelRouter = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'model_router.py'), 'utf8');
+  const schemas = fs.readFileSync(path.resolve(root, '..', 'backend', 'tools', 'schema_definitions.py'), 'utf8');
+  const tests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_runtime_manager.py'), 'utf8');
+
+  assert.match(main, /metis:open-path/);
+  assert.match(main, /shell\.showItemInFolder/);
+  assert.match(preload, /openPath/);
+  assert.match(globals, /openPath/);
+  assert.match(backend, /METIS_BUNDLED_RUNTIME_PACK_DIR/);
+  assert.match(backend, /bundledRuntimePackDir/);
+  assert.match(backend, /maybeEnsureRuntimePack/);
+  assert.match(builder, /resources\/runtime-pack/);
+  assert.match(settings, /RuntimeTab/);
+  assert.match(settings, /Metis Runtime Manager/);
+  assert.match(settings, /VM Runtime Pack/);
+  assert.match(settings, /最近 Runtime Job/);
+  assert.match(settings, /runtime-result-paths/);
+  assert.match(settings, /extractResultPaths/);
+  assert.match(api, /getRuntimeManagerStatus/);
+  assert.match(api, /runtimeManagerSmoke/);
+  assert.match(api, /runtimeManagerRepair/);
+  assert.match(api, /runtimeManagerStartupTest/);
+  assert.match(api, /runtimeManagerPackageVmBundle/);
+  assert.match(api, /runtimeManagerBuildVmAssets/);
+  assert.match(api, /runtimeManagerValidateRelease/);
+  assert.match(api, /runtimeManagerJobFromRecord/);
+  assert.match(types, /RuntimeManagerStatus/);
+  assert.match(types, /RuntimeManagerJobSummary/);
+  assert.match(types, /RuntimeManagerVmRuntime/);
+  assert.match(types, /RuntimeManagerReleaseIntegration/);
+  assert.match(css, /\.runtime-manager-panel/);
+  assert.match(css, /\.runtime-vm-summary/);
+  assert.match(css, /\.runtime-result-path-row/);
+  assert.match(routes, /\/settings\/runtime-manager\/smoke/);
+  assert.match(routes, /\/settings\/runtime-manager\/diagnostics/);
+  assert.match(routes, /\/settings\/runtime-manager\/repair/);
+  assert.match(routes, /\/settings\/runtime-manager\/startup-test/);
+  assert.match(routes, /\/settings\/runtime-manager\/package-vm-bundle/);
+  assert.match(routes, /\/settings\/runtime-manager\/build-vm-assets/);
+  assert.match(routes, /\/settings\/runtime-manager\/validate-release/);
+  assert.match(routes, /\/settings\/runtime-manager\/ensure/);
+  assert.match(manager, /runtime_manager_export_diagnostics/);
+  assert.match(manager, /runtime_manager_repair/);
+  assert.match(manager, /runtime_manager_ensure/);
+  assert.match(manager, /runtime_manager_startup_test/);
+  assert.match(manager, /runtime_manager_build_vm_assets/);
+  assert.match(manager, /runtime_manager_validate_release_source/);
+  assert.match(manager, /metis_runtime_bundle_package_v2/);
+  assert.match(manager, /metis_runtime_job_status/);
+  assert.match(runtimeJob, /RUNTIME_JOB_SCHEMA = "metis\.runtime_job\.v1"/);
+  assert.match(runtimeJob, /def metis_runtime_job\(/);
+  assert.match(runtimeJob, /def metis_runtime_job_status\(/);
+  assert.match(modelRouter, /execution_boundary/);
+  assert.match(modelRouter, /runtime_policy_for_task/);
+  assert.match(modelRouter, /metis_runtime_job/);
+  assert.match(schemas, /Claude-style Runtime Job/);
+  assert.match(tests, /test_runtime_manager_settings_routes_round_trip/);
 });
 
 test('FABLEADV-47 connector OAuth stores tokens safely', () => {

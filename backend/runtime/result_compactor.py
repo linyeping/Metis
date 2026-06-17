@@ -23,7 +23,7 @@ _WRITE_TOOLS = {
     "delete_file", "edit_notebook", "todo_write",
 }
 _FILE_READ_TOOLS = {"read_file", "read_multiple_files"}
-_SHELL_TOOLS = {"execute_bash_command", "run_tests"}
+_SHELL_TOOLS = {"execute_bash_command", "run_tests", "metis_runtime_run"}
 _SEARCH_TOOLS = {"grep_search", "glob_search", "semantic_search", "web_search"}
 _LIST_TOOLS = {"list_directory"}
 _BROWSER_TOOLS = {"browse_web", "browse_and_extract", "browser_read_page", "web_search"}
@@ -44,6 +44,38 @@ _STRATEGY_MAP: Dict[str, str] = {
     # shell
     "execute_bash_command": "tail_heavy",
     "run_tests": "tail_heavy",
+    "metis_rootfs_asset_status": "json_summary",
+    "metis_rootfs_source_status": "json_summary",
+    "metis_rootfs_asset_download": "json_summary",
+    "metis_rootfs_asset_register": "json_summary",
+    "metis_rootfs_builder_status": "json_summary",
+    "metis_rootfs_build": "json_summary",
+    "metis_rootfs_image_builder_status": "json_summary",
+    "metis_rootfs_image_build": "json_summary",
+    "metis_runtime_bundle_package": "json_summary",
+    "metis_runtime_bundle_package_v2": "json_summary",
+    "metis_runtime_bundle_prepare": "json_summary",
+    "metis_vm_direct_assets_prepare": "json_summary",
+    "metis_vm_direct_runner_prepare": "json_summary",
+    "metis_vm_direct_runner_smoke": "json_summary",
+    "metis_vm_hcs_starter_prepare": "json_summary",
+    "metis_vm_hcs_starter_start": "json_summary",
+    "metis_vm_guest_handshake_prepare": "json_summary",
+    "metis_vm_guest_handshake_verify": "json_summary",
+    "metis_vm_rootfs_boot_verifier_prepare": "json_summary",
+    "metis_vm_rootfs_boot_verify": "json_summary",
+    "metis_vm_bundle_status": "json_summary",
+    "metis_vm_pack_adopt_reference": "json_summary",
+    "metis_vm_pack_scaffold": "json_summary",
+    "metis_wsl_runtime_status": "json_summary",
+    "metis_wsl_runtime_import": "json_summary",
+    "metis_sandbox_status": "json_summary",
+    "metis_runtime_create": "json_summary",
+    "metis_runtime_run": "json_summary",
+    "metis_runtime_collect_artifacts": "json_summary",
+    "metis_runtime_export_patch": "json_summary",
+    "metis_runtime_export_diagnostics": "json_summary",
+    "metis_runtime_status": "json_summary",
     # search
     "grep_search": "dedup_lines",
     "glob_search": "dedup_lines",

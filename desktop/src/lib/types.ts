@@ -26,7 +26,18 @@ export type ThemeName =
 
 export type SectionId = 'chat' | 'skills' | 'mcp' | 'computer' | 'cron';
 
-export type SettingsSection = 'appearance' | 'conversation' | 'model' | 'usage' | 'network' | 'terminal' | 'tools' | 'connectors' | 'desktop' | 'about';
+export type SettingsSection =
+  | 'appearance'
+  | 'conversation'
+  | 'model'
+  | 'usage'
+  | 'network'
+  | 'terminal'
+  | 'runtime'
+  | 'tools'
+  | 'connectors'
+  | 'desktop'
+  | 'about';
 
 export type BootPhase = 'idle' | 'detecting' | 'preflight' | 'starting' | 'log' | 'ready' | 'error' | 'exit' | 'restarting';
 
@@ -299,6 +310,171 @@ export interface RuntimeSettings {
   terminalShell: TerminalShell;
   pythonPath: string;
   providerValidation?: ProviderValidation;
+}
+
+export interface DocumentConverterCandidate {
+  name: string;
+  path: string;
+  source: string;
+  available: boolean;
+}
+
+export interface DocumentConverterStatus {
+  ok: boolean;
+  schema: string;
+  support: {
+    doc: boolean;
+    xls: boolean;
+    ppt: boolean;
+  };
+  missing: string[];
+  converters: {
+    soffice: DocumentConverterCandidate | null;
+    antiword: DocumentConverterCandidate | null;
+    pandoc: DocumentConverterCandidate | null;
+    xlrd: DocumentConverterCandidate | null;
+  };
+  searchRoots: string[];
+  recommendedRoots: string[];
+  hints: string[];
+}
+
+export interface RuntimeManagerAction {
+  id: string;
+  label: string;
+  status: 'ready' | 'available' | 'blocked' | string;
+  description: string;
+}
+
+export interface RuntimeManagerHealth {
+  preferredBackend: string;
+  ready: boolean;
+  metisWslReady: boolean;
+  wslAvailable: boolean;
+  dockerAvailable: boolean;
+  rootfsReady: boolean;
+  vmPackReady: boolean;
+  runtimeBundleReady: boolean;
+  vmRuntimeInstalled: boolean;
+  vmGuestProtocolReady: boolean;
+  vmHcsDirectReady: boolean;
+  vmAssetsVerified: boolean;
+  vmAssetBytes: number;
+  bundledRuntimePackAvailable: boolean;
+  runtimeDownloadAvailable: boolean;
+}
+
+export interface RuntimeManagerPaths {
+  root: string;
+  rootfs: string;
+  wslInstallDir: string;
+  bundlePath: string;
+  vmRuntimeBundle: string;
+  runtimePackInstallDir: string;
+  bundledRuntimePack: string;
+  runtimeBundleManifest: string;
+  artifactsRoot: string;
+  diagnosticsRoot: string;
+  runtimeJobsRoot: string;
+}
+
+export interface RuntimeManagerVmRuntime {
+  installed: boolean;
+  installDir: string;
+  bundlePath: string;
+  bundleDetected: boolean;
+  metisOwned: boolean;
+  runnerReady: boolean;
+  guestProtocolReady: boolean;
+  hcsDirectReady: boolean;
+  runnerTransport: string;
+  assetsVerified: boolean;
+  assetBytes: number;
+  missingRequired: string[];
+  assetReport: Record<string, unknown>;
+  selectedBundle: Record<string, unknown>;
+  candidateCount: number;
+  reason: string;
+  host: Record<string, unknown>;
+}
+
+export interface RuntimeManagerReleaseIntegration {
+  ok: boolean;
+  schema: string;
+  installStrategy: string;
+  installedPath: string;
+  bundledAvailable: boolean;
+  bundledPath: string;
+  downloadAvailable: boolean;
+  downloadUrl: string;
+  autoPrepareEnabled: boolean;
+  installedReport: Record<string, unknown>;
+  bundledReport: Record<string, unknown>;
+  strategies: Array<Record<string, unknown>>;
+  notes: string[];
+}
+
+export interface RuntimeManagerJobSummary {
+  jobId: string;
+  sessionId: string;
+  task: string;
+  status: string;
+  backend: string;
+  createdAt: number;
+  updatedAt: number;
+  artifactsDir: string;
+  diagnosticsZip: string;
+}
+
+export interface RuntimeManagerSessionSummary {
+  sessionId: string;
+  task: string;
+  status: string;
+  mode: string;
+  backend: string;
+  updatedAt: number;
+  workspaceDir: string;
+  artifactsDir: string;
+}
+
+export interface RuntimeManagerStatus {
+  ok: boolean;
+  schema: string;
+  generatedAt: number;
+  root: string;
+  health: RuntimeManagerHealth;
+  paths: RuntimeManagerPaths;
+  actions: RuntimeManagerAction[];
+  notes: string[];
+  sandbox: Record<string, unknown>;
+  rootfs: Record<string, unknown>;
+  builder: Record<string, unknown>;
+  vmBundle: Record<string, unknown>;
+  vmRuntime: RuntimeManagerVmRuntime;
+  releaseIntegration: RuntimeManagerReleaseIntegration;
+  runtimeBundle: Record<string, unknown>;
+  wslRuntime: Record<string, unknown>;
+  sessions: {
+    sessions: RuntimeManagerSessionSummary[];
+  };
+  jobs: {
+    jobs: RuntimeManagerJobSummary[];
+  };
+}
+
+export interface RuntimeManagerCommandResult {
+  ok: boolean;
+  schema?: string;
+  message?: string;
+  error?: string;
+  alreadyInstalled?: boolean;
+  created?: Record<string, unknown>;
+  run?: Record<string, unknown>;
+  status?: Record<string, unknown>;
+  plan?: Record<string, unknown>;
+  diagnosticsZip?: string;
+  diagnostics_zip?: string;
+  [key: string]: unknown;
 }
 
 export interface ModelCapabilities {

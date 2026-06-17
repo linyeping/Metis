@@ -195,6 +195,98 @@ function packagedBackendExe() {
   return path.join(process.resourcesPath, 'backend-dist', 'metis-backend', executable)
 }
 
+function bundledRuntimePackDir() {
+  if (process.env.METIS_BUNDLED_RUNTIME_PACK_DIR) {
+    return process.env.METIS_BUNDLED_RUNTIME_PACK_DIR
+  }
+  if (isDevBackend()) {
+    return path.resolve(__dirname, '..', 'resources', 'runtime-pack')
+  }
+  return path.join(process.resourcesPath, 'runtime-pack')
+}
+
+function normalizedRuntimePackAssetDir(dir) {
+  const candidates = [
+    path.join(dir, 'metisvm.bundle'),
+    path.join(dir, 'metis-runtime-bundle-v2'),
+    dir
+  ]
+  return candidates.find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) || dir
+}
+
+function hasRuntimePackAssets(dir) {
+  try {
+    const bundle = normalizedRuntimePackAssetDir(dir)
+    const required = ['vmlinuz', 'initrd', 'metis-bin.vhdx', 'metis-vm-pack.json']
+    const hasRequired = required.every(name => fs.existsSync(path.join(bundle, name)))
+    const hasRootfs = fs.existsSync(path.join(bundle, 'rootfs.vhdx')) || fs.existsSync(path.join(bundle, 'rootfs.vhdx.zst'))
+    return hasRequired && hasRootfs
+  } catch {
+    return false
+  }
+}
+
+function shouldAutoEnsureRuntimePack() {
+  if (process.env.METIS_RUNTIME_AUTO_ENSURE === '1' || process.env.METIS_RUNTIME_AUTO_DOWNLOAD === '1') {
+    return true
+  }
+  return hasRuntimePackAssets(bundledRuntimePackDir())
+}
+
+function postBackendJson(port, pathname, body = {}) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: pathname,
+        method: 'POST',
+        timeout: 6 * 60 * 60 * 1000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        }
+      },
+      res => {
+        let text = ''
+        res.setEncoding('utf8')
+        res.on('data', chunk => {
+          text += chunk
+        })
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode, text })
+        })
+      }
+    )
+    req.on('error', reject)
+    req.on('timeout', () => {
+      req.destroy(new Error('runtime ensure request timed out'))
+    })
+    req.write(payload)
+    req.end()
+  })
+}
+
+function maybeEnsureRuntimePack(port) {
+  if (!shouldAutoEnsureRuntimePack()) {
+    return
+  }
+  const allowDownload = process.env.METIS_RUNTIME_AUTO_DOWNLOAD === '1' || process.env.METIS_RUNTIME_AUTO_ENSURE === '1'
+  appendLogLine(`[runtime-pack] auto ensure requested (allowDownload=${allowDownload})`)
+  postBackendJson(port, '/settings/runtime-manager/repair', {
+    source: 'auto',
+    allow_download: allowDownload,
+    force: false
+  })
+    .then(result => {
+      appendLogLine(`[runtime-pack] auto ensure response ${result.statusCode}: ${String(result.text || '').slice(0, 1000)}`)
+    })
+    .catch(error => {
+      appendLogLine(`[runtime-pack] auto ensure skipped: ${error?.message || error}`)
+    })
+}
+
 function isPathLike(exe) {
   return path.isAbsolute(exe) || exe.includes('\\') || exe.includes('/')
 }
@@ -2599,6 +2691,115 @@ async function handleFakeRequest(req, res) {
     return
   }
 
+  if (req.method === 'GET' && pathname === '/settings/runtime-manager') {
+    const bundlePath = path.join(metisHome(), 'vm_bundles', 'metisvm.bundle')
+    writeFakeJson(res, 200, {
+      ok: true,
+      schema: 'metis.runtime_manager.v1',
+      generated_at: fakeNowSeconds(),
+      root: fakeWorkspaceRoot,
+      health: {
+        preferred_backend: 'local',
+        ready: true,
+        metis_wsl_ready: false,
+        wsl_available: false,
+        docker_available: false,
+        rootfs_ready: false,
+        vm_pack_ready: false,
+        runtime_bundle_ready: false,
+        vm_runtime_installed: false,
+        vm_guest_protocol_ready: false,
+        vm_hcs_direct_ready: false,
+        vm_assets_verified: false,
+        vm_asset_bytes: 0,
+        bundled_runtime_pack_available: false,
+        runtime_download_available: false
+      },
+      paths: {
+        root: fakeWorkspaceRoot,
+        rootfs: '',
+        wsl_install_dir: '',
+        bundle_path: '',
+        vm_runtime_bundle: bundlePath,
+        runtime_pack_install_dir: bundlePath,
+        bundled_runtime_pack: path.resolve(__dirname, '..', 'resources', 'runtime-pack'),
+        runtime_bundle_manifest: '',
+        artifacts_root: path.join(fakeWorkspaceRoot, '.metis', 'artifacts'),
+        diagnostics_root: path.join(fakeWorkspaceRoot, '.metis', 'diagnostics'),
+        runtime_jobs_root: path.join(fakeWorkspaceRoot, '.metis', 'runtime-jobs')
+      },
+      actions: [
+        {
+          id: 'repair-runtime',
+          label: 'Repair or install VM runtime',
+          status: 'blocked',
+          description: 'Fake backend has no bundled runtime pack.'
+        },
+        {
+          id: 'diagnostics',
+          label: 'Export runtime diagnostics',
+          status: 'ready',
+          description: 'Collect fake runtime diagnostics.'
+        }
+      ],
+      notes: ['Fake backend runtime manager payload.'],
+      sandbox: {},
+      rootfs: {},
+      builder: {},
+      vm_bundle: {},
+      vm_runtime: {
+        installed: false,
+        install_dir: bundlePath,
+        bundle_path: bundlePath,
+        bundle_detected: false,
+        metis_owned: false,
+        runner_ready: false,
+        guest_protocol_ready: false,
+        hcs_direct_ready: false,
+        runner_transport: '',
+        assets_verified: false,
+        asset_bytes: 0,
+        missing_required: ['vmlinuz', 'initrd', 'rootfs.vhdx', 'metis-bin.vhdx'],
+        asset_report: {},
+        selected_bundle: {},
+        candidate_count: 0,
+        reason: 'fake backend has no runtime pack',
+        host: {}
+      },
+      release_integration: {
+        ok: true,
+        schema: 'metis.runtime_manager.release_integration.v1',
+        install_strategy: 'manual',
+        installed_path: bundlePath,
+        bundled_available: false,
+        bundled_path: path.resolve(__dirname, '..', 'resources', 'runtime-pack'),
+        download_available: false,
+        download_url: '',
+        auto_prepare_enabled: false,
+        installed_report: {},
+        bundled_report: {},
+        strategies: [],
+        notes: []
+      },
+      runtime_bundle: {},
+      wsl_runtime: {},
+      sessions: { sessions: [] },
+      jobs: { jobs: [] }
+    })
+    return
+  }
+
+  if (req.method === 'POST' && pathname.startsWith('/settings/runtime-manager/')) {
+    const action = pathname.split('/').pop() || 'action'
+    writeFakeJson(res, 200, {
+      ok: action !== 'repair',
+      schema: `fake.runtime_manager.${action}.v1`,
+      message: action === 'repair' ? 'Fake backend cannot repair runtime packs.' : `Fake runtime manager action completed: ${action}`,
+      error: action === 'repair' ? 'Fake backend has no bundled runtime pack.' : ''
+    })
+    return
+  }
+
   if (req.method === 'POST' && pathname === '/workspace/file-changes/revert') {
     const body = await readFakeBody(req)
     const result = fakeFileChangeRevertPayload(body)
@@ -3340,10 +3541,13 @@ async function startBackend(emit = () => {}) {
 
   // Decrypt API key from safeStorage if available
   const storage = resolveDataRootInfo()
+  const runtimePackDir = bundledRuntimePackDir()
   const backendEnv = {
     ...process.env,
     METIS_DATA_ROOT: storage.dataRoot,
     METIS_HOME: storage.metisHome,
+    METIS_BUNDLED_RUNTIME_PACK_DIR: runtimePackDir,
+    METIS_RUNTIME_PACK_BUNDLED_DIR: runtimePackDir,
     METIS_HTTP_PORT: String(port),
     METIS_PORT: String(port),
     PYTHONIOENCODING: 'utf-8',
@@ -3438,6 +3642,7 @@ async function startBackend(emit = () => {}) {
     title: 'Metis 后端已就绪',
     port
   })
+  maybeEnsureRuntimePack(port)
   return port
 }
 

@@ -464,8 +464,8 @@ def build_tool_contract(
     )
     category = _tool_category(tool_name)
     risk_level = _max_risk(str(autoguard.get("riskLevel") or RISK_LOW), _category_base_risk(category))
-    read_before_edit = category in {"edit", "shell", "git"}
-    verify_after = category in {"edit", "shell", "browser", "desktop", "artifact", "git"}
+    read_before_edit = category in {"edit", "shell", "git", "runtime"}
+    verify_after = category in {"edit", "shell", "browser", "desktop", "artifact", "git", "runtime"}
     return {
         "version": _TOOL_CONTRACT_VERSION,
         "tool": str(tool_name or "tool"),
@@ -660,6 +660,8 @@ def _tool_category(tool_name: str) -> str:
         return "git"
     if "shell" in lowered or "bash" in lowered or "execute" in lowered or "command" in lowered:
         return "shell"
+    if lowered == "metis_sandbox_status" or lowered.startswith("metis_runtime_"):
+        return "runtime"
     if any(hint in lowered for hint in _DESKTOP_HINTS):
         return "desktop"
     if any(hint in lowered for hint in _BROWSER_HINTS):
@@ -683,6 +685,7 @@ def _preferred_tool_surface(category: str) -> str:
         "browser": "preview-browser",
         "desktop": "computer-use-fallback",
         "artifact": "artifact-tool-plus-render-verify",
+        "runtime": "isolated-runtime-workspace",
         "shell": "shell-only-when-dedicated-tool-is-insufficient",
         "git": "git-guarded-workflow",
         "delete": "explicit-permission-required",
@@ -692,7 +695,7 @@ def _preferred_tool_surface(category: str) -> str:
 def _category_base_risk(category: str) -> str:
     if category == "delete":
         return RISK_HIGH
-    if category in {"edit", "shell", "git", "desktop", "browser", "artifact"}:
+    if category in {"edit", "shell", "git", "desktop", "browser", "artifact", "runtime"}:
         return RISK_MEDIUM
     return RISK_LOW
 
@@ -712,6 +715,8 @@ def _tool_contract_reason(category: str, tool_name: str) -> str:
         return f"{tool_name} inspects or interacts with page state and should capture evidence after actions."
     if category == "artifact":
         return f"{tool_name} creates or inspects deliverables and should render/verify final output."
+    if category == "runtime":
+        return f"{tool_name} works in an isolated runtime workspace and should return artifacts, diagnostics, or patches instead of directly changing the source project."
     if category == "delete":
         return f"{tool_name} can remove data and requires explicit narrow approval."
     return f"{tool_name} follows the generic Metis tool contract."
@@ -721,6 +726,7 @@ def _safer_tool_alternative(category: str) -> str:
     return {
         "shell": "Use dedicated tools such as read_file, grep_search, robust_replace_in_file, run_tests, or a domain tool first.",
         "desktop": "Use file/code/document/browser tools in the background before taking over the desktop.",
+        "runtime": "Prefer copy-mode runtime sessions and export a patch before writing back to the source project.",
         "delete": "Prefer moving to a backup location or asking for exact confirmation.",
         "git": "Run check_git_status and git_diff before any commit or push.",
         "edit": "Use read_file plus diff-mode replacement instead of whole-file rewrites.",

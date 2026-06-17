@@ -36,6 +36,154 @@ def get_settings() -> Any:
     return jsonify(get_runtime_settings())
 
 
+@settings_bp.route("/settings/document-converters", methods=["GET"])
+def document_converters_status() -> Any:
+    from backend.runtime.document_converters import document_converter_status
+
+    return jsonify(document_converter_status().to_dict())
+
+
+@settings_bp.route("/settings/runtime-manager", methods=["GET"])
+def runtime_manager_status_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_status
+
+    return jsonify(runtime_manager_status())
+
+
+@settings_bp.route("/settings/runtime-manager/import-plan", methods=["POST"])
+def runtime_manager_import_plan_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_import_plan
+
+    return jsonify(runtime_manager_import_plan())
+
+
+@settings_bp.route("/settings/runtime-manager/import", methods=["POST"])
+def runtime_manager_import_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_import
+
+    return jsonify(runtime_manager_import())
+
+
+@settings_bp.route("/settings/runtime-manager/build-plan", methods=["POST"])
+def runtime_manager_build_plan_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_build_plan
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(runtime_manager_build_plan(profile=str(data.get("profile") or "standard")))
+
+
+@settings_bp.route("/settings/runtime-manager/prepare-bundle", methods=["POST"])
+def runtime_manager_prepare_bundle_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_prepare_bundle
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(
+        runtime_manager_prepare_bundle(
+            version=str(data.get("version") or ""),
+            channel=str(data.get("channel") or "local"),
+        )
+    )
+
+
+@settings_bp.route("/settings/runtime-manager/package-bundle", methods=["POST"])
+def runtime_manager_package_bundle_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_package_bundle
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(
+        runtime_manager_package_bundle(
+            version=str(data.get("version") or ""),
+            channel=str(data.get("channel") or "local"),
+        )
+    )
+
+
+@settings_bp.route("/settings/runtime-manager/package-vm-bundle", methods=["POST"])
+def runtime_manager_package_vm_bundle_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_package_vm_bundle
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(
+        runtime_manager_package_vm_bundle(
+            version=str(data.get("version") or ""),
+            channel=str(data.get("channel") or "direct"),
+        )
+    )
+
+
+@settings_bp.route("/settings/runtime-manager/build-vm-assets", methods=["POST"])
+def runtime_manager_build_vm_assets_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_build_vm_assets
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(
+        runtime_manager_build_vm_assets(
+            version=str(data.get("version") or ""),
+            channel=str(data.get("channel") or "direct"),
+            profile=str(data.get("profile") or "standard"),
+            allow_network=bool(data.get("allow_network") or data.get("allowNetwork")),
+            dry_run=bool(data.get("dry_run", data.get("dryRun", True))),
+            force=bool(data.get("force")),
+            package_bundle=bool(data.get("package_bundle") or data.get("packageBundle")),
+            rootfs_vhdx_path=str(data.get("rootfs_vhdx_path") or data.get("rootfsVhdxPath") or ""),
+            kernel_path=str(data.get("kernel_path") or data.get("kernelPath") or ""),
+            initrd_path=str(data.get("initrd_path") or data.get("initrdPath") or ""),
+            metis_bin_path=str(data.get("metis_bin_path") or data.get("metisBinPath") or ""),
+        )
+    )
+
+
+@settings_bp.route("/settings/runtime-manager/validate-release", methods=["POST"])
+def runtime_manager_validate_release_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_validate_release_source
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(runtime_manager_validate_release_source(url=str(data.get("url") or "")))
+
+
+@settings_bp.route("/settings/runtime-manager/startup-test", methods=["POST"])
+def runtime_manager_startup_test_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_startup_test
+
+    return jsonify(runtime_manager_startup_test())
+
+
+@settings_bp.route("/settings/runtime-manager/repair", methods=["POST"])
+def runtime_manager_repair_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_repair
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(
+        runtime_manager_repair(
+            source=str(data.get("source") or "auto"),
+            allow_download=bool(data.get("allow_download") or data.get("allowDownload")),
+            force=bool(data.get("force")),
+        )
+    )
+
+
+@settings_bp.route("/settings/runtime-manager/ensure", methods=["POST"])
+def runtime_manager_ensure_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_ensure
+
+    return jsonify(runtime_manager_ensure())
+
+
+@settings_bp.route("/settings/runtime-manager/smoke", methods=["POST"])
+def runtime_manager_smoke_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_smoke
+
+    return jsonify(runtime_manager_smoke())
+
+
+@settings_bp.route("/settings/runtime-manager/diagnostics", methods=["POST"])
+def runtime_manager_diagnostics_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_export_diagnostics
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(runtime_manager_export_diagnostics(session_id=str(data.get("session_id") or "")))
+
+
 @settings_bp.route("/settings", methods=["POST"])
 def update_settings() -> Any:
     data = request.get_json(silent=True) or {}

@@ -4,7 +4,6 @@ import csv
 import html.parser
 import io
 import re
-import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -12,6 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, List
 from xml.etree import ElementTree as ET
+
+from backend.runtime.document_converters import (
+    antiword_path,
+    document_converter_status,
+    soffice_path,
+)
 
 
 MAX_UPLOAD_PARSE_CHARS = 50_000
@@ -145,7 +150,7 @@ def dependency_for_extension(ext: str) -> str:
         ".xltx": "openpyxl",
         ".doc": "LibreOffice soffice or antiword",
         ".ppt": "LibreOffice soffice",
-        ".xls": "LibreOffice soffice or xlrd",
+        ".xls": "xlrd or LibreOffice soffice",
     }
     return deps.get(ext.lower(), "built-in parser")
 
@@ -442,8 +447,14 @@ def _extract_epub(data: bytes) -> str:
 
 
 def _extract_legacy_office(data: bytes, ext: str, filename: str) -> str:
+    if ext == ".xls":
+        try:
+            return _extract_xls_with_xlrd(data)
+        except MissingParserDependency:
+            pass
+
     if ext == ".doc":
-        antiword = shutil.which("antiword")
+        antiword = antiword_path()
         if antiword:
             return _run_converter_stdout([antiword], data, ext, filename)
 
@@ -451,11 +462,44 @@ def _extract_legacy_office(data: bytes, ext: str, filename: str) -> str:
     if converted:
         return converted
 
+    status = document_converter_status()
+    hints = "; ".join(status.to_dict().get("hints", []))
     raise UnsupportedFileType(
-        f"Legacy Office {ext} parsing needs LibreOffice soffice"
-        + (" or antiword" if ext == ".doc" else "")
-        + ". Please convert the file to docx/xlsx/pptx, or install LibreOffice and retry."
+        f"Legacy Office {ext} parsing needs {dependency_for_extension(ext)}. "
+        "Metis checked configured portable converters, PATH, and Python modules. "
+        f"{hints or 'Please convert the file to docx/xlsx/pptx, or install a converter and retry.'}"
     )
+
+
+def _extract_xls_with_xlrd(data: bytes) -> str:
+    try:
+        import xlrd  # type: ignore
+    except ImportError as exc:
+        raise MissingParserDependency(".xls", "xlrd", str(exc)) from exc
+
+    workbook = xlrd.open_workbook(file_contents=data)
+    sheets = []
+    for sheet in workbook.sheets():
+        rows = []
+        for row_index in range(min(sheet.nrows, 2000)):
+            values = [_stringify_xlrd_cell(sheet.cell(row_index, col_index)) for col_index in range(sheet.ncols)]
+            if any(value.strip() for value in values):
+                rows.append("\t".join(values))
+        if sheet.nrows > 2000:
+            rows.append("[...sheet truncated after 2000 rows...]")
+        if rows:
+            sheets.append(f"--- Sheet: {sheet.name} ---\n" + "\n".join(rows))
+    return "\n\n".join(sheets) or "(No data found in legacy spreadsheet)"
+
+
+def _stringify_xlrd_cell(cell: Any) -> str:
+    value = getattr(cell, "value", "")
+    ctype = int(getattr(cell, "ctype", 0) or 0)
+    if ctype == 0 or value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _run_converter_stdout(command: List[str], data: bytes, ext: str, filename: str) -> str:
@@ -476,7 +520,7 @@ def _run_converter_stdout(command: List[str], data: bytes, ext: str, filename: s
 
 
 def _convert_with_soffice(data: bytes, ext: str, filename: str) -> str:
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice = soffice_path()
     if not soffice:
         return ""
     with tempfile.TemporaryDirectory(prefix="metis-parse-") as temp_dir:

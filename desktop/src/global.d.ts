@@ -79,6 +79,7 @@ declare global {
         filters?: Array<{ name: string; extensions: string[] }>;
       }) => Promise<{ canceled: boolean; path?: string }>;
       openExternal: (url: string) => Promise<{ ok: boolean }>;
+      openPath: (path: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       getPathForFile: (file: File) => string;
       onBackendExit: (callback: (payload: unknown) => void) => () => void;
       onBootEvent: (callback: (payload: BootEvent) => void) => () => void;

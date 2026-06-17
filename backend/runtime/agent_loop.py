@@ -752,6 +752,14 @@ _SAFE_TOOLS: set[str] = {
     "generate_repo_map",
     "desktop_screenshot",
     "desktop_inventory",
+    "metis_rootfs_asset_status",
+    "metis_rootfs_source_status",
+    "metis_rootfs_builder_status",
+    "metis_rootfs_image_builder_status",
+    "metis_vm_bundle_status",
+    "metis_wsl_runtime_status",
+    "metis_sandbox_status",
+    "metis_runtime_status",
 }
 _PARALLEL_READONLY_TOOLS: set[str] = {
     "read_file",
@@ -773,6 +781,30 @@ _EDIT_TOOLS: set[str] = {
     "delete_file",
     "delete_directory",
     "create_directory",
+    "metis_rootfs_asset_download",
+    "metis_rootfs_build",
+    "metis_rootfs_image_build",
+    "metis_rootfs_asset_register",
+    "metis_runtime_bundle_package",
+    "metis_runtime_bundle_package_v2",
+    "metis_runtime_bundle_prepare",
+    "metis_vm_direct_assets_prepare",
+    "metis_vm_direct_runner_prepare",
+    "metis_vm_direct_runner_smoke",
+    "metis_vm_hcs_starter_prepare",
+    "metis_vm_hcs_starter_start",
+    "metis_vm_guest_handshake_prepare",
+    "metis_vm_guest_handshake_verify",
+    "metis_vm_rootfs_boot_verifier_prepare",
+    "metis_vm_rootfs_boot_verify",
+    "metis_vm_pack_adopt_reference",
+    "metis_vm_pack_scaffold",
+    "metis_wsl_runtime_import",
+    "metis_runtime_create",
+    "metis_runtime_run",
+    "metis_runtime_collect_artifacts",
+    "metis_runtime_export_patch",
+    "metis_runtime_export_diagnostics",
 }
 
 
@@ -2686,8 +2718,35 @@ def _format_tool_result(
 # ---------------------------------------------------------------------------
 
 _FILE_READ_TOOLS = {"read_file", "read_multiple_files"}
-_WRITE_TOOLS = {"write_file", "create_file", "append_to_file", "robust_replace_in_file",
-                "edit_code_ast", "apply_patch", "rename_file_update_refs", "delete_file"}
+_WRITE_TOOLS = {
+    "write_file",
+    "create_file",
+    "append_to_file",
+    "robust_replace_in_file",
+    "edit_code_ast",
+    "apply_patch",
+    "rename_file_update_refs",
+    "delete_file",
+    "metis_rootfs_asset_download",
+    "metis_rootfs_build",
+    "metis_rootfs_image_build",
+    "metis_rootfs_asset_register",
+    "metis_runtime_bundle_package",
+    "metis_runtime_bundle_package_v2",
+    "metis_runtime_bundle_prepare",
+    "metis_vm_direct_assets_prepare",
+    "metis_vm_direct_runner_prepare",
+    "metis_vm_direct_runner_smoke",
+    "metis_vm_hcs_starter_prepare",
+    "metis_vm_hcs_starter_start",
+    "metis_vm_guest_handshake_prepare",
+    "metis_vm_guest_handshake_verify",
+    "metis_vm_rootfs_boot_verifier_prepare",
+    "metis_vm_rootfs_boot_verify",
+    "metis_vm_pack_adopt_reference",
+    "metis_vm_pack_scaffold",
+    "metis_wsl_runtime_import",
+}
 _SEARCH_TOOLS = {"search_in_file", "search_in_codebase", "find_files"}
 _SHELL_TOOLS = {"execute_bash_command", "execute_command"}
 _LIST_TOOLS = {"list_directory"}

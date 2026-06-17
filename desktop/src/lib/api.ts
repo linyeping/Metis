@@ -11,6 +11,8 @@ import type {
   CronTask,
   DeskGoalLogEntry,
   DeskStatusPayload,
+  DocumentConverterCandidate,
+  DocumentConverterStatus,
   FileChangeRevertResult,
   FirstRunStatus,
   MemoryPayload,
@@ -35,6 +37,15 @@ import type {
   ProviderUsagePayload,
   ProviderValidation,
   RewindResult,
+  RuntimeManagerAction,
+  RuntimeManagerCommandResult,
+  RuntimeManagerHealth,
+  RuntimeManagerJobSummary,
+  RuntimeManagerPaths,
+  RuntimeManagerReleaseIntegration,
+  RuntimeManagerSessionSummary,
+  RuntimeManagerStatus,
+  RuntimeManagerVmRuntime,
   RuntimeSettings,
   SearchResult,
   Session,
@@ -737,6 +748,334 @@ export async function updateSettings(settings: Partial<RuntimeSettings> & { apiK
       python_path: settings.pythonPath,
     }),
   });
+}
+
+function converterCandidateFromRecord(row: Record<string, unknown>): DocumentConverterCandidate {
+  return {
+    name: stringValue(row.name),
+    path: stringValue(row.path),
+    source: stringValue(row.source),
+    available: Boolean(row.available),
+  };
+}
+
+export async function getDocumentConverters(): Promise<DocumentConverterStatus> {
+  const data = await requestJson<Record<string, unknown>>('/settings/document-converters');
+  const converters = recordValue(data.converters);
+  const support = recordValue(data.support);
+  const candidate = (name: string): DocumentConverterCandidate | null => {
+    const row = converters[name];
+    if (!row || typeof row !== 'object') return null;
+    return converterCandidateFromRecord(recordValue(row));
+  };
+  return {
+    ok: Boolean(data.ok),
+    schema: stringValue(data.schema),
+    support: {
+      doc: Boolean(support.doc),
+      xls: Boolean(support.xls),
+      ppt: Boolean(support.ppt),
+    },
+    missing: stringArray(data.missing),
+    converters: {
+      soffice: candidate('soffice'),
+      antiword: candidate('antiword'),
+      pandoc: candidate('pandoc'),
+      xlrd: candidate('xlrd'),
+    },
+    searchRoots: stringArray(data.search_roots ?? data.searchRoots),
+    recommendedRoots: stringArray(data.recommended_roots ?? data.recommendedRoots),
+    hints: stringArray(data.hints),
+  };
+}
+
+function runtimeManagerActionFromRecord(row: Record<string, unknown>): RuntimeManagerAction {
+  return {
+    id: stringValue(row.id),
+    label: stringValue(row.label),
+    status: stringValue(row.status),
+    description: stringValue(row.description),
+  };
+}
+
+function runtimeManagerHealthFromRecord(row: Record<string, unknown>): RuntimeManagerHealth {
+  return {
+    preferredBackend: stringValue(row.preferred_backend ?? row.preferredBackend),
+    ready: Boolean(row.ready),
+    metisWslReady: Boolean(row.metis_wsl_ready ?? row.metisWslReady),
+    wslAvailable: Boolean(row.wsl_available ?? row.wslAvailable),
+    dockerAvailable: Boolean(row.docker_available ?? row.dockerAvailable),
+    rootfsReady: Boolean(row.rootfs_ready ?? row.rootfsReady),
+    vmPackReady: Boolean(row.vm_pack_ready ?? row.vmPackReady),
+    runtimeBundleReady: Boolean(row.runtime_bundle_ready ?? row.runtimeBundleReady),
+    vmRuntimeInstalled: Boolean(row.vm_runtime_installed ?? row.vmRuntimeInstalled),
+    vmGuestProtocolReady: Boolean(row.vm_guest_protocol_ready ?? row.vmGuestProtocolReady),
+    vmHcsDirectReady: Boolean(row.vm_hcs_direct_ready ?? row.vmHcsDirectReady),
+    vmAssetsVerified: Boolean(row.vm_assets_verified ?? row.vmAssetsVerified),
+    vmAssetBytes: numberValue(row.vm_asset_bytes ?? row.vmAssetBytes),
+    bundledRuntimePackAvailable: Boolean(row.bundled_runtime_pack_available ?? row.bundledRuntimePackAvailable),
+    runtimeDownloadAvailable: Boolean(row.runtime_download_available ?? row.runtimeDownloadAvailable),
+  };
+}
+
+function runtimeManagerPathsFromRecord(row: Record<string, unknown>): RuntimeManagerPaths {
+  return {
+    root: stringValue(row.root),
+    rootfs: stringValue(row.rootfs),
+    wslInstallDir: stringValue(row.wsl_install_dir ?? row.wslInstallDir),
+    bundlePath: stringValue(row.bundle_path ?? row.bundlePath),
+    vmRuntimeBundle: stringValue(row.vm_runtime_bundle ?? row.vmRuntimeBundle),
+    runtimePackInstallDir: stringValue(row.runtime_pack_install_dir ?? row.runtimePackInstallDir),
+    bundledRuntimePack: stringValue(row.bundled_runtime_pack ?? row.bundledRuntimePack),
+    runtimeBundleManifest: stringValue(row.runtime_bundle_manifest ?? row.runtimeBundleManifest),
+    artifactsRoot: stringValue(row.artifacts_root ?? row.artifactsRoot),
+    diagnosticsRoot: stringValue(row.diagnostics_root ?? row.diagnosticsRoot),
+    runtimeJobsRoot: stringValue(row.runtime_jobs_root ?? row.runtimeJobsRoot),
+  };
+}
+
+function runtimeManagerVmRuntimeFromRecord(row: Record<string, unknown>): RuntimeManagerVmRuntime {
+  return {
+    installed: Boolean(row.installed),
+    installDir: stringValue(row.install_dir ?? row.installDir),
+    bundlePath: stringValue(row.bundle_path ?? row.bundlePath),
+    bundleDetected: Boolean(row.bundle_detected ?? row.bundleDetected),
+    metisOwned: Boolean(row.metis_owned ?? row.metisOwned),
+    runnerReady: Boolean(row.runner_ready ?? row.runnerReady),
+    guestProtocolReady: Boolean(row.guest_protocol_ready ?? row.guestProtocolReady),
+    hcsDirectReady: Boolean(row.hcs_direct_ready ?? row.hcsDirectReady),
+    runnerTransport: stringValue(row.runner_transport ?? row.runnerTransport),
+    assetsVerified: Boolean(row.assets_verified ?? row.assetsVerified),
+    assetBytes: numberValue(row.asset_bytes ?? row.assetBytes),
+    missingRequired: stringArray(row.missing_required ?? row.missingRequired),
+    assetReport: recordValue(row.asset_report ?? row.assetReport),
+    selectedBundle: recordValue(row.selected_bundle ?? row.selectedBundle),
+    candidateCount: numberValue(row.candidate_count ?? row.candidateCount),
+    reason: stringValue(row.reason),
+    host: recordValue(row.host),
+  };
+}
+
+function runtimeManagerReleaseIntegrationFromRecord(row: Record<string, unknown>): RuntimeManagerReleaseIntegration {
+  const strategies = Array.isArray(row.strategies) ? row.strategies : [];
+  return {
+    ok: Boolean(row.ok),
+    schema: stringValue(row.schema),
+    installStrategy: stringValue(row.install_strategy ?? row.installStrategy),
+    installedPath: stringValue(row.installed_path ?? row.installedPath),
+    bundledAvailable: Boolean(row.bundled_available ?? row.bundledAvailable),
+    bundledPath: stringValue(row.bundled_path ?? row.bundledPath),
+    downloadAvailable: Boolean(row.download_available ?? row.downloadAvailable),
+    downloadUrl: stringValue(row.download_url ?? row.downloadUrl),
+    autoPrepareEnabled: Boolean(row.auto_prepare_enabled ?? row.autoPrepareEnabled),
+    installedReport: recordValue(row.installed_report ?? row.installedReport),
+    bundledReport: recordValue(row.bundled_report ?? row.bundledReport),
+    strategies: strategies.map(item => recordValue(item)),
+    notes: stringArray(row.notes),
+  };
+}
+
+function runtimeManagerJobFromRecord(row: Record<string, unknown>): RuntimeManagerJobSummary {
+  return {
+    jobId: stringValue(row.job_id ?? row.jobId),
+    sessionId: stringValue(row.session_id ?? row.sessionId),
+    task: stringValue(row.task),
+    status: stringValue(row.status),
+    backend: stringValue(row.backend),
+    createdAt: numberValue(row.created_at ?? row.createdAt),
+    updatedAt: numberValue(row.updated_at ?? row.updatedAt),
+    artifactsDir: stringValue(row.artifacts_dir ?? row.artifactsDir),
+    diagnosticsZip: stringValue(row.diagnostics_zip ?? row.diagnosticsZip),
+  };
+}
+
+function runtimeManagerSessionFromRecord(row: Record<string, unknown>): RuntimeManagerSessionSummary {
+  return {
+    sessionId: stringValue(row.session_id ?? row.sessionId),
+    task: stringValue(row.task),
+    status: stringValue(row.status),
+    mode: stringValue(row.mode),
+    backend: stringValue(row.backend),
+    updatedAt: numberValue(row.updated_at ?? row.updatedAt),
+    workspaceDir: stringValue(row.workspace_dir ?? row.workspaceDir),
+    artifactsDir: stringValue(row.artifacts_dir ?? row.artifactsDir),
+  };
+}
+
+function runtimeManagerStatusFromRecord(row: Record<string, unknown>): RuntimeManagerStatus {
+  const sessions = recordValue(row.sessions);
+  const sessionRows = Array.isArray(sessions.sessions) ? sessions.sessions : [];
+  const jobs = recordValue(row.jobs);
+  const jobRows = Array.isArray(jobs.jobs) ? jobs.jobs : [];
+  const actions = Array.isArray(row.actions) ? row.actions : [];
+  return {
+    ok: Boolean(row.ok),
+    schema: stringValue(row.schema),
+    generatedAt: numberValue(row.generated_at ?? row.generatedAt),
+    root: stringValue(row.root),
+    health: runtimeManagerHealthFromRecord(recordValue(row.health)),
+    paths: runtimeManagerPathsFromRecord(recordValue(row.paths)),
+    actions: actions.map(item => runtimeManagerActionFromRecord(recordValue(item))),
+    notes: stringArray(row.notes),
+    sandbox: recordValue(row.sandbox),
+    rootfs: recordValue(row.rootfs),
+    builder: recordValue(row.builder),
+    vmBundle: recordValue(row.vm_bundle ?? row.vmBundle),
+    vmRuntime: runtimeManagerVmRuntimeFromRecord(recordValue(row.vm_runtime ?? row.vmRuntime)),
+    releaseIntegration: runtimeManagerReleaseIntegrationFromRecord(recordValue(row.release_integration ?? row.releaseIntegration)),
+    runtimeBundle: recordValue(row.runtime_bundle ?? row.runtimeBundle),
+    wslRuntime: recordValue(row.wsl_runtime ?? row.wslRuntime),
+    sessions: {
+      sessions: sessionRows.map(item => runtimeManagerSessionFromRecord(recordValue(item))),
+    },
+    jobs: {
+      jobs: jobRows.map(item => runtimeManagerJobFromRecord(recordValue(item))),
+    },
+  };
+}
+
+function runtimeManagerCommandResultFromRecord(row: Record<string, unknown>): RuntimeManagerCommandResult {
+  return {
+    ...row,
+    ok: Boolean(row.ok),
+    schema: stringValue(row.schema),
+    message: stringValue(row.message),
+    error: stringValue(row.error),
+    alreadyInstalled: Boolean(row.already_installed ?? row.alreadyInstalled),
+    diagnosticsZip: stringValue(row.diagnostics_zip ?? row.diagnosticsZip),
+  };
+}
+
+export async function getRuntimeManagerStatus(): Promise<RuntimeManagerStatus> {
+  return runtimeManagerStatusFromRecord(await requestJson<Record<string, unknown>>('/settings/runtime-manager'));
+}
+
+export async function runtimeManagerImportPlan(): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/import-plan', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  );
+}
+
+export async function runtimeManagerImport(): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/import', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  );
+}
+
+export async function runtimeManagerBuildPlan(profile = 'standard'): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/build-plan', {
+      method: 'POST',
+      body: JSON.stringify({ profile }),
+    }),
+  );
+}
+
+export async function runtimeManagerPrepareBundle(version = '', channel = 'local'): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/prepare-bundle', {
+      method: 'POST',
+      body: JSON.stringify({ version, channel }),
+    }),
+  );
+}
+
+export async function runtimeManagerPackageBundle(version = '', channel = 'local'): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/package-bundle', {
+      method: 'POST',
+      body: JSON.stringify({ version, channel }),
+    }),
+  );
+}
+
+export async function runtimeManagerPackageVmBundle(version = '', channel = 'direct'): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/package-vm-bundle', {
+      method: 'POST',
+      body: JSON.stringify({ version, channel }),
+    }),
+  );
+}
+
+export async function runtimeManagerBuildVmAssets(options: {
+  dryRun?: boolean;
+  allowNetwork?: boolean;
+  force?: boolean;
+  packageBundle?: boolean;
+  version?: string;
+  channel?: string;
+  profile?: string;
+} = {}): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/build-vm-assets', {
+      method: 'POST',
+      body: JSON.stringify({
+        dry_run: options.dryRun ?? true,
+        allow_network: Boolean(options.allowNetwork),
+        force: Boolean(options.force),
+        package_bundle: Boolean(options.packageBundle),
+        version: options.version || '',
+        channel: options.channel || 'direct',
+        profile: options.profile || 'standard',
+      }),
+    }),
+  );
+}
+
+export async function runtimeManagerValidateRelease(url = ''): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/validate-release', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  );
+}
+
+export async function runtimeManagerStartupTest(): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/startup-test', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  );
+}
+
+export async function runtimeManagerRepair(options: { source?: string; allowDownload?: boolean; force?: boolean } = {}): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/repair', {
+      method: 'POST',
+      body: JSON.stringify({
+        source: options.source || 'auto',
+        allow_download: Boolean(options.allowDownload),
+        force: Boolean(options.force),
+      }),
+    }),
+  );
+}
+
+export async function runtimeManagerSmoke(): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/smoke', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  );
+}
+
+export async function runtimeManagerDiagnostics(sessionId = ''): Promise<RuntimeManagerCommandResult> {
+  return runtimeManagerCommandResultFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/runtime-manager/diagnostics', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    }),
+  );
 }
 
 // FABLEADV-15: config-driven provider registry (builtin + user providers.json).

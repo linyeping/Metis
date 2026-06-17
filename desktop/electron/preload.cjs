@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('metis', {
   pickPythonExe: () => ipcRenderer.invoke('metis:pick-python-exe'),
   saveFile: payload => ipcRenderer.invoke('metis:save-file', payload),
   openExternal: url => ipcRenderer.invoke('metis:open-external', url),
+  openPath: path => ipcRenderer.invoke('metis:open-path', path),
   bootState: () => ipcRenderer.invoke('metis:boot-state'),
   retryBackend: () => ipcRenderer.invoke('metis:retry-backend'),
   openLog: () => ipcRenderer.invoke('metis:open-log'),

@@ -9,6 +9,7 @@ langgraph-sdk==0.1.74
 PyPDF2>=3.0.0
 python-docx>=1.0.0
 openpyxl>=3.1.0
+xlrd>=2.0.1
 
 # Desktop tray integration
 pystray>=0.19.5

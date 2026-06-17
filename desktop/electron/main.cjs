@@ -3444,6 +3444,28 @@ ipcMain.handle('metis:save-file', async (_event, payload = {}) => {
 ipcMain.handle('metis:open-external', (_event, url) => {
   return { ok: openExternalSafe(url) }
 })
+
+ipcMain.handle('metis:open-path', async (_event, targetPath) => {
+  const raw = String(targetPath || '').trim()
+  if (!raw || /^[a-z]+:\/\//i.test(raw)) {
+    return { ok: false, error: 'invalid local path' }
+  }
+  const resolved = path.resolve(raw)
+  if (!fsSync.existsSync(resolved)) {
+    return { ok: false, error: 'path does not exist', path: resolved }
+  }
+  try {
+    const stat = fsSync.statSync(resolved)
+    if (stat.isDirectory()) {
+      const error = await shell.openPath(resolved)
+      return { ok: !error, path: resolved, error: error || undefined }
+    }
+    shell.showItemInFolder(resolved)
+    return { ok: true, path: resolved }
+  } catch (error) {
+    return { ok: false, path: resolved, error: error?.message || String(error) }
+  }
+})
 ipcMain.handle('metis:terminal-run', (_event, payload = {}) => runTerminalCommand(payload))
 ipcMain.handle('metis:terminal-create', (_event, payload = {}) => createTerminalSession(payload))
 ipcMain.handle('metis:terminal-input', (_event, sessionId, data) => inputTerminalSession(sessionId, data))

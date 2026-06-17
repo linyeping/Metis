@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import io
+import sys
+import types
 import zipfile
 
 import pytest
 
+from backend.runtime.document_converters import document_converter_status
 from backend.web.file_extractors import UnsupportedFileType, extract_uploaded_file, truncate_text
 
 
@@ -47,6 +50,35 @@ def test_extract_xlsx_reads_sheet_rows() -> None:
     assert "period\t12.5" in parsed.text
 
 
+def test_extract_xls_uses_xlrd_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeCell:
+        def __init__(self, value: object) -> None:
+            self.value = value
+            self.ctype = 1 if value not in ("", None) else 0
+
+    class FakeSheet:
+        name = "Legacy"
+        nrows = 2
+        ncols = 2
+
+        def cell(self, row: int, col: int) -> FakeCell:
+            rows = [["name", "value"], ["period", 12.5]]
+            return FakeCell(rows[row][col])
+
+    class FakeBook:
+        def sheets(self) -> list[FakeSheet]:
+            return [FakeSheet()]
+
+    fake_xlrd = types.SimpleNamespace(open_workbook=lambda file_contents: FakeBook())
+    monkeypatch.setitem(sys.modules, "xlrd", fake_xlrd)
+
+    parsed = extract_uploaded_file("profiles.xls", b"legacy xls bytes")
+
+    assert parsed.extension == ".xls"
+    assert "--- Sheet: Legacy ---" in parsed.text
+    assert "period\t12.5" in parsed.text
+
+
 def test_extract_pptx_reads_slide_text_with_ooxml_fallback() -> None:
     xml = """<?xml version="1.0" encoding="UTF-8"?>
 <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -85,6 +117,15 @@ def test_legacy_doc_reports_converter_requirement_when_unavailable() -> None:
         assert "converter" in str(exc).lower() or "libreoffice" in str(exc).lower()
     else:
         assert parsed.extension == ".doc"
+
+
+def test_document_converter_status_reports_legacy_support_shape() -> None:
+    payload = document_converter_status().to_dict()
+
+    assert payload["schema"] == "metis.document_converter_status.v1"
+    assert set(payload["support"]) == {"doc", "xls", "ppt"}
+    assert set(payload["converters"]) == {"soffice", "antiword", "pandoc", "xlrd"}
+    assert isinstance(payload["hints"], list)
 
 
 def test_truncate_text_reports_original_count() -> None:

@@ -36,7 +36,13 @@ docs/dev-log/
 NEWUPDATE.md
 .metis/.gitignore
 .metis/audit/
+.metis/artifacts/
 .metis/cache/
+.metis/diagnostics/
 .metis/memory.json
 .metis/project-profile.json
+.metis/runtime/
+.metis/runtime-jobs/
+.metis/runtime-pack/
+.metis/wsl/
 .metis/tool-permissions.jsonl

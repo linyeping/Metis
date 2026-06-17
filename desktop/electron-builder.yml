@@ -22,6 +22,14 @@ extraResources:
       - "!var/rely/**/weights/**"
   - from: resources/icons
     to: icons
+  - from: resources/runtime-pack
+    to: runtime-pack
+    filter:
+      - "**/*"
+      - "!**/.env"
+      - "!**/*.key"
+      - "!**/*.pfx"
+      - "!**/*.pem"
 win:
   target:
     - nsis

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -13,6 +12,7 @@ from backend.tools.coding.foundation.core_mechanisms.path_security import (
     safe_path_for_read,
     safe_path_for_write,
 )
+from backend.runtime.document_converters import soffice_path
 
 from .pdf_tools import pdf_render_pages
 
@@ -123,13 +123,13 @@ def docx_to_pdf(path: str, output_dir: str = "") -> str:
     source, error = _resolve_existing_file(path)
     if source is None:
         return _json_error(error or "DOCX file not found", path=path)
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice = soffice_path()
     if not soffice:
         return _json_error(
-            "Missing DOCX renderer: LibreOffice/soffice was not found on PATH.",
+            "Missing DOCX renderer: LibreOffice/soffice was not found.",
             path=str(source),
             dependency="LibreOffice soffice",
-            install_hint="Install LibreOffice or bundle soffice with Metis.",
+            install_hint="Install LibreOffice, set METIS_SOFFICE, or bundle soffice under resources/document-converters.",
         )
     out_dir = _output_dir(output_dir, "output/docx")
     cmd = [

@@ -43,5 +43,6 @@ Work from evidence, stay honest about uncertainty, and verify before claiming su
 - Read before write.
 - Think before act.
 - Verify after change.
+- Prefer background file/code/artifact tools and isolated runtime sessions for deliverables; use desktop takeover only when the task truly depends on visible app interaction.
 - Keep diffs minimal.
 - Finish one task before starting the next.
