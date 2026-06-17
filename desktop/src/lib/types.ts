@@ -627,6 +627,8 @@ export interface PermissionAuditEntry {
   action: string;
   approved: boolean;
   remember: string;
+  grant?: string;
+  rootPath?: string;
   ruleId: string;
   source: string;
   arguments: unknown;
@@ -634,6 +636,50 @@ export interface PermissionAuditEntry {
   decisionReason?: string;
   riskLevel?: string;
   mode?: string;
+}
+
+export interface PermissionExplainer {
+  explanation: string;
+  reasoning: string;
+  risk: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | string;
+  risk_level?: string;
+  autoguard?: {
+    thinking?: string;
+    shouldBlock?: boolean;
+    should_block?: boolean;
+    reason?: string;
+    riskLevel?: string;
+    risk_level?: string;
+  };
+}
+
+export interface PermissionRequestMetadata {
+  decision?: {
+    action?: string;
+    source?: string;
+    reason?: string;
+    mode?: string;
+    risk_level?: string;
+    riskLevel?: string;
+  };
+  pathSafety?: {
+    allowed: boolean;
+    code: string;
+    message: string;
+    path: string;
+    suggestedRoot: string;
+    outsideWorkspace: boolean;
+  };
+  explainer?: PermissionExplainer;
+  permissionExplainer?: PermissionExplainer;
+  autoguard?: PermissionExplainer['autoguard'];
+  toolContract?: AgentToolContract;
+  suggestedWritableRoot: string;
+  suggestedWritableRoots: PermissionSuggestedWritableRoot[];
+  canGrantWritableRoot: boolean;
+  canGrantFullAccess: boolean;
+  workspaceRoot: string;
 }
 
 export interface PermissionControlPlanePayload {
@@ -646,8 +692,25 @@ export interface PermissionControlPlanePayload {
   notes: string[];
 }
 
+export interface PermissionWritableRoot {
+  id: string;
+  path: string;
+  source: string;
+  createdAt: number;
+  updatedAt: number;
+  workspaceRoot?: string;
+}
+
+export interface PermissionSuggestedWritableRoot {
+  key: string;
+  path: string;
+  exists: boolean;
+}
+
 export interface PermissionStatePayload {
   rules: PermissionRule[];
+  writableRoots: PermissionWritableRoot[];
+  suggestedWritableRoots: PermissionSuggestedWritableRoot[];
   audit: PermissionAuditEntry[];
   controlPlane?: PermissionControlPlanePayload;
   path: string;
@@ -722,6 +785,91 @@ export interface ChatToolEvent {
   finishedAt?: number;
   summary?: string;
   errorHint?: string;
+}
+
+export interface AwaySummaryPayload {
+  ok: boolean;
+  summary: string;
+}
+
+export interface PromptSuggestionsPayload {
+  ok: boolean;
+  suggestions: string[];
+}
+
+export interface AgentRuntimePromptProfile {
+  version: string;
+  cachePolicy: string;
+  stablePrefix: string[];
+  sessionSuffix: string[];
+  requestSuffix: string[];
+  scratchpadPath: string;
+  compactMode: string;
+  compactCount: number;
+}
+
+export interface AgentToolContract {
+  version: string;
+  tool: string;
+  category: string;
+  riskLevel: string;
+  preferredSurface: string;
+  readBeforeEdit: boolean;
+  verifyAfter: boolean;
+  requiresPermission: boolean;
+  why: string;
+  saferAlternative: string;
+}
+
+export interface AgentWorkerProfile {
+  id: string;
+  name: string;
+  status: 'pending' | 'running' | 'done' | 'error' | string;
+  progress: number;
+  summary: string;
+  toolCount: number;
+}
+
+export interface AgentCoordinatorProfile {
+  version: string;
+  mode: string;
+  task: string;
+  nextAction: string;
+  workers: AgentWorkerProfile[];
+  freshVerifier: {
+    enabled: boolean;
+    role: string;
+    rule: string;
+  };
+}
+
+export interface AgentProactiveProfile {
+  version: string;
+  enabled: boolean;
+  optInRequired: boolean;
+  state: string;
+  tickSeconds: number;
+  policies: string[];
+  lastActivityAt: number;
+}
+
+export interface AgentRuntimeProfilePayload {
+  ok: boolean;
+  promptRuntime: AgentRuntimePromptProfile;
+  toolContracts: {
+    version: string;
+    guidance: string[];
+    items: AgentToolContract[];
+  };
+  coordinator: AgentCoordinatorProfile;
+  proactive: AgentProactiveProfile;
+}
+
+export interface AutoTitlePayload {
+  ok: boolean;
+  updated: boolean;
+  title: string;
+  error?: string;
 }
 
 export interface ChatSubagentEvent {
@@ -895,6 +1043,8 @@ export interface ChatStreamEvent {
   call_id?: string;
   callId?: string;
   request_id?: string;
+  requestId?: string;
+  permission?: PermissionRequestMetadata | null;
   code?: string;
   title?: string;
   message?: string;

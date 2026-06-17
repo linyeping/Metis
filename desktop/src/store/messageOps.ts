@@ -114,7 +114,32 @@ export function toolErrorHint(result: unknown): string {
 }
 
 export function permissionDetails(event: NormalizedChatEvent): string {
-  return [`工具: ${event.toolName}`, `请求: ${event.requestId}`, '参数:', toolText(event.args)].join('\n');
+  const permission = event.permission;
+  const pathSafety = permission?.pathSafety;
+  const explainer = permission?.explainer || permission?.permissionExplainer;
+  const autoguard = explainer?.autoguard || permission?.autoguard;
+  const contract = permission?.toolContract;
+  const riskLevel = explainer?.riskLevel || permission?.decision?.riskLevel || permission?.decision?.risk_level || '';
+  return [
+    `工具: ${event.toolName}`,
+    `请求: ${event.requestId}`,
+    riskLevel ? `风险等级: ${riskLevel}` : '',
+    contract?.preferredSurface ? `工具契约: ${contract.preferredSurface}` : '',
+    contract?.why ? `选择原因: ${contract.why}` : '',
+    contract?.verifyAfter ? '验收要求: 执行后需要验证结果' : '',
+    contract?.saferAlternative ? `更稳替代: ${contract.saferAlternative}` : '',
+    explainer?.explanation ? `执行内容: ${explainer.explanation}` : '',
+    explainer?.reasoning ? `我的原因: ${explainer.reasoning}` : '',
+    explainer?.risk ? `风险: ${explainer.risk}` : '',
+    autoguard?.reason ? `AutoGuard: ${autoguard.shouldBlock || autoguard.should_block ? '需要确认' : '未发现阻断项'} · ${autoguard.reason}` : '',
+    pathSafety?.path ? `目标路径: ${pathSafety.path}` : '',
+    pathSafety?.suggestedRoot ? `建议授权目录: ${pathSafety.suggestedRoot}` : '',
+    permission?.decision?.reason ? `权限原因: ${permission.decision.reason}` : '',
+    '参数:',
+    toolText(event.args),
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 export function toolId(event: NormalizedChatEvent, messageId: string): string {
@@ -398,6 +423,7 @@ export function normalizedSnapshotEvent(event: Partial<NormalizedChatEvent> & { 
     toolName: event.toolName || 'tool',
     args: event.args,
     result: event.result,
+    summary: event.summary || '',
     callId: event.callId || `snapshot-${Date.now()}`,
     requestId: event.requestId || '',
     error: {
@@ -414,5 +440,6 @@ export function normalizedSnapshotEvent(event: Partial<NormalizedChatEvent> & { 
     memory: event.memory || null,
     todo: event.todo || null,
     subagent: event.subagent || null,
+    permission: event.permission || null,
   };
 }

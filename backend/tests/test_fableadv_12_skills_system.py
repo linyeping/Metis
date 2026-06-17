@@ -213,3 +213,22 @@ def test_builtin_artifact_skills_install_pdf_and_documents_tools(metis_home: Pat
     assert "office_report_from_code_run" in loaded_documents
     assert "desktop_win2_task" in loaded_documents
     assert "Prefer background file, code, chart, DOCX, and PDF tools" in loaded_documents
+
+
+def test_builtin_coding_agent_skill_installs_code_development_workflow(metis_home: Path, tmp_path: Path) -> None:
+    skills = {skill.name: skill for skill in discover_skills(workspace_root=str(tmp_path))}
+
+    assert "coding-agent" in skills
+    coding = skills["coding-agent"]
+    assert "read_file" in coding.allowed_tools
+    assert "run_tests" in coding.allowed_tools
+    assert "robust_replace_in_file" in coding.allowed_tools
+    assert "desktop_win2_task" in coding.disallowed_tools
+
+    loaded = load_skill_content("coding-agent", workspace_root=str(tmp_path))
+
+    assert "Use this skill for serious code development work" in loaded
+    assert "Prefer repository tools over desktop control" in loaded
+    assert "npm run test:fixed-regression" in loaded
+    assert "Allowed tools: read_file" in loaded
+    assert "Disallowed tools: desktop_action, desktop_win2_task" in loaded

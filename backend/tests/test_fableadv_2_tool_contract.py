@@ -37,11 +37,13 @@ def test_lean_profile_is_default_and_hides_overlap_tools(monkeypatch) -> None:
     schemas = _tool_schemas_for_config(registry, AgentConfig(llm_backend="fake", llm_model="fake"))
     names = _schema_names(schemas)
 
-    assert len(names) <= 20
+    assert len(names) <= len(LEAN_PROFILE)
     assert "read_file" in names
     assert "robust_replace_in_file" in names
     assert "browse_web" in names
     assert "load_skill" in names
+    assert "pdf_extract_text" in names
+    assert "docx_create" in names
     assert "semantic_search" not in names
     assert "read_file_chunk" not in names
 

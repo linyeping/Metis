@@ -22,6 +22,32 @@ import { compactPath, formatNoticeTime } from './threadUtils';
 import { useT } from '../../hooks/useT';
 
 // ---------------------------------------------------------------------------
+// AwaySummaryNotice — return-to-session recap
+// ---------------------------------------------------------------------------
+
+export function AwaySummaryNotice({ summary, onDismiss }: { summary: string; onDismiss: () => void }) {
+  const t = useT();
+  if (!summary.trim()) return null;
+  return (
+    <aside className="away-summary-notice" aria-label={t('会话摘要')}>
+      <div className="away-summary-head">
+        <span className="away-summary-icon">
+          <Sparkles size={15} />
+        </span>
+        <div>
+          <strong>{t('回来后可以从这里继续')}</strong>
+          <small>{t('Metis 已整理最近上下文')}</small>
+        </div>
+        <button className="icon-button subtle" type="button" aria-label={t('关闭会话摘要')} onClick={onDismiss}>
+          <X size={14} />
+        </button>
+      </div>
+      <p>{summary}</p>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // LearningNotice — 记忆学习通知
 // ---------------------------------------------------------------------------
 

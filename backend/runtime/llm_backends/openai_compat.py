@@ -22,6 +22,7 @@ from ._common import (
     usage_from_openai,
 )
 from .base import LLMBackend, LLMResponse, Usage
+from .deepseek_schema import sanitize_deepseek_strict_tools
 
 _VISION_MODELS = {
     "gpt-4o",
@@ -137,14 +138,15 @@ class OpenAICompatBackend(LLMBackend):
         timeout: float = 120.0,
         cancel_event: Optional[threading.Event] = None,
     ) -> LLMResponse:
+        request_tools = _provider_tools(self.base_url, self.model, tools)
         payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": _effective_tool_temperature(self.base_url, self.model, temperature, tools),
+            "temperature": _effective_tool_temperature(self.base_url, self.model, temperature, request_tools),
             "max_tokens": max_tokens,
         }
-        if tools:
-            payload["tools"] = tools
+        if request_tools:
+            payload["tools"] = request_tools
         reasoning = self._reasoning_params()
         if reasoning:
             payload.update(reasoning)
@@ -167,7 +169,7 @@ class OpenAICompatBackend(LLMBackend):
         thinking = message.get("reasoning_content") or ""
         tool_calls = parse_openai_tool_calls(
             message.get("tool_calls"),
-            tools=tools,
+            tools=request_tools,
             parallel=self.supports_parallel_tool_calls,
         )
         return LLMResponse(
@@ -190,15 +192,16 @@ class OpenAICompatBackend(LLMBackend):
         timeout: float = 120.0,
         cancel_event: Optional[threading.Event] = None,
     ) -> Generator[str, None, LLMResponse]:
+        request_tools = _provider_tools(self.base_url, self.model, tools)
         payload: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": _effective_tool_temperature(self.base_url, self.model, temperature, tools),
+            "temperature": _effective_tool_temperature(self.base_url, self.model, temperature, request_tools),
             "max_tokens": max_tokens,
             "stream": True,
         }
-        if tools:
-            payload["tools"] = tools
+        if request_tools:
+            payload["tools"] = request_tools
         reasoning = self._reasoning_params()
         if reasoning:
             payload.update(reasoning)
@@ -298,7 +301,7 @@ class OpenAICompatBackend(LLMBackend):
             )
         tool_calls = parse_openai_tool_calls(
             raw_tool_calls,
-            tools=tools,
+            tools=request_tools,
             parallel=self.supports_parallel_tool_calls,
         )
 
@@ -367,6 +370,18 @@ def _effective_tool_temperature(
     if _is_deepseek_target(base_url, model):
         return 0.0
     return temperature
+
+
+def _provider_tools(
+    base_url: str,
+    model: str,
+    tools: Optional[List[Dict[str, Any]]],
+) -> Optional[List[Dict[str, Any]]]:
+    if not tools:
+        return tools
+    if _is_deepseek_target(base_url, model):
+        return sanitize_deepseek_strict_tools(tools)
+    return tools
 
 
 def _is_deepseek_target(base_url: str, model: str) -> bool:

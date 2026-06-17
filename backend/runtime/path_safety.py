@@ -98,6 +98,7 @@ class PathSafetyDecision:
     code: str = ""
     message: str = ""
     path: str = ""
+    suggested_root: str = ""
 
     def error_text(self) -> str:
         if self.code == "PATH_OUTSIDE_WORKSPACE":
@@ -112,14 +113,23 @@ def validate_tool_paths(
     arguments: Dict[str, Any],
     *,
     workspace_root: Optional[str] = None,
+    writable_roots: Optional[Iterable[str]] = None,
 ) -> PathSafetyDecision:
     action = _tool_action(tool_name)
     if action is None:
         return PathSafetyDecision(True)
 
     root = _resolve_path(workspace_root or os.getcwd())
-    for raw_path in _extract_paths(arguments):
-        decision = validate_path_access(raw_path, action=action, workspace_root=root)
+    roots = _resolve_writable_roots(writable_roots, root=root)
+    for path_key, raw_path in _extract_path_items(arguments):
+        decision = validate_path_access(
+            raw_path,
+            action=action,
+            workspace_root=root,
+            writable_roots=roots,
+            tool_name=tool_name,
+            path_key=path_key,
+        )
         if not decision.allowed:
             return decision
     return PathSafetyDecision(True)
@@ -130,6 +140,9 @@ def validate_path_access(
     *,
     action: str,
     workspace_root: Optional[str] = None,
+    writable_roots: Optional[Iterable[str | Path]] = None,
+    tool_name: str = "",
+    path_key: str = "",
 ) -> PathSafetyDecision:
     if not str(path or "").strip():
         return PathSafetyDecision(True)
@@ -137,6 +150,7 @@ def validate_path_access(
     root = _resolve_path(workspace_root or os.getcwd())
     target = _resolve_path(path, root=root)
     target_text = str(target)
+    roots = _resolve_writable_roots(writable_roots, root=root)
 
     secret_reason = _sensitive_reason(target)
     if secret_reason:
@@ -147,12 +161,17 @@ def validate_path_access(
             target_text,
         )
 
-    if action == "write" and not _is_within(target, root):
+    if action == "write" and not _is_within(target, root) and not _is_within_any(target, roots):
+        suggested_root = suggest_writable_root_for_path(target, tool_name=tool_name, path_key=path_key)
         return PathSafetyDecision(
             False,
             "PATH_OUTSIDE_WORKSPACE",
-            f"{target_text} is outside the active workspace {root}.",
+            (
+                f"{target_text} is outside the active workspace {root}. "
+                f"Authorized writable roots: {_format_roots_for_message(roots)}."
+            ),
             target_text,
+            suggested_root,
         )
 
     if action == "write":
@@ -176,19 +195,42 @@ def _tool_action(tool_name: str) -> Optional[str]:
     return None
 
 
+def extract_tool_paths(arguments: Dict[str, Any]) -> List[str]:
+    return [path for _key, path in _extract_path_items(arguments)]
+
+
+def suggest_writable_root_for_path(path: str | Path, *, tool_name: str = "", path_key: str = "") -> str:
+    target = _resolve_path(str(path))
+    key = str(path_key or "").lower()
+    tool = str(tool_name or "").lower()
+    directory_keys = {"directory_path", "output_dir", "artifacts_dir", "root", "cwd", "working_dir"}
+    directory_tools = {"create_directory", "delete_directory", "list_directory"}
+    if key in directory_keys or tool in directory_tools:
+        return str(target)
+    if target.suffix:
+        return str(target.parent)
+    if target.exists() and target.is_dir():
+        return str(target)
+    return str(target.parent)
+
+
 def _extract_paths(arguments: Dict[str, Any]) -> List[str]:
-    paths: List[str] = []
+    return [path for _key, path in _extract_path_items(arguments)]
+
+
+def _extract_path_items(arguments: Dict[str, Any]) -> List[tuple[str, str]]:
+    items: List[tuple[str, str]] = []
     for key in PATH_KEYS:
         value = arguments.get(key)
         if isinstance(value, str):
-            paths.append(value)
+            items.append((key, value))
     for key in LIST_PATH_KEYS:
         value = arguments.get(key)
         if isinstance(value, str):
-            paths.append(value)
+            items.append((key, value))
         elif isinstance(value, Iterable):
-            paths.extend(item for item in value if isinstance(item, str))
-    return paths
+            items.extend((key, item) for item in value if isinstance(item, str))
+    return items
 
 
 def _resolve_path(path: str, *, root: Optional[Path] = None) -> Path:
@@ -196,6 +238,22 @@ def _resolve_path(path: str, *, root: Optional[Path] = None) -> Path:
     if not raw.is_absolute():
         raw = (root or Path.cwd()) / raw
     return raw.resolve(strict=False)
+
+
+def _resolve_writable_roots(paths: Optional[Iterable[str | Path]], *, root: Path) -> List[Path]:
+    roots: List[Path] = []
+    seen: set[str] = set()
+    for raw in paths or []:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        resolved = _resolve_path(value, root=root)
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(resolved)
+    return roots
 
 
 def _unresolved_path(path: str, *, root: Optional[Path] = None) -> Path:
@@ -211,6 +269,15 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _is_within_any(path: Path, roots: Iterable[Path]) -> bool:
+    return any(_is_within(path, root) for root in roots)
+
+
+def _format_roots_for_message(roots: Iterable[Path]) -> str:
+    values = [str(root) for root in roots]
+    return ", ".join(values) if values else "none"
 
 
 def _sensitive_reason(path: Path) -> str:

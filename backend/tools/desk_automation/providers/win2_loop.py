@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -316,6 +317,10 @@ def run_task(goal: str, max_steps: int = 20, prefer_existing: bool = False) -> d
     except Exception as exc:
         return _error(f"Automation not allowed: {exc}", fallback=False)
 
+    fast_path = _try_fast_path(goal, prefer_existing=prefer_existing)
+    if fast_path is not None:
+        return fast_path
+
     try:
         win = _select_or_launch_target(goal, prefer_existing=prefer_existing)
     except Exception as exc:
@@ -456,6 +461,188 @@ def _select_or_launch_target(goal: str, *, prefer_existing: bool = False) -> Any
                 if win is not None:
                     return win
     return _best_window_match(goal, list_windows())
+
+
+def _try_fast_path(goal: str, *, prefer_existing: bool = False) -> dict[str, Any] | None:
+    """Use deterministic automation for narrow, high-confidence desktop tasks."""
+    lowered = _norm_text(goal)
+    if "记事本" not in lowered and "notepad" not in lowered:
+        return None
+    typed_text = _extract_notepad_fast_path_text(goal)
+    if not typed_text:
+        return None
+
+    start = time.time()
+    activity: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
+    steps_used = 0
+    win: Any | None = None
+
+    try:
+        from ..capture.window_manager import activate_window, list_windows
+    except Exception as exc:
+        return {
+            **_error(f"Fast path unavailable: {type(exc).__name__}: {exc}", fallback=True),
+            "fast_path": True,
+        }
+
+    try:
+        existing = list_windows()
+        before_hwnds = {int(getattr(item, "hwnd", 0) or 0) for item in existing}
+        if prefer_existing:
+            win = _best_window_match("记事本 notepad", existing, extra_terms=["记事本", "notepad"])
+
+        if win is None:
+            subprocess.Popen(["notepad.exe"])
+            steps_used += 1
+            activity.append({"phase": "launch", "status": "completed", "target": "notepad.exe"})
+            win = _wait_for_new_or_matching_window(
+                "记事本 notepad",
+                before_hwnds=before_hwnds,
+                extra_terms=["记事本", "notepad"],
+            )
+
+        if win is None:
+            return {
+                **_error("Fast path could not find a Notepad window after launch.", fallback=True),
+                "fast_path": True,
+                "activity": activity,
+                "history": history,
+            }
+
+        activated = bool(activate_window(int(win.hwnd)))
+        steps_used += 1
+        activity.append(
+            {
+                "phase": "activate",
+                "status": "completed" if activated else "warning",
+                "hwnd": int(win.hwnd),
+                "title": getattr(win, "title", ""),
+            }
+        )
+
+        type_action = ScreenAction(
+            ActionType.TYPE,
+            {"text": typed_text},
+            "fast path: type extracted notepad text",
+        )
+        type_result = _execute_action(int(win.hwnd), type_action)
+        steps_used += 1
+        history.append(
+            {
+                "step": steps_used,
+                "action": ActionType.TYPE.value,
+                "params": {"text": typed_text},
+                "reasoning": type_action.reasoning,
+                "result": type_result,
+            }
+        )
+        activity.append(
+            {
+                "phase": "type",
+                "status": "completed" if bool(type_result.get("ok")) else "failed",
+                "text_length": len(typed_text),
+            }
+        )
+
+        verification = verify(
+            hwnd=int(win.hwnd),
+            assertion=f'确认记事本已输入 "{typed_text[:80]}"',
+            text_contains=typed_text[:80],
+            title_contains="记事本",
+            require_foreground=True,
+            require_text_visible=bool(typed_text),
+            require_screenshot=True,
+            include_ocr=True,
+        )
+        steps_used += 1
+        verified = bool(verification.get("ok"))
+        activity.append(
+            {
+                "phase": "verify",
+                "status": "completed" if verified else "soft_warning",
+                "verdict": verification.get("verdict") or {},
+            }
+        )
+
+        typed_ok = bool(type_result.get("ok"))
+        return {
+            "ok": typed_ok,
+            "provider": WIN2_PROVIDER_NAME,
+            "status": "fast_path_done" if typed_ok else "fast_path_failed",
+            "fast_path": True,
+            "goal": goal,
+            "hwnd": int(getattr(win, "hwnd", 0) or 0),
+            "title": getattr(win, "title", ""),
+            "steps": steps_used,
+            "elapsed_sec": round(time.time() - start, 2),
+            "activity": activity,
+            "history": history[-8:],
+            "verification": verification,
+            "verification_ok": verified,
+            "fallback_recommended": not typed_ok,
+        }
+    except Exception as exc:
+        return {
+            **_error(f"Fast path failed: {type(exc).__name__}: {exc}", fallback=True),
+            "fast_path": True,
+            "activity": activity,
+            "history": history,
+        }
+
+
+def _wait_for_new_or_matching_window(
+    goal: str,
+    *,
+    before_hwnds: set[int],
+    extra_terms: list[str] | None = None,
+) -> Any | None:
+    from ..capture.window_manager import list_windows
+
+    deadline = time.time() + _WINDOW_WAIT_SECONDS
+    fallback: Any | None = None
+    while time.time() < deadline:
+        time.sleep(0.35)
+        windows = list_windows()
+        candidates = [
+            win
+            for win in windows
+            if int(getattr(win, "hwnd", 0) or 0) not in before_hwnds
+            and _best_window_match(goal, [win], extra_terms=extra_terms) is not None
+        ]
+        if candidates:
+            return candidates[0]
+        fallback = _best_window_match(goal, windows, extra_terms=extra_terms) or fallback
+        if fallback is not None and not before_hwnds:
+            return fallback
+    return fallback
+
+
+def _extract_notepad_fast_path_text(goal: str) -> str:
+    text = str(goal or "").strip()
+    if not text:
+        return ""
+    quoted = re.search(r"[\"'“”‘’「」『』]([^\"'“”‘’「」『』]{1,1000})[\"'“”‘’「」『』]", text)
+    if quoted:
+        return quoted.group(1).strip()
+    for pattern in [
+        r"(?:输入|写入|键入|打字)(?:内容|文字|文本)?(?:为|成|：|:)?\s*(.+)$",
+        r"(?:type|write|enter)\s+(.+)$",
+    ]:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = _clean_fast_path_text(match.group(1))
+        if value:
+            return value
+    return ""
+
+
+def _clean_fast_path_text(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.split(r"(?:然后|接着|再|并保存|保存|关闭|点击|提交)", text, maxsplit=1)[0]
+    text = text.strip(" \t\r\n:：,，。.;；!?！？")
+    return text[:2000]
 
 
 def _best_window_match(goal: str, windows: list[Any], extra_terms: list[str] | None = None) -> Any | None:
@@ -711,7 +898,6 @@ def _execute_action(hwnd: int, action: ScreenAction) -> dict[str, Any]:
         activate_window,
         click_in_window,
         press_key_in_window,
-        scroll_in_window,
         type_in_window,
         window_to_screen,
     )

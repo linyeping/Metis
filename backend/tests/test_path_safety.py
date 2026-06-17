@@ -54,6 +54,42 @@ def test_path_safety_denies_write_outside_workspace(tmp_path: Path) -> None:
 
     assert not decision.allowed
     assert decision.code == "PATH_OUTSIDE_WORKSPACE"
+    assert decision.suggested_root == str(outside.parent.resolve())
+
+
+def test_path_safety_allows_write_under_authorized_writable_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    desktop = tmp_path / "Desktop"
+    workspace.mkdir()
+    desktop.mkdir()
+    target = desktop / "metis-note.txt"
+
+    decision = validate_tool_paths(
+        "write_file",
+        {"path": str(target)},
+        workspace_root=str(workspace),
+        writable_roots=[str(desktop)],
+    )
+
+    assert decision.allowed
+
+
+def test_path_safety_still_denies_sensitive_file_under_authorized_root(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    desktop = tmp_path / "Desktop"
+    workspace.mkdir()
+    desktop.mkdir()
+    target = desktop / ".env"
+
+    decision = validate_tool_paths(
+        "write_file",
+        {"path": str(target)},
+        workspace_root=str(workspace),
+        writable_roots=[str(desktop)],
+    )
+
+    assert not decision.allowed
+    assert decision.code == "PATH_SENSITIVE"
 
 
 def test_path_safety_denies_artifact_output_outside_workspace(tmp_path: Path) -> None:

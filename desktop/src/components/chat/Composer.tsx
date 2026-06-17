@@ -10,22 +10,26 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
+  Sparkles,
   Square,
   Upload,
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion';
 import {
+  Fragment,
   type ChangeEvent,
   type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
 import { getComposerPermissionMode, getSkills, setComposerPermissionMode } from '../../lib/api';
+import { filterSlashWorkflowCommands, moveSlashSelection } from '../../lib/slashCommands';
 import type { ParsedFile, PermissionAccessMode, SkillSummary } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
@@ -57,9 +61,14 @@ const accessOptions: Array<{
   },
 ];
 
+type SlashAction = { kind: 'action'; command: string; hint: string; run: () => void | Promise<void> };
+type SlashSkillAction = { kind: 'skill'; command: string; hint: string; skill: SkillSummary };
+type SlashMenuItem = SlashAction | SlashSkillAction;
+
 export function Composer() {
   const t = useT();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const slashMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const heightAnimationReadyRef = useRef(false);
   const heightFrameRef = useRef<number | null>(null);
@@ -75,15 +84,19 @@ export function Composer() {
   const removeAttachment = useChatStore(state => state.removeAttachment);
   const compactContext = useChatStore(state => state.compactContext);
   const rewindLatest = useChatStore(state => state.rewindLatest);
+  const promptSuggestions = useChatStore(state => state.promptSuggestions);
+  const applyPromptSuggestion = useChatStore(state => state.applyPromptSuggestion);
   const newSession = useSessionStore(state => state.newSession);
   const selectSession = useSessionStore(state => state.selectSession);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashSkills, setSlashSkills] = useState<SkillSummary[]>([]);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const pendingAttachment = attachments.some(file => file.status === 'parsing');
   const readyAttachmentCount = attachments.filter(file => !file.status || file.status === 'ready').length;
   const sendDisabled = !streaming && (pendingAttachment || (!text.trim() && readyAttachmentCount === 0));
   const sendReady = streaming || !sendDisabled;
+  const showPromptSuggestions = promptSuggestions.length > 0 && !text.trim() && !streaming;
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -157,8 +170,9 @@ export function Composer() {
 
   const slashQuery = text.startsWith('/') ? text.slice(1).trim().toLowerCase() : '';
   // 立即执行的内置指令（真接 chatStore/sessionStore 能力，不再是发出去没人理的假文字）。
-  const slashActions: Array<{ command: string; hint: string; run: () => void | Promise<void> }> = [
+  const immediateSlashActions: SlashAction[] = [
     {
+      kind: 'action',
       command: '/new',
       hint: '开新对话',
       run: async () => {
@@ -166,10 +180,19 @@ export function Composer() {
         if (sessionId) await selectSession(sessionId);
       },
     },
-    { command: '/compact', hint: '压缩上下文，释放空间', run: () => compactContext() },
-    { command: '/rewind', hint: '撤销上一轮对话', run: () => rewindLatest() },
+    { kind: 'action', command: '/compact', hint: '压缩上下文，释放空间', run: () => compactContext() },
+    { kind: 'action', command: '/rewind', hint: '撤销上一轮对话', run: () => rewindLatest() },
   ];
-  const matchedSlashActions = slashActions.filter(action => !slashQuery || action.command.slice(1).includes(slashQuery));
+  const workflowSlashActions: SlashAction[] = filterSlashWorkflowCommands(slashQuery).map<SlashAction>(workflow => ({
+    kind: 'action',
+    command: workflow.command,
+    hint: workflow.hint,
+    run: () => send(workflow.prompt),
+  }));
+  const matchedSlashActions = [
+    ...immediateSlashActions.filter(action => !slashQuery || action.command.slice(1).includes(slashQuery)),
+    ...workflowSlashActions,
+  ];
   const slashSkillOptions = slashSkills
     .filter(skill => {
       const key = (skill.skillName || skill.id || skill.name).toLowerCase();
@@ -178,7 +201,37 @@ export function Composer() {
     })
     .sort((a, b) => slashSkillRank(a) - slashSkillRank(b))
     .slice(0, 8);
-  const hasSlashResults = matchedSlashActions.length > 0 || slashSkillOptions.length > 0;
+  const slashMenuItems = useMemo<SlashMenuItem[]>(
+    () => [
+      ...matchedSlashActions,
+      ...slashSkillOptions.map<SlashSkillAction>(skill => ({
+        kind: 'skill',
+        command: `/${skill.skillName || skill.id}`,
+        hint: skill.description || skill.whenToUse || skill.name,
+        skill,
+      })),
+    ],
+    [matchedSlashActions, slashSkillOptions],
+  );
+  const hasSlashResults = slashMenuItems.length > 0;
+  const firstSkillIndex = slashMenuItems.findIndex(item => item.kind === 'skill');
+
+  useEffect(() => {
+    setSlashActiveIndex(0);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    setSlashActiveIndex(current => {
+      if (!slashOpen || slashMenuItems.length === 0) return 0;
+      return Math.min(Math.max(current, 0), slashMenuItems.length - 1);
+    });
+  }, [slashMenuItems.length, slashOpen]);
+
+  useEffect(() => {
+    if (!slashOpen) return;
+    const active = slashMenuRef.current?.querySelector<HTMLElement>(`[data-slash-index="${slashActiveIndex}"]`);
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [slashActiveIndex, slashOpen]);
 
   const insertSlashSkill = (command: string) => {
     setText(`${command} `);
@@ -198,9 +251,35 @@ export function Composer() {
     void action.run();
   };
 
+  const applySlashMenuItem = (item: SlashMenuItem | undefined) => {
+    if (!item) return;
+    if (item.kind === 'skill') {
+      insertSlashSkill(item.command);
+      return;
+    }
+    runSlashAction(item);
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === '/' && !text.trim()) {
       setSlashOpen(true);
+    }
+    if (slashOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setSlashActiveIndex(index => moveSlashSelection(index, slashMenuItems.length, event.key === 'ArrowDown' ? 1 : -1));
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSlashOpen(false);
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && slashMenuItems.length > 0) {
+        event.preventDefault();
+        applySlashMenuItem(slashMenuItems[slashActiveIndex] || slashMenuItems[0]);
+        return;
+      }
     }
     if (event.key !== 'Enter') return;
     if (event.shiftKey || event.nativeEvent.isComposing) return;
@@ -267,31 +346,58 @@ export function Composer() {
       </AnimatePresence>
       <AnimatePresence>
         {slashOpen && (
-        <motion.div
-          className="slash-menu"
-          initial={{ y: 8, opacity: 0, scale: 0.96 }}
-          animate={{ y: 0, opacity: 1, scale: 1 }}
-          exit={{ y: 6, opacity: 0, scale: 0.97, transition: { duration: 0.12 } }}
-          transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-        >
-          {matchedSlashActions.map(action => (
-            <button className="slash-skill-option" key={action.command} type="button" onClick={() => runSlashAction(action)}>
-              <span>{action.command}</span>
-              <small>{t(action.hint)}</small>
-            </button>
-          ))}
-          {slashSkillOptions.length > 0 && <small className="slash-menu-section">{t('技能')}</small>}
-          {slashSkillOptions.map(skill => {
-            const command = `/${skill.skillName || skill.id}`;
-            return (
-              <button className="slash-skill-option" key={skill.id} type="button" onClick={() => insertSlashSkill(command)}>
-                <span>{command}</span>
-                <small>{skill.description || skill.whenToUse || skill.name}</small>
+          <motion.div
+            id="composer-slash-menu"
+            className="slash-menu"
+            ref={slashMenuRef}
+            role="listbox"
+            aria-label={t('斜杠指令')}
+            initial={{ y: 8, opacity: 0, scale: 0.96 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: 6, opacity: 0, scale: 0.97, transition: { duration: 0.12 } }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+          >
+            {slashMenuItems.map((item, index) => (
+              <Fragment key={slashMenuItemKey(item)}>
+                {index === firstSkillIndex && <small className="slash-menu-section">{t('技能')}</small>}
+                <button
+                  id={`slash-option-${index}`}
+                  className="slash-skill-option"
+                  type="button"
+                  role="option"
+                  aria-selected={index === slashActiveIndex}
+                  data-active={index === slashActiveIndex}
+                  data-kind={item.kind}
+                  data-slash-index={index}
+                  onMouseDown={event => event.preventDefault()}
+                  onMouseEnter={() => setSlashActiveIndex(index)}
+                  onClick={() => applySlashMenuItem(item)}
+                >
+                  <span>{item.command}</span>
+                  <small>{item.kind === 'action' ? t(item.hint) : item.hint}</small>
+                </button>
+              </Fragment>
+            ))}
+            {!hasSlashResults && <small className="slash-menu-empty">{t('无匹配指令')}</small>}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showPromptSuggestions && (
+          <motion.div
+            className="prompt-suggestion-row"
+            initial={{ y: 6, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 4, opacity: 0, transition: { duration: 0.12 } }}
+            transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+          >
+            <Sparkles size={13} />
+            {promptSuggestions.map(suggestion => (
+              <button key={suggestion} type="button" onClick={() => applyPromptSuggestion(suggestion)}>
+                {t(suggestion)}
               </button>
-            );
-          })}
-          {!hasSlashResults && <small className="slash-menu-empty">{t('无匹配指令')}</small>}
-        </motion.div>
+            ))}
+          </motion.div>
         )}
       </AnimatePresence>
       {attachments.length > 0 && (
@@ -306,6 +412,9 @@ export function Composer() {
         <textarea
           ref={textareaRef}
           aria-label="Message input"
+          aria-controls={slashOpen ? 'composer-slash-menu' : undefined}
+          aria-expanded={slashOpen}
+          aria-activedescendant={slashOpen && hasSlashResults ? `slash-option-${slashActiveIndex}` : undefined}
           rows={1}
           value={text}
           data-command={/^\/\S*$/.test(text)}
@@ -383,6 +492,11 @@ function slashSkillRank(skill: SkillSummary): number {
   if (key === 'browser') return 0;
   if (key === 'computer') return 1;
   return 2;
+}
+
+function slashMenuItemKey(item: SlashMenuItem): string {
+  if (item.kind === 'skill') return `skill:${item.skill.id}`;
+  return `action:${item.command}`;
 }
 
 function attachmentStatusText(file: ParsedFile, t: (zh: string) => string): string {

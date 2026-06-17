@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BarChart3, Cpu, Globe, Info, MessageSquare, Monitor, Palette, Plug, Terminal, Wrench, X } from 'lucide-react';
 import {
+  createPermissionWritableRoot,
   createPermissionRule,
+  deletePermissionWritableRoot,
   deletePermissionRule,
   getMemory,
   getModelCapabilities,
@@ -419,6 +421,33 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     [refreshPermissions, requestConfirm, t],
   );
 
+  const createWritableRoot = useCallback(
+    async (path: string) => {
+      await createPermissionWritableRoot(path, 'settings');
+      permissionsCache = null;
+      await refreshPermissions(true);
+    },
+    [refreshPermissions],
+  );
+
+  const deleteWritableRoot = useCallback(
+    async (rootId: string, path: string) => {
+      const confirmed = await requestConfirm({
+        title: t('删除授权目录？'),
+        message: `${path || t('这个目录')} ${t('删除后，Metis 不能再写入该工作区外目录。')}`,
+        confirmLabel: t('删除'),
+        cancelLabel: t('取消'),
+        tone: 'danger',
+        icon: 'trash',
+      });
+      if (!confirmed) return;
+      await deletePermissionWritableRoot(rootId);
+      permissionsCache = null;
+      await refreshPermissions(true);
+    },
+    [refreshPermissions, requestConfirm, t],
+  );
+
   const saveDiagnosticsBundle = useCallback(async () => {
     setSavingDiagnostics(true);
     setDiagnosticsMessage('');
@@ -532,6 +561,8 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             onCreate={createPermission}
             onDeleteMany={deletePermissions}
             onDelete={deletePermission}
+            onCreateWritableRoot={createWritableRoot}
+            onDeleteWritableRoot={deleteWritableRoot}
           />
         );
       case 'connectors':

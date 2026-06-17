@@ -20,6 +20,7 @@ def isolated_permissions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any
     monkeypatch.setattr(web_app, "_permission_locks", {})
     monkeypatch.setattr(web_app, "_permission_results", {})
     monkeypatch.setattr(web_app, "_permission_contexts", {})
+    monkeypatch.setattr(web_app, "_permission_ephemeral_writable_roots", {})
     return web_app.app.test_client()
 
 
@@ -147,7 +148,7 @@ def test_permission_audit_records_control_plane_reason(isolated_permissions: Any
     assert audit["mode"] == "edit"
 
 
-def test_composer_full_access_enables_cross_workspace_read_boundary(isolated_permissions: Any) -> None:
+def test_composer_full_access_enables_cross_workspace_boundaries(isolated_permissions: Any) -> None:
     client = isolated_permissions
 
     assert web_app._tool_boundary_overrides("read_file", {"path": "E:\\notes.txt"}) == {}
@@ -163,7 +164,106 @@ def test_composer_full_access_enables_cross_workspace_read_boundary(isolated_per
     assert overrides["allow_search_outside_workspace"] is True
     assert "allow_shell_cwd_outside_workspace" not in overrides
 
-    assert web_app._tool_boundary_overrides("write_file", {"path": "E:\\notes.txt"}) == {}
+    write_overrides = web_app._tool_boundary_overrides("write_file", {"path": "E:\\notes.txt"})
+    assert write_overrides["allow_paths_outside_workspace"] is True
+    assert web_app._check_permission_rules("write_file", {"path": "E:\\notes.txt"}) == "allow"
+    assert web_app._check_permission_rules("write_file", {"path": "E:\\.env"}) == "deny"
+
+
+def test_permissions_endpoint_manages_writable_roots(isolated_permissions: Any, tmp_path: Path) -> None:
+    client = isolated_permissions
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+
+    created = client.post("/permissions/writable-roots", json={"path": str(desktop), "source": "test"})
+    assert created.status_code == 200
+    entry = created.get_json()["writable_root"]
+    assert entry["path"] == str(desktop.resolve())
+
+    payload = client.get("/permissions").get_json()
+    assert payload["writable_roots"][0]["path"] == str(desktop.resolve())
+    assert isinstance(payload["suggested_writable_roots"], list)
+
+    deleted = client.delete(f"/permissions/writable-roots/{entry['id']}")
+    assert deleted.status_code == 200
+    assert client.get("/permissions").get_json()["writable_roots"] == []
+
+
+def test_writable_root_enables_write_boundary_override(isolated_permissions: Any, tmp_path: Path) -> None:
+    client = isolated_permissions
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    target = desktop / "note.txt"
+
+    assert web_app._tool_boundary_overrides("write_file", {"path": str(target)}) == {}
+    assert web_app._check_permission_rules("write_file", {"path": str(target)}) == "ask"
+    response = client.post("/permissions/writable-roots", json={"path": str(desktop), "source": "test"})
+    assert response.status_code == 200
+
+    decision = web_app._check_permission_rules("write_file", {"path": str(target)})
+    assert decision is None
+    overrides = web_app._tool_boundary_overrides("write_file", {"path": str(target)})
+    assert overrides["allow_paths_outside_workspace"] is True
+
+    denied = web_app._check_permission_rules("write_file", {"path": str(desktop / ".env")})
+    assert denied == "deny"
+
+
+def test_permission_dialog_can_grant_temporary_writable_root(isolated_permissions: Any, tmp_path: Path) -> None:
+    client = isolated_permissions
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    target = desktop / "note.txt"
+    request_id = "perm-temp-root"
+    web_app._permission_locks[request_id] = threading.Event()
+    web_app._permission_contexts[request_id] = {
+        "request_id": request_id,
+        "call_id": "call-temp-root",
+        "tool": "write_file",
+        "arguments": {"path": str(target)},
+        "permission": {
+            "suggested_writable_root": str(desktop),
+            "path_safety": {
+                "suggested_root": str(desktop),
+                "code": "PATH_OUTSIDE_WORKSPACE",
+            },
+        },
+    }
+
+    response = client.post(
+        "/permission",
+        json={"request_id": request_id, "approved": True, "grant": "temporary_root"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["grant"] == "temporary_root"
+    assert web_app._tool_boundary_overrides("write_file", {"path": str(target)})["allow_paths_outside_workspace"] is True
+    assert client.get("/permissions").get_json()["writable_roots"] == []
+
+
+def test_permission_dialog_can_persist_writable_root(isolated_permissions: Any, tmp_path: Path) -> None:
+    client = isolated_permissions
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    request_id = "perm-persist-root"
+    web_app._permission_locks[request_id] = threading.Event()
+    web_app._permission_contexts[request_id] = {
+        "request_id": request_id,
+        "call_id": "call-persist-root",
+        "tool": "write_file",
+        "arguments": {"path": str(desktop / "note.txt")},
+        "permission": {"suggested_writable_root": str(desktop)},
+    }
+
+    response = client.post(
+        "/permission",
+        json={"request_id": request_id, "approved": True, "grant": "writable_root"},
+    )
+
+    assert response.status_code == 200
+    payload = client.get("/permissions").get_json()
+    assert payload["writable_roots"][0]["path"] == str(desktop.resolve())
+    assert payload["audit"][0]["grant"] == "writable_root"
 
 
 def test_permission_checker_uses_active_workspace_root_not_process_cwd(
@@ -189,4 +289,4 @@ def test_permission_checker_uses_active_workspace_root_not_process_cwd(
     outside = backend_cwd / "notes.md"
 
     assert web_app._check_permission_rules("write_file", {"path": str(inside)}) is None
-    assert web_app._check_permission_rules("write_file", {"path": str(outside)}) == "deny"
+    assert web_app._check_permission_rules("write_file", {"path": str(outside)}) == "ask"

@@ -1,5 +1,5 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { ShieldAlert } from 'lucide-react';
+import { FolderOpen, FolderPlus, ShieldAlert, Trash2 } from 'lucide-react';
 import type { PermissionAuditEntry, PermissionRule, PermissionStatePayload } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
@@ -23,8 +23,10 @@ import {
 
 interface PermissionPanelProps {
   onCreate: (payload: PermissionRuleDraft) => void | Promise<void>;
+  onCreateWritableRoot: (path: string) => void | Promise<void>;
   onDelete: (ruleId: string, tool: string) => void;
   onDeleteMany: (ruleIds: string[]) => void | Promise<void>;
+  onDeleteWritableRoot: (rootId: string, path: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   permissions: PermissionStatePayload | null;
 }
@@ -33,8 +35,10 @@ export const PermissionPanel = memo(function PermissionPanel({
   permissions,
   onRefresh,
   onCreate,
+  onCreateWritableRoot,
   onDeleteMany,
   onDelete,
+  onDeleteWritableRoot,
 }: PermissionPanelProps) {
   const t = useT();
   const requestConfirm = useUiStore(state => state.requestConfirm);
@@ -52,8 +56,12 @@ export const PermissionPanel = memo(function PermissionPanel({
   const [importJson, setImportJson] = useState('');
   const [importStatus, setImportStatus] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [newRootPath, setNewRootPath] = useState('');
+  const [rootBusy, setRootBusy] = useState('');
   const rules = permissions?.rules ?? [];
   const audit = permissions?.audit ?? [];
+  const writableRoots = permissions?.writableRoots ?? [];
+  const suggestedWritableRoots = permissions?.suggestedWritableRoots ?? [];
   const needle = useMemo(() => deferredQuery.trim().toLowerCase(), [deferredQuery]);
   const ruleSearchText = useMemo(() => buildRuleSearchText(rules), [rules]);
   const auditSearchText = useMemo(() => buildAuditSearchText(audit), [audit]);
@@ -67,6 +75,10 @@ export const PermissionPanel = memo(function PermissionPanel({
   }, [actionFilter, needle, ruleSearchText, rules]);
   const selectedRules = useMemo(() => rules.filter(rule => selectedRuleIds.includes(rule.id)), [rules, selectedRuleIds]);
   const cleanupRuleIds = useMemo(() => conflictCleanupRuleIds(rules), [rules]);
+  const writableRootSet = useMemo(
+    () => new Set(writableRoots.map(root => root.path.trim().toLowerCase()).filter(Boolean)),
+    [writableRoots],
+  );
   const allFilteredSelected = useMemo(
     () => filteredRules.length > 0 && filteredRules.every(rule => selectedRuleIds.includes(rule.id)),
     [filteredRules, selectedRuleIds],
@@ -119,6 +131,26 @@ export const PermissionPanel = memo(function PermissionPanel({
     } finally {
       setCreatingTemplate('');
     }
+  };
+
+  const createWritableRoot = async (path: string) => {
+    const target = path.trim();
+    if (!target || rootBusy) return;
+    setRootBusy(target);
+    try {
+      await onCreateWritableRoot(target);
+      if (target === newRootPath.trim()) setNewRootPath('');
+    } finally {
+      setRootBusy('');
+    }
+  };
+
+  const pickWritableRoot = async () => {
+    if (rootBusy) return;
+    const picked = await window.metis?.pickFolder?.();
+    if (!picked) return;
+    setNewRootPath(picked);
+    await createWritableRoot(picked);
   };
 
   const toggleRuleSelection = (ruleId: string, checked: boolean) => {
@@ -271,6 +303,77 @@ export const PermissionPanel = memo(function PermissionPanel({
           <code>{permissions?.auditPath || t('等待后端返回')}</code>
         </div>
       </div>
+
+      <section className="permission-writable-roots">
+        <div className="permission-section-head">
+          <div>
+            <h4>{t('授权目录')}</h4>
+            <p>{t('全工具访问不等于全盘写入；桌面、文档等工作区外目录需要在这里单独授权。')}</p>
+          </div>
+        </div>
+        <form
+          className="permission-root-form"
+          onSubmit={event => {
+            event.preventDefault();
+            void createWritableRoot(newRootPath);
+          }}
+        >
+          <input
+            value={newRootPath}
+            placeholder="C:\\Users\\you\\Desktop"
+            onChange={event => setNewRootPath(event.target.value)}
+          />
+          <button type="submit" disabled={!newRootPath.trim() || Boolean(rootBusy)}>
+            <FolderPlus size={14} />
+            <span>{rootBusy === newRootPath.trim() ? t('添加中...') : t('添加目录')}</span>
+          </button>
+          <button type="button" className="permission-root-picker" disabled={Boolean(rootBusy)} onClick={() => void pickWritableRoot()}>
+            <FolderOpen size={14} />
+            <span>{t('选择文件夹')}</span>
+          </button>
+        </form>
+        {suggestedWritableRoots.length > 0 && (
+          <div className="permission-root-suggestions">
+            {suggestedWritableRoots.map(root => {
+              const active = writableRootSet.has(root.path.trim().toLowerCase());
+              return (
+                <button
+                  type="button"
+                  key={root.key || root.path}
+                  disabled={active || Boolean(rootBusy)}
+                  onClick={() => void createWritableRoot(root.path)}
+                >
+                  <FolderPlus size={13} />
+                  <span>{suggestedRootLabel(root.key, t)}</span>
+                  <code>{root.path}</code>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {writableRoots.length === 0 ? (
+          <p className="permission-empty">{t('尚未授权工作区外可写目录。')}</p>
+        ) : (
+          <div className="permission-root-list">
+            {writableRoots.map(root => (
+              <article key={root.id || root.path} className="permission-root-row">
+                <div>
+                  <strong>{root.path}</strong>
+                  <small>{t('来源 · ')}{t(sourceLabel(root.source))}</small>
+                </div>
+                <button
+                  type="button"
+                  disabled={Boolean(rootBusy)}
+                  onClick={() => void onDeleteWritableRoot(root.id, root.path)}
+                  aria-label={`${t('删除')} ${root.path}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="permission-policy-templates">
         <div>
@@ -478,6 +581,13 @@ function buildRuleSearchText(rules: PermissionRule[]): Map<string, string> {
       `${rule.tool} ${rule.action} ${rule.source} ${safeJsonCompact(rule.argsMatch)}`.toLowerCase(),
     ]),
   );
+}
+
+function suggestedRootLabel(key: string, t: (value: string) => string): string {
+  if (key === 'desktop') return t('添加桌面');
+  if (key === 'documents') return t('添加文档');
+  if (key === 'downloads') return t('添加下载');
+  return t('添加目录');
 }
 
 function buildAuditSearchText(audit: PermissionAuditEntry[]): Map<string, string> {

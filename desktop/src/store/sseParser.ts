@@ -118,7 +118,7 @@ export function applyChatEvent(
       args: normalized.args,
       status: 'running',
       startedAt: now,
-      summary: summarizeToolValue(normalized.args),
+      summary: normalized.summary || summarizeToolValue(normalized.args),
     });
     setRuntimeStatus(toolRuntimeStatus(normalized, 'running'));
     persistRecovery(assistantId);
@@ -133,7 +133,7 @@ export function applyChatEvent(
       args: normalized.args,
       status: 'waiting_approval',
       startedAt: now,
-      summary: `等待确认 ${summarizeToolValue(normalized.args)}`,
+      summary: normalized.summary ? `等待确认 ${normalized.summary}` : `等待确认 ${summarizeToolValue(normalized.args)}`,
     });
     setRuntimeStatus(toolRuntimeStatus(normalized, 'waiting_approval'));
     persistRecovery(assistantId);
@@ -148,7 +148,7 @@ export function applyChatEvent(
       result: normalized.result,
       status: resultStatus,
       finishedAt: Date.now(),
-      summary: summarizeToolValue(normalized.result),
+      summary: normalized.summary || summarizeToolValue(normalized.result),
       errorHint: resultStatus === 'error' ? toolErrorHint(normalized.result) : '',
     });
     setRuntimeStatus(toolRuntimeStatus(normalized, resultStatus));
@@ -558,41 +558,92 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
   pendingPermissionDialogs.add(event.requestId);
 
   try {
+    const rootSuggestion = event.permission?.suggestedWritableRoot || event.permission?.pathSafety?.suggestedRoot || '';
+    const canGrantRoot = Boolean(event.permission?.canGrantWritableRoot && rootSuggestion);
+    const choices = canGrantRoot
+      ? [
+          {
+            value: 'temporary_root',
+            label: '仅本次允许此文件夹',
+            description: `本次运行可写入 ${rootSuggestion}，不保存到规则文件。`,
+          },
+          {
+            value: 'writable_root',
+            label: '以后允许此文件夹',
+            description: `把 ${rootSuggestion} 加入当前工作区授权目录。`,
+          },
+          {
+            value: 'pick_root',
+            label: '选择文件夹授权',
+            description: '打开系统文件夹选择器，不需要手动输入路径。',
+          },
+          {
+            value: 'full_access',
+            label: '完全访问权限',
+            description: '对齐 Codex full access：信任本工作区，减少后续路径审批。',
+          },
+          {
+            value: 'always_deny',
+            label: '本工作区总是拒绝',
+            description: '保存 deny 规则，下次同工具直接拒绝。',
+          },
+        ]
+      : [
+          {
+            value: 'once',
+            label: '仅本次允许',
+            description: '允许这一次工具调用，不保存规则。',
+          },
+          {
+            value: 'always_allow',
+            label: '本工作区总是允许',
+            description: '保存 allow 规则，下次同工具自动放行。',
+          },
+          {
+            value: 'always_deny',
+            label: '本工作区总是拒绝',
+            description: '保存 deny 规则，下次同工具直接拒绝。',
+          },
+        ];
     const decision = await useUiStore.getState().requestChoice({
       title: '允许工具执行？',
-      message: `Metis 想要运行工具 ${event.toolName}。请选择本次如何处理。`,
+      message: canGrantRoot
+        ? `Metis 想要写入工作区外目录。请选择是否授权 ${rootSuggestion}。`
+        : `Metis 想要运行工具 ${event.toolName}。请选择本次如何处理。`,
       details: permissionDetails(event),
       confirmLabel: '确认选择',
       cancelLabel: '仅本次拒绝',
       tone: 'danger',
       icon: 'warning',
-      defaultChoice: 'once',
-      choices: [
-        {
-          value: 'once',
-          label: '仅本次允许',
-          description: '允许这一次工具调用，不保存规则。',
-        },
-        {
-          value: 'always_allow',
-          label: '本工作区总是允许',
-          description: '保存 allow 规则，下次同工具自动放行。',
-        },
-        {
-          value: 'always_deny',
-          label: '本工作区总是拒绝',
-          description: '保存 deny 规则，下次同工具直接拒绝。',
-        },
-      ],
+      defaultChoice: canGrantRoot ? 'temporary_root' : 'once',
+      choices,
     });
-    const approved = decision.confirmed && decision.choice !== 'always_deny';
-    const remember = decision.confirmed
-      ? decision.choice === 'always_allow'
+    let selectedRoot = rootSuggestion;
+    if (decision.confirmed && decision.choice === 'pick_root') {
+      selectedRoot = (await window.metis?.pickFolder?.()) || '';
+    }
+    const approved =
+      decision.confirmed && decision.choice !== 'always_deny' && decision.choice !== 'pick_root'
+        ? true
+        : Boolean(decision.confirmed && decision.choice === 'pick_root' && selectedRoot);
+    const remember: 'allow' | 'deny' | '' =
+      decision.confirmed && decision.choice === 'always_allow'
         ? 'allow'
-        : decision.choice === 'always_deny'
+        : decision.confirmed && decision.choice === 'always_deny'
           ? 'deny'
-          : ''
-      : '';
+          : '';
+    let grant: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access' = '';
+    if (approved && decision.choice === 'temporary_root') grant = 'temporary_root';
+    if (approved && decision.choice === 'writable_root') grant = 'writable_root';
+    if (approved && decision.choice === 'pick_root') grant = 'selected_root';
+    if (approved && decision.choice === 'full_access') grant = 'full_access';
+    const approvalSummary = approved
+      ? permissionApprovalSummary(grant, remember)
+      : remember === 'deny'
+        ? '已保存拒绝规则，等待后端确认'
+        : decision.choice === 'pick_root'
+          ? '未选择文件夹，已拒绝'
+          : '已拒绝，等待后端确认';
 
     upsertTool(assistantId, {
       id: toolId(event, assistantId),
@@ -601,17 +652,13 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
       toolName: event.toolName,
       args: event.args,
       status: approved ? 'running' : 'waiting_approval',
-      summary: approved
-        ? remember === 'allow'
-          ? '已保存允许规则，等待工具结果'
-          : '已允许，等待工具结果'
-        : remember === 'deny'
-          ? '已保存拒绝规则，等待后端确认'
-          : '已拒绝，等待后端确认',
+      summary: approvalSummary,
     });
 
     await answerToolPermission(event.requestId, approved, {
       remember,
+      grant,
+      rootPath: selectedRoot,
       tool: event.toolName,
       args: event.args,
       callId: event.callId,
@@ -632,6 +679,17 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
   } finally {
     pendingPermissionDialogs.delete(event.requestId);
   }
+}
+
+function permissionApprovalSummary(
+  grant: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access',
+  remember: 'allow' | 'deny' | '',
+): string {
+  if (grant === 'temporary_root') return '已临时授权目录，等待工具结果';
+  if (grant === 'writable_root' || grant === 'selected_root') return '已授权目录，等待工具结果';
+  if (grant === 'full_access') return '已开启完全访问，等待工具结果';
+  if (remember === 'allow') return '已保存允许规则，等待工具结果';
+  return '已允许，等待工具结果';
 }
 
 // ---------------------------------------------------------------------------

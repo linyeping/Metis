@@ -1,4 +1,15 @@
-import type { AgentEventKind, ChatStreamEvent, ChatSubagentEvent, ChatTodoItem, ChatTokenUsage, CompactStatusPayload, ContextLedger, RuntimeStatus } from './types';
+import type {
+  AgentEventKind,
+  ChatStreamEvent,
+  ChatSubagentEvent,
+  ChatTodoItem,
+  ChatTokenUsage,
+  CompactStatusPayload,
+  ContextLedger,
+  PermissionRequestMetadata,
+  PermissionSuggestedWritableRoot,
+  RuntimeStatus,
+} from './types';
 
 interface NormalizedError {
   code: string;
@@ -29,6 +40,7 @@ export interface NormalizedChatEvent {
   toolName: string;
   args: unknown;
   result: unknown;
+  summary: string;
   callId: string;
   requestId: string;
   error: NormalizedError;
@@ -39,6 +51,7 @@ export interface NormalizedChatEvent {
   memory: NormalizedMemory | null;
   todo: NormalizedTodo | null;
   subagent: ChatSubagentEvent | null;
+  permission: PermissionRequestMetadata | null;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -79,6 +92,7 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
   const phase = stringValue(value(payload, eventRecord, 'phase'));
   const toolName = stringValue(value(payload, eventRecord, 'tool', 'toolName', 'tool_name', 'name')) || 'tool';
   const errorInfo = recordValue(value(payload, eventRecord, 'error_info', 'errorInfo'));
+  const permissionPayload = recordValue(value(payload, eventRecord, 'permission'));
   const timestamp = numberValue(value(payload, eventRecord, 'timestamp')) || Date.now() / 1000;
 
   return {
@@ -87,6 +101,7 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
     toolName,
     args: value(payload, eventRecord, 'args', 'arguments'),
     result: value(payload, eventRecord, 'result'),
+    summary: stringValue(value(payload, eventRecord, 'summary', 'label')),
     callId: stringValue(value(payload, eventRecord, 'call_id', 'callId')) || `call-${Date.now()}`,
     requestId: stringValue(value(payload, eventRecord, 'request_id', 'requestId')),
     error: {
@@ -172,6 +187,86 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
             result: value(payload, eventRecord, 'result'),
           }
         : null,
+    permission: kind === 'permission_request' ? permissionMetadataValue(permissionPayload) : null,
+  };
+}
+
+function permissionMetadataValue(payload: UnknownRecord): PermissionRequestMetadata | null {
+  if (Object.keys(payload).length === 0) return null;
+  const pathSafety = recordValue(value(payload, {}, 'path_safety', 'pathSafety'));
+  const decision = recordValue(value(payload, {}, 'decision'));
+  const explainer = recordValue(value(payload, {}, 'explainer', 'permission_explainer', 'permissionExplainer'));
+  const autoguard = recordValue(value(payload, {}, 'autoguard'));
+  const toolContract = recordValue(value(payload, {}, 'tool_contract', 'toolContract'));
+  const rootsRaw = value(payload, {}, 'suggested_writable_roots', 'suggestedWritableRoots');
+  const suggestedWritableRoots: PermissionSuggestedWritableRoot[] = Array.isArray(rootsRaw)
+    ? rootsRaw.map(item => {
+        const row = recordValue(item);
+        return {
+          key: stringValue(value(row, {}, 'key')),
+          path: stringValue(value(row, {}, 'path')),
+          exists: booleanValue(value(row, {}, 'exists')),
+        };
+      })
+    : [];
+  return {
+    decision: Object.keys(decision).length ? decision : undefined,
+    pathSafety: Object.keys(pathSafety).length
+      ? {
+          allowed: booleanValue(value(pathSafety, {}, 'allowed'), true),
+          code: stringValue(value(pathSafety, {}, 'code')),
+          message: stringValue(value(pathSafety, {}, 'message')),
+          path: stringValue(value(pathSafety, {}, 'path')),
+          suggestedRoot: stringValue(value(pathSafety, {}, 'suggested_root', 'suggestedRoot')),
+          outsideWorkspace: booleanValue(value(pathSafety, {}, 'outside_workspace', 'outsideWorkspace')),
+        }
+      : undefined,
+    explainer: Object.keys(explainer).length
+      ? {
+          explanation: stringValue(value(explainer, {}, 'explanation')),
+          reasoning: stringValue(value(explainer, {}, 'reasoning')),
+          risk: stringValue(value(explainer, {}, 'risk')),
+          riskLevel: stringValue(value(explainer, {}, 'riskLevel', 'risk_level')),
+          risk_level: stringValue(value(explainer, {}, 'risk_level')),
+          autoguard: Object.keys(recordValue(value(explainer, {}, 'autoguard'))).length
+            ? (recordValue(value(explainer, {}, 'autoguard')) as NonNullable<PermissionRequestMetadata['autoguard']>)
+            : undefined,
+        }
+      : undefined,
+    permissionExplainer: Object.keys(explainer).length
+      ? {
+          explanation: stringValue(value(explainer, {}, 'explanation')),
+          reasoning: stringValue(value(explainer, {}, 'reasoning')),
+          risk: stringValue(value(explainer, {}, 'risk')),
+          riskLevel: stringValue(value(explainer, {}, 'riskLevel', 'risk_level')),
+          risk_level: stringValue(value(explainer, {}, 'risk_level')),
+          autoguard: Object.keys(recordValue(value(explainer, {}, 'autoguard'))).length
+            ? (recordValue(value(explainer, {}, 'autoguard')) as NonNullable<PermissionRequestMetadata['autoguard']>)
+            : undefined,
+        }
+      : undefined,
+    autoguard: Object.keys(autoguard).length
+      ? (autoguard as NonNullable<PermissionRequestMetadata['autoguard']>)
+      : undefined,
+    toolContract: Object.keys(toolContract).length
+      ? {
+          version: stringValue(value(toolContract, {}, 'version')),
+          tool: stringValue(value(toolContract, {}, 'tool')),
+          category: stringValue(value(toolContract, {}, 'category')),
+          riskLevel: stringValue(value(toolContract, {}, 'risk_level', 'riskLevel')),
+          preferredSurface: stringValue(value(toolContract, {}, 'preferred_surface', 'preferredSurface')),
+          readBeforeEdit: booleanValue(value(toolContract, {}, 'read_before_edit', 'readBeforeEdit')),
+          verifyAfter: booleanValue(value(toolContract, {}, 'verify_after', 'verifyAfter')),
+          requiresPermission: booleanValue(value(toolContract, {}, 'requires_permission', 'requiresPermission')),
+          why: stringValue(value(toolContract, {}, 'why')),
+          saferAlternative: stringValue(value(toolContract, {}, 'safer_alternative', 'saferAlternative')),
+        }
+      : undefined,
+    suggestedWritableRoot: stringValue(value(payload, {}, 'suggested_writable_root', 'suggestedWritableRoot')),
+    suggestedWritableRoots,
+    canGrantWritableRoot: booleanValue(value(payload, {}, 'can_grant_writable_root', 'canGrantWritableRoot')),
+    canGrantFullAccess: booleanValue(value(payload, {}, 'can_grant_full_access', 'canGrantFullAccess')),
+    workspaceRoot: stringValue(value(payload, {}, 'workspace_root', 'workspaceRoot')),
   };
 }
 

@@ -7,8 +7,10 @@ import { useT } from '../../../hooks/useT';
 interface ToolsTabProps {
   capabilities: ModelCapabilities | null;
   onCreate: (payload: PermissionRuleDraft) => void | Promise<void>;
+  onCreateWritableRoot: (path: string) => void | Promise<void>;
   onDelete: (ruleId: string, tool: string) => void;
   onDeleteMany: (ruleIds: string[]) => void | Promise<void>;
+  onDeleteWritableRoot: (rootId: string, path: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   permissions: PermissionStatePayload | null;
 }
@@ -16,8 +18,10 @@ interface ToolsTabProps {
 export const ToolsTab = memo(function ToolsTab({
   capabilities,
   onCreate,
+  onCreateWritableRoot,
   onDelete,
   onDeleteMany,
+  onDeleteWritableRoot,
   onRefresh,
   permissions,
 }: ToolsTabProps) {
@@ -36,8 +40,10 @@ export const ToolsTab = memo(function ToolsTab({
         permissions={permissions}
         onRefresh={onRefresh}
         onCreate={onCreate}
+        onCreateWritableRoot={onCreateWritableRoot}
         onDeleteMany={onDeleteMany}
         onDelete={onDelete}
+        onDeleteWritableRoot={onDeleteWritableRoot}
       />
     </div>
   );

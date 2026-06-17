@@ -60,12 +60,12 @@ CONTENT_DELTA_FLUSH_INTERVAL = float(os.environ.get("METIS_CONTENT_DELTA_FLUSH_I
 CONTENT_DELTA_FLUSH_CHARS = int(os.environ.get("METIS_CONTENT_DELTA_FLUSH_CHARS", "30"))
 REPEATED_TOOL_CALL_LIMIT = 3
 TOOL_CALL_RECOVERY_PROMPT = (
-    "Your last response could not be parsed as a tool call. Please try again. "
-    "Format your tool call exactly as:\n"
-    "TOOL: tool_name\n"
-    "ARGS: {\"param\": \"value\"}\n"
-    "Only one tool call per response."
+    "Your previous response indicated a tool/function call, but the call could not be parsed or had no valid arguments. "
+    "Repair it now by returning exactly one native tool/function call using one of the available tools. "
+    "Use a strict JSON object for arguments, keep the same intent, do not answer in prose, and do not invent tool names. "
+    "If no tool is actually needed, return a concise final answer instead."
 )
+MAX_TOOL_CALL_REPAIR_ATTEMPTS = int(os.environ.get("METIS_TOOL_CALL_REPAIR_ATTEMPTS", "2"))
 # FABLEADV-19: truncation continuation. When output is cut off by max_tokens, the
 # turn was not "done" — guide the model to continue / chunk instead of ending.
 MAX_TRUNCATION_CONTINUATIONS = int(os.environ.get("METIS_MAX_CONTINUATIONS", "5"))
@@ -871,7 +871,7 @@ def run(
     consecutive_errors = 0
     cumulative_usage = Usage()
     last_context_ledger: Dict[str, Any] = {}
-    tool_recovery_attempted = False
+    tool_repair_attempts = 0
     continuation_count = 0
     continuation_buffer = ""
     seen_files: Dict[str, str] = {}
@@ -1025,8 +1025,15 @@ def run(
         if response.thinking:
             yield ThinkingEvent(text=response.thinking)
 
-        if response.stop_reason == "tool_use" and not response.tool_calls and not tool_recovery_attempted:
-            tool_recovery_attempted = True
+        if response.stop_reason == "tool_use" and not response.tool_calls and tool_repair_attempts < MAX_TOOL_CALL_REPAIR_ATTEMPTS:
+            tool_repair_attempts += 1
+            yield _runtime_status_event(
+                "tool_call_repair",
+                "Repairing malformed tool call",
+                turn=turn_count,
+                tool_calls=tool_call_count,
+                recoverable=True,
+            )
             working_messages.append(_format_assistant_message(response, config))
             working_messages.append({"role": "user", "content": TOOL_CALL_RECOVERY_PROMPT})
             turn_count -= 1
@@ -1329,7 +1336,7 @@ def run_stream(
     last_context_ledger: Dict[str, Any] = {}
     last_tool_signature = ""
     repeated_tool_count = 0
-    tool_recovery_attempted = False
+    tool_repair_attempts = 0
     continuation_count = 0
     continuation_buffer = ""
     seen_files: Dict[str, str] = {}
@@ -1635,8 +1642,15 @@ def run_stream(
         if response.thinking:
             yield ThinkingEvent(text=response.thinking)
 
-        if response.stop_reason == "tool_use" and not response.tool_calls and not tool_recovery_attempted:
-            tool_recovery_attempted = True
+        if response.stop_reason == "tool_use" and not response.tool_calls and tool_repair_attempts < MAX_TOOL_CALL_REPAIR_ATTEMPTS:
+            tool_repair_attempts += 1
+            yield _runtime_status_event(
+                "tool_call_repair",
+                "Repairing malformed tool call",
+                turn=turn_count,
+                tool_calls=tool_call_count,
+                recoverable=True,
+            )
             working_messages.append(_format_assistant_message(response, config))
             working_messages.append({"role": "user", "content": TOOL_CALL_RECOVERY_PROMPT})
             turn_count -= 1

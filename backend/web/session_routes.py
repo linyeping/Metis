@@ -3,11 +3,21 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, Response, jsonify, request
 
+from backend.runtime.agent_services import (
+    build_agent_runtime_profile,
+    build_verification_agent_report,
+    generate_away_summary,
+    generate_prompt_suggestions,
+    generate_session_title,
+    should_auto_title,
+    verification_command_policy,
+)
 from backend.web.helpers import get_state
 from backend.web.sessions import get_session_manager
 from backend.web.workspaces import get_workspace_manager
@@ -393,3 +403,151 @@ def rename_session(session_id: str) -> Any:
     if not get_session_manager().update_session(session_id, title=title):
         return jsonify({"error": "not found"}), 404
     return jsonify({"ok": True, "title": title})
+
+
+@session_bp.route("/sessions/<session_id>/title/auto", methods=["POST"])
+def auto_title_session(session_id: str) -> Any:
+    """Generate a concise title without overwriting user-renamed sessions."""
+    data = request.get_json(silent=True) or {}
+    force = bool(data.get("force", False))
+    manager = get_session_manager()
+    session = manager.get_session(session_id)
+    if session is None:
+        return jsonify({"error": "session not found"}), 404
+    if not force and not should_auto_title(session.title):
+        return jsonify({"ok": True, "updated": False, "title": session.title})
+    title = generate_session_title(session.history)
+    if not title:
+        return jsonify({"ok": False, "updated": False, "title": session.title, "error": "not enough user context"})
+    manager.update_session(session_id, title=title)
+    return jsonify({"ok": True, "updated": True, "title": title})
+
+
+@session_bp.route("/sessions/<session_id>/away-summary", methods=["GET"])
+def away_summary(session_id: str) -> Any:
+    """Return a short while-you-were-away recap for the session."""
+    session = get_session_manager().get_session(session_id)
+    if session is None:
+        return jsonify({"error": "session not found"}), 404
+    summary = generate_away_summary(session.history, session.compact_state)
+    return jsonify({"ok": bool(summary), "summary": summary})
+
+
+@session_bp.route("/sessions/<session_id>/suggestions", methods=["GET"])
+def prompt_suggestions(session_id: str) -> Any:
+    """Return short next-prompt suggestions for the active composer."""
+    session = get_session_manager().get_session(session_id)
+    if session is None:
+        return jsonify({"error": "session not found"}), 404
+    return jsonify({"ok": True, "suggestions": generate_prompt_suggestions(session.history)})
+
+
+@session_bp.route("/sessions/<session_id>/verification-agent", methods=["POST"])
+def verification_agent(session_id: str) -> Any:
+    """Build a verification-only report shell from supplied checks."""
+    session = get_session_manager().get_session(session_id)
+    if session is None:
+        return jsonify({"error": "session not found"}), 404
+    data = request.get_json(silent=True) or {}
+    changed_files = data.get("changed_files", data.get("changedFiles", []))
+    checks = data.get("checks", [])
+    normalized_checks = checks if isinstance(checks, list) else []
+    commands = data.get("commands", [])
+    if isinstance(commands, list) and commands:
+        normalized_checks = [
+            *normalized_checks,
+            *_run_verification_commands(session.workspace_id, commands),
+        ]
+    report = build_verification_agent_report(
+        task=str(data.get("task") or session.title or ""),
+        changed_files=changed_files if isinstance(changed_files, list) else [],
+        checks=normalized_checks,
+    )
+    return jsonify({"ok": True, "report": report})
+
+
+@session_bp.route("/sessions/<session_id>/agent-runtime-profile", methods=["GET"])
+def agent_runtime_profile(session_id: str) -> Any:
+    """Return the visible runtime contract profile for the Plan/Activity UI."""
+    session = get_session_manager().get_session(session_id)
+    if session is None:
+        return jsonify({"error": "session not found"}), 404
+    workspace_root = _session_workspace_root(session.workspace_id)
+    model = ""
+    try:
+        from backend.web.llm_state import get_runtime_settings
+
+        settings = get_runtime_settings()
+        model = str(settings.get("model") or "")
+    except Exception:
+        model = ""
+    payload = build_agent_runtime_profile(
+        history=session.history,
+        workspace_root=workspace_root,
+        session_id=session.id,
+        mode=session.mode,
+        model=model,
+        compact_state=session.compact_state,
+        active_run=None,
+    )
+    return jsonify(payload)
+
+
+def _run_verification_commands(workspace_id: str, commands: List[Any]) -> List[Dict[str, Any]]:
+    workspace = get_workspace_manager().get_workspace(workspace_id) if workspace_id else None
+    cwd = workspace.path if workspace is not None and os.path.isdir(workspace.path) else os.getcwd()
+    results: List[Dict[str, Any]] = []
+    for raw_command in commands[:5]:
+        command = str(raw_command or "").strip()
+        policy = verification_command_policy(command)
+        if not policy.get("allowed"):
+            results.append(
+                {
+                    "name": command or "empty command",
+                    "command": command,
+                    "result": "blocked",
+                    "status": "blocked",
+                    "output": "",
+                    "error": str(policy.get("reason") or "blocked by verifier policy"),
+                }
+            )
+            continue
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=cwd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+            results.append(
+                {
+                    "name": command,
+                    "command": command,
+                    "result": "pass" if completed.returncode == 0 else "fail",
+                    "status": "pass" if completed.returncode == 0 else "fail",
+                    "exit_code": completed.returncode,
+                    "output": output[:4000],
+                }
+            )
+        except subprocess.TimeoutExpired as exc:
+            results.append(
+                {
+                    "name": command,
+                    "command": command,
+                    "result": "fail",
+                    "status": "timeout",
+                    "exit_code": None,
+                    "output": str(exc)[:1200],
+                }
+            )
+    return results
+
+
+def _session_workspace_root(workspace_id: str) -> str:
+    workspace = get_workspace_manager().get_workspace(workspace_id) if workspace_id else None
+    if workspace is not None and os.path.isdir(workspace.path):
+        return workspace.path
+    return os.getcwd()

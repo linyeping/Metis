@@ -122,6 +122,9 @@ def normalize_compact_state(value: Any) -> Dict[str, Any]:
     version = COMPACT_STATE_VERSION if requested_version >= COMPACT_STATE_VERSION or any(sections.values()) else 1
     state: Dict[str, Any] = {
         "version": version,
+        "mode": _normalize_compact_mode(
+            str(value.get("mode") or value.get("compact_mode") or value.get("compactMode") or "partial_older")
+        ),
         "summary": summary,
         "boundary_message_id": str(value.get("boundary_message_id") or value.get("boundaryMessageId") or ""),
         "boundary_index": max(0, _safe_int(value.get("boundary_index", value.get("boundaryIndex")), 0)),
@@ -168,7 +171,13 @@ def model_context_for_history(history: List[Dict[str, Any]], compact_state: Any)
     if not state:
         return list(history)
     boundary_index = compact_boundary_index(history, state)
-    return [{"role": "system", "content": render_compact_context(state)}] + list(history[boundary_index:])
+    summary_message = {"role": "system", "content": render_compact_context(state)}
+    mode = str(state.get("mode") or "partial_older").strip().lower()
+    if mode == "full":
+        return [summary_message]
+    if mode == "partial_recent":
+        return list(history[:boundary_index]) + [summary_message]
+    return [summary_message] + list(history[boundary_index:])
 
 
 def compact_state_after_truncate(
@@ -189,10 +198,15 @@ def compact_state_after_truncate(
     next_boundary = compact_boundary_index(new_history, state)
     next_state["boundary_index"] = next_boundary
     if _safe_int(next_state.get("version"), 1) >= COMPACT_STATE_VERSION:
-        next_state["preserved_message_ids"] = _message_ids(new_history[next_boundary:])
+        if str(next_state.get("mode") or "") == "partial_recent":
+            next_state["preserved_message_ids"] = _message_ids(new_history[:next_boundary])
+        else:
+            next_state["preserved_message_ids"] = _message_ids(new_history[next_boundary:])
         next_state["source_message_count"] = min(
             max(0, _safe_int(next_state.get("source_message_count"), 0)),
-            next_boundary,
+            max(0, len(new_history) - next_boundary)
+            if str(next_state.get("mode") or "") == "partial_recent"
+            else next_boundary,
         )
     return next_state
 
@@ -204,33 +218,44 @@ def build_compact_state_v2(
     keep_recent: int = 4,
     previous_state: Any = None,
     compacted_at: Optional[float] = None,
+    mode: str = "partial_older",
+    boundary_index: Optional[int] = None,
 ) -> Dict[str, Any]:
     previous = normalize_compact_state(previous_state)
-    boundary_index = max(0, len(history) - max(0, keep_recent))
+    compact_mode = _normalize_compact_mode(mode)
+    if boundary_index is None:
+        boundary_index = len(history) if compact_mode == "full" else max(0, len(history) - max(0, keep_recent))
+    else:
+        boundary_index = max(0, min(_safe_int(boundary_index, 0), len(history)))
     boundary_message_id = ""
     if boundary_index < len(history) and isinstance(history[boundary_index], Mapping):
         boundary_message_id = str(history[boundary_index].get("id") or "")
 
-    extracted = extract_compact_sections(history, boundary_index=boundary_index)
+    section_history = history[boundary_index:] if compact_mode == "partial_recent" else history
+    section_boundary = len(section_history) if compact_mode in {"full", "partial_recent"} else boundary_index
+    extracted = extract_compact_sections(section_history, boundary_index=section_boundary)
     previous_sections = previous.get("sections") if isinstance(previous.get("sections"), Mapping) else {}
     sections = merge_sections(previous_sections, extracted)
     clean_summary = str(summary or "").strip()
     if not clean_summary:
         clean_summary = render_summary_from_sections(sections)
+    preserved_messages = history[:boundary_index] if compact_mode == "partial_recent" else history[boundary_index:]
+    source_message_count = len(history[boundary_index:]) if compact_mode == "partial_recent" else boundary_index
 
     return {
         "version": COMPACT_STATE_VERSION,
+        "mode": compact_mode,
         "summary": clean_summary,
         "boundary_message_id": boundary_message_id,
         "boundary_index": boundary_index,
         "compacted_at": float(compacted_at if compacted_at is not None else time.time()),
         "compact_count": max(0, _safe_int(previous.get("compact_count"), 0)) + 1,
-        "source_message_count": boundary_index,
+        "source_message_count": source_message_count,
         "sections": sections,
-        "preserved_message_ids": _message_ids(history[boundary_index:]),
+        "preserved_message_ids": _message_ids(preserved_messages),
         "rehydration_hints": [
             "The full persisted transcript remains the source of truth; this message is only a compact continuity layer.",
-            "Messages at and after the boundary are still included after this compact summary.",
+            _rehydration_hint_for_mode(compact_mode),
             "Re-run read/search/observe tools when exact omitted file, page, or desktop details matter.",
         ],
     }
@@ -311,6 +336,7 @@ def render_compact_context(compact_state: Any) -> str:
         COMPACT_MARKER,
         "This is a compact continuity layer. The full transcript is still persisted outside model context.",
         f"Compaction count: {max(0, _safe_int(state.get('compact_count'), 0))}.",
+        f"Compaction mode: {str(state.get('mode') or 'partial_older')}.",
     ]
     boundary_id = str(state.get("boundary_message_id") or "")
     if boundary_id:
@@ -342,6 +368,23 @@ def render_summary_from_sections(sections: Any) -> str:
         lines.append(f"## {_SECTION_LABELS[key]}")
         lines.extend(f"- {item}" for item in items[: _SECTION_LIMITS[key]])
     return "\n".join(lines).strip()
+
+
+def _normalize_compact_mode(value: str) -> str:
+    mode = str(value or "partial_older").strip().lower().replace("-", "_")
+    if mode in {"full", "full_context"}:
+        return "full"
+    if mode in {"partial_recent", "recent", "recent_context"}:
+        return "partial_recent"
+    return "partial_older"
+
+
+def _rehydration_hint_for_mode(mode: str) -> str:
+    if mode == "full":
+        return "The full model context is represented by this compact summary; reload transcript details from persisted history when needed."
+    if mode == "partial_recent":
+        return "Messages before the boundary are still included before this compact summary; the recent tail is summarized."
+    return "Messages at and after the boundary are still included after this compact summary."
 
 
 def _normalize_sections(value: Mapping[str, Any]) -> Dict[str, List[str]]:

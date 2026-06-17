@@ -95,6 +95,21 @@ for _auto_pkg in (
     except Exception:
         pass  # 可选依赖缺失不阻断打包；运行时按需降级
 
+# 文档/PDF artifact 工具依赖：PDF/DOCX 在 packaged exe 中必须可直接创建、读取与渲染。
+for _artifact_pkg in (
+    "docx",
+    "pypdf",
+    "pdfplumber",
+    "reportlab",
+):
+    try:
+        _ad, _ab, _ah = collect_all(_artifact_pkg)
+        datas += _ad
+        binaries += _ab
+        hiddenimports += _ah
+    except Exception:
+        pass
+
 excluded_modules = [
     "IPython",
     "PyQt5",

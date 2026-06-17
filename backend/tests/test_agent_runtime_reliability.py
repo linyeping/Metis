@@ -141,6 +141,43 @@ class BoundaryBackend(ToolBackend):
         return LLMResponse(content="Boundary flow completed", usage=Usage(2, 3, 5))
 
 
+class ToolCallRepairBackend(LLMBackend):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.messages_per_call: List[List[Dict[str, Any]]] = []
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+    ) -> LLMResponse:
+        self.calls += 1
+        self.messages_per_call.append(messages)
+        if self.calls == 1:
+            return LLMResponse(content="", stop_reason="tool_use", tool_calls=[], usage=Usage(2, 1, 3))
+        if self.calls == 2:
+            return LLMResponse(tool_calls=[ToolCall("call_repaired", "echo", {"value": "repaired"})], usage=Usage(3, 1, 4))
+        return LLMResponse(content="Repair completed", stop_reason="end_turn", usage=Usage(4, 2, 6))
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+    ) -> Generator[str, None, LLMResponse]:
+        response = self.chat(messages, tools, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
+        if response.content:
+            yield response.content
+        return response
+
+
 def _messages() -> List[Dict[str, Any]]:
     return [{"role": "user", "content": "smoke"}]
 
@@ -297,6 +334,19 @@ def test_run_stream_applies_tool_boundary_overrides() -> None:
         for event in events
     )
     assert get_effective_sub_allow("allow_paths_outside_workspace") is False
+
+
+def test_run_stream_repairs_empty_tool_call_response() -> None:
+    backend = ToolCallRepairBackend()
+    events = _events(backend)
+    phases = _phases(events)
+
+    assert backend.calls == 3
+    assert "tool_call_repair" in phases
+    assert any("Repair it now by returning exactly one native tool/function call" in str(message.get("content")) for message in backend.messages_per_call[1])
+    assert any(isinstance(event, ToolCallEvent) and event.call_id == "call_repaired" for event in events)
+    assert any(isinstance(event, ToolResultEvent) and event.result == "echo:repaired" for event in events)
+    assert any(isinstance(event, DoneEvent) and event.total_tool_calls == 1 for event in events)
 
 
 def test_stream_crash_emits_failed_error_and_done() -> None:

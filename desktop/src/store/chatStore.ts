@@ -6,11 +6,14 @@
  */
 import { create } from 'zustand';
 import {
+  autoTitleSession,
   cancelChatRun,
   chatStream,
   compactConversation,
   getActiveSessionRun,
+  getAwaySummary,
   getCompactStatus,
+  getPromptSuggestions,
   getSession,
   getSessionCheckpoints,
   parseUpload,
@@ -92,6 +95,8 @@ interface ChatState {
   todoNotice: ChatTodoNotice | null;
   planTodos: ChatTodoItem[];
   recoveryNotice: ChatRunRecoverySnapshot | null;
+  awaySummary: string | null;
+  promptSuggestions: string[];
   compactStatus: CompactStatusPayload | null;
   compacting: boolean;
   subagents: ChatSubagentEvent[];
@@ -106,6 +111,8 @@ interface ChatState {
   clearAttachments: () => void;
   clearMemoryNotice: () => void;
   clearTodoNotice: () => void;
+  dismissAwaySummary: () => void;
+  applyPromptSuggestion: (value: string) => void;
   dismissRecoveryNotice: () => void;
   refreshCompactStatus: () => Promise<void>;
   compactContext: (model?: string) => Promise<void>;
@@ -133,6 +140,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   todoNotice: null,
   planTodos: [],
   recoveryNotice: null,
+  awaySummary: null,
+  promptSuggestions: [],
   compactStatus: null,
   compacting: false,
   subagents: [],
@@ -174,6 +183,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearAttachments: () => set({ attachments: [] }),
   clearMemoryNotice: () => set({ memoryNotice: null }),
   clearTodoNotice: () => set({ todoNotice: null }),
+  dismissAwaySummary: () => set({ awaySummary: null }),
+  applyPromptSuggestion: value => set({ composerText: value, promptSuggestions: [] }),
   dismissRecoveryNotice: () => set({ recoveryNotice: null }),
   refreshCompactStatus: async () => {
     try {
@@ -256,6 +267,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         messages: [],
         memoryNotice: null,
         todoNotice: null,
+        awaySummary: null,
+        promptSuggestions: [],
         planTodos: [],
         recoveryNotice: null,
         compactStatus: null,
@@ -308,7 +321,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: nextMessages,
       memoryNotice: null,
       todoNotice: null,
+      awaySummary: null,
       recoveryNotice: activeRunInfo ? null : recoverySnapshot,
+      promptSuggestions: [],
       usage: null,
       contextLedger: null,
       runtimeStatus: null,
@@ -319,6 +334,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     if (activeRunInfo) {
       attachRunStream(activeRunInfo, sessionId);
+    } else if (nextMessages.length > 0) {
+      void refreshSessionHints(sessionId, { includeAway: true });
     }
   },
   send: async overrideText => {
@@ -423,7 +440,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
+      await autoTitleSession(sessionId).catch(() => null);
       await useSessionStore.getState().load();
+      void refreshSessionHints(sessionId, { includeAway: false });
     } catch (error) {
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
       if (!controller.signal.aborted) {
@@ -476,6 +495,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       memoryNotice: null,
       todoNotice: null,
       recoveryNotice: null,
+      awaySummary: null,
+      promptSuggestions: [],
       compactStatus: null,
       usage: null,
       contextLedger: null,
@@ -657,7 +678,9 @@ function attachRunStream(run: ChatRunPayload, sessionId: string): void {
     try {
       await runEventStream(run.runId, event => handleRunEvent(run.runId, event, assistantId, sessionId, processedRunSeq, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal, processedRunSeq.get(run.runId) || 0);
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
+      await autoTitleSession(sessionId).catch(() => null);
       await useSessionStore.getState().load();
+      void refreshSessionHints(sessionId, { includeAway: false });
     } catch (error) {
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
       if (!controller.signal.aborted) {
@@ -684,6 +707,21 @@ function refreshActiveRunUiState(): void {
     streaming: Boolean(activeRun),
     controller: activeRun?.controller || null,
     runSessionId: activeRun ? activeSessionId : null,
+  });
+}
+
+async function refreshSessionHints(sessionId: string, options: { includeAway: boolean }): Promise<void> {
+  if (!sessionId) return;
+  const activeAtStart = useSessionStore.getState().activeSessionId;
+  if (activeAtStart !== sessionId) return;
+  const [suggestionsResult, awayResult] = await Promise.all([
+    getPromptSuggestions(sessionId).catch(() => ({ ok: false, suggestions: [] })),
+    options.includeAway ? getAwaySummary(sessionId).catch(() => ({ ok: false, summary: '' })) : Promise.resolve({ ok: false, summary: '' }),
+  ]);
+  if (useSessionStore.getState().activeSessionId !== sessionId) return;
+  useChatStore.setState({
+    promptSuggestions: suggestionsResult.suggestions || [],
+    awaySummary: options.includeAway && awayResult.ok ? awayResult.summary || null : useChatStore.getState().awaySummary,
   });
 }
 

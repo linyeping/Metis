@@ -18,7 +18,7 @@ import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { Composer } from './Composer';
 import { AssistantMessage, SystemMessage, UserMessage } from './MessageBubble';
-import { ContextOrganizingNotice, LearningNotice, RunRecoveryNotice, RuntimeStatusBar, TodoNotice } from './NoticeCards';
+import { AwaySummaryNotice, ContextOrganizingNotice, LearningNotice, RunRecoveryNotice, RuntimeStatusBar, TodoNotice } from './NoticeCards';
 import { SubagentGroup } from './SubagentGroup';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,8 @@ export function MetisThread() {
   const clearMemoryNotice = useChatStore(state => state.clearMemoryNotice);
   const todoNotice = useChatStore(state => state.todoNotice);
   const clearTodoNotice = useChatStore(state => state.clearTodoNotice);
+  const awaySummary = useChatStore(state => state.awaySummary);
+  const dismissAwaySummary = useChatStore(state => state.dismissAwaySummary);
   const recoveryNotice = useChatStore(state => state.recoveryNotice);
   const dismissRecoveryNotice = useChatStore(state => state.dismissRecoveryNotice);
   const markRecoveryFailed = useChatStore(state => state.markRecoveryFailed);
@@ -101,6 +103,9 @@ export function MetisThread() {
         )}
         {todoNotice && (
           <TodoNotice notice={todoNotice} onDismiss={clearTodoNotice} />
+        )}
+        {awaySummary && (
+          <AwaySummaryNotice summary={awaySummary} onDismiss={dismissAwaySummary} />
         )}
         {recoveryNotice && (
           <RunRecoveryNotice

@@ -1,6 +1,9 @@
 import type {
   AgentEventContract,
+  AgentRuntimeProfilePayload,
   ActiveChatRunPayload,
+  AutoTitlePayload,
+  AwaySummaryPayload,
   ChatRunPayload,
   ChatRunsPayload,
   ChatStreamEvent,
@@ -18,8 +21,11 @@ import type {
   ParsedFile,
   PermissionAccessMode,
   PermissionAuditEntry,
+  PromptSuggestionsPayload,
   PermissionRule,
   PermissionStatePayload,
+  PermissionSuggestedWritableRoot,
+  PermissionWritableRoot,
   ProviderModelCatalog,
   ProviderProfile,
   ProviderRegistryEntry,
@@ -225,6 +231,82 @@ function compactStatusFromRecord(row: Record<string, unknown>): CompactStatusPay
   };
 }
 
+function agentRuntimeProfileFromRecord(row: Record<string, unknown>): AgentRuntimeProfilePayload {
+  const prompt = recordValue(row.prompt_runtime ?? row.promptRuntime);
+  const contracts = recordValue(row.tool_contracts ?? row.toolContracts);
+  const coordinator = recordValue(row.coordinator);
+  const proactive = recordValue(row.proactive);
+  const workersRaw = coordinator.workers;
+  const contractItemsRaw = contracts.items;
+  return {
+    ok: Boolean(row.ok),
+    promptRuntime: {
+      version: stringValue(prompt.version),
+      cachePolicy: stringValue(prompt.cache_policy ?? prompt.cachePolicy),
+      stablePrefix: stringArray(prompt.stable_prefix ?? prompt.stablePrefix),
+      sessionSuffix: stringArray(prompt.session_suffix ?? prompt.sessionSuffix),
+      requestSuffix: stringArray(prompt.request_suffix ?? prompt.requestSuffix),
+      scratchpadPath: stringValue(prompt.scratchpad_path ?? prompt.scratchpadPath),
+      compactMode: stringValue(prompt.compact_mode ?? prompt.compactMode),
+      compactCount: numberValue(prompt.compact_count ?? prompt.compactCount),
+    },
+    toolContracts: {
+      version: stringValue(contracts.version),
+      guidance: stringArray(contracts.guidance),
+      items: Array.isArray(contractItemsRaw)
+        ? contractItemsRaw.map(item => {
+            const contract = recordValue(item);
+            return {
+              version: stringValue(contract.version),
+              tool: stringValue(contract.tool),
+              category: stringValue(contract.category),
+              riskLevel: stringValue(contract.risk_level ?? contract.riskLevel),
+              preferredSurface: stringValue(contract.preferred_surface ?? contract.preferredSurface),
+              readBeforeEdit: Boolean(contract.read_before_edit ?? contract.readBeforeEdit),
+              verifyAfter: Boolean(contract.verify_after ?? contract.verifyAfter),
+              requiresPermission: Boolean(contract.requires_permission ?? contract.requiresPermission),
+              why: stringValue(contract.why),
+              saferAlternative: stringValue(contract.safer_alternative ?? contract.saferAlternative),
+            };
+          })
+        : [],
+    },
+    coordinator: {
+      version: stringValue(coordinator.version),
+      mode: stringValue(coordinator.mode),
+      task: stringValue(coordinator.task),
+      nextAction: stringValue(coordinator.next_action ?? coordinator.nextAction),
+      workers: Array.isArray(workersRaw)
+        ? workersRaw.map(item => {
+            const worker = recordValue(item);
+            return {
+              id: stringValue(worker.id),
+              name: stringValue(worker.name),
+              status: stringValue(worker.status),
+              progress: numberValue(worker.progress),
+              summary: stringValue(worker.summary),
+              toolCount: numberValue(worker.tool_count ?? worker.toolCount),
+            };
+          })
+        : [],
+      freshVerifier: {
+        enabled: Boolean(recordValue(coordinator.fresh_verifier ?? coordinator.freshVerifier).enabled),
+        role: stringValue(recordValue(coordinator.fresh_verifier ?? coordinator.freshVerifier).role),
+        rule: stringValue(recordValue(coordinator.fresh_verifier ?? coordinator.freshVerifier).rule),
+      },
+    },
+    proactive: {
+      version: stringValue(proactive.version),
+      enabled: Boolean(proactive.enabled),
+      optInRequired: Boolean(proactive.opt_in_required ?? proactive.optInRequired),
+      state: stringValue(proactive.state),
+      tickSeconds: numberValue(proactive.tick_seconds ?? proactive.tickSeconds),
+      policies: stringArray(proactive.policies),
+      lastActivityAt: numberValue(proactive.last_activity_at ?? proactive.lastActivityAt),
+    },
+  };
+}
+
 function compactStateFromRecord(value: unknown): Session['compactState'] {
   const row = recordValue(value);
   const summary = stringValue(row.summary);
@@ -283,6 +365,8 @@ function permissionAuditFromRecord(row: Record<string, unknown>): PermissionAudi
     action: stringValue(row.action),
     approved: Boolean(row.approved),
     remember: stringValue(row.remember),
+    grant: stringValue(row.grant),
+    rootPath: stringValue(row.root_path ?? row.rootPath),
     ruleId: stringValue(row.rule_id ?? row.ruleId),
     source: stringValue(row.source),
     arguments: row.arguments,
@@ -290,6 +374,25 @@ function permissionAuditFromRecord(row: Record<string, unknown>): PermissionAudi
     decisionReason: stringValue(row.decision_reason ?? row.decisionReason),
     riskLevel: stringValue(row.risk_level ?? row.riskLevel),
     mode: stringValue(row.mode),
+  };
+}
+
+function permissionWritableRootFromRecord(row: Record<string, unknown>): PermissionWritableRoot {
+  return {
+    id: stringValue(row.id),
+    path: stringValue(row.path),
+    source: stringValue(row.source),
+    createdAt: numberValue(row.created_at ?? row.createdAt),
+    updatedAt: numberValue(row.updated_at ?? row.updatedAt),
+    workspaceRoot: stringValue(row.workspace_root ?? row.workspaceRoot) || undefined,
+  };
+}
+
+function permissionSuggestedWritableRootFromRecord(row: Record<string, unknown>): PermissionSuggestedWritableRoot {
+  return {
+    key: stringValue(row.key),
+    path: stringValue(row.path),
+    exists: Boolean(row.exists),
   };
 }
 
@@ -480,6 +583,40 @@ export async function renameSessionTitle(sessionId: string, title: string): Prom
   });
 }
 
+export async function autoTitleSession(sessionId: string, force = false): Promise<AutoTitlePayload> {
+  const data = await requestJson<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/title/auto`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
+  return {
+    ok: Boolean(data.ok),
+    updated: Boolean(data.updated),
+    title: stringValue(data.title),
+    error: stringValue(data.error),
+  };
+}
+
+export async function getAwaySummary(sessionId: string): Promise<AwaySummaryPayload> {
+  const data = await requestJson<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/away-summary`);
+  return {
+    ok: Boolean(data.ok),
+    summary: stringValue(data.summary),
+  };
+}
+
+export async function getPromptSuggestions(sessionId: string): Promise<PromptSuggestionsPayload> {
+  const data = await requestJson<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/suggestions`);
+  return {
+    ok: Boolean(data.ok),
+    suggestions: stringArray(data.suggestions).slice(0, 3),
+  };
+}
+
+export async function getAgentRuntimeProfile(sessionId: string): Promise<AgentRuntimeProfilePayload> {
+  const data = await requestJson<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/agent-runtime-profile`);
+  return agentRuntimeProfileFromRecord(data);
+}
+
 export async function resetConversation(): Promise<{ sessionId: string | null; workspaceId: string }> {
   const data = await requestJson<Record<string, unknown>>('/reset', {
     method: 'POST',
@@ -491,10 +628,10 @@ export async function resetConversation(): Promise<{ sessionId: string | null; w
   };
 }
 
-export async function compactConversation(): Promise<CompactStatusPayload> {
+export async function compactConversation(payload: { mode?: 'full' | 'partial_older' | 'partial_recent'; keepRecent?: number } = {}): Promise<CompactStatusPayload> {
   const data = await requestJson<Record<string, unknown>>('/compact', {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ mode: payload.mode, keep_recent: payload.keepRecent }),
   });
   return compactStatusFromRecord(data);
 }
@@ -1121,7 +1258,14 @@ export async function deleteCronTask(taskId: string): Promise<void> {
 export async function answerToolPermission(
   requestId: string,
   approved: boolean,
-  options: { remember?: 'allow' | 'deny' | ''; tool?: string; args?: unknown; callId?: string } = {},
+  options: {
+    remember?: 'allow' | 'deny' | '';
+    grant?: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access';
+    rootPath?: string;
+    tool?: string;
+    args?: unknown;
+    callId?: string;
+  } = {},
 ): Promise<void> {
   await requestJson('/permission', {
     method: 'POST',
@@ -1129,6 +1273,8 @@ export async function answerToolPermission(
       request_id: requestId,
       approved,
       remember: options.remember || '',
+      grant: options.grant || '',
+      root_path: options.rootPath || '',
       tool: options.tool,
       args: options.args,
       call_id: options.callId,
@@ -1139,9 +1285,15 @@ export async function answerToolPermission(
 export async function getPermissions(): Promise<PermissionStatePayload> {
   const data = await requestJson<Record<string, unknown>>('/permissions');
   const rules = Array.isArray(data.rules) ? data.rules : [];
+  const writableRaw = data.writable_roots ?? data.writableRoots;
+  const writableRoots = Array.isArray(writableRaw) ? writableRaw : [];
+  const suggestedRaw = data.suggested_writable_roots ?? data.suggestedWritableRoots;
+  const suggestedWritableRoots = Array.isArray(suggestedRaw) ? suggestedRaw : [];
   const audit = Array.isArray(data.audit) ? data.audit : [];
   return {
     rules: rules.map(item => permissionRuleFromRecord(recordValue(item))),
+    writableRoots: writableRoots.map(item => permissionWritableRootFromRecord(recordValue(item))),
+    suggestedWritableRoots: suggestedWritableRoots.map(item => permissionSuggestedWritableRootFromRecord(recordValue(item))),
     audit: audit.map(item => permissionAuditFromRecord(recordValue(item))),
     controlPlane: Object.keys(recordValue(data.control_plane ?? data.controlPlane)).length
       ? permissionControlPlaneFromRecord(recordValue(data.control_plane ?? data.controlPlane))
@@ -1168,6 +1320,18 @@ export async function createPermissionRule(payload: {
     }),
   });
   return permissionRuleFromRecord(recordValue(data.rule));
+}
+
+export async function createPermissionWritableRoot(path: string, source = 'settings'): Promise<PermissionWritableRoot> {
+  const data = await requestJson<Record<string, unknown>>('/permissions/writable-roots', {
+    method: 'POST',
+    body: JSON.stringify({ path, source }),
+  });
+  return permissionWritableRootFromRecord(recordValue(data.writable_root ?? data.writableRoot));
+}
+
+export async function deletePermissionWritableRoot(rootId: string): Promise<void> {
+  await requestJson(`/permissions/writable-roots/${encodeURIComponent(rootId)}`, { method: 'DELETE' });
 }
 
 export async function deletePermissionRule(ruleId: string): Promise<void> {

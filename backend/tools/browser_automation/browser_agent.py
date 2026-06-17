@@ -324,6 +324,12 @@ def _build_browser_use_llm(config: BrowserLLMConfig | None = None) -> tuple[Any,
             if config.base_url:
                 kwargs["base_url"] = config.base_url
             llm = ChatOpenAI(**kwargs)
+            try:
+                object.__setattr__(llm, "provider", "openai")
+                object.__setattr__(llm, "model_name", config.model or "gpt-4o-mini")
+                object.__setattr__(llm, "base_url", config.base_url)
+            except Exception:
+                pass
             return _LegacyBrowserUseLLMProxy(
                 llm,
                 provider="openai",

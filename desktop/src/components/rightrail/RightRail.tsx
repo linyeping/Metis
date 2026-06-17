@@ -21,6 +21,7 @@ import {
   Network,
   RefreshCw,
   ScanSearch,
+  ShieldCheck,
   SquareTerminal,
   Square,
   StickyNote,
@@ -31,9 +32,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getWorkspaceFile, getWorkspaceTree } from '../../lib/api';
+import { apiBase, cancelChatRun, getAgentRuntimeProfile, getChatRuns, getProviderStatus, getWorkspaceFile, getWorkspaceTree } from '../../lib/api';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, ChatTodoItem, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import type { AgentRuntimeProfilePayload, BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, ChatTodoItem, ContextLedger, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -165,6 +166,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const planTodos = useChatStore(state => state.planTodos);
   const streaming = useChatStore(state => state.streaming);
   const runtimeStatus = useChatStore(state => state.runtimeStatus);
+  const contextLedger = useChatStore(state => state.contextLedger);
   const sendChat = useChatStore(state => state.send);
   const rewindLatest = useChatStore(state => state.rewindLatest);
   const loadChatSession = useChatStore(state => state.loadSession);
@@ -173,6 +175,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const updateWebPreviewTab = useUiStore(state => state.updateWebPreviewTab);
   const setWebPreviewZoom = useUiStore(state => state.setWebPreviewZoom);
   const sessions = useSessionStore(state => state.sessions);
+  const activeSessionId = useSessionStore(state => state.activeSessionId);
   const selectSession = useSessionStore(state => state.selectSession);
   const workspaces = useSessionStore(state => state.workspaces);
   const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
@@ -198,6 +201,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const [devBusy, setDevBusy] = useState(false);
   const [previewAudit, setPreviewAudit] = useState<PreviewAuditResult | null>(null);
   const [browserActivity, setBrowserActivity] = useState<BrowserActivityPayload | null>(null);
+  const [agentRuntimeProfile, setAgentRuntimeProfile] = useState<AgentRuntimeProfilePayload | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [devDetailsOpen, setDevDetailsOpen] = useState(false);
   const [workspaceSettling, setWorkspaceSettling] = useState(false);
@@ -222,6 +226,28 @@ export function RightRail({ backendReady }: RightRailProps) {
         : null,
     [activeDiffFile?.preview, activeDiffPreview, diffRevertItems, diffRevertSummaryId, diffSummary],
   );
+
+  useEffect(() => {
+    if (!backendReady || !activeSessionId) {
+      setAgentRuntimeProfile(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const profile = await getAgentRuntimeProfile(activeSessionId);
+        if (!cancelled) setAgentRuntimeProfile(profile);
+      } catch {
+        if (!cancelled) setAgentRuntimeProfile(null);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, streaming ? 8000 : 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeSessionId, backendReady, planTodos.length, streaming, subagents.length]);
 
   const submitPlanFollowUp = useCallback(
     async (kind: PlanActionKind, stepLabel: string) => {
@@ -1374,6 +1400,7 @@ export function RightRail({ backendReady }: RightRailProps) {
           </button>
         </div>
       </div>
+      <AgentRuntimeProfileCard profile={agentRuntimeProfile} contextLedger={contextLedger} />
       <PlanRunMonitor
         backendReady={backendReady}
         loadChatSession={loadChatSession}
@@ -1584,6 +1611,98 @@ function relativeActivityTime(value: string, t: (text: string) => string): strin
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function AgentRuntimeProfileCard({ profile, contextLedger }: { profile: AgentRuntimeProfilePayload | null; contextLedger: ContextLedger | null }) {
+  const t = useT();
+  const cacheRate = Math.round((contextLedger?.cacheHitRate || 0) * 100);
+  const cacheDetail = contextLedger
+    ? `${compactMetricNumber(contextLedger.cacheHitTokens)} ${t('命中')} · ${compactMetricNumber(contextLedger.cacheMissTokens)} ${t('未命中')}`
+    : t('等待下一次运行');
+  if (!profile) {
+    return (
+      <section className="agent-runtime-card" data-empty="true">
+        <header>
+          <ShieldCheck size={14} />
+          <div>
+            <strong>{t('Agent Runtime')}</strong>
+            <span>{t('当前会话暂无运行时画像。')}</span>
+          </div>
+        </header>
+        <div className="agent-runtime-grid">
+          <RuntimeMetric label={t('Cache')} value={contextLedger ? `${cacheRate}%` : '--'} detail={cacheDetail} />
+        </div>
+      </section>
+    );
+  }
+
+  const workers = profile.coordinator.workers || [];
+  const doneWorkers = workers.filter(worker => worker.status === 'done').length;
+  const issueWorkers = workers.filter(worker => worker.status === 'error').length;
+  const riskyContracts = profile.toolContracts.items.filter(item => item.requiresPermission).length;
+  const promptLayers = profile.promptRuntime.stablePrefix.length + profile.promptRuntime.sessionSuffix.length + profile.promptRuntime.requestSuffix.length;
+
+  return (
+    <section className="agent-runtime-card" aria-label={t('Agent Runtime')}>
+      <header>
+        <ShieldCheck size={14} />
+        <div>
+          <strong>{t('Agent Runtime')}</strong>
+          <span>{t(runtimeProfileSubtitle(profile.proactive.state))}</span>
+        </div>
+        <em>{profile.promptRuntime.version || 'v2'}</em>
+      </header>
+      <div className="agent-runtime-grid">
+        <RuntimeMetric label={t('Prompt')} value={`${promptLayers}`} detail={profile.promptRuntime.cachePolicy} />
+        <RuntimeMetric label={t('Tools')} value={`${riskyContracts}/${profile.toolContracts.items.length}`} detail={t('需权限')} />
+        <RuntimeMetric label={t('Workers')} value={`${doneWorkers}/${workers.length}`} detail={issueWorkers ? t('有错误') : t('新鲜验收')} />
+        <RuntimeMetric label={t('Ticks')} value={`${profile.proactive.tickSeconds || 15}s`} detail={profile.proactive.enabled ? t('后台可用') : t('需手动开启')} />
+        <RuntimeMetric label={t('Cache')} value={contextLedger ? `${cacheRate}%` : '--'} detail={cacheDetail} />
+      </div>
+      {workers.length > 0 && (
+        <div className="agent-worker-strip">
+          {workers.map(worker => (
+            <span key={worker.id || worker.name} data-status={worker.status}>
+              {t(workerLabel(worker.name))}
+              <b>{worker.progress}%</b>
+            </span>
+          ))}
+        </div>
+      )}
+      <p>{profile.coordinator.nextAction || t('等待下一步任务。')}</p>
+      {profile.promptRuntime.scratchpadPath && <small title={profile.promptRuntime.scratchpadPath}>{compactPath(profile.promptRuntime.scratchpadPath)}</small>}
+    </section>
+  );
+}
+
+function compactMetricNumber(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return `${Math.round(value)}`;
+}
+
+function RuntimeMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <span className="agent-runtime-metric">
+      <b>{value}</b>
+      <em>{label}</em>
+      <small>{detail}</small>
+    </span>
+  );
+}
+
+function runtimeProfileSubtitle(state: string): string {
+  if (state === 'running') return '长任务正在运行';
+  if (state === 'available') return '长任务模式已授权';
+  return '后台主动性保持手动开启';
+}
+
+function workerLabel(name: string): string {
+  if (name === 'research') return '研究';
+  if (name === 'implementation') return '实现';
+  if (name === 'verification') return '验收';
+  return name || 'Worker';
 }
 
 function PlanRunMonitor({

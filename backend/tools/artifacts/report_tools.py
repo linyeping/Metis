@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 from backend.tools.coding.foundation.core_mechanisms.path_security import (
     PathSecurityError,

@@ -95,4 +95,45 @@ describe('normalizeChatStreamEvent', () => {
     expect(event.todo?.activeCount).toBe(1);
     expect(event.todo?.doneCount).toBe(1);
   });
+
+  it('normalizes tool summary labels', () => {
+    const event = normalizeChatStreamEvent({
+      type: 'tool_result',
+      payload: {
+        tool: 'read_file',
+        call_id: 'call-read',
+        result: 'ok',
+        summary: 'Read app.py',
+      },
+    });
+
+    expect(event.summary).toBe('Read app.py');
+    expect(event.callId).toBe('call-read');
+  });
+
+  it('normalizes permission explainer metadata', () => {
+    const event = normalizeChatStreamEvent({
+      type: 'permission_request',
+      payload: {
+        tool: 'write_file',
+        call_id: 'call-write',
+        request_id: 'permission-1',
+        permission: {
+          explainer: {
+            explanation: 'write_file may modify files.',
+            reasoning: 'I am asking because this writes outside workspace.',
+            risk: 'May write outside workspace',
+            riskLevel: 'HIGH',
+            autoguard: {
+              shouldBlock: true,
+              reason: 'target is outside the active workspace',
+            },
+          },
+        },
+      },
+    });
+
+    expect(event.permission?.explainer?.riskLevel).toBe('HIGH');
+    expect(event.permission?.explainer?.autoguard?.shouldBlock).toBe(true);
+  });
 });

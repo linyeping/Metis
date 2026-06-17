@@ -224,6 +224,45 @@ def test_accessibility_summary_uses_window_relative_rects():
     assert "rect=(12,34,56,20)" in text
 
 
+def test_notepad_fast_path_runs_deterministic_macro(monkeypatch):
+    calls = []
+    window = SimpleNamespace(hwnd=456, title="无标题 - 记事本", exe_name="notepad.exe")
+
+    monkeypatch.setattr(win2_loop, "win2_enabled", lambda: True)
+    monkeypatch.setattr(win2_loop.config, "assert_automation_allowed", lambda: None)
+    monkeypatch.setattr(win2_loop.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(win2_loop.subprocess, "Popen", lambda args: calls.append(("popen", args)) or SimpleNamespace(pid=1))
+    monkeypatch.setattr(
+        "backend.tools.desk_automation.capture.window_manager.list_windows",
+        lambda: [] if len([item for item in calls if item[0] == "list"]) == 0 and not calls.append(("list", None)) else [window],
+    )
+    monkeypatch.setattr(
+        "backend.tools.desk_automation.capture.window_manager.activate_window",
+        lambda hwnd: calls.append(("activate", hwnd)) or True,
+    )
+
+    def fake_execute(hwnd, action):
+        calls.append(("execute", hwnd, action.action.value, action.params))
+        return {"ok": True}
+
+    monkeypatch.setattr(win2_loop, "_execute_action", fake_execute)
+    monkeypatch.setattr(
+        win2_loop,
+        "verify",
+        lambda **kwargs: calls.append(("verify", kwargs)) or {"ok": True, "verdict": {"ok": True}},
+    )
+
+    result = win2_loop.run_task("打开记事本，输入“hello metis”", max_steps=20)
+
+    assert result["ok"] is True
+    assert result["fast_path"] is True
+    assert result["status"] == "fast_path_done"
+    assert result["steps"] == 4
+    assert any(call[0] == "popen" and call[1] == ["notepad.exe"] for call in calls)
+    assert any(call[0] == "execute" and call[3]["text"] == "hello metis" for call in calls)
+    assert any(call[0] == "verify" and call[1]["text_contains"] == "hello metis" for call in calls)
+
+
 def test_desktop_expert_prefers_win2_tools():
     definition = expert_tools._EXPERT_DEFINITIONS["desktop_expert"]
     assert "desktop_win2_task" in definition["tool_whitelist"]

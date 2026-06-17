@@ -10,7 +10,7 @@ import uuid
 from dataclasses import replace
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from flask import Flask, Response, abort, jsonify, request, send_file, stream_with_context
 
@@ -54,13 +54,26 @@ from backend.runtime.checkpoint_store import (  # noqa: E402
 from backend.core.paths import legacy_miro_path, metis_dir, metis_path  # noqa: E402
 from backend.runtime.tool_registry import get_registry  # noqa: E402
 from backend.runtime.error_catalog import ErrorInfo, classify_llm_error  # noqa: E402
-from backend.runtime.path_safety import validate_tool_paths  # noqa: E402
+from backend.runtime.path_safety import (  # noqa: E402
+    WRITE_TOOLS,
+    extract_tool_paths,
+    suggest_writable_root_for_path,
+    validate_path_access,
+    validate_tool_paths,
+)
 from backend.runtime.context_control import (  # noqa: E402
     build_compact_state_v2,
     compact_boundary_index as context_compact_boundary_index,
     compact_state_after_truncate as context_compact_state_after_truncate,
     model_context_for_history as context_model_context_for_history,
     normalize_compact_state as context_normalize_compact_state,
+)
+from backend.runtime.agent_services import (  # noqa: E402
+    build_tool_contract,
+    classify_autoguard,
+    explain_permission,
+    generate_session_title,
+    generate_tool_label,
 )
 from backend.runtime.permission_control import (  # noqa: E402
     evaluate_permission,
@@ -169,6 +182,7 @@ _perm_dict_lock = threading.Lock()
 _permission_locks: Dict[str, threading.Event] = {}
 _permission_results: Dict[str, bool] = {}
 _permission_contexts: Dict[str, Dict[str, Any]] = {}
+_permission_ephemeral_writable_roots: Dict[str, Dict[str, Any]] = {}
 _URL_TRAILING_MARKERS = ("，", "。", "！", "？", "；", "：", "、", "）", "】", "》", "」", "』")
 _SUBAGENT_TOOLS = {
     "task_dispatch",
@@ -427,16 +441,28 @@ def _load_permission_document(workspace_root: str = "") -> Dict[str, Any]:
     if not os.path.isfile(source_path) and os.path.isfile(paths["legacy_config"]):
         source_path = paths["legacy_config"]
     if not os.path.isfile(source_path):
-        return {"rules": [], "source_path": paths["config"], "exists": False}
+        return {"rules": [], "writable_roots": [], "source_path": paths["config"], "exists": False}
     try:
         with open(source_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (json.JSONDecodeError, OSError):
-        return {"rules": [], "source_path": source_path, "exists": True}
+        return {"rules": [], "writable_roots": [], "source_path": source_path, "exists": True}
     rules = data.get("rules", []) if isinstance(data, dict) else []
     if not isinstance(rules, list):
         rules = []
-    return {"rules": rules, "source_path": source_path, "exists": True}
+    writable_roots = data.get("writable_roots", []) if isinstance(data, dict) else []
+    if not isinstance(writable_roots, list):
+        writable_roots = []
+    return {
+        "rules": rules,
+        "writable_roots": [
+            _normalize_permission_writable_root(item, workspace_root=workspace_root)
+            for item in writable_roots
+            if isinstance(item, (dict, str))
+        ],
+        "source_path": source_path,
+        "exists": True,
+    }
 
 
 def _normalize_permission_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
@@ -452,11 +478,131 @@ def _permission_rules(workspace_root: str = "") -> List[Dict[str, Any]]:
     ]
 
 
-def _write_permission_rules(rules: List[Dict[str, Any]], workspace_root: str = "") -> None:
+def _permission_writable_roots(workspace_root: str = "") -> List[Dict[str, Any]]:
+    document = _load_permission_document(workspace_root)
+    return [
+        _normalize_permission_writable_root(item, workspace_root=workspace_root)
+        for item in document.get("writable_roots", [])
+        if isinstance(item, (dict, str))
+    ]
+
+
+def _permission_writable_root_paths(workspace_root: str = "") -> List[str]:
+    return [str(item.get("path") or "") for item in _permission_writable_roots(workspace_root) if item.get("path")]
+
+
+def _permission_ephemeral_writable_root_paths(workspace_root: str = "") -> List[str]:
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    now = time.time()
+    paths: List[str] = []
+    expired: List[str] = []
+    with _perm_dict_lock:
+        for key, item in list(_permission_ephemeral_writable_roots.items()):
+            expires_at = float(item.get("expires_at") or 0)
+            if expires_at and expires_at < now:
+                expired.append(key)
+                continue
+            if os.path.abspath(str(item.get("workspace_root") or "")) != root:
+                continue
+            path = str(item.get("path") or "").strip()
+            if path:
+                paths.append(path)
+        for key in expired:
+            _permission_ephemeral_writable_roots.pop(key, None)
+    return paths
+
+
+def _effective_writable_root_paths(workspace_root: str = "") -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for path in [*_permission_writable_root_paths(workspace_root), *_permission_ephemeral_writable_root_paths(workspace_root)]:
+        key = os.path.abspath(os.path.expanduser(str(path))).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(os.path.abspath(os.path.expanduser(str(path))))
+    return out
+
+
+def _add_ephemeral_writable_root(path: str, *, workspace_root: str = "", source: str = "permission_dialog") -> Dict[str, Any]:
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    target = os.path.abspath(os.path.expanduser(str(path or "").strip()))
+    if not target:
+        raise ValueError("path required")
+    safety = validate_path_access(target, action="write", workspace_root=root, writable_roots=[target])
+    if not safety.allowed:
+        raise ValueError(safety.error_text())
+    entry = {
+        "id": f"temp_{uuid.uuid4().hex}",
+        "path": target,
+        "source": source,
+        "workspace_root": root,
+        "created_at": time.time(),
+        "expires_at": time.time() + 60 * 60,
+    }
+    with _perm_dict_lock:
+        _permission_ephemeral_writable_roots[str(entry["id"])] = entry
+    return entry
+
+
+def _candidate_writable_roots_for_arguments(tool_name: str, arguments: Dict[str, Any]) -> List[str]:
+    roots: List[str] = []
+    seen: set[str] = set()
+    for raw_path in extract_tool_paths(arguments):
+        candidate = suggest_writable_root_for_path(raw_path, tool_name=tool_name)
+        key = os.path.abspath(os.path.expanduser(candidate)).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        roots.append(os.path.abspath(os.path.expanduser(candidate)))
+    return roots
+
+
+def _normalize_permission_writable_root(item: Dict[str, Any] | str, workspace_root: str = "") -> Dict[str, Any]:
+    raw: Dict[str, Any]
+    if isinstance(item, str):
+        raw = {"path": item}
+    else:
+        raw = dict(item)
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    path_value = str(raw.get("path") or "").strip()
+    if path_value:
+        path_value = os.path.abspath(os.path.expanduser(path_value))
+    now = time.time()
+    return {
+        "id": str(raw.get("id") or uuid.uuid4()),
+        "path": path_value,
+        "source": str(raw.get("source") or "settings"),
+        "created_at": float(raw.get("created_at") or now),
+        "updated_at": float(raw.get("updated_at") or raw.get("created_at") or now),
+        "workspace_root": root,
+    }
+
+
+def _write_permission_state(
+    rules: List[Dict[str, Any]],
+    writable_roots: List[Dict[str, Any]] | None = None,
+    workspace_root: str = "",
+) -> None:
     path = _permission_paths(workspace_root)["config"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    clean_roots = [
+        _normalize_permission_writable_root(item, workspace_root=workspace_root)
+        for item in (writable_roots or [])
+        if isinstance(item, (dict, str)) and str((item.get("path") if isinstance(item, dict) else item) or "").strip()
+    ]
     with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"rules": rules}, handle, ensure_ascii=False, indent=2)
+        json.dump({"rules": rules, "writable_roots": clean_roots}, handle, ensure_ascii=False, indent=2)
+
+
+def _write_permission_rules(rules: List[Dict[str, Any]], workspace_root: str = "") -> None:
+    roots = _permission_writable_roots(workspace_root)
+    _write_permission_state(rules, roots, workspace_root)
+
+
+def _write_permission_writable_roots(writable_roots: List[Dict[str, Any]], workspace_root: str = "") -> None:
+    rules = _permission_rules(workspace_root)
+    _write_permission_state(rules, writable_roots, workspace_root)
 
 
 def _load_permission_rules(workspace_root: str = "") -> List[Dict[str, Any]]:
@@ -502,6 +648,80 @@ def _create_permission_rule(
     return rule
 
 
+def _create_permission_writable_root(
+    *,
+    path: str,
+    source: str = "settings",
+    workspace_root: str = "",
+) -> Dict[str, Any]:
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    raw_target = str(path or "").strip()
+    if not raw_target:
+        raise ValueError("path required")
+    target = os.path.abspath(os.path.expanduser(raw_target))
+    safety = validate_path_access(target, action="write", workspace_root=root, writable_roots=[target])
+    if not safety.allowed:
+        raise ValueError(safety.error_text())
+    roots = _permission_writable_roots(root)
+    key = target.lower()
+    now = time.time()
+    for index, existing in enumerate(roots):
+        if str(existing.get("path") or "").lower() != key:
+            continue
+        existing["source"] = str(source or existing.get("source") or "settings")
+        existing["updated_at"] = now
+        roots[index] = existing
+        _write_permission_writable_roots(roots, root)
+        return existing
+    entry = _normalize_permission_writable_root(
+        {
+            "path": target,
+            "source": str(source or "settings"),
+            "created_at": now,
+            "updated_at": now,
+        },
+        workspace_root=root,
+    )
+    roots.append(entry)
+    _write_permission_writable_roots(roots, root)
+    return entry
+
+
+def _delete_permission_writable_root(root_id: str, workspace_root: str = "") -> bool:
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    needle = unquote(str(root_id or "")).strip()
+    needle_path = os.path.abspath(os.path.expanduser(needle)).lower() if needle and (":" in needle or "\\" in needle or "/" in needle) else ""
+    roots = _permission_writable_roots(root)
+    next_roots = [
+        item
+        for item in roots
+        if str(item.get("id") or "") != needle and (not needle_path or str(item.get("path") or "").lower() != needle_path)
+    ]
+    if len(next_roots) == len(roots):
+        return False
+    _write_permission_writable_roots(next_roots, root)
+    return True
+
+
+def _suggested_writable_roots() -> List[Dict[str, Any]]:
+    home = os.path.expanduser("~")
+    candidates = [
+        ("desktop", os.path.join(home, "Desktop")),
+        ("documents", os.path.join(home, "Documents")),
+        ("downloads", os.path.join(home, "Downloads")),
+    ]
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for key, path in candidates:
+        resolved = os.path.abspath(os.path.expanduser(path))
+        lowered = resolved.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        out.append({"key": key, "path": resolved, "exists": os.path.isdir(resolved)})
+    return out
+
+
 def _sanitize_permission_args(value: Any, depth: int = 0) -> Any:
     if depth > 4:
         return "[truncated]"
@@ -537,6 +757,8 @@ def _append_permission_audit(entry: Dict[str, Any], workspace_root: str = "") ->
         "action": str(entry.get("action") or ""),
         "approved": bool(entry.get("approved", False)),
         "remember": str(entry.get("remember") or ""),
+        "grant": str(entry.get("grant") or ""),
+        "root_path": str(entry.get("root_path") or ""),
         "rule_id": str(entry.get("rule_id") or ""),
         "source": str(entry.get("source") or "permission_dialog"),
         "arguments": _sanitize_permission_args(entry.get("arguments") or {}),
@@ -590,17 +812,93 @@ def _composer_full_access_enabled(workspace_root: str = "") -> bool:
     return any(_is_composer_full_access_rule(rule) for rule in _load_permission_rules(workspace_root))
 
 
-def _tool_boundary_overrides(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Dict[str, bool]:
-    if tool_name not in _CROSS_WORKSPACE_READ_TOOLS:
-        return {}
-    if not _composer_full_access_enabled(workspace_root):
-        return {}
-    return {
-        "allow_paths_outside_workspace": True,
-        "allow_search_outside_workspace": True,
-        "allow_semantic_outside_workspace": True,
-        "allow_notebook_paths_outside_workspace": True,
+def _permission_safety_for_tool(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Any:
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    writable_roots = _effective_writable_root_paths(root)
+    if tool_name in WRITE_TOOLS and _composer_full_access_enabled(root):
+        writable_roots = [*writable_roots, *_candidate_writable_roots_for_arguments(tool_name, arguments)]
+    return validate_tool_paths(tool_name, arguments, workspace_root=root, writable_roots=writable_roots)
+
+
+def _permission_request_metadata(
+    *,
+    tool_name: str,
+    arguments: Dict[str, Any],
+    workspace_root: str,
+    safety: Any,
+    decision: Dict[str, Any],
+) -> Dict[str, Any]:
+    suggested_root = str(getattr(safety, "suggested_root", "") or "")
+    outside_workspace = str(getattr(safety, "code", "") or "") == "PATH_OUTSIDE_WORKSPACE"
+    path_safety = {
+        "allowed": bool(getattr(safety, "allowed", True)),
+        "code": str(getattr(safety, "code", "") or ""),
+        "message": str(getattr(safety, "message", "") or ""),
+        "path": str(getattr(safety, "path", "") or ""),
+        "suggested_root": suggested_root,
+        "outside_workspace": outside_workspace,
     }
+    explainer = explain_permission(
+        tool_name=tool_name,
+        arguments=arguments or {},
+        decision=decision,
+        path_safety=path_safety,
+        workspace_root=os.path.abspath(workspace_root or _active_workspace_root()),
+    )
+    return {
+        "decision": decision,
+        "path_safety": path_safety,
+        "explainer": explainer,
+        "permission_explainer": explainer,
+        "autoguard": explainer.get("autoguard", {}),
+        "tool_contract": build_tool_contract(
+            tool_name,
+            arguments or {},
+            workspace_root=os.path.abspath(workspace_root or _active_workspace_root()),
+            mode=str(decision.get("mode") or "auto"),
+        ),
+        "suggested_writable_root": suggested_root,
+        "suggested_writable_roots": _suggested_writable_roots(),
+        "can_grant_writable_root": bool(outside_workspace and suggested_root and tool_name in WRITE_TOOLS),
+        "can_grant_full_access": bool(tool_name in WRITE_TOOLS),
+        "workspace_root": os.path.abspath(workspace_root or _active_workspace_root()),
+    }
+
+
+def _tool_boundary_overrides(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Dict[str, bool]:
+    root = os.path.abspath(workspace_root or _active_workspace_root())
+    if tool_name in _CROSS_WORKSPACE_READ_TOOLS:
+        if not _composer_full_access_enabled(root):
+            return {}
+        return {
+            "allow_paths_outside_workspace": True,
+            "allow_search_outside_workspace": True,
+            "allow_semantic_outside_workspace": True,
+            "allow_notebook_paths_outside_workspace": True,
+        }
+    if tool_name in WRITE_TOOLS:
+        if _composer_full_access_enabled(root):
+            safety = validate_tool_paths(
+                tool_name,
+                arguments,
+                workspace_root=root,
+                writable_roots=_candidate_writable_roots_for_arguments(tool_name, arguments),
+            )
+            if safety.allowed:
+                return {"allow_paths_outside_workspace": True}
+            return {}
+        writable_roots = _effective_writable_root_paths(root)
+        if not writable_roots:
+            return {}
+        safety = validate_tool_paths(
+            tool_name,
+            arguments,
+            workspace_root=root,
+            writable_roots=writable_roots,
+        )
+        if safety.allowed:
+            return {"allow_paths_outside_workspace": True}
+    return {}
 
 
 def _tool_boundary_overrides_for_workspace(workspace_root: str) -> Any:
@@ -616,7 +914,25 @@ def _permission_checker_for_workspace(workspace_root: str) -> Any:
 def _check_permission_rules(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Optional[str]:
     """Return allow, deny, ask, or None based on workspace permission rules."""
     root = os.path.abspath(workspace_root or _active_workspace_root())
-    safety = validate_tool_paths(tool_name, arguments, workspace_root=root)
+    safety = _permission_safety_for_tool(tool_name, arguments, root)
+    path_safety = {
+        "allowed": bool(getattr(safety, "allowed", True)),
+        "code": str(getattr(safety, "code", "") or ""),
+        "message": str(getattr(safety, "message", "") or ""),
+        "path": str(getattr(safety, "path", "") or ""),
+        "suggested_root": str(getattr(safety, "suggested_root", "") or ""),
+        "outside_workspace": str(getattr(safety, "code", "") or "") == "PATH_OUTSIDE_WORKSPACE",
+    }
+    if not safety.allowed and safety.code == "PATH_OUTSIDE_WORKSPACE" and tool_name in WRITE_TOOLS:
+        rule_decision = evaluate_rule_layer(
+            tool_name=tool_name,
+            arguments=arguments,
+            rules=_load_permission_rules(root),
+            mode=_runtime_state.execution_mode,
+        )
+        if rule_decision.action == "deny":
+            return "deny"
+        return "ask"
     decision = evaluate_rule_layer(
         tool_name=tool_name,
         arguments=arguments,
@@ -624,6 +940,15 @@ def _check_permission_rules(tool_name: str, arguments: Dict[str, Any], workspace
         mode=_runtime_state.execution_mode,
         hard_deny_reason="" if safety.allowed else safety.error_text(),
     )
+    autoguard = classify_autoguard(
+        tool_name=tool_name,
+        arguments=arguments,
+        mode=_runtime_state.execution_mode,
+        path_safety=path_safety,
+        workspace_root=root,
+    )
+    if autoguard.get("shouldBlock") and decision.action not in {"deny", "ask"}:
+        return "ask"
     return decision.action if decision.action in {"allow", "deny", "ask"} else None
 
 
@@ -892,8 +1217,8 @@ def _mechanical_compact(
     """No-LLM fallback compaction: drop tool echoes, truncate old messages."""
     if len(history) <= keep_recent:
         return list(history)
-    old = history[:-keep_recent]
-    recent = history[-keep_recent:]
+    old = history if keep_recent <= 0 else history[:-keep_recent]
+    recent = [] if keep_recent <= 0 else history[-keep_recent:]
     key_facts = _extract_key_facts(old)
     compacted: List[Dict[str, Any]] = []
     for msg in old:
@@ -932,8 +1257,8 @@ def _compact_history(
     if len(history) <= keep_recent + 2:
         return None
 
-    old_messages = history[:-keep_recent]
-    recent_messages = history[-keep_recent:]
+    old_messages = history if keep_recent <= 0 else history[:-keep_recent]
+    recent_messages = [] if keep_recent <= 0 else history[-keep_recent:]
 
     # Write-before-compaction: extract key facts first
     key_facts = _extract_key_facts(old_messages)
@@ -1055,6 +1380,9 @@ def _trigger_auto_compact(config: AgentConfig, *, aggressive: bool = False) -> O
 
 def _generate_fallback_title(text: str) -> str:
     """Generate a local title without LLM, used as fallback."""
+    prompt_title = generate_session_title([{"role": "user", "content": text}])
+    if prompt_title:
+        return prompt_title
     text = text.strip()
     if not text:
         return ""
@@ -1628,9 +1956,10 @@ def _stream_agent_response(
                 break
 
             lock: Optional[threading.Event] = None
+            event_summary_label = ""
             if isinstance(event, PermissionRequestEvent):
                 lock = threading.Event()
-                safety = validate_tool_paths(event.tool_name, event.arguments or {}, workspace_root=config.workspace_root)
+                safety = _permission_safety_for_tool(event.tool_name, event.arguments or {}, config.workspace_root)
                 permission_decision = evaluate_permission(
                     mode=mode,
                     tool_name=event.tool_name,
@@ -1649,6 +1978,13 @@ def _stream_agent_response(
                         "workspace_root": config.workspace_root,
                         "mode": mode,
                         "decision": permission_decision.to_dict(),
+                        "permission": _permission_request_metadata(
+                            tool_name=event.tool_name,
+                            arguments=event.arguments or {},
+                            workspace_root=config.workspace_root,
+                            safety=safety,
+                            decision=permission_decision.to_dict(),
+                        ),
                         "created_at": time.time(),
                     }
 
@@ -1656,9 +1992,12 @@ def _stream_agent_response(
                 if checkpoint is not None:
                     checkpoint.capture_tool_call(event.tool_name, event.arguments or {})
                 tool_names.append(event.tool_name)
+                label = generate_tool_label(event.tool_name, event.arguments or {}, status="running")
+                event_summary_label = label
                 pending_tool_calls[event.call_id or event.tool_name] = {
                     "name": event.tool_name,
                     "arguments": event.arguments or {},
+                    "summary": label,
                 }
 
             if isinstance(event, ToolResultEvent):
@@ -1667,6 +2006,14 @@ def _stream_agent_response(
                 # as a transcript-only record (metis_kind=tool) that is filtered
                 # out before building the model request (agent_loop).
                 call = pending_tool_calls.pop(event.call_id or event.tool_name, {})
+                result_status = "error" if _tool_result_is_error(event.result) else "success"
+                result_label = generate_tool_label(
+                    event.tool_name or str(call.get("name") or "tool"),
+                    call.get("arguments", {}) if isinstance(call.get("arguments"), dict) else {},
+                    event.result,
+                    status=result_status,
+                )
+                event_summary_label = result_label
                 run_history.append(
                     _new_message(
                         "assistant",
@@ -1677,7 +2024,8 @@ def _stream_agent_response(
                             "name": event.tool_name or call.get("name", ""),
                             "arguments": call.get("arguments", {}),
                             "result": _truncate_tool_record(event.result),
-                            "status": "error" if _tool_result_is_error(event.result) else "success",
+                            "status": result_status,
+                            "summary": result_label,
                         },
                     )
                 )
@@ -1700,7 +2048,28 @@ def _stream_agent_response(
                     reason="assistant_content",
                 )
 
-            yield _sse(_event_payload(event))
+            payload = _event_payload(event)
+            if isinstance(event, ToolCallEvent):
+                label = ""
+                call = pending_tool_calls.get(event.call_id or event.tool_name, {})
+                if isinstance(call, dict):
+                    label = str(call.get("summary") or "")
+                if not label:
+                    label = generate_tool_label(event.tool_name, event.arguments or {}, status="running")
+                payload["payload"]["summary"] = label
+                payload["summary"] = label
+            if isinstance(event, ToolResultEvent):
+                label = event_summary_label or generate_tool_label(event.tool_name, {}, event.result)
+                payload["payload"]["summary"] = label
+                payload["summary"] = label
+            if isinstance(event, PermissionRequestEvent):
+                with _perm_dict_lock:
+                    context = dict(_permission_contexts.get(event.request_id, {}))
+                permission_payload = context.get("permission") if isinstance(context.get("permission"), dict) else {}
+                if permission_payload:
+                    payload["payload"]["permission"] = permission_payload
+                    payload["permission"] = permission_payload
+            yield _sse(payload)
 
             if isinstance(event, ToolCallEvent) and event.tool_name in _SUBAGENT_TOOLS:
                 yield _sse(
@@ -2902,7 +3271,7 @@ def get_mode() -> Any:
 def set_mode() -> Any:
     data = request.get_json(silent=True) or {}
     mode = data.get("mode", "auto")
-    valid_modes = ("ask", "edit", "plan", "auto", "bypass")
+    valid_modes = ("ask", "edit", "plan", "auto", "auto_guard", "read_only", "bypass")
     if mode not in valid_modes:
         return jsonify({"error": f"invalid mode, must be one of: {valid_modes}"}), 400
     _runtime_state.execution_mode = mode
@@ -2919,6 +3288,9 @@ def handle_permission() -> Any:
     remember = str(data.get("remember") or "").strip().lower()
     if remember not in {"", "allow", "deny"}:
         return jsonify({"error": "remember must be allow, deny, or empty"}), 400
+    grant = str(data.get("grant") or "").strip().lower()
+    if grant not in {"", "temporary_root", "writable_root", "selected_root", "full_access"}:
+        return jsonify({"error": "grant must be empty, temporary_root, writable_root, selected_root, or full_access"}), 400
 
     with _perm_dict_lock:
         lock = _permission_locks.get(request_id)
@@ -2934,8 +3306,38 @@ def handle_permission() -> Any:
     call_id = str(context.get("call_id") or data.get("call_id") or "")
     workspace_root = str(context.get("workspace_root") or "")
     decision = context.get("decision") if isinstance(context.get("decision"), dict) else {}
+    permission_meta = context.get("permission") if isinstance(context.get("permission"), dict) else {}
+    path_safety = permission_meta.get("path_safety") if isinstance(permission_meta.get("path_safety"), dict) else {}
+    root_path = str(
+        data.get("root_path")
+        or data.get("rootPath")
+        or permission_meta.get("suggested_writable_root")
+        or path_safety.get("suggested_root")
+        or ""
+    ).strip()
     rule_id = ""
-    if remember in {"allow", "deny"} and tool_name:
+    if approved and grant in {"temporary_root", "writable_root", "selected_root"}:
+        if not root_path:
+            return jsonify({"error": "root_path required for writable root grant"}), 400
+        if grant == "temporary_root":
+            entry = _add_ephemeral_writable_root(root_path, workspace_root=workspace_root, source="permission_dialog_once")
+            rule_id = str(entry.get("id") or "")
+        else:
+            entry = _create_permission_writable_root(
+                path=root_path,
+                source="permission_dialog",
+                workspace_root=workspace_root,
+            )
+            rule_id = str(entry.get("id") or "")
+    elif approved and grant == "full_access":
+        rule = _create_permission_rule(
+            tool="*",
+            action="allow",
+            source=_COMPOSER_PERMISSION_SOURCE,
+            workspace_root=workspace_root,
+        )
+        rule_id = str(rule.get("id") or "")
+    elif remember in {"allow", "deny"} and tool_name:
         rule = _create_permission_rule(
             tool=tool_name,
             action=remember,
@@ -2953,6 +3355,8 @@ def handle_permission() -> Any:
             "action": "allow" if approved else "deny",
             "approved": approved,
             "remember": remember,
+            "grant": grant,
+            "root_path": root_path,
             "rule_id": rule_id,
             "source": "permission_dialog",
             "mode": str(context.get("mode") or _runtime_state.execution_mode or "auto"),
@@ -2968,7 +3372,7 @@ def handle_permission() -> Any:
             return jsonify({"error": "no pending permission request"}), 404
         _permission_results[request_id] = approved
         current_lock.set()
-    return jsonify({"ok": True, "approved": approved, "remember": remember, "rule_id": rule_id})
+    return jsonify({"ok": True, "approved": approved, "remember": remember, "grant": grant, "root_path": root_path, "rule_id": rule_id})
 
 
 @app.route("/permissions", methods=["GET"])
@@ -2977,9 +3381,12 @@ def list_permissions() -> Any:
     paths = _permission_paths(root)
     rules_raw = _permission_rules(root)
     rules = [_permission_rule_payload(rule) for rule in rules_raw]
+    writable_roots = _permission_writable_roots(root)
     return jsonify(
         {
             "rules": rules,
+            "writable_roots": writable_roots,
+            "suggested_writable_roots": _suggested_writable_roots(),
             "audit": _read_permission_audit(limit=50, workspace_root=root),
             "control_plane": permission_control_payload(mode=_runtime_state.execution_mode, rules=rules_raw),
             "path": paths["config"],
@@ -3009,6 +3416,30 @@ def create_permission() -> Any:
         workspace_root=_active_workspace_root(),
     )
     return jsonify({"ok": True, "rule": _permission_rule_payload(rule)})
+
+
+@app.route("/permissions/writable-roots", methods=["POST"])
+def create_permission_writable_root() -> Any:
+    data = request.get_json(silent=True) or {}
+    path = str(data.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "path required"}), 400
+    try:
+        entry = _create_permission_writable_root(
+            path=path,
+            source=str(data.get("source") or "settings"),
+            workspace_root=_active_workspace_root(),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "writable_root": entry})
+
+
+@app.route("/permissions/writable-roots/<root_id>", methods=["DELETE"])
+def delete_permission_writable_root(root_id: str) -> Any:
+    if not _delete_permission_writable_root(root_id, _active_workspace_root()):
+        return jsonify({"error": "writable root not found"}), 404
+    return jsonify({"ok": True, "id": root_id})
 
 
 @app.route("/permissions/<rule_id>", methods=["DELETE"])
@@ -3052,7 +3483,22 @@ def reset() -> Any:
 @app.route("/compact", methods=["POST"])
 def compact() -> Any:
     """Compact model context while preserving the persisted user transcript."""
+    data = request.get_json(silent=True) or {}
     session_id = _request_session_id() or _runtime_state.active_session_id or ""
+    compact_mode = str(data.get("mode") or data.get("compact_mode") or "partial_older").strip().lower().replace("-", "_")
+    if compact_mode in {"older", "older_context"}:
+        compact_mode = "partial_older"
+    if compact_mode in {"recent", "recent_context"}:
+        compact_mode = "partial_recent"
+    if compact_mode not in {"full", "partial_older", "partial_recent"}:
+        payload = _compact_status_payload(
+            ok=False,
+            before_context_messages=0,
+            after_context_messages=0,
+            error="invalid compact mode, use full, partial_older, or partial_recent",
+        )
+        _runtime_state.last_compact_status = payload
+        return jsonify(payload), 400
     if not session_id:
         payload = _compact_status_payload(
             ok=False,
@@ -3088,7 +3534,13 @@ def compact() -> Any:
     history = list(session.history)
     current_state = _normalize_compact_state(session.compact_state)
     before_context = _model_context_for_history(history, current_state)
-    keep_recent = 4
+    keep_recent = max(0, min(_safe_int(data.get("keep_recent") or data.get("keepRecent"), 4), 24))
+    boundary_index = (
+        len(history)
+        if compact_mode == "full"
+        else max(0, len(history) - keep_recent)
+    )
+    source_context = history if compact_mode in {"full", "partial_older"} else history[boundary_index:]
     if len(before_context) <= keep_recent + 2:
         payload = _compact_status_payload(
             ok=False,
@@ -3099,12 +3551,12 @@ def compact() -> Any:
         _runtime_state.last_compact_status = payload
         return jsonify(payload)
 
-    result = _compact_history(before_context, keep_recent=keep_recent)
+    result_keep_recent = 0 if compact_mode == "full" else keep_recent
+    result = _compact_history(source_context, keep_recent=result_keep_recent)
     if result is None:
-        result = _mechanical_compact(before_context, keep_recent=keep_recent)
+        result = _mechanical_compact(source_context, keep_recent=result_keep_recent)
 
     summary = _compact_summary_from_messages(result)
-    boundary_index = max(0, len(history) - keep_recent)
     boundary_message_id = ""
     if boundary_index < len(history):
         boundary_message_id = str(history[boundary_index].get("id") or "")
@@ -3114,6 +3566,8 @@ def compact() -> Any:
         keep_recent=keep_recent,
         previous_state=current_state,
         compacted_at=time.time(),
+        mode=compact_mode,
+        boundary_index=boundary_index,
     )
     boundary_index = _safe_int(compact_state.get("boundary_index"), boundary_index)
     boundary_message_id = str(compact_state.get("boundary_message_id") or boundary_message_id)
@@ -3136,6 +3590,7 @@ def compact() -> Any:
             "boundary_message_id": boundary_message_id,
             "compact_count": compact_state["compact_count"],
             "version": compact_state.get("version", 1),
+            "mode": compact_state.get("mode", compact_mode),
             "source_message_count": compact_state.get("source_message_count", 0),
             "preserved_message_count": len(compact_state.get("preserved_message_ids") or []),
         }

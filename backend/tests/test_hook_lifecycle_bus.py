@@ -91,11 +91,13 @@ def test_hook_lifecycle_bus_subscriber_audit_and_redaction(tmp_path: Path) -> No
     assert result.handler_errors == ["RuntimeError: boom"]
 
     recent = recent_hook_lifecycle_events()
-    assert recent[-1]["arguments"]["api_key"] == "[redacted]"
+    recent_event = next(row for row in reversed(recent) if row["event_id"] == result.event.event_id)
+    assert recent_event["arguments"]["api_key"] == "[redacted]"
     audit_path = tmp_path / "metis-home" / "audit" / "hook-lifecycle.jsonl"
     rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
-    assert rows[-1]["schema"] == HOOK_LIFECYCLE_SCHEMA
-    assert rows[-1]["arguments"]["api_key"] == "[redacted]"
+    audit_event = next(row for row in reversed(rows) if row["event_id"] == result.event.event_id)
+    assert audit_event["schema"] == HOOK_LIFECYCLE_SCHEMA
+    assert audit_event["arguments"]["api_key"] == "[redacted]"
 
 
 def test_configured_command_hook_runs_from_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

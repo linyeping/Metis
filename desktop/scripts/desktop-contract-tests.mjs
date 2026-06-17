@@ -48,6 +48,78 @@ test('package exposes core verification scripts', () => {
   assert.ok(pkg.scripts['smoke:desktop']);
   assert.ok(pkg.scripts['perf:desktop']);
   assert.ok(pkg.scripts['test:contracts']);
+  assert.equal(pkg.scripts['test:fixed-regression'], 'node scripts/fixed-regression-runner.mjs');
+  assert.equal(pkg.scripts['test:fixed-regression:list'], 'node scripts/fixed-regression-runner.mjs --list');
+  assert.match(pkg.scripts.dist, /^npm run test:fixed-regression && /);
+  assert.match(pkg.scripts['dist:win'], /^npm run test:fixed-regression && /);
+  assert.ok(pkg.scripts['dist:win'].indexOf('test:fixed-regression') < pkg.scripts['dist:win'].indexOf('electron-builder'));
+});
+
+test('fixed regression runner covers agent safety and artifact gates', () => {
+  const runner = read('scripts/fixed-regression-runner.mjs');
+
+  for (const suite of [
+    'permissions',
+    'compact',
+    'verifier',
+    'browser-computer',
+    'artifacts',
+    'model-tools',
+    'desktop-contracts',
+  ]) {
+    assert.match(runner, new RegExp(`id:\\s*'${suite}'`));
+  }
+
+  for (const testPath of [
+    'backend/tests/test_permission_rules.py',
+    'backend/tests/test_permission_control_plane.py',
+    'backend/tests/test_fableadv_10_compaction_transcript_separation.py',
+    'backend/tests/test_verifier_evidence_chain.py',
+    'backend/tests/test_preview_browser_bridge.py',
+    'backend/tests/test_win2_computer_use.py',
+    'backend/tests/test_fableadv_20_computer_use.py',
+    'backend/tests/test_artifact_pdf_docx_tools.py',
+    'backend/tests/test_provider_registry.py',
+    'backend/tests/test_agent_runtime_reliability.py',
+    'backend/tests/test_deepseek_strict_schema.py',
+    'scripts/desktop-contract-tests.mjs',
+  ]) {
+    assert.match(runner, new RegExp(testPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.match(runner, /METIS_FIXED_REGRESSION_SUITE/);
+  assert.match(runner, /--suite/);
+  assert.match(runner, /--list/);
+  assert.match(runner, /!arg\.startsWith\('-'\)/);
+});
+
+test('DeepSeek, slash menu, cache dashboard, and release gates stay wired', () => {
+  const repoRoot = path.resolve(root, '..');
+  const composer = read('src/components/chat/Composer.tsx');
+  const css = read('src/index.css');
+  const rightRail = read('src/components/rightrail/RightRail.tsx');
+  const openaiCompat = fs.readFileSync(path.join(repoRoot, 'backend', 'runtime', 'llm_backends', 'openai_compat.py'), 'utf8');
+  const deepseekSchema = fs.readFileSync(path.join(repoRoot, 'backend', 'runtime', 'llm_backends', 'deepseek_schema.py'), 'utf8');
+  const agentLoop = fs.readFileSync(path.join(repoRoot, 'backend', 'runtime', 'agent_loop.py'), 'utf8');
+
+  assert.match(composer, /slashMenuRef/);
+  assert.match(composer, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.match(css, /\.slash-menu\s*\{[\s\S]*max-height:\s*min\(360px,\s*calc\(100vh - 220px\)\)/);
+  assert.match(css, /\.slash-menu\s*\{[\s\S]*overflow-y:\s*auto/);
+
+  assert.match(openaiCompat, /sanitize_deepseek_strict_tools/);
+  assert.match(openaiCompat, /_provider_tools/);
+  assert.match(deepseekSchema, /function\["strict"\]\s*=\s*True/);
+  assert.match(deepseekSchema, /additionalProperties"\]\s*=\s*False/);
+
+  assert.match(agentLoop, /MAX_TOOL_CALL_REPAIR_ATTEMPTS/);
+  assert.match(agentLoop, /tool_call_repair/);
+  assert.match(agentLoop, /native tool\/function call/);
+
+  assert.match(rightRail, /contextLedger/);
+  assert.match(rightRail, /cacheHitRate/);
+  assert.match(rightRail, /label=\{t\('Cache'\)\}/);
+  assert.match(css, /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(72px,\s*1fr\)\)/);
 });
 
 test('FABLEADV-47 connector OAuth stores tokens safely', () => {
@@ -392,7 +464,8 @@ test('FABLEADV-50 preview browser automation and safety gate stay wired', () => 
   assert.match(toolRegistry, /browser_activity/);
   assert.match(toolProfiles, /preview_browser_observe/);
   assert.match(toolProfiles, /browse_and_extract/);
-  assert.match(skillLoader, /BUILTIN_SKILLS_VERSION = 6/);
+  const builtinSkillsVersion = Number(skillLoader.match(/BUILTIN_SKILLS_VERSION = (\d+)/)?.[1] || 0);
+  assert.ok(builtinSkillsVersion >= 6);
   assert.match(skillLoader, /Allowed tools:/);
   assert.match(browserSkill, /Browser Router/);
   assert.match(browserSkill, /preview_browser_observe/);
@@ -1870,7 +1943,7 @@ test('NEW-79 cross-drive read and autosizing composer stays wired', () => {
   assert.match(readFileTool, /def _read_docx_text/);
   assert.match(pathTests, /test_legacy_path_security_allows_outside_read_with_boundary_override/);
   assert.match(pathTests, /test_read_file_extracts_cross_workspace_docx_text_with_boundary_override/);
-  assert.match(permissionTests, /test_composer_full_access_enables_cross_workspace_read_boundary/);
+  assert.match(permissionTests, /test_composer_full_access_enables_cross_workspace_boundaries/);
   assert.match(composer, /textareaRef/);
   assert.match(composer, /scrollHeight/);
   assert.match(css, /max-height:\s*min\(38vh,\s*320px\)/);
@@ -2007,12 +2080,19 @@ test('NEW-57 permission policy templates and path safety stay wired', () => {
   assert.match(settings, /policy_template/);
   assert.match(settings, /permission-new-arg-key-input/);
   assert.match(settings, /permission-new-arg-pattern-input/);
+  assert.match(settings, /pickFolder/);
+  assert.match(settings, /选择文件夹/);
   assert.match(settings, /scopeLabel/);
   assert.match(css, /\.permission-policy-templates/);
   assert.match(css, /\.permission-template-button/);
   assert.match(api, /args_match:\s*payload\.argsMatch/);
+  assert.match(api, /grant:\s*options\.grant/);
+  assert.match(api, /root_path:\s*options\.rootPath/);
   assert.match(realBackend, /validate_tool_paths\(tool_name, arguments/);
+  assert.match(realBackend, /temporary_root/);
+  assert.match(realBackend, /suggested_writable_root/);
   assert.match(realBackend, /dict\(rule\.get\("args_match"\)/);
+  assert.match(pathSafety, /suggested_root/);
   assert.match(pathSafety, /SECRET_EXTENSIONS/);
   assert.match(pathSafety, /SECRET_DIRS/);
   assert.match(pathSafetyTest, /test_path_safety_denies_ssh_directory_read/);
