@@ -453,21 +453,30 @@ def _extract_legacy_office(data: bytes, ext: str, filename: str) -> str:
         except MissingParserDependency:
             pass
 
+    converter_errors: List[str] = []
     if ext == ".doc":
         antiword = antiword_path()
         if antiword:
-            return _run_converter_stdout([antiword], data, ext, filename)
+            try:
+                return _run_converter_stdout([antiword], data, ext, filename)
+            except ValueError as exc:
+                converter_errors.append(f"antiword converter failed: {exc}")
 
-    converted = _convert_with_soffice(data, ext, filename)
-    if converted:
-        return converted
+    try:
+        converted = _convert_with_soffice(data, ext, filename)
+        if converted:
+            return converted
+    except ValueError as exc:
+        converter_errors.append(f"LibreOffice converter failed: {exc}")
 
     status = document_converter_status()
     hints = "; ".join(status.to_dict().get("hints", []))
+    failure = f" Converter details: {'; '.join(converter_errors)}" if converter_errors else ""
     raise UnsupportedFileType(
         f"Legacy Office {ext} parsing needs {dependency_for_extension(ext)}. "
         "Metis checked configured portable converters, PATH, and Python modules. "
         f"{hints or 'Please convert the file to docx/xlsx/pptx, or install a converter and retry.'}"
+        f"{failure}"
     )
 
 
