@@ -2850,7 +2850,29 @@ def metis_runtime_create(
         paths.session_root.mkdir(parents=True, exist_ok=False)
         paths.artifacts_dir.mkdir(parents=True, exist_ok=True)
         paths.diagnostics_dir.mkdir(parents=True, exist_ok=True)
-        if mode_value == "copy":
+        # HCS is itself the isolation boundary: the VM gets workspace files
+        # pushed in over vsock per run and writes nothing back to the source,
+        # so we skip the host-side snapshot entirely (no disk bloat).
+        hcs_direct = mode_value == "copy" and backend_selection["selected"] == "hcs"
+        if hcs_direct:
+            copy_stats = {
+                "mode": "hcs-direct",
+                "copied_files": 0,
+                "copied_bytes": 0,
+                "skipped": [],
+                "note": "HCS VM is the isolation boundary; workspace is pushed into the VM per run, no host snapshot",
+            }
+            paths = RuntimePaths(
+                source_root=paths.source_root,
+                session_root=paths.session_root,
+                workspace_dir=source_root,  # read-only push source; VM writes go to artifacts
+                artifacts_dir=paths.artifacts_dir,
+                diagnostics_dir=paths.diagnostics_dir,
+                manifest_path=paths.manifest_path,
+                runs_path=paths.runs_path,
+            )
+            baseline = _scan_baseline(source_root, max_files=max(1, int(max_files or DEFAULT_MAX_FILES)))
+        elif mode_value == "copy":
             paths.workspace_dir.mkdir(parents=True, exist_ok=True)
             copy_stats, baseline = _copy_workspace_snapshot(
                 source_root,
@@ -2892,7 +2914,7 @@ def metis_runtime_create(
             copy_stats=copy_stats,
             runtimes=_detect_runtime_commands(),
         )
-        if mode_value == "copy":
+        if mode_value == "copy" and not hcs_direct:
             manifest.git_baseline = _initialize_git_baseline(paths.workspace_dir)
         _write_manifest(manifest)
         return _json(
@@ -3290,6 +3312,182 @@ def _write_manifest(manifest: RuntimeManifest) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Runtime storage hygiene (size reporting + retention GC)
+# ---------------------------------------------------------------------------
+
+RUNTIME_STORAGE_SCHEMA = "metis.runtime_storage.usage.v1"
+RUNTIME_GC_SCHEMA = "metis.runtime_storage.gc.v1"
+_RUNTIME_KINDS = ("runtime", "artifacts", "diagnostics")
+
+
+def _is_runtime_session_dir(name: str) -> bool:
+    """True only for runtime session dirs (rt_*). Protects siblings like
+    .metis/runtime/wsl (managed WSL distro) from being GC'd."""
+    return name.startswith("rt_")
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    if not path.is_dir():
+        return 0
+    for item in path.rglob("*"):
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _force_rmtree(path: Path) -> bool:
+    """Remove a tree, clearing the read-only bit on Windows (e.g. .git objects)
+    that would otherwise make shutil.rmtree silently fail. Returns True if gone."""
+    def _onerror(func, p, _exc):
+        try:
+            os.chmod(p, 0o700)
+            func(p)
+        except Exception:
+            pass
+    try:
+        shutil.rmtree(path, onerror=_onerror)
+    except Exception:
+        pass
+    return not path.exists()
+
+
+def _metis_root(root: str) -> Path:
+    raw = str(root or ".").strip() or "."
+    if raw == ".":
+        base = get_workspace_root()
+    else:
+        try:
+            base = safe_path_for_read(raw, allow_paths_outside_workspace=get_effective_sub_allow("allow_paths_outside_workspace"))
+        except Exception:
+            base = Path(raw).expanduser().resolve(strict=False)
+    if base.is_file():
+        base = base.parent
+    return base / ".metis"
+
+
+def metis_runtime_storage_usage(root: str = ".") -> str:
+    """Report disk used by runtime sessions/artifacts/diagnostics/jobs."""
+    try:
+        metis = _metis_root(root)
+        by_kind: Dict[str, int] = {}
+        for kind in _RUNTIME_KINDS:
+            by_kind[kind] = _dir_size(metis / kind)
+        jobs_dir = metis / "runtime-jobs"
+        by_kind["jobs"] = _dir_size(jobs_dir)
+        session_ids = set()
+        runtime_dir = metis / "runtime"
+        if runtime_dir.is_dir():
+            session_ids = {p.name for p in runtime_dir.iterdir() if p.is_dir() and _is_runtime_session_dir(p.name)}
+        total = sum(by_kind.values())
+        return _json({
+            "ok": True,
+            "schema": RUNTIME_STORAGE_SCHEMA,
+            "root": str(metis.parent),
+            "metis_dir": str(metis),
+            "total_bytes": total,
+            "by_kind": by_kind,
+            "session_count": len(session_ids),
+            "job_count": len(list(jobs_dir.glob("job_*.json"))) if jobs_dir.is_dir() else 0,
+        })
+    except Exception as exc:
+        return _json_error(f"{type(exc).__name__}: {exc}", code="RUNTIME_STORAGE_FAILED")
+
+
+def metis_runtime_gc(
+    root: str = ".",
+    keep_recent: int = 20,
+    max_age_days: float = 7.0,
+    aggressive: bool = False,
+) -> str:
+    """Prune old runtime sessions and job manifests.
+
+    Keeps the `keep_recent` newest sessions and anything newer than
+    `max_age_days`; deletes the rest (runtime + artifacts + diagnostics).
+    `aggressive=True` ignores keep_recent/age and removes everything.
+    """
+    try:
+        metis = _metis_root(root)
+        runtime_dir = metis / "runtime"
+        sessions = []
+        if runtime_dir.is_dir():
+            for p in runtime_dir.iterdir():
+                # ONLY ever touch runtime session dirs (rt_*). Never delete other
+                # things stored under .metis/runtime (e.g. the managed WSL distro
+                # at .metis/runtime/wsl/) — that would destroy user data.
+                if p.is_dir() and _is_runtime_session_dir(p.name):
+                    try:
+                        sessions.append((p.name, p.stat().st_mtime))
+                    except OSError:
+                        sessions.append((p.name, 0.0))
+        sessions.sort(key=lambda x: x[1], reverse=True)  # newest first
+
+        now = time.time()
+        cutoff = now - max_age_days * 86400
+        keep: set = set()
+        if not aggressive:
+            # Keep only the N newest sessions that are also within max_age
+            # (keep_recent is a hard cap; age prunes within the cap).
+            for idx, (sid, mtime) in enumerate(sessions):
+                if idx < max(0, int(keep_recent)) and mtime >= cutoff:
+                    keep.add(sid)
+
+        removed = []
+        freed = 0
+        for sid, _mtime in sessions:
+            if sid in keep:
+                continue
+            any_removed = False
+            for kind in _RUNTIME_KINDS:
+                d = metis / kind / sid
+                if d.is_dir():
+                    sz = _dir_size(d)
+                    if _force_rmtree(d):
+                        freed += sz
+                        any_removed = True
+            if any_removed:
+                removed.append(sid)
+
+        # Prune orphan job manifests for removed sessions / beyond keep_recent.
+        jobs_dir = metis / "runtime-jobs"
+        jobs_removed = 0
+        if jobs_dir.is_dir():
+            job_files = sorted(jobs_dir.glob("job_*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+            for idx, jf in enumerate(job_files):
+                drop = aggressive or (idx >= max(0, int(keep_recent)))
+                if not drop:
+                    try:
+                        if jf.stat().st_mtime < cutoff:
+                            drop = True
+                    except OSError:
+                        pass
+                if drop:
+                    try:
+                        freed += jf.stat().st_size
+                        jf.unlink()
+                        jobs_removed += 1
+                    except OSError:
+                        continue
+
+        return _json({
+            "ok": True,
+            "schema": RUNTIME_GC_SCHEMA,
+            "root": str(metis.parent),
+            "removed_sessions": removed,
+            "removed_session_count": len(removed),
+            "removed_job_count": jobs_removed,
+            "kept_session_count": len(keep),
+            "freed_bytes": freed,
+            "policy": {"keep_recent": keep_recent, "max_age_days": max_age_days, "aggressive": aggressive},
+        })
+    except Exception as exc:
+        return _json_error(f"{type(exc).__name__}: {exc}", code="RUNTIME_GC_FAILED")
+
+
 def _copy_workspace_snapshot(
     source_root: Path,
     workspace_dir: Path,
@@ -3437,6 +3635,26 @@ def _detect_runtime_commands() -> Dict[str, Dict[str, str]]:
         }
         for name, path in commands.items()
     }
+
+
+def _hcs_backend_available() -> bool:
+    """Check if HCS VM sandbox is usable.
+
+    Either the privileged service is running (non-elevated path, no UAC) or
+    HCS is directly reachable from this process (elevated) with a VM bundle.
+    """
+    try:
+        from backend.runtime import svc_client
+        if svc_client.service_available():
+            return True
+    except Exception:
+        pass
+    try:
+        from backend.runtime.hcs_runtime import hcs_runtime_available
+        ok, _ = hcs_runtime_available()
+        return ok
+    except Exception:
+        return False
 
 
 def _detect_sandbox_backends(
@@ -9518,7 +9736,9 @@ def _select_runtime_backend(
         requested = "vm"
     if requested in {"wsl_import", "managed_wsl", "metiswsl"}:
         requested = "metis_wsl"
-    if requested not in {"auto", "local", "wsl", "docker", "vm", "metis_wsl"}:
+    if requested in {"hcs", "hcs_vm", "hyper_v", "hyperv"}:
+        requested = "hcs"
+    if requested not in {"auto", "local", "wsl", "docker", "vm", "metis_wsl", "hcs"}:
         requested = "local"
     status = _detect_sandbox_backends(
         docker_image=docker_image,
@@ -9531,11 +9751,21 @@ def _select_runtime_backend(
     fallback_reason = ""
     selected = requested
     if requested == "auto":
-        selected = str(status.get("preferred") or "local")
-        fallback_reason = "auto selected the strongest available backend"
-        if selected == "vm" and not status.get("vm_pack", {}).get("runnable"):
+        # Prefer HCS if available, then existing VM/WSL/Docker, then local
+        hcs_ok = _hcs_backend_available()
+        if hcs_ok:
+            selected = "hcs"
+            fallback_reason = "auto selected HCS VM sandbox (strongest isolation)"
+        else:
+            selected = str(status.get("preferred") or "local")
+            fallback_reason = "auto selected the strongest available backend"
+            if selected == "vm" and not status.get("vm_pack", {}).get("runnable"):
+                selected = "local"
+                fallback_reason = "VM Pack is detected but not runnable in this build, falling back to local copy"
+    elif requested == "hcs":
+        if not _hcs_backend_available():
             selected = "local"
-            fallback_reason = "VM Pack is detected but not runnable in this build, falling back to local copy"
+            fallback_reason = "HCS VM sandbox unavailable, falling back to local copy"
     elif requested == "metis_wsl" and not status.get("metis_wsl", {}).get("available"):
         selected = "local"
         fallback_reason = f"Metis WSL runtime unavailable, falling back to local copy: {status.get('metis_wsl', {}).get('reason', '')}"
@@ -9626,6 +9856,15 @@ def _run_runtime_command(
             )
         if backend == "vm":
             return _run_vm_guest_protocol_command(
+                manifest,
+                command_text,
+                work_dir=work_dir,
+                timeout=timeout,
+                env_map=env_map,
+                network_allowed=network_allowed,
+            )
+        if backend == "hcs":
+            return _run_hcs_command(
                 manifest,
                 command_text,
                 work_dir=work_dir,
@@ -9871,6 +10110,94 @@ def _vm_protocol_failure_message(
     if daemon_stderr.strip():
         parts.append(f"stderr={_truncate(daemon_stderr, 1200)}")
     return "\n".join(parts)
+
+
+def _run_hcs_command(
+    manifest: RuntimeManifest,
+    command_text: str,
+    *,
+    work_dir: Path,
+    timeout: int,
+    env_map: Dict[str, str],
+    network_allowed: bool,
+) -> BackendRunResult:
+    """Run a command inside an HCS VM.
+
+    Three-tier path:
+      1. privileged service (non-elevated, no UAC) via the named pipe
+      2. direct hcs_runtime (works only when this process is elevated)
+      3. raise -> caller falls back to WSL/local
+    """
+    # --- Tier 1: privileged service (preferred; no elevation needed) ---
+    try:
+        from backend.runtime import svc_client
+        if svc_client.service_available():
+            from backend.runtime.hcs_client import find_metis_bundle
+            bundle = find_metis_bundle()
+            params = {
+                "command": command_text,
+                "workspace_dir": str(manifest.paths.workspace_dir),
+                "artifacts_dir": str(manifest.paths.artifacts_dir),
+                "diagnostics_dir": str(manifest.paths.diagnostics_dir),
+                "timeout": max(1, int(timeout or 120)),
+                "network_allowed": bool(network_allowed),
+                "memory_mb": 1024,
+                "processors": 2,
+                "bundle_dir": str(bundle) if bundle else "",
+            }
+            result = svc_client.run_job_via_service(params)
+            if result is not None and not result.get("error"):
+                return BackendRunResult(
+                    returncode=result.get("returncode"),
+                    stdout=str(result.get("stdout") or ""),
+                    stderr=str(result.get("stderr") or ""),
+                    timed_out=bool(result.get("timed_out")),
+                    executed_command=command_text,
+                    backend="hcs",
+                    fallback_reason="via metis-vm-service",
+                )
+    except Exception:
+        pass  # fall through to direct / local
+
+    # --- Tier 2: direct hcs_runtime (requires elevated process) ---
+    from backend.runtime.hcs_runtime import (
+        hcs_runtime_create_session,
+        hcs_runtime_run,
+        hcs_runtime_destroy,
+    )
+
+    session_id = manifest.session_id
+    create_result = hcs_runtime_create_session(
+        session_id=session_id,
+        workspace_dir=manifest.paths.workspace_dir,
+        artifacts_dir=manifest.paths.artifacts_dir,
+        diagnostics_dir=manifest.paths.diagnostics_dir,
+    )
+    if not create_result.get("ok"):
+        raise OSError(f"HCS session creation failed: {create_result.get('error', 'unknown')}")
+
+    try:
+        result = hcs_runtime_run(
+            session_id=session_id,
+            command=command_text,
+            cwd=str(work_dir) if work_dir else "",
+            timeout=max(1, int(timeout or 120)),
+            env=env_map,
+            network_allowed=bool(network_allowed),
+        )
+        return BackendRunResult(
+            returncode=result.get("returncode"),
+            stdout=str(result.get("stdout") or ""),
+            stderr=str(result.get("stderr") or ""),
+            timed_out=bool(result.get("timed_out")),
+            executed_command=command_text,
+            backend="hcs",
+        )
+    finally:
+        try:
+            hcs_runtime_destroy(session_id)
+        except Exception:
+            pass
 
 
 def _run_local_command(command_text: str, *, work_dir: Path, timeout: int, env_map: Dict[str, str]) -> BackendRunResult:

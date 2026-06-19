@@ -247,6 +247,7 @@ export const zhEn: Record<string, string> = {
   '模型族': 'Model family',
   '视觉': 'Vision',
   '结构化输出': 'Structured output',
+  'Metis 隔离后台任务：运行、产物、诊断和验证证据链。': 'Metis isolated background jobs: run, artifacts, diagnostics, and a verification evidence chain.',
   '可用工具数': 'Available tools',
   '上下文窗口': 'Context window',
   '指令遵循': 'Instruction adherence',

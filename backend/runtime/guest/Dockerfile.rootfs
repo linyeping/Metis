@@ -1,0 +1,41 @@
+# Metis VM rootfs builder
+# Produces a minimal Alpine rootfs with Python3, git, and metisd.
+#
+# Usage:
+#   docker build -f Dockerfile.rootfs -t metis-rootfs .
+#   docker create --name metis-rootfs-export metis-rootfs /bin/true
+#   docker export metis-rootfs-export | gzip > metis-rootfs.tar.gz
+#   docker rm metis-rootfs-export
+
+FROM alpine:3.20 AS rootfs
+
+# Core packages
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    git \
+    bash \
+    coreutils \
+    findutils \
+    diffutils \
+    patch \
+    curl \
+    openssh-client \
+    9p-virtio
+
+# Create standard mount points for Plan 9 shares
+RUN mkdir -p /mnt/workspace /mnt/artifacts /mnt/diagnostics
+
+# Install metisd guest agent
+COPY metisd.py /usr/local/bin/metisd
+RUN chmod +x /usr/local/bin/metisd
+
+# Init script that auto-mounts Plan 9 shares and starts metisd
+COPY init_metis.sh /sbin/init_metis
+RUN chmod +x /sbin/init_metis
+
+# Clean up APK cache
+RUN rm -rf /var/cache/apk/* /tmp/*
+
+# Default: run metisd on stdio
+CMD ["/usr/local/bin/metisd"]

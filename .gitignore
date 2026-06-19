@@ -4,6 +4,38 @@ out/
 build/
 *.exe
 *.msi
+*.zst
+# Release upload staging (big binaries go to GitHub release assets, not git)
+release-artifacts/
+# Local dev/test launchers (machine-specific hardcoded paths)
+/go_*.ps1
+/hcs_*.ps1
+/check_hyperv_group.ps1
+/read_claude_pipe_acl.ps1
+/desktop/stop
+# Throwaway debug probes
+backend/tests/hcs_debug_test.py
+backend/tests/hcs_full_dump.py
+backend/tests/hcs_caps_test.py
+backend/tests/hcs_net_nonet_test.py
+backend/runtime/guest/stage3_build.sh
+# Metis VM runtime pack build artifacts (large binaries — built in CI, not committed)
+backend/runtime/vmpack_build/
+backend/runtime/vmpack_build_rich/
+desktop/resources/runtime-pack/
+desktop/resources/runtime-svc/
+*.vhdx
+vmlinuz
+initrd
+_build_initrd
+*.bundle/
+metis-runtime-bundle-v2.zip
+hcs_*_output.txt
+hcs_poc_output.txt
+go_*_output.txt
+go_pipe_selftest_output.txt
+claude_pipe_acl_output.txt
+backend/runtime/metis-vm-svc/metis-vm-svc.exe
 .env
 .env.*
 __pycache__/

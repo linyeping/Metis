@@ -23,8 +23,10 @@ EXCLUDED_DATA_PARTS = {
     "packaging_blueprint",
     "tests",
     "var",
+    "metis-vm-svc",   # Go service — packaged separately in resources/runtime-svc, not in the Python bundle
+    "vmpack_build",   # dev VM pack build output
 }
-EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
+EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".exe", ".go", ".vhdx"}
 
 
 def collect_source_tree(source: Path, target: str):

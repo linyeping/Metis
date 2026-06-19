@@ -1069,6 +1069,34 @@ export async function runtimeManagerSmoke(): Promise<RuntimeManagerCommandResult
   );
 }
 
+export interface RuntimeSelfTestResult {
+  ok: boolean;
+  backend: string;
+  fellBackToLocal: boolean;
+  bootOk: boolean;
+  xlsxOk: boolean;
+  message: string;
+  stdout: string;
+  stderr: string;
+}
+
+export async function runtimeManagerSelfTest(): Promise<RuntimeSelfTestResult> {
+  const row = await requestJson<Record<string, unknown>>('/settings/runtime-manager/selftest', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return {
+    ok: Boolean(row.ok),
+    backend: String(row.backend ?? ''),
+    fellBackToLocal: Boolean(row.fell_back_to_local),
+    bootOk: Boolean(row.boot_ok),
+    xlsxOk: Boolean(row.xlsx_ok),
+    message: String(row.message ?? ''),
+    stdout: String(row.stdout ?? ''),
+    stderr: String(row.stderr ?? ''),
+  };
+}
+
 export async function runtimeManagerDiagnostics(sessionId = ''): Promise<RuntimeManagerCommandResult> {
   return runtimeManagerCommandResultFromRecord(
     await requestJson<Record<string, unknown>>('/settings/runtime-manager/diagnostics', {
@@ -1076,6 +1104,115 @@ export async function runtimeManagerDiagnostics(sessionId = ''): Promise<Runtime
       body: JSON.stringify({ session_id: sessionId }),
     }),
   );
+}
+
+// Phase 5: HCS sandbox first-run provisioning (VM Platform + Hyper-V group).
+export interface RuntimeProvisionAction {
+  id: string;
+  title: string;
+  elevation: string;
+  reboot: string;
+}
+
+export interface RuntimeProvisionStatus {
+  supported: boolean;
+  ready: boolean;
+  hcsAvailable: boolean;
+  hcsReason: string;
+  vmPlatformEnabled: boolean;
+  permissionDenied: boolean;
+  inHyperVAdmins: boolean;
+  bundleInstalled: boolean;
+  bundlePath: string;
+  isAdmin: boolean;
+  virtualizationOk: boolean | null;
+  serviceInstalled: boolean;
+  serviceRunning: boolean;
+  serviceResponding: boolean;
+  rebootRequired: boolean;
+  needs: string[];
+  actions: RuntimeProvisionAction[];
+  uxSummary: string;
+}
+
+function runtimeProvisionStatusFromRecord(row: Record<string, unknown>): RuntimeProvisionStatus {
+  const actions = Array.isArray(row.actions) ? (row.actions as Record<string, unknown>[]) : [];
+  return {
+    supported: Boolean(row.supported),
+    ready: Boolean(row.ready),
+    hcsAvailable: Boolean(row.hcs_available),
+    hcsReason: stringValue(row.hcs_reason),
+    vmPlatformEnabled: Boolean(row.vm_platform_enabled),
+    permissionDenied: Boolean(row.permission_denied),
+    inHyperVAdmins: Boolean(row.in_hyperv_admins),
+    bundleInstalled: Boolean(row.bundle_installed),
+    bundlePath: stringValue(row.bundle_path),
+    isAdmin: Boolean(row.is_admin),
+    virtualizationOk: row.virtualization_ok === null || row.virtualization_ok === undefined
+      ? null
+      : Boolean(row.virtualization_ok),
+    serviceInstalled: Boolean(row.service_installed),
+    serviceRunning: Boolean(row.service_running),
+    serviceResponding: Boolean(row.service_responding),
+    rebootRequired: Boolean(row.reboot_required),
+    needs: Array.isArray(row.needs) ? row.needs.map(item => String(item)) : [],
+    actions: actions.map(item => ({
+      id: stringValue(item.id),
+      title: stringValue(item.title),
+      elevation: stringValue(item.elevation),
+      reboot: stringValue(item.reboot),
+    })),
+    uxSummary: stringValue(row.ux_summary),
+  };
+}
+
+export async function runtimeManagerProvisionStatus(deep = false): Promise<RuntimeProvisionStatus> {
+  return runtimeProvisionStatusFromRecord(
+    await requestJson<Record<string, unknown>>(`/settings/runtime-manager/provision-status?deep=${deep ? '1' : '0'}`),
+  );
+}
+
+export async function runtimeManagerProvision(actions: string[] = []): Promise<Record<string, unknown>> {
+  return requestJson<Record<string, unknown>>('/settings/runtime-manager/provision', {
+    method: 'POST',
+    body: JSON.stringify({ actions }),
+  });
+}
+
+// Phase 6 (B): runtime storage usage + cleanup.
+export interface RuntimeStorageUsage {
+  ok: boolean;
+  totalBytes: number;
+  byKind: Record<string, number>;
+  sessionCount: number;
+  jobCount: number;
+  metisDir: string;
+}
+
+export async function runtimeManagerStorageUsage(root = '.'): Promise<RuntimeStorageUsage> {
+  const row = await requestJson<Record<string, unknown>>(`/settings/runtime-manager/storage?root=${encodeURIComponent(root)}`);
+  const byKindRaw = recordValue(row.by_kind);
+  const byKind: Record<string, number> = {};
+  for (const [k, v] of Object.entries(byKindRaw)) byKind[k] = Number(v) || 0;
+  return {
+    ok: Boolean(row.ok),
+    totalBytes: Number(row.total_bytes) || 0,
+    byKind,
+    sessionCount: Number(row.session_count) || 0,
+    jobCount: Number(row.job_count) || 0,
+    metisDir: stringValue(row.metis_dir),
+  };
+}
+
+export async function runtimeManagerCleanup(options: { aggressive?: boolean; keepRecent?: number; maxAgeDays?: number } = {}): Promise<Record<string, unknown>> {
+  return requestJson<Record<string, unknown>>('/settings/runtime-manager/cleanup', {
+    method: 'POST',
+    body: JSON.stringify({
+      aggressive: Boolean(options.aggressive),
+      keep_recent: options.keepRecent ?? 20,
+      max_age_days: options.maxAgeDays ?? 7,
+    }),
+  });
 }
 
 // FABLEADV-15: config-driven provider registry (builtin + user providers.json).

@@ -50,6 +50,52 @@ def runtime_manager_status_route() -> Any:
     return jsonify(runtime_manager_status())
 
 
+@settings_bp.route("/settings/runtime-manager/provision-status", methods=["GET"])
+def runtime_manager_provision_status_route() -> Any:
+    from backend.runtime.runtime_provision import provision_status
+
+    deep = str(request.args.get("deep") or "").strip().lower() in {"1", "true", "yes"}
+    return jsonify(provision_status(deep=deep))
+
+
+@settings_bp.route("/settings/runtime-manager/provision", methods=["POST"])
+def runtime_manager_provision_route() -> Any:
+    from backend.runtime.runtime_provision import provision_status, run_provision_elevated
+
+    payload = request.get_json(silent=True) or {}
+    actions = payload.get("actions")
+    if not isinstance(actions, list) or not actions:
+        actions = provision_status().get("needs", [])
+    result = run_provision_elevated([a for a in actions if a != "install_pack"])
+    # Re-detect so the caller sees the post-provision state.
+    result["status"] = provision_status(deep=True)
+    return jsonify(result)
+
+
+@settings_bp.route("/settings/runtime-manager/storage", methods=["GET"])
+def runtime_manager_storage_route() -> Any:
+    import json as _json
+    from backend.runtime.isolated_runtime import metis_runtime_storage_usage
+
+    root = str(request.args.get("root") or ".").strip() or "."
+    return jsonify(_json.loads(metis_runtime_storage_usage(root=root)))
+
+
+@settings_bp.route("/settings/runtime-manager/cleanup", methods=["POST"])
+def runtime_manager_cleanup_route() -> Any:
+    import json as _json
+    from backend.runtime.isolated_runtime import metis_runtime_gc
+
+    payload = request.get_json(silent=True) or {}
+    root = str(payload.get("root") or ".").strip() or "."
+    aggressive = bool(payload.get("aggressive"))
+    keep_recent = int(payload.get("keep_recent", 20) or 20)
+    max_age_days = float(payload.get("max_age_days", 7.0) or 7.0)
+    return jsonify(_json.loads(metis_runtime_gc(
+        root=root, keep_recent=keep_recent, max_age_days=max_age_days, aggressive=aggressive,
+    )))
+
+
 @settings_bp.route("/settings/runtime-manager/import-plan", methods=["POST"])
 def runtime_manager_import_plan_route() -> Any:
     from backend.runtime.runtime_manager import runtime_manager_import_plan
@@ -174,6 +220,13 @@ def runtime_manager_smoke_route() -> Any:
     from backend.runtime.runtime_manager import runtime_manager_smoke
 
     return jsonify(runtime_manager_smoke())
+
+
+@settings_bp.route("/settings/runtime-manager/selftest", methods=["POST"])
+def runtime_manager_selftest_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_selftest
+
+    return jsonify(runtime_manager_selftest())
 
 
 @settings_bp.route("/settings/runtime-manager/diagnostics", methods=["POST"])

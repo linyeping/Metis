@@ -22,14 +22,12 @@ extraResources:
       - "!var/rely/**/weights/**"
   - from: resources/icons
     to: icons
-  - from: resources/runtime-pack
-    to: runtime-pack
-    filter:
-      - "**/*"
-      - "!**/.env"
-      - "!**/*.key"
-      - "!**/*.pfx"
-      - "!**/*.pem"
+  # Phase 8.4: runtime-pack is NO LONGER bundled into the installer.
+  # The app downloads it on first run from METIS_RUNTIME_PACK_URL (a GitHub
+  # release manifest pointing at the rich-rootfs zip). This keeps the installer
+  # small (~50MB instead of ~1GB) and lets us ship pack updates without rebuilding.
+  - from: resources/runtime-svc
+    to: runtime-svc
 win:
   target:
     - nsis

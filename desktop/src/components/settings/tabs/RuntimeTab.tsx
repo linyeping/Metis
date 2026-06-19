@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   Archive,
@@ -14,6 +14,17 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { RuntimeManagerCommandResult, RuntimeManagerStatus } from '../../../lib/types';
+import {
+  runtimeManagerProvision,
+  runtimeManagerProvisionStatus,
+  runtimeManagerStorageUsage,
+  runtimeManagerCleanup,
+  runtimeManagerRepair,
+  runtimeManagerSelfTest,
+  type RuntimeProvisionStatus,
+  type RuntimeStorageUsage,
+  type RuntimeSelfTestResult,
+} from '../../../lib/api';
 import { safeJson, formatTime } from '../settingsShared';
 import { useT } from '../../../hooks/useT';
 
@@ -36,6 +47,200 @@ interface RuntimeTabProps {
   onValidateRelease: () => void | Promise<void>;
   result: RuntimeManagerCommandResult | null;
   status: RuntimeManagerStatus | null;
+}
+
+const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
+  const t = useT();
+  const [status, setStatus] = useState<RuntimeProvisionStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [storage, setStorage] = useState<RuntimeStorageUsage | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<RuntimeSelfTestResult | null>(null);
+
+  const refresh = useCallback(async (deep = false) => {
+    try {
+      const next = await runtimeManagerProvisionStatus(deep);
+      setStatus(next);
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
+  const refreshStorage = useCallback(async () => {
+    try {
+      setStorage(await runtimeManagerStorageUsage('.'));
+    } catch {
+      setStorage(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh(false);
+    // Deep pass picks up BIOS virtualization + group membership (slower).
+    void refresh(true);
+    void refreshStorage();
+  }, [refresh, refreshStorage]);
+
+  const cleanup = useCallback(async () => {
+    setCleaning(true);
+    try {
+      await runtimeManagerCleanup({ keepRecent: 5, maxAgeDays: 7 });
+      await refreshStorage();
+    } finally {
+      setCleaning(false);
+    }
+  }, [refreshStorage]);
+
+  const elevatedNeeds = (status?.needs ?? []).filter(n => n !== 'install_pack');
+
+  const downloadPack = useCallback(async () => {
+    setDownloading(true);
+    setNote(t('正在下载沙箱运行时（约 800 MB，解压后约 3.2 GB），首次下载较久，请保持网络通畅…'));
+    try {
+      const res = await runtimeManagerRepair({ source: 'download', allowDownload: true, force: false });
+      await refresh(true);
+      setNote(res.ok ? t('沙箱运行时已下载并安装完成。') : (res.error || t('下载未完成，请重试。')));
+    } catch (err) {
+      setNote(String((err as Error)?.message || err));
+    } finally {
+      setDownloading(false);
+    }
+  }, [refresh, t]);
+
+  const selfTest = useCallback(async () => {
+    setTesting(true);
+    setTestResult(null);
+    setNote(t('正在自检：真实启动沙箱并运行一个任务…'));
+    try {
+      const res = await runtimeManagerSelfTest();
+      setTestResult(res);
+      setNote('');
+    } catch (err) {
+      setNote(String((err as Error)?.message || err));
+    } finally {
+      setTesting(false);
+    }
+  }, [t]);
+
+  const provision = useCallback(async () => {
+    setBusy(true);
+    setNote(t('已请求管理员授权（UAC），请在弹窗中确认…'));
+    try {
+      await runtimeManagerProvision(elevatedNeeds);
+      await refresh(true);
+      setNote(t('开通已执行。若提示需要重启或重新登录，请完成后再回到此处。'));
+    } catch (err) {
+      setNote(String((err as Error)?.message || err));
+    } finally {
+      setBusy(false);
+    }
+  }, [elevatedNeeds, refresh, t]);
+
+  if (!status || !status.supported) return null;
+
+  return (
+    <div className="runtime-provision" data-ready={status.ready}>
+      <div className="runtime-provision-head">
+        {status.ready ? <CheckCircle2 size={15} className="ok" /> : <ShieldCheck size={15} />}
+        <span className="runtime-provision-title">{t('HCS 沙箱环境')}</span>
+        <span className="runtime-provision-badge" data-ok={status.ready}>
+          {status.ready ? t('就绪') : t('需要设置')}
+        </span>
+      </div>
+
+      <p className="runtime-provision-summary">{status.uxSummary}</p>
+
+      <div className="runtime-provision-checks">
+        {status.virtualizationOk !== null && (
+          <ProvisionCheck ok={status.virtualizationOk} label={t('CPU 虚拟化')} />
+        )}
+        <ProvisionCheck ok={status.vmPlatformEnabled} label={t('虚拟机平台')} />
+        <ProvisionCheck ok={status.serviceResponding} label={t('沙箱服务')} />
+        <ProvisionCheck ok={status.bundleInstalled} label={t('运行时包')} />
+      </div>
+
+      {status.virtualizationOk === false && (
+        <p className="runtime-provision-note runtime-provision-warn">
+          {t('CPU 虚拟化（VT-x/AMD-V）在 BIOS/UEFI 中被禁用。请进固件设置开启后重试——Metis 无法替你修改 BIOS。')}
+        </p>
+      )}
+
+      {!status.ready && status.virtualizationOk !== false && (
+        <div className="runtime-provision-actions">
+          {elevatedNeeds.length > 0 && (
+            <button type="button" onClick={() => void provision()} disabled={busy}>
+              <ShieldCheck size={13} />
+              <span>
+                {busy
+                  ? t('开通中…')
+                  : status.rebootRequired
+                    ? t('开通沙箱（需一次 UAC + 重启）')
+                    : t('开通沙箱（需一次 UAC）')}
+              </span>
+            </button>
+          )}
+          <button type="button" onClick={() => void refresh(true)} disabled={busy}>
+            <RefreshCw size={13} className={busy ? 'spin' : ''} />
+            <span>{t('重新检测')}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Runtime pack download (first launch / missing bundle) */}
+      {!status.bundleInstalled && (
+        <div className="runtime-provision-actions">
+          <button type="button" onClick={() => void downloadPack()} disabled={downloading}>
+            <FileDown size={13} className={downloading ? 'spin' : ''} />
+            <span>{downloading ? t('下载中…') : t('下载沙箱运行时（约 800 MB）')}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Real self-test: actually boots the VM + runs a job (no false positives) */}
+      {status.ready && (
+        <div className="runtime-provision-actions">
+          <button type="button" onClick={() => void selfTest()} disabled={testing}>
+            <Play size={13} className={testing ? 'spin' : ''} />
+            <span>{testing ? t('自检中…') : t('自检沙箱')}</span>
+          </button>
+        </div>
+      )}
+
+      {testResult && (
+        <p className="runtime-provision-note" data-ok={testResult.ok}>
+          {testResult.ok ? '✓ ' : '✗ '}{testResult.message}
+          {testResult.backend ? ` (${testResult.backend})` : ''}
+        </p>
+      )}
+
+      {note && <p className="runtime-provision-note">{note}</p>}
+
+      {storage && (
+        <div className="runtime-provision-storage">
+          <span className="runtime-provision-storage-text">
+            {t('本地运行缓存')}: {formatBytes(storage.totalBytes)}
+            {storage.sessionCount > 0 ? ` · ${storage.sessionCount} ${t('个会话')}` : ''}
+          </span>
+          <button type="button" onClick={() => void cleanup()} disabled={cleaning || storage.totalBytes === 0}>
+            <RefreshCw size={12} className={cleaning ? 'spin' : ''} />
+            <span>{cleaning ? t('清理中…') : t('清理缓存')}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+});
+
+function ProvisionCheck({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span className="runtime-provision-check" data-ok={ok}>
+      <CheckCircle2 size={12} />
+      {label}
+    </span>
+  );
 }
 
 export const RuntimeTab = memo(function RuntimeTab({
@@ -88,17 +293,18 @@ export const RuntimeTab = memo(function RuntimeTab({
 
   return (
     <div className="settings-card-grid runtime-manager-panel">
-      <section className="settings-section runtime-manager-hero">
-        <div className="settings-section-header">
+      {/* Hero: the sandbox provision panel is the primary UX. */}
+      <SandboxProvisionPanel />
+
+      {/* Advanced: Metis Runtime Manager — collapsed by default */}
+      <details className="settings-card runtime-collapsible">
+        <summary className="settings-section-header">
           <Server size={16} className="section-icon" />
-          <span>
-            <h3>{t('Metis Runtime Manager')}</h3>
-            <p className="section-desc">{t('管理隔离运行时、rootfs、WSL 导入、smoke 验收和诊断包。')}</p>
-          </span>
+          <span><h3>{t('Metis Runtime Manager')}</h3></span>
           <span className="runtime-manager-status" data-ok={health?.ready ?? false}>
             {health?.preferredBackend || t('检测中')}
           </span>
-        </div>
+        </summary>
 
         <div className="runtime-health-grid">
           <RuntimeMetric label={t('Metis WSL')} ok={health?.metisWslReady} value={installed ? t('已安装') : t('未安装')} />
@@ -144,19 +350,17 @@ export const RuntimeTab = memo(function RuntimeTab({
         </div>
 
         {message ? <p className="runtime-manager-message">{message}</p> : null}
-      </section>
+      </details>
 
-      <section className="settings-card runtime-vm-card">
-        <div className="settings-section-header">
+      {/* Advanced: VM Runtime Pack — collapsed by default */}
+      <details className="settings-card runtime-collapsible">
+        <summary className="settings-section-header">
           <HardDrive size={16} className="section-icon" />
-          <span>
-            <h3>{t('VM Runtime Pack')}</h3>
-            <p className="section-desc">{t('显示自带沙盒运行时的安装、资产、校验、启动测试和 release 集成状态。')}</p>
-          </span>
+          <span><h3>{t('VM Runtime Pack')}</h3></span>
           <span className="runtime-manager-status" data-ok={vmRuntime?.installed && vmRuntime?.assetsVerified}>
             {vmRuntime?.runnerTransport || release?.installStrategy || t('未安装')}
           </span>
-        </div>
+        </summary>
 
         <div className="runtime-health-grid">
           <RuntimeMetric label={t('VM Runtime')} ok={vmRuntime?.installed} value={vmRuntime?.installed ? t('已安装') : t('未安装')} />
@@ -200,108 +404,9 @@ export const RuntimeTab = memo(function RuntimeTab({
 
         <div className="runtime-vm-summary">
           <span title={vmRuntime?.bundlePath}>{t('当前: ')}{vmRuntime?.bundlePath || t('未检测到')}</span>
-          <span title={release?.bundledPath}>{t('内置: ')}{release?.bundledPath || t('未检测到')}</span>
-          {vmRuntime?.missingRequired?.length ? <em>{t('缺失: ')}{vmRuntime.missingRequired.join(', ')}</em> : <em>{vmRuntime?.reason || t('等待检测结果')}</em>}
+          {vmRuntime?.missingRequired?.length ? <em>{t('缺失: ')}{vmRuntime.missingRequired.join(', ')}</em> : null}
         </div>
-      </section>
-
-      <section className="settings-card runtime-path-card">
-        <div className="settings-section-header">
-          <HardDrive size={16} className="section-icon" />
-          <span>
-            <h3>{t('运行时位置')}</h3>
-            <p className="section-desc">{t('本机运行态保存在 .metis 下，默认不进入 Git 提交。')}</p>
-          </span>
-        </div>
-        <RuntimePath copied={copiedPath === status?.paths.wslInstallDir} label={t('WSL')} onCopy={copyPath} onOpen={openPath} value={status?.paths.wslInstallDir || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.runtimePackInstallDir} label={t('VM Install')} onCopy={copyPath} onOpen={openPath} value={status?.paths.runtimePackInstallDir || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.vmRuntimeBundle} label={t('VM Bundle')} onCopy={copyPath} onOpen={openPath} value={status?.paths.vmRuntimeBundle || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.bundledRuntimePack} label={t('Bundled')} onCopy={copyPath} onOpen={openPath} value={status?.paths.bundledRuntimePack || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.rootfs} label={t('rootfs')} onCopy={copyPath} onOpen={openPath} value={status?.paths.rootfs || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.runtimeBundleManifest} label={t('Bundle')} onCopy={copyPath} onOpen={openPath} value={status?.paths.runtimeBundleManifest || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.artifactsRoot} label={t('Artifacts')} onCopy={copyPath} onOpen={openPath} value={status?.paths.artifactsRoot || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.diagnosticsRoot} label={t('Diagnostics')} onCopy={copyPath} onOpen={openPath} value={status?.paths.diagnosticsRoot || t('未检测到')} />
-        <RuntimePath copied={copiedPath === status?.paths.runtimeJobsRoot} label={t('Jobs')} onCopy={copyPath} onOpen={openPath} value={status?.paths.runtimeJobsRoot || t('未检测到')} />
-      </section>
-
-      <section className="settings-card runtime-actions-card">
-        <div className="settings-section-header">
-          <Activity size={16} className="section-icon" />
-          <span>
-            <h3>{t('建议动作')}</h3>
-            <p className="section-desc">{t('根据当前 Docker、WSL、rootfs 和运行会话自动生成。')}</p>
-          </span>
-        </div>
-        <div className="runtime-action-list">
-          {(status?.actions ?? []).map(action => (
-            <div key={action.id} className="runtime-action-row" data-status={action.status}>
-              <strong>{actionTitle(action.id, action.label, t)}</strong>
-              <span>{actionDescription(action.id, action.description, t)}</span>
-              <em>{action.status}</em>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="settings-card runtime-session-card">
-        <div className="settings-section-header">
-          <CheckCircle2 size={16} className="section-icon" />
-          <span>
-            <h3>{t('最近运行')}</h3>
-            <p className="section-desc">{t('展示最近隔离运行时会话，便于追踪 smoke、产物和诊断。')}</p>
-          </span>
-        </div>
-        <div className="runtime-session-list">
-          {(status?.sessions.sessions ?? []).slice(0, 4).map(session => (
-            <div key={session.sessionId} className="runtime-session-row">
-              <strong>{session.task || session.sessionId}</strong>
-              <span>{session.backend} · {session.status} · {formatTime(session.updatedAt)}</span>
-              <code title={session.artifactsDir}>{session.artifactsDir || session.workspaceDir}</code>
-              <div className="runtime-session-actions">
-                <button type="button" onClick={() => void openPath(session.artifactsDir || session.workspaceDir)} disabled={Boolean(busy) || !isLocalPath(session.artifactsDir || session.workspaceDir)}>
-                  <FolderOpen size={12} />
-                  {t('打开')}
-                </button>
-                <button type="button" onClick={() => void onDiagnostics(session.sessionId)} disabled={Boolean(busy)}>
-                  <FileDown size={12} />
-                  {t('诊断')}
-                </button>
-              </div>
-            </div>
-          ))}
-          {status && status.sessions.sessions.length === 0 ? <small>{t('还没有运行时会话。')}</small> : null}
-        </div>
-      </section>
-
-      <section className="settings-card runtime-session-card">
-        <div className="settings-section-header">
-          <CheckCircle2 size={16} className="section-icon" />
-          <span>
-            <h3>{t('最近 Runtime Job')}</h3>
-            <p className="section-desc">{t('Claude-style 后台任务：运行、产物、诊断和 verifier 证据链。')}</p>
-          </span>
-        </div>
-        <div className="runtime-session-list">
-          {(status?.jobs.jobs ?? []).slice(0, 5).map(job => (
-            <div key={job.jobId} className="runtime-session-row" data-status={job.status}>
-              <strong>{job.task || job.jobId}</strong>
-              <span>{job.backend || '-'} · {job.status || '-'} · {formatTime(job.updatedAt || job.createdAt)}</span>
-              <code title={job.diagnosticsZip || job.artifactsDir}>{job.diagnosticsZip || job.artifactsDir || job.jobId}</code>
-              <div className="runtime-session-actions">
-                <button type="button" onClick={() => void openPath(job.artifactsDir)} disabled={Boolean(busy) || !isLocalPath(job.artifactsDir)}>
-                  <FolderOpen size={12} />
-                  {t('产物')}
-                </button>
-                <button type="button" onClick={() => void openPath(job.diagnosticsZip)} disabled={Boolean(busy) || !isLocalPath(job.diagnosticsZip)}>
-                  <FileDown size={12} />
-                  {t('诊断')}
-                </button>
-              </div>
-            </div>
-          ))}
-          {status && status.jobs.jobs.length === 0 ? <small>{t('还没有 Runtime Job。')}</small> : null}
-        </div>
-      </section>
+      </details>
 
       {result ? (
         <details className="settings-section settings-disclosure runtime-result-details">

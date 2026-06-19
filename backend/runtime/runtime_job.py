@@ -169,6 +169,7 @@ def metis_runtime_job(
             else "Runtime job finished but verification failed; inspect diagnostics and stderr."
         )
         _write_job(root, payload)
+        _auto_gc(root)
         return _json(payload)
     except Exception as exc:
         if session_id:
@@ -335,6 +336,15 @@ def _artifact_size(item: Dict[str, Any]) -> int:
         return int(value)
     except Exception:
         return 0
+
+
+def _auto_gc(root: str) -> None:
+    """Best-effort retention GC after a job (keeps recent sessions, prunes old)."""
+    try:
+        from backend.runtime.isolated_runtime import metis_runtime_gc
+        metis_runtime_gc(root=root, keep_recent=20, max_age_days=7.0)
+    except Exception:
+        return
 
 
 def _write_job(root: str, payload: Dict[str, Any]) -> None:

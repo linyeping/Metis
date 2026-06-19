@@ -1,7 +1,7 @@
 {
   "name": "metis-desktop",
   "productName": "Metis",
-  "version": "26.6.17",
+  "version": "26.6.19",
   "description": "Metis desktop shell.",
   "author": "Metis",
   "license": "MIT",
@@ -13,6 +13,7 @@
     "dev:electron": "wait-on http://127.0.0.1:5174 && cross-env METIS_DESKTOP_DEV_SERVER=http://127.0.0.1:5174 electron --no-sandbox --disable-gpu-sandbox --in-process-gpu --disable-gpu --disable-gpu-compositing --use-gl=swiftshader --enable-unsafe-swiftshader --disable-features=VizDisplayCompositor .",
     "dev": "node scripts/dev-launcher.mjs",
     "build-backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1",
+    "build-svc": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-svc.ps1",
     "build": "tsc -b && vite build",
     "dist": "npm run test:fixed-regression && npm run build && electron-builder",
     "dist:win": "npm run test:fixed-regression && npm run build-backend && npm run build && electron-builder --win nsis",

@@ -1,0 +1,46 @@
+name: build-runtime-pack
+
+# Builds the Metis rich VM rootfs (office libs + networking-capable userland)
+# on a Linux runner — where apt/pip/docker work — since the local Windows dev
+# build environment can't (no WSL network, etc.). Produces rootfs.vhdx + initrd
+# as artifacts; the Windows packaging step adds vmlinuz (WSL kernel) to form
+# the final metisvm.bundle.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "backend/runtime/guest/Dockerfile.rootfs.rich"
+      - "backend/runtime/guest/build_rich_rootfs.sh"
+      - "backend/runtime/guest/init_rich.sh"
+      - "backend/runtime/guest/metisd.py"
+      - ".github/workflows/build-runtime-pack.yml"
+
+jobs:
+  build-rich-rootfs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils e2fsprogs cpio busybox-static
+
+      - name: Build rich rootfs (docker -> ext4 vhdx + overlay initramfs)
+        run: |
+          chmod +x backend/runtime/guest/build_rich_rootfs.sh
+          backend/runtime/guest/build_rich_rootfs.sh "${{ runner.temp }}/vmpack_rich"
+
+      - name: Show artifact sizes
+        run: ls -la "${{ runner.temp }}/vmpack_rich"
+
+      - name: Upload rich rootfs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metis-rich-rootfs
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/vmpack_rich/rootfs.vhdx
+            ${{ runner.temp }}/vmpack_rich/initrd
+            ${{ runner.temp }}/vmpack_rich/metis-vm-pack.json
+            ${{ runner.temp }}/vmpack_rich/SHA256SUMS.txt

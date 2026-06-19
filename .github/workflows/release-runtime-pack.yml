@@ -1,0 +1,92 @@
+name: release-runtime-pack
+
+# Builds the rich runtime pack and publishes it as a GitHub Release.
+# The app downloads it on first run via METIS_RUNTIME_PACK_URL.
+#
+# Trigger manually from the Actions tab, or push a tag like 'pack-v0.3.0'.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Pack version tag (e.g. 0.3.0)"
+        required: true
+        default: "0.3.0"
+  push:
+    tags:
+      - "pack-v*"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve pack version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME#pack-v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-utils e2fsprogs cpio busybox-static
+
+      - name: Build rich rootfs (docker -> ext4 vhdx + overlay initramfs)
+        run: |
+          chmod +x backend/runtime/guest/build_rich_rootfs.sh
+          backend/runtime/guest/build_rich_rootfs.sh "${{ runner.temp }}/vmpack_rich"
+
+      - name: Copy WSL-equivalent kernel (placeholder)
+        run: |
+          # The kernel is not built here; the app installer ships its own copy
+          # of the WSL2 kernel (vmlinuz) at install time. The pack only contains
+          # initrd + rootfs.vhdx. The first-run installer combines them.
+          ls -la "${{ runner.temp }}/vmpack_rich"
+
+      - name: Bundle pack into zip
+        id: zip
+        run: |
+          cd "${{ runner.temp }}/vmpack_rich"
+          ZIP="metis-runtime-pack-${{ steps.ver.outputs.version }}.zip"
+          zip -r "../$ZIP" .
+          cd ..
+          sha256sum "$ZIP" | awk '{print $1}' > "${ZIP}.sha256"
+          SIZE=$(stat -c%s "$ZIP")
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+          echo "sha256=$(cat ${ZIP}.sha256)" >> $GITHUB_OUTPUT
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+      - name: Write release manifest
+        run: |
+          ZIP="${{ steps.zip.outputs.zip }}"
+          cat > "${{ runner.temp }}/metis-runtime-bundle-v2-latest.json" <<EOF
+          {
+            "schema": "metis.runtime_bundle.release.v2",
+            "name": "metisvm",
+            "version": "${{ steps.ver.outputs.version }}",
+            "boot_mode": "rootfs",
+            "package": {
+              "name": "$ZIP",
+              "url": "https://github.com/${{ github.repository }}/releases/download/pack-v${{ steps.ver.outputs.version }}/$ZIP",
+              "sha256": "${{ steps.zip.outputs.sha256 }}",
+              "size_bytes": ${{ steps.zip.outputs.size }}
+            }
+          }
+          EOF
+          cat "${{ runner.temp }}/metis-runtime-bundle-v2-latest.json"
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pack-v${{ steps.ver.outputs.version }}
+          name: "Metis Runtime Pack ${{ steps.ver.outputs.version }}"
+          files: |
+            ${{ runner.temp }}/${{ steps.zip.outputs.zip }}
+            ${{ runner.temp }}/metis-runtime-bundle-v2-latest.json
+          make_latest: "true"

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -35,7 +36,7 @@ from backend.runtime.isolated_runtime import (
     metis_wsl_runtime_import,
     metis_wsl_runtime_status,
 )
-from backend.runtime.runtime_job import metis_runtime_job_status
+from backend.runtime.runtime_job import metis_runtime_job_status, metis_runtime_job
 
 RUNTIME_MANAGER_SCHEMA = "metis.runtime_manager.v1"
 RUNTIME_MANAGER_REPAIR_SCHEMA = "metis.runtime_manager.repair.v1"
@@ -473,7 +474,13 @@ def runtime_manager_repair(
 
 
 def runtime_manager_ensure(root: str = ".") -> Dict[str, Any]:
-    allow_download = _env_flag("METIS_RUNTIME_AUTO_DOWNLOAD") or _env_flag("METIS_RUNTIME_AUTO_ENSURE")
+    # Phase 8.4 default: download IS allowed unless explicitly disabled via
+    # METIS_RUNTIME_DISABLE_AUTO_DOWNLOAD=1. The installer no longer bundles
+    # the runtime pack, so first-run download is the expected behaviour.
+    if _env_flag("METIS_RUNTIME_DISABLE_AUTO_DOWNLOAD"):
+        allow_download = False
+    else:
+        allow_download = True
     return runtime_manager_repair(root=root, source="auto", allow_download=allow_download, force=False)
 
 
@@ -498,6 +505,75 @@ def runtime_manager_smoke(root: str = ".") -> Dict[str, Any]:
         "run": run,
         "message": "Runtime smoke completed." if run.get("ok") else "Runtime smoke failed.",
     }
+
+
+def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
+    """Real HCS sandbox self-test — must actually boot the VM and run a job.
+
+    Unlike `smoke` (backend=auto, may fall back to local), this FORCES the HCS
+    backend and fails loudly if it falls back. This guarantees the green light
+    means the VM truly works, never a false positive. Exercises python3 + an
+    office library round-trip inside the guest.
+    """
+    import tempfile as _tempfile
+
+    workspace = _tempfile.mkdtemp(prefix="metis_selftest_")
+    prev_root = os.environ.get("MIRO_WORKSPACE_ROOT")
+    os.environ["MIRO_WORKSPACE_ROOT"] = workspace
+    try:
+        command = (
+            "echo SELFTEST_BOOT_OK; python3 --version; "
+            "python3 -c \"import openpyxl; wb=openpyxl.Workbook(); ws=wb.active; "
+            "ws.append(['a',1]); ws.append(['b',2]); wb.save('st.xlsx'); "
+            "import openpyxl as o; w=o.load_workbook('st.xlsx'); "
+            "print('SELFTEST_XLSX_OK', sum(r[1].value for r in w.active.iter_rows(min_row=1)))\""
+        )
+        job = _loads(metis_runtime_job(
+            task="HCS sandbox self-test",
+            command=command,
+            root=workspace,
+            backend="hcs",
+            timeout=180,
+        ))
+        backend = str(job.get("backend") or "")
+        stdout = str(job.get("stdout") or "")
+        fallback = str((job.get("run") or {}).get("fallback_reason") or "")
+        rc = job.get("returncode")
+        used_local = backend != "hcs"
+        passed = (
+            backend == "hcs"
+            and rc == 0
+            and "SELFTEST_BOOT_OK" in stdout
+            and "SELFTEST_XLSX_OK" in stdout
+        )
+        if used_local:
+            message = "自检失败:沙箱回退到本地执行(VM 未真正运行)。"
+        elif passed:
+            message = "自检通过:VM 真实启动并运行了任务(含办公库)。"
+        else:
+            message = "自检失败:VM 启动了但任务未通过,请查看诊断。"
+        return {
+            "ok": passed,
+            "schema": RUNTIME_MANAGER_SCHEMA,
+            "backend": backend,
+            "returncode": job.get("returncode"),
+            "boot_ok": "SELFTEST_BOOT_OK" in stdout,
+            "xlsx_ok": "SELFTEST_XLSX_OK" in stdout,
+            "fell_back_to_local": used_local,
+            "fallback_reason": fallback,
+            "stdout": stdout[:1000],
+            "stderr": str(job.get("stderr") or "")[:1000],
+            "message": message,
+        }
+    finally:
+        if prev_root is None:
+            os.environ.pop("MIRO_WORKSPACE_ROOT", None)
+        else:
+            os.environ["MIRO_WORKSPACE_ROOT"] = prev_root
+        try:
+            shutil.rmtree(workspace, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def runtime_manager_export_diagnostics(session_id: str = "", root: str = ".") -> Dict[str, Any]:
@@ -905,6 +981,25 @@ def _normalize_runtime_pack_source(path: Path) -> Path:
     return path
 
 
+def _grant_hyperv_vm_read(install_dir: Path) -> None:
+    """Hyper-V VMs run as 'NT VIRTUAL MACHINE\\<vmid>' virtual accounts. The VHDX
+    files inside the bundle need an ACE for 'NT VIRTUAL MACHINE\\Virtual Machines'
+    (well-known SID S-1-5-83-0) or the worker process gets ERROR_ACCESS_DENIED
+    when opening the disk. Add the ACE once at install time so we never need
+    `icacls` again.
+    """
+    if sys.platform != "win32":
+        return
+    for vhdx in install_dir.rglob("*.vhdx"):
+        try:
+            subprocess.run(
+                ["icacls", str(vhdx), "/grant", "*S-1-5-83-0:(RX)"],
+                capture_output=True, check=False, timeout=20,
+            )
+        except Exception:
+            continue
+
+
 def _install_runtime_pack_from_dir(source_dir: Path, install_dir: Path, *, force: bool) -> Dict[str, Any]:
     source = _normalize_runtime_pack_source(source_dir)
     if not source.is_dir():
@@ -926,6 +1021,7 @@ def _install_runtime_pack_from_dir(source_dir: Path, install_dir: Path, *, force
         shutil.copy2(item, dest)
         copied.append({"relative_path": rel.as_posix(), "path": str(dest), "size_bytes": dest.stat().st_size})
     extraction = _extract_rootfs_zst_if_needed(install_dir, force=force)
+    _grant_hyperv_vm_read(install_dir)
     report = _bundle_report(install_dir)
     ok = bool(report.get("required_present")) and bool(extraction.get("ok", True))
     return {
@@ -1134,21 +1230,28 @@ def _bundle_report(path: Path) -> Dict[str, Any]:
                 size = item.stat().st_size
                 total_bytes += size
                 files.append({"relative_path": item.relative_to(path).as_posix(), "size_bytes": size})
-    required = list(VM_REQUIRED_RUNTIME_FILES)
-    missing = [name for name in required if not (path / name).is_file()]
-    rootfs_present = (path / VM_ROOTFS_FILE).is_file() or (path / VM_ROOTFS_ZST_FILE).is_file()
-    if not rootfs_present:
-        missing.append(VM_ROOTFS_FILE)
-    sha = _verify_sha256s(path) if is_dir else {"has_sha256s": False, "verified": False, "checked": [], "errors": []}
     manifest = _read_json_file(path / "metis-vm-pack.json") if is_dir else {}
     owner = str(manifest.get("owner") or "").lower()
+    boot_mode = str(manifest.get("boot_mode") or "").lower()
+    initramfs_only = boot_mode == "initramfs"
+
+    # initramfs-only packs carry the whole userland in the initrd, so a
+    # separate rootfs.vhdx / metis-bin.vhdx is not required.
+    required = [name for name in VM_REQUIRED_RUNTIME_FILES
+                if not (initramfs_only and name == "metis-bin.vhdx")]
+    missing = [name for name in required if not (path / name).is_file()]
+    rootfs_present = (path / VM_ROOTFS_FILE).is_file() or (path / VM_ROOTFS_ZST_FILE).is_file()
+    if not rootfs_present and not initramfs_only:
+        missing.append(VM_ROOTFS_FILE)
+    sha = _verify_sha256s(path) if is_dir else {"has_sha256s": False, "verified": False, "checked": [], "errors": []}
     return {
         "path": str(path),
         "exists": exists,
         "is_dir": is_dir,
         "total_bytes": total_bytes,
         "file_count": len(files),
-        "required_files": [*required, VM_ROOTFS_FILE],
+        "required_files": required if initramfs_only else [*required, VM_ROOTFS_FILE],
+        "boot_mode": boot_mode or "rootfs",
         "missing_required": missing,
         "required_present": is_dir and not missing,
         "rootfs_present": rootfs_present,

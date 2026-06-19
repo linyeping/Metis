@@ -10791,6 +10791,172 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   line-height: 1.5;
 }
 
+/* Phase 5: HCS sandbox first-run provisioning panel */
+.runtime-provision {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: rgba(127, 127, 127, 0.06);
+}
+
+.runtime-provision[data-ready='true'] {
+  border-color: rgba(64, 192, 120, 0.4);
+  background: rgba(64, 192, 120, 0.08);
+}
+
+.runtime-provision-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.runtime-provision-head .ok {
+  color: var(--success, #36c07a);
+}
+
+.runtime-provision-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.runtime-provision-badge {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(220, 160, 60, 0.18);
+  color: #d8a23c;
+}
+
+.runtime-provision-badge[data-ok='true'] {
+  background: rgba(64, 192, 120, 0.18);
+  color: #36c07a;
+}
+
+.runtime-provision-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.runtime-provision-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-provision-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.runtime-provision-check[data-ok='true'] {
+  color: #36c07a;
+  opacity: 1;
+}
+
+.runtime-provision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-provision-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.runtime-provision-actions button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.runtime-provision-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.runtime-provision-warn {
+  color: #d8a23c;
+}
+
+/* Collapsible advanced sections (Runtime Manager, VM Runtime Pack) */
+.runtime-collapsible {
+  padding: 0;
+}
+
+.runtime-collapsible > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.runtime-collapsible > summary::-webkit-details-marker { display: none; }
+.runtime-collapsible > summary::before {
+  content: '▸';
+  margin-right: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.runtime-collapsible[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.runtime-collapsible[open] > *:not(summary) {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+.runtime-collapsible[open] > *:last-child {
+  padding-bottom: 14px;
+}
+
+.runtime-provision-storage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+.runtime-provision-storage-text {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.runtime-provision-storage button {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.runtime-provision-storage button:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
 .runtime-path-card,
 .runtime-actions-card,
 .runtime-session-card,

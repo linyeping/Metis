@@ -1,0 +1,119 @@
+# Metis rich VM rootfs 0.3.0 — Claude-parity userland.
+#
+# Built in CI (GitHub Actions Linux runner) where apt + pip + network work.
+# Tier list of installed capabilities (matches the inspection of Claude's
+# claudevm rootfs, 2026-06-19):
+#   - office:    LibreOffice + unoconvert/unoserver, pandoc
+#   - PDF:       pdfplumber, pdfminer.six, pikepdf, camelot, tabula, pypdf
+#   - OCR:       tesseract + pytesseract
+#   - vision:    opencv-python-headless, pillow, magika
+#   - ML:        onnxruntime
+#   - video:     ffmpeg + imageio-ffmpeg
+#   - science:   sympy, matplotlib, numpy, pandas
+#   - LaTeX:     texlive (base + recommended)
+#   - JS:        nodejs + npm
+#   - tools:     ripgrep, uv (10x pip), xvfb, git
+FROM python:3.12-slim-bookworm
+
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Teach apt about the proxy when we're behind one (CN dev builds).
+RUN echo "[build] HTTP_PROXY=$HTTP_PROXY"; \
+    if [ -n "$HTTP_PROXY" ]; then \
+        printf 'Acquire::http::Proxy "%s";\nAcquire::https::Proxy "%s";\n' \
+            "$HTTP_PROXY" "$HTTPS_PROXY" > /etc/apt/apt.conf.d/00proxy; \
+    fi
+
+# When NO proxy is provided (CI), swap to TUNA mirrors for speed.
+RUN set -eu; \
+    if [ -z "$HTTP_PROXY" ]; then \
+        if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+            sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
+        fi; \
+        pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
+    fi
+
+# ── system userland (split into focused apt-get runs for clearer cache use) ──
+
+# Base shell + network + git
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash coreutils findutils grep sed gawk procps less file \
+        ca-certificates git curl wget unzip zip tar gzip xz-utils \
+        iproute2 iputils-ping isc-dhcp-client dnsutils \
+        libffi8 libssl3 zlib1g
+
+# Office: LibreOffice headless + pandoc
+RUN apt-get install -y --no-install-recommends \
+        libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress \
+        libreoffice-script-provider-python \
+        pandoc
+
+# OCR + PDF rendering + fonts
+RUN apt-get install -y --no-install-recommends \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim \
+        poppler-utils ghostscript \
+        fontconfig fonts-dejavu-core fonts-noto-core fonts-noto-cjk
+
+# Video / image system libs (opencv runtime + ffmpeg)
+RUN apt-get install -y --no-install-recommends \
+        ffmpeg libgl1 libglib2.0-0 libsm6 libxext6 libxrender1
+
+# JS toolchain
+RUN apt-get install -y --no-install-recommends \
+        nodejs npm
+
+# tabula-py needs a JVM
+RUN apt-get install -y --no-install-recommends default-jre-headless
+
+# LaTeX (minimal but useful)
+RUN apt-get install -y --no-install-recommends \
+        texlive-latex-base texlive-fonts-recommended texlive-xetex
+
+# Display server for headless browser-style tasks
+RUN apt-get install -y --no-install-recommends xvfb
+
+# Fast tools
+RUN apt-get install -y --no-install-recommends ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Python stack: install uv first, then use it for everything else (10x faster) ──
+RUN pip install --no-cache-dir uv
+
+# uv ignores pip's config; teach it the mirror via env (when no proxy = CN net).
+ENV UV_INDEX_URL=${HTTP_PROXY:+https://pypi.org/simple}
+RUN if [ -z "$HTTP_PROXY" ]; then \
+        export UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple; \
+    fi; \
+    uv pip install --system --no-cache \
+        openpyxl python-docx python-pptx \
+        pandas numpy pillow lxml beautifulsoup4 requests \
+        reportlab pypdf \
+        pdfplumber pdfminer.six pikepdf camelot-py tabula-py \
+        opencv-python-headless \
+        pytesseract \
+        onnxruntime magika \
+        imageio[ffmpeg] \
+        sympy matplotlib \
+        markdown markdownify markitdown \
+        unoserver
+
+# ── ML/DL stack temporarily omitted (PyPI mirrors flaky for large wheels).
+# Will be added in a follow-up rich-0.4 bundle once CI handles the mirror retry.
+
+# metisd guest agent + mount points
+COPY metisd.py /usr/local/bin/metisd
+RUN chmod +x /usr/local/bin/metisd \
+    && mkdir -p /workspace /artifacts /diagnostics
+
+# Rich-rootfs PID 1
+COPY init_rich.sh /sbin/metis-init
+RUN chmod +x /sbin/metis-init
+
+CMD ["/usr/local/bin/metisd"]
