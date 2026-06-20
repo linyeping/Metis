@@ -77,3 +77,6 @@ NEWUPDATE.md
 .metis/runtime-pack/
 .metis/wsl/
 .metis/tool-permissions.jsonl
+
+# eval run artifacts (reports, logs)
+evals-results/
