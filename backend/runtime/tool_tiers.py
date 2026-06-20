@@ -88,6 +88,8 @@ TIER_3_TOOLS: Set[str] = {
     "ask_question",
     "todo_write",
     "load_skill",
+    "install_skill",
+    "install_mcp_server",
     "switch_mode",
     "delete_file",
     "append_to_file",

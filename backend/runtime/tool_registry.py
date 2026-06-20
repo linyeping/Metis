@@ -833,6 +833,85 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         )
     )
 
+    def install_skill_tool(source: str, name: str = "") -> str:
+        from backend.runtime.extension_installer import install_skill
+
+        return install_skill(source, name=name)
+
+    registry.register(
+        ToolDefinition(
+            name="install_skill",
+            description=(
+                "Install a Metis skill into the skills home so it loads now and after restart. "
+                "Use this (NOT a shell download) when asked to add/install a skill — a bare "
+                "download lands in the workspace and never loads. source may be a local directory, "
+                "a .zip (local path or URL), or a git URL; it must contain a SKILL.md."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Local directory, .zip path/URL, or git URL containing SKILL.md.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional skill name; defaults to the source folder name.",
+                    },
+                },
+                "required": ["source"],
+            },
+            execute_fn=install_skill_tool,
+            usage_hint="Use to install skills instead of shelling out into the workspace.",
+            source="builtin",
+            toolset="workflow",
+            requires_approval=True,
+            destructive=True,
+        )
+    )
+
+    def install_mcp_server_tool(
+        name: str,
+        command: str = "",
+        args: Any = None,
+        env: Any = None,
+        url: str = "",
+    ) -> str:
+        from backend.runtime.extension_installer import install_mcp_server
+
+        arg_list = args if isinstance(args, list) else ([] if args is None else [str(args)])
+        env_map = env if isinstance(env, dict) else None
+        return install_mcp_server(name, command=command, args=arg_list, env=env_map, url=url)
+
+    registry.register(
+        ToolDefinition(
+            name="install_mcp_server",
+            description=(
+                "Register an MCP server in Metis's own mcp.json and reload tools. Use this "
+                "(NOT a shell edit of some other app's config) when asked to add/install an MCP "
+                "server. Provide a stdio launcher (command + args) or a remote url. Put secrets "
+                "in env values, never hard-coded in args."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Server name (key in mcpServers)."},
+                    "command": {"type": "string", "description": "Launcher command, e.g. npx or uvx (stdio servers)."},
+                    "args": {"type": "array", "items": {"type": "string"}, "description": "Launcher arguments."},
+                    "env": {"type": "object", "description": "Environment variables (use for API keys / secrets)."},
+                    "url": {"type": "string", "description": "Remote MCP endpoint URL (alternative to command)."},
+                },
+                "required": ["name"],
+            },
+            execute_fn=install_mcp_server_tool,
+            usage_hint="Use to register MCP servers instead of editing external config files.",
+            source="builtin",
+            toolset="workflow",
+            requires_approval=True,
+            destructive=True,
+        )
+    )
+
     # FABLEADV-23: 工具按需检索/加载（仅在 deferred 模式 + 有 deferred 工具时进 schema，
     # 由 agent_loop 控制；这里始终注册，执行器纯函数返回检索文本）。
     def search_tools(query: str = "") -> str:
