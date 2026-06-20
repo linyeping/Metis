@@ -49,6 +49,11 @@ type RunJobRequest struct {
 	MemoryMB       int               `json:"memory_mb"`
 	Processors     int               `json:"processors"`
 	BundleDir      string            `json:"bundle_dir"`
+	// SessionDataDir, when set together with a non-empty SessionID, enables
+	// persistence: a per-key writable vhdx (cloned from SessionDataTemplate on
+	// first use) is attached and mounted to /data in the guest.
+	SessionDataDir      string `json:"session_data_dir"`
+	SessionDataTemplate string `json:"session_data_template"`
 }
 
 // RunJobResult mirrors the dict hcs_runtime_run returns.
@@ -143,87 +148,63 @@ func startConsole(diagDir string) (string, func(), error) {
 	return name, func() { _ = l.Close() }, nil
 }
 
-// RunJob = boot VM -> wait metisd -> push/run/pull -> destroy.
-func RunJob(req RunJobRequest) RunJobResult {
-	res := RunJobResult{Backend: "hcs"}
-	started := time.Now()
-
-	var b BundlePaths
+// resolveBundle locates the runtime pack for a job, honoring an explicit
+// BundleDir (LocalSystem can't find the per-user install via LOCALAPPDATA).
+func resolveBundle(req RunJobRequest) (BundlePaths, bool) {
 	if req.BundleDir != "" {
-		b = BundlePaths{Vmlinuz: filepath.Join(req.BundleDir, "vmlinuz"), Initrd: filepath.Join(req.BundleDir, "initrd")}
+		b := BundlePaths{Vmlinuz: filepath.Join(req.BundleDir, "vmlinuz"), Initrd: filepath.Join(req.BundleDir, "initrd")}
 		if fileExists(filepath.Join(req.BundleDir, "rootfs.vhdx")) {
 			b.Rootfs = filepath.Join(req.BundleDir, "rootfs.vhdx")
 		}
-	} else {
-		var ok bool
-		b, ok = findMetisBundle()
-		if !ok {
-			res.Error = "no VM bundle found"
-			return res
+		if fileExists(b.Vmlinuz) && fileExists(b.Initrd) {
+			return b, true
 		}
+		return BundlePaths{}, false
 	}
+	return findMetisBundle()
+}
 
-	vmID := uuid.NewString()
-	consolePipe, stopConsole, cerr := startConsole(req.DiagnosticsDir)
-	if cerr != nil {
-		consolePipe = ""
+// RunJob dispatches between a kept-alive, session-keyed VM (reuse + /data
+// persistence) and the legacy one-shot path (keyless callers like the CLI).
+func RunJob(req RunJobRequest) RunJobResult {
+	if req.SessionID != "" {
+		return runJobKeyed(req)
 	}
+	return runJobOneShot(req)
+}
 
-	// Optional HCN NAT networking: create an endpoint and attach it as eth0.
-	endpoint, epErr := maybeCreateEndpoint(req.NetworkAllowed)
-	defer deleteEndpointSafe(endpoint)
-	endpointID, mac := "", ""
-	if endpoint != nil {
-		endpointID, mac = endpoint.Id, endpoint.MacAddress
+// runJobKeyed reuses (or boots) the VM bound to req.SessionID and runs on it
+// without destroying it — the reaper / session.close handle teardown.
+func runJobKeyed(req RunJobRequest) RunJobResult {
+	startReaper()
+	e, err := ensureVM(req.SessionID, req)
+	if err != nil {
+		return RunJobResult{Backend: "hcs", ExecMode: "unsupported", Error: err.Error(), ReturnCode: 126}
 	}
-	if req.NetworkAllowed && endpoint == nil {
-		// network requested but endpoint creation failed — fail loudly so the
-		// caller knows the sandbox is offline and doesn't run a network task
-		// against a network-less VM.
-		res.Error = "network requested but HCN endpoint creation failed: " + fmt.Sprint(epErr)
-		res.ReturnCode = 126
-		return res
-	}
+	defer e.mu.Unlock() // ensureVM returns with e.mu held
+	return e.runOnVM(req)
+}
 
-	vm := NewHcsVm(vmID, b, VMOptions{
-		MemoryMB: req.MemoryMB, Processors: req.Processors,
-		KernelCmdline: "console=ttyS0", ConsolePipe: consolePipe,
-		EndpointID: endpointID, MacAddress: mac,
-	})
-	defer func() {
-		vm.Destroy()
-		if stopConsole != nil {
-			stopConsole()
-		}
-	}()
+// runJobOneShot boots a transient VM, runs once, and destroys it. Reuses the
+// shared boot path with no session key (so no persistence is attached).
+func runJobOneShot(req RunJobRequest) RunJobResult {
+	e := &liveVM{key: ""}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.boot(req); err != nil {
+		e.teardown()
+		return RunJobResult{Backend: "hcs", ExecMode: "unsupported", Error: err.Error(), ReturnCode: 126}
+	}
+	defer e.teardown()
+	return e.runOnVM(req)
+}
 
-	if err := vm.Create(); err != nil {
-		res.Error = "create: " + err.Error()
-		return res
-	}
-	if _, err := vm.Start(bootTimeoutMs); err != nil {
-		res.Error = "start: " + err.Error()
-		return res
-	}
-
-	if !waitMetisd(vmID, metisdWaitSeconds*time.Second) {
-		res.ExecMode = "unsupported"
-		res.Error = "metisd did not come up on vsock"
-		res.ReturnCode = 126
-		return res
-	}
-	res.ExecMode = "hvsocket"
-
-	// Configure the guest NIC from the endpoint (needs `ip` in the rich rootfs).
-	if endpoint != nil {
-		ip, prefix, gw, dns := endpointNetConfig(endpoint)
-		if ip != "" {
-			_, _ = sendJSONL(vmID, []map[string]any{
-				{"id": "net", "method": "net.configure", "params": map[string]any{
-					"ip": ip, "prefix": prefix, "gateway": gw, "dns": dns, "iface": "eth0"}},
-			}, 20*time.Second)
-		}
-	}
+// runJobOnVM runs one push/run/pull cycle against an already-booted VM whose
+// metisd is up. Shared by the keyed and one-shot paths.
+func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
+	res := RunJobResult{Backend: "hcs", ExecMode: "hvsocket"}
+	started := time.Now()
+	vmID := vm.ID
 
 	// 1) push: hello + mount + fs.put(every workspace file) + run + list
 	pushed := map[string]bool{}

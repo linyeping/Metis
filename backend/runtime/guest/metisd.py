@@ -356,6 +356,63 @@ def handle_net_configure(req_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return _reply(req_id, configured=ok, iface=iface, ip=ip, steps=results)
 
 
+def handle_data_mount(req_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Mount the writable sessiondata disk to /data and point pip --user at it.
+
+    The host attaches a per-session writable ext4 vhdx labelled METISDATA.
+    We mount it by label (robust to SCSI lun ordering), create the pip user
+    base, and export PYTHONUSERBASE so `pip install --user` and the user
+    site-packages persist across runs. Needs `mount` in the guest (present in
+    the rich rootfs); on the minimal initramfs this degrades to mounted=False.
+    """
+    import glob
+
+    mountpoint = params.get("mountpoint", "/data")
+    label = params.get("label", "METISDATA")
+    pyuserbase = params.get("pythonuserbase", "/data/pyuser")
+    steps: List[Dict[str, Any]] = []
+
+    try:
+        os.makedirs(mountpoint, exist_ok=True)
+    except OSError as exc:
+        return _reply(req_id, mounted=False, error=f"mkdir {mountpoint}: {exc}")
+
+    def _try_mount(cmd: List[str]) -> bool:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            steps.append({"cmd": " ".join(cmd), "rc": r.returncode, "err": (r.stderr or "").strip()[:200]})
+            return r.returncode == 0
+        except Exception as exc:  # mount binary missing on minimal pack, etc.
+            steps.append({"cmd": " ".join(cmd), "rc": -1, "err": str(exc)})
+            return False
+
+    mounted = os.path.ismount(mountpoint)
+    if not mounted:
+        # Preferred: mount by filesystem label.
+        mounted = _try_mount(["mount", "-L", label, mountpoint])
+    if not mounted:
+        # Fallback: try each non-rootfs block device until one mounts.
+        for dev in sorted(glob.glob("/dev/sd*")):
+            if _try_mount(["mount", dev, mountpoint]):
+                mounted = True
+                break
+
+    if mounted:
+        try:
+            os.makedirs(pyuserbase, exist_ok=True)
+            # Inherited by handle_process_run, which copies os.environ.
+            os.environ["PYTHONUSERBASE"] = pyuserbase
+        except OSError as exc:
+            steps.append({"cmd": "mkdir pyuserbase", "rc": -1, "err": str(exc)})
+
+    return _reply(req_id,
+        mounted=bool(mounted),
+        mountpoint=mountpoint,
+        pythonuserbase=pyuserbase if mounted else "",
+        steps=steps,
+    )
+
+
 def handle_runtime_shutdown(req_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return _reply(req_id, message="shutting down", _shutdown=True)
 
@@ -374,6 +431,7 @@ HANDLERS = {
     "fs.get": handle_fs_get,
     "fs.list": handle_fs_list,
     "net.configure": handle_net_configure,
+    "data.mount": handle_data_mount,
     "diagnostics.export": handle_diagnostics_export,
     "runtime.shutdown": handle_runtime_shutdown,
 }

@@ -156,6 +156,7 @@ func createPipeInstance(sddl string, first bool) (windows.Handle, error) {
 
 // ServePipe runs the accept loop until the process exits.
 func ServePipe() error {
+	startReaper() // reclaim idle session-keyed VMs in the background
 	userSID := expectedUserSID()
 	sddl := pipeSDDL(userSID)
 	logf("pipe server: %s\n  expected user SID: %s\n  SDDL: %s", pipeName, userSID, sddl)
@@ -301,6 +302,16 @@ func dispatchRequest(line []byte) []byte {
 	case "vm.cleanup_orphans":
 		n := cleanupMetisOrphans()
 		return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": true, "result": map[string]any{"reaped": n}})
+	case "session.close":
+		var p struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		closed := false
+		if p.SessionID != "" {
+			closed = closeSession(p.SessionID)
+		}
+		return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": true, "result": map[string]any{"closed": closed}})
 	default:
 		return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": false, "error": "unknown method: " + req.Method})
 	}

@@ -34,6 +34,7 @@ func (m *metisService) Execute(args []string, r <-chan svc.ChangeRequest, change
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
 				changes <- svc.Status{State: svc.StopPending}
+				shutdownAllSessions() // destroy kept-alive sandbox VMs cleanly
 				return false, 0
 			default:
 			}

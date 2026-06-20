@@ -10112,6 +10112,55 @@ def _vm_protocol_failure_message(
     return "\n".join(parts)
 
 
+def _hcs_session_key(manifest: RuntimeManifest) -> str:
+    """Stable per-session key so the service can reuse a warm VM + /data disk.
+
+    For the HCS backend workspace_dir == the project source root, so hashing
+    the source root yields a key that is stable across every runtime job in
+    the same project/chat (each job otherwise gets a fresh rt_* manifest id,
+    which would never reuse). An explicit METIS_RUNTIME_SESSION_KEY override
+    lets the app layer inject a chat-session id later without re-plumbing the
+    tool signature.
+    """
+    override = os.environ.get("METIS_RUNTIME_SESSION_KEY", "").strip()
+    if override:
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "", override)[:32]
+        if safe:
+            return f"sk_{safe}"
+    try:
+        root = str(manifest.paths.source_root or "")
+    except Exception:
+        root = ""
+    if not root:
+        return ""
+    import hashlib
+    digest = hashlib.sha1(os.path.normcase(os.path.abspath(root)).encode("utf-8")).hexdigest()[:16]
+    return f"sk_{digest}"
+
+
+def _hcs_sessiondata_paths(bundle: Optional[Path]) -> tuple[str, str]:
+    """Resolve (data_dir, template) for sessiondata persistence.
+
+    data_dir lives under the *user's* LOCALAPPDATA (passed explicitly because
+    the LocalSystem service's own LOCALAPPDATA is the systemprofile). The empty
+    ext4 template ships in the rich bundle (CI); a METIS_SESSIONDATA_TEMPLATE
+    env override is honored for local testing before the bundle repack.
+    """
+    data_dir = ""
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        data_dir = os.path.join(local_appdata, "Metis", "sessiondata")
+    template = ""
+    env_tmpl = os.environ.get("METIS_SESSIONDATA_TEMPLATE", "").strip()
+    if env_tmpl and os.path.isfile(env_tmpl):
+        template = env_tmpl
+    elif bundle is not None:
+        cand = os.path.join(str(bundle), "sessiondata-template.vhdx")
+        if os.path.isfile(cand):
+            template = cand
+    return data_dir, template
+
+
 def _run_hcs_command(
     manifest: RuntimeManifest,
     command_text: str,
@@ -10134,7 +10183,10 @@ def _run_hcs_command(
         if svc_client.service_available():
             from backend.runtime.hcs_client import find_metis_bundle
             bundle = find_metis_bundle()
+            session_key = _hcs_session_key(manifest)
+            data_dir, data_template = _hcs_sessiondata_paths(bundle)
             params = {
+                "session_id": session_key,
                 "command": command_text,
                 "workspace_dir": str(manifest.paths.workspace_dir),
                 "artifacts_dir": str(manifest.paths.artifacts_dir),
@@ -10144,6 +10196,10 @@ def _run_hcs_command(
                 "memory_mb": 1024,
                 "processors": 2,
                 "bundle_dir": str(bundle) if bundle else "",
+                # Persistence: per-key writable /data disk (best-effort — the
+                # service skips it gracefully when no template/disk exists).
+                "session_data_dir": data_dir if session_key else "",
+                "session_data_template": data_template if session_key else "",
             }
             result = svc_client.run_job_via_service(params)
             if result is not None and not result.get("error"):

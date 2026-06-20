@@ -116,6 +116,7 @@ type VMOptions struct {
 	ConsolePipe   string // optional COM1 named pipe (\\.\pipe\...)
 	EndpointID    string // optional HCN endpoint to attach as eth0
 	MacAddress    string // MAC for the attached NIC
+	DataDiskPath  string // optional writable sessiondata vhdx mounted to /data
 }
 
 func buildVMDocument(b BundlePaths, o VMOptions) (string, error) {
@@ -126,16 +127,25 @@ func buildVMDocument(b BundlePaths, o VMOptions) (string, error) {
 	}
 	devices := map[string]any{}
 
+	// SCSI attachments: rootfs (read-only) at lun 0 when present, then the
+	// writable sessiondata disk in the next free lun. The guest mounts the
+	// data disk by filesystem label, so the exact lun number doesn't matter.
+	attachments := map[string]any{}
+	lun := 0
 	if b.Rootfs != "" {
 		if _, err := os.Stat(b.Rootfs); err == nil {
-			devices["Scsi"] = map[string]any{
-				"primary": map[string]any{
-					"Attachments": map[string]any{
-						"0": map[string]any{"Type": "VirtualDisk", "Path": b.Rootfs, "ReadOnly": true},
-					},
-				},
-			}
+			attachments[fmt.Sprintf("%d", lun)] = map[string]any{"Type": "VirtualDisk", "Path": b.Rootfs, "ReadOnly": true}
+			lun++
 		}
+	}
+	if o.DataDiskPath != "" {
+		if _, err := os.Stat(o.DataDiskPath); err == nil {
+			attachments[fmt.Sprintf("%d", lun)] = map[string]any{"Type": "VirtualDisk", "Path": o.DataDiskPath, "ReadOnly": false}
+			lun++
+		}
+	}
+	if len(attachments) > 0 {
+		devices["Scsi"] = map[string]any{"primary": map[string]any{"Attachments": attachments}}
 	}
 	if o.ConsolePipe != "" {
 		devices["ComPorts"] = map[string]any{"0": map[string]any{"NamedPipe": o.ConsolePipe}}

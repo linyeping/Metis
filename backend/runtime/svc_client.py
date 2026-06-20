@@ -151,4 +151,18 @@ def run_job_via_service(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-__all__ = ["service_available", "service_status", "run_job_via_service", "PIPE_NAME"]
+def close_session(session_id: str) -> bool:
+    """Explicitly tear down a kept-alive session VM. True if one was closed."""
+    if not session_id:
+        return False
+    try:
+        resps = _rpc([{"seq": 1, "method": "session.close", "params": {"session_id": session_id}}])
+    except Exception:
+        return False
+    for r in resps:
+        if r.get("seq") == 1 and isinstance(r.get("result"), dict):
+            return bool(r["result"].get("closed"))
+    return False
+
+
+__all__ = ["service_available", "service_status", "run_job_via_service", "close_session", "PIPE_NAME"]
