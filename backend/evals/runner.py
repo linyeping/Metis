@@ -126,6 +126,8 @@ def run_task(
             if isinstance(event, ErrorEvent):
                 run_error = event.message or event.title or event.code
         checker = run_checker(workspace, task)
+    except Exception as exc:  # noqa: BLE001 — one bad task must not abort the suite
+        run_error = run_error or f"{type(exc).__name__}: {exc}"
     finally:
         metrics = collector.finish(success=bool(checker.get("ok")))
 
