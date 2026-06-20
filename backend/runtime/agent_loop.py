@@ -54,7 +54,7 @@ from .cancellation import (
 )
 
 logger = logging.getLogger(__name__)
-MAX_WORKING_CONTEXT_CHARS = int(os.environ.get("METIS_MAX_WORKING_CONTEXT_CHARS", "400000"))
+MAX_WORKING_CONTEXT_CHARS = int(os.environ.get("METIS_MAX_WORKING_CONTEXT_CHARS", "1500000"))
 TOOL_EXECUTION_TIMEOUT = float(os.environ.get("METIS_TOOL_EXECUTION_TIMEOUT", "300"))
 CONTENT_DELTA_FLUSH_INTERVAL = float(os.environ.get("METIS_CONTENT_DELTA_FLUSH_INTERVAL", "0.08"))
 CONTENT_DELTA_FLUSH_CHARS = int(os.environ.get("METIS_CONTENT_DELTA_FLUSH_CHARS", "30"))
@@ -953,7 +953,7 @@ def run(
         )
         for event in compact_events:
             yield event
-        if _working_context_chars(working_messages) > MAX_WORKING_CONTEXT_CHARS:
+        if _enforce_working_context(working_messages):
             yield _runtime_status_event(
                 "failed",
                 "Agent working context exceeded hard limit",
@@ -1426,7 +1426,7 @@ def run_stream(
         )
         for event in compact_events:
             yield event
-        if _working_context_chars(working_messages) > MAX_WORKING_CONTEXT_CHARS:
+        if _enforce_working_context(working_messages):
             yield _runtime_status_event(
                 "failed",
                 "Agent working context exceeded hard limit",
@@ -1978,7 +1978,7 @@ def run_stream(
                 tool_call_count=tool_call_count,
                 reason="tool_loop",
             )
-            if _working_context_chars(working_messages) > MAX_WORKING_CONTEXT_CHARS:
+            if _enforce_working_context(working_messages):
                 yield _runtime_status_event(
                     "failed",
                     "Agent working context exceeded hard limit",
@@ -2559,6 +2559,31 @@ def _append_error_recovery_hint(result: str) -> str:
             "Do NOT repeat the same call with identical arguments.]"
         )
     return result
+
+
+def _enforce_working_context(messages: List[Dict[str, Any]]) -> bool:
+    """Keep the working context under the char cap WITHOUT killing the run.
+
+    When over the cap, hard-truncate oversized tool results and historical
+    tool-call arguments (e.g. a huge inline script the agent sent) in place,
+    then re-measure. Returns True only if it is STILL over after truncation
+    (i.e. genuinely unrecoverable) — the caller fails only in that case.
+    """
+    if _working_context_chars(messages) <= MAX_WORKING_CONTEXT_CHARS:
+        return False
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str) and len(content) > _MAX_RESULT_CHARS:
+            message["content"] = _head_tail_truncate(content)
+        for tool_call in message.get("tool_calls") or []:
+            fn = tool_call.get("function") or {}
+            args = fn.get("arguments")
+            if isinstance(args, str) and len(args) > _MAX_RESULT_CHARS:
+                fn["arguments"] = args[:_MAX_RESULT_CHARS] + " /* …arguments truncated… */"
+    still_over = _working_context_chars(messages) > MAX_WORKING_CONTEXT_CHARS
+    if not still_over:
+        logger.info("runtime emergency context truncation applied (recovered under cap)")
+    return still_over
 
 
 def _working_context_chars(messages: List[Dict[str, Any]]) -> int:

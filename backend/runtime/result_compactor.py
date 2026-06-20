@@ -72,6 +72,8 @@ _STRATEGY_MAP: Dict[str, str] = {
     "metis_sandbox_status": "json_summary",
     "metis_runtime_create": "json_summary",
     "metis_runtime_run": "json_summary",
+    "metis_runtime_job": "json_summary",
+    "metis_runtime_job_status": "json_summary",
     "metis_runtime_collect_artifacts": "json_summary",
     "metis_runtime_export_patch": "json_summary",
     "metis_runtime_export_diagnostics": "json_summary",

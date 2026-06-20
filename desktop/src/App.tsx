@@ -253,6 +253,15 @@ export function App() {
         lastEscapeAt = 0;
         return;
       }
+      // While a run is active (including desktop takeover / computer use), a
+      // single Esc aborts it — pressing Esc to "exit takeover" must work.
+      const chat = useChatStore.getState();
+      if (chat.streaming) {
+        event.preventDefault();
+        chat.stop();
+        lastEscapeAt = 0;
+        return;
+      }
       const now = Date.now();
       if (now - lastEscapeAt <= 650) {
         lastEscapeAt = 0;
