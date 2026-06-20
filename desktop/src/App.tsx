@@ -275,6 +275,14 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [backendReady]);
 
+  useEffect(() => {
+    // Composer model/effort menu changes settings directly; refresh app state
+    // so the titlebar model badge and everything else stays in sync.
+    const onSettingsRefresh = () => { void refresh(); };
+    window.addEventListener('metis:settings-refresh', onSettingsRefresh);
+    return () => window.removeEventListener('metis:settings-refresh', onSettingsRefresh);
+  }, [refresh]);
+
   const mainContent = activeSection === 'chat' ? <MetisThread /> : activeSection === 'cron' ? <CronPanel /> : <SectionMain section={activeSection} />;
   const main = (
     <div className="main-panel-stage" key={activeSection} data-section={activeSection}>

@@ -28,12 +28,71 @@ import {
   useRef,
   useState,
 } from 'react';
-import { getComposerPermissionMode, getSkills, setComposerPermissionMode } from '../../lib/api';
+import {
+  getComposerPermissionMode,
+  getProviderStatus,
+  getSettings,
+  getSkills,
+  setComposerPermissionMode,
+  updateSettings,
+} from '../../lib/api';
 import { filterSlashWorkflowCommands, moveSlashSelection } from '../../lib/slashCommands';
-import type { ParsedFile, PermissionAccessMode, SkillSummary } from '../../lib/types';
+import type { ParsedFile, PermissionAccessMode, ProviderProfile, RuntimeSettings, SkillSummary } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
+import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
+
+const EFFORT_LEVELS: Array<{ value: string; zh: string; en: string }> = [
+  { value: 'low', zh: '低', en: 'Low' },
+  { value: 'medium', zh: '中', en: 'Medium' },
+  { value: 'high', zh: '高', en: 'High' },
+  { value: 'max', zh: '超高', en: 'Max' },
+];
+
+function shortModelName(model: string): string {
+  if (!model) return '模型';
+  const trimmed = model.split('/').pop() || model;
+  return trimmed.replace(/^(gpt|claude|gemini|qwen|deepseek|glm)[-_]?/i, '') || trimmed;
+}
+
+interface ComposerModelEntry {
+  id: string;
+  model: string;
+  providerId: string;
+  baseUrl: string;
+  provider: string;
+  active: boolean;
+}
+
+function buildComposerModelList(providers: ProviderProfile[], settings: RuntimeSettings | null): ComposerModelEntry[] {
+  const activeProviderId = settings?.providerId || settings?.backend || '';
+  const activeModel = settings?.model || '';
+  const out: ComposerModelEntry[] = [];
+  for (const provider of providers) {
+    if (provider.providerId === 'fake') continue;
+    const isActiveProvider = provider.providerId === activeProviderId;
+    const modelIds = Array.from(new Set([
+      provider.defaultModel,
+      ...provider.fallbackModels,
+      isActiveProvider ? activeModel : '',
+    ].filter(Boolean)));
+    for (const model of modelIds) {
+      out.push({
+        id: `${provider.providerId}:${model}`,
+        model,
+        providerId: provider.providerId,
+        baseUrl: provider.baseUrl || (isActiveProvider ? settings?.baseUrl || '' : ''),
+        provider: provider.displayName,
+        active: isActiveProvider && model === activeModel,
+      });
+    }
+  }
+  if (out.length === 0 && activeModel) {
+    out.push({ id: `current:${activeModel}`, model: activeModel, providerId: activeProviderId, baseUrl: settings?.baseUrl || '', provider: 'Current', active: true });
+  }
+  return out;
+}
 
 const accessOptions: Array<{
   mode: PermissionAccessMode;
@@ -437,6 +496,7 @@ export function Composer() {
             <ComposerAccessMenu />
           </div>
           <div className="composer-toolbar-right">
+            <ComposerModelMenu />
             <motion.button
               className="send-button"
               type="button"
@@ -511,6 +571,113 @@ function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function ComposerModelMenu() {
+  const t = useT();
+  const language = useUiStore(state => state.language);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<RuntimeSettings | null>(null);
+  const [providers, setProviders] = useState<ProviderProfile[]>([]);
+
+  const load = async () => {
+    try {
+      const [next, status] = await Promise.all([getSettings(), getProviderStatus()]);
+      setSettings(next);
+      setProviders(status.providers);
+    } catch {
+      try { setSettings(await getSettings()); } catch { /* ignore */ }
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+  useEffect(() => { if (open) void load(); }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: Event) => { if ((event as globalThis.KeyboardEvent).key === 'Escape') setOpen(false); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const zh = language === 'zh';
+  const effort = settings?.reasoningEffort && settings.reasoningEffort !== 'off' ? settings.reasoningEffort : '';
+  const effortMeta = EFFORT_LEVELS.find(e => e.value === effort);
+  const models = useMemo(() => buildComposerModelList(providers, settings), [providers, settings]);
+
+  const applyEffort = async (value: string) => {
+    setSaving(true);
+    try {
+      await updateSettings({ reasoningEffort: value });
+      await load();
+      window.dispatchEvent(new Event('metis:settings-refresh'));
+    } finally { setSaving(false); }
+  };
+  const applyModel = async (entry: ComposerModelEntry) => {
+    setSaving(true);
+    try {
+      await updateSettings({ backend: entry.providerId, providerId: entry.providerId, baseUrl: entry.baseUrl, model: entry.model });
+      await load();
+      window.dispatchEvent(new Event('metis:settings-refresh'));
+      setOpen(false);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div ref={rootRef} className="composer-model-wrap" onPointerDown={event => event.stopPropagation()}>
+      <button
+        type="button"
+        className="composer-model-button"
+        onClick={() => setOpen(value => !value)}
+        title={settings?.model || t('选择模型')}
+      >
+        <span className="composer-model-name">{shortModelName(settings?.model || '')}</span>
+        {effortMeta && <em className="composer-model-effort">{zh ? effortMeta.zh : effortMeta.en}</em>}
+        <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="composer-model-menu" role="menu">
+          <div className="composer-model-section">{t('推理强度')}</div>
+          <div className="composer-effort-row">
+            {EFFORT_LEVELS.map(level => (
+              <button
+                key={level.value}
+                type="button"
+                data-active={effort === level.value}
+                disabled={saving}
+                onClick={() => void applyEffort(level.value)}
+              >
+                {zh ? level.zh : level.en}
+              </button>
+            ))}
+          </div>
+          <div className="composer-model-divider" />
+          <div className="composer-model-section">{t('模型')}</div>
+          <div className="composer-model-list">
+            {models.map(entry => (
+              <button
+                key={entry.id}
+                type="button"
+                data-active={entry.active}
+                disabled={saving}
+                onClick={() => void applyModel(entry)}
+              >
+                <span>{entry.model}</span>
+                {entry.active && <Check size={14} />}
+              </button>
+            ))}
+            {models.length === 0 && <p className="composer-model-empty">{t('暂无可用模型')}</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ComposerAccessMenu() {

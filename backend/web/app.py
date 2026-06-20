@@ -3199,8 +3199,27 @@ def _maybe_record_learning(
         memory_path = _append_project_memory(f"- {day}: {summary} (tools: {tools})")
         memory_count = 1
 
+    # Only sediment a SKILL for genuinely complex, reusable workflows — not for
+    # trivial 2-tool tasks (which produced low-value boilerplate skills before).
+    # Require a real multi-step workflow: enough tool calls, tool *variety*, and
+    # multiple reasoning turns. Thresholds are env-tunable.
+    def _env_int(name: str, default: int) -> int:
+        try:
+            return int(os.environ.get(name, "") or default)
+        except (TypeError, ValueError):
+            return default
+
     skill_tool_count = len(meaningful_tool_names) if tool_names else tool_count
-    if env_bool("METIS_AUTO_SKILLS", "MIRO_AUTO_SKILLS", True) and skill_tool_count >= 2:
+    distinct_tools = len(set(meaningful_tool_names))
+    min_calls = _env_int("METIS_SKILL_MIN_TOOL_CALLS", 6)
+    min_distinct = _env_int("METIS_SKILL_MIN_DISTINCT_TOOLS", 4)
+    min_turns = _env_int("METIS_SKILL_MIN_TURNS", 4)
+    skill_worthy = (
+        skill_tool_count >= min_calls
+        and distinct_tools >= min_distinct
+        and (done_event.total_turns or 0) >= min_turns
+    )
+    if env_bool("METIS_AUTO_SKILLS", "MIRO_AUTO_SKILLS", True) and skill_worthy:
         skill_path = _create_skill_from_session(summary, meaningful_tool_names) or ""
         skill_count = 1 if skill_path else 0
 

@@ -4664,6 +4664,117 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   align-self: auto;
 }
 
+/* Composer inline model + reasoning-effort picker (left of the send button) */
+.composer-model-wrap {
+  position: relative;
+}
+.composer-model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 180px;
+}
+.composer-model-button:hover,
+.composer-model-button[aria-expanded='true'] {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.composer-model-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-model-effort {
+  font-style: normal;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text);
+}
+.composer-model-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 240px;
+  max-width: 320px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface, var(--bg));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+.composer-model-section {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 6px 6px;
+}
+.composer-effort-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.composer-effort-row button {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.composer-effort-row button[data-active='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+}
+.composer-model-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px 2px;
+}
+.composer-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.composer-model-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.composer-model-list button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.composer-model-list button[data-active='true'] {
+  color: var(--accent);
+}
+.composer-model-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px;
+}
+
 .composer-access-button {
   display: inline-flex;
   align-items: center;

@@ -16,7 +16,6 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import wordmark from '../../assets/metis-wordmark-sm.png';
 import { useSideChatStore } from '../../store/sideChatStore';
 import { useUiStore, type WorkspaceCardId } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
@@ -84,9 +83,7 @@ export function Titlebar({ model }: TitlebarProps) {
 
   return (
     <header className="titlebar">
-      <div className="titlebar-brand">
-        <img src={wordmark} alt="Metis" />
-      </div>
+      <div className="titlebar-brand" aria-hidden="true" />
       <div className="titlebar-center">
         <span>Metis Desktop</span>
         {model && <em>{model}</em>}
