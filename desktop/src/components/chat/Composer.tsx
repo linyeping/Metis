@@ -41,14 +41,8 @@ import type { ParsedFile, PermissionAccessMode, ProviderProfile, RuntimeSettings
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
+import { effortLevelsFor, effortLabel } from '../../lib/reasoningTiers';
 import { useT } from '../../hooks/useT';
-
-const EFFORT_LEVELS: Array<{ value: string; zh: string; en: string }> = [
-  { value: 'low', zh: '低', en: 'Low' },
-  { value: 'medium', zh: '中', en: 'Medium' },
-  { value: 'high', zh: '高', en: 'High' },
-  { value: 'max', zh: '超高', en: 'Max' },
-];
 
 function shortModelName(model: string): string {
   if (!model) return '模型';
@@ -608,7 +602,9 @@ function ComposerModelMenu() {
 
   const zh = language === 'zh';
   const effort = settings?.reasoningEffort && settings.reasoningEffort !== 'off' ? settings.reasoningEffort : '';
-  const effortMeta = EFFORT_LEVELS.find(e => e.value === effort);
+  // Only the tiers the *current* model actually supports, plus an off switch.
+  const effortChoices = useMemo(() => ['off', ...effortLevelsFor(settings?.model || '')], [settings?.model]);
+  const effortBadge = effort ? effortLabel(effort, zh) : '';
   const models = useMemo(() => buildComposerModelList(providers, settings), [providers, settings]);
 
   const applyEffort = async (value: string) => {
@@ -638,26 +634,30 @@ function ComposerModelMenu() {
         title={settings?.model || t('选择模型')}
       >
         <span className="composer-model-name">{shortModelName(settings?.model || '')}</span>
-        {effortMeta && <em className="composer-model-effort">{zh ? effortMeta.zh : effortMeta.en}</em>}
+        {effortBadge && <em className="composer-model-effort">{effortBadge}</em>}
         <ChevronDown size={13} />
       </button>
       {open && (
         <div className="composer-model-menu" role="menu">
-          <div className="composer-model-section">{t('推理强度')}</div>
-          <div className="composer-effort-row">
-            {EFFORT_LEVELS.map(level => (
-              <button
-                key={level.value}
-                type="button"
-                data-active={effort === level.value}
-                disabled={saving}
-                onClick={() => void applyEffort(level.value)}
-              >
-                {zh ? level.zh : level.en}
-              </button>
-            ))}
-          </div>
-          <div className="composer-model-divider" />
+          {effortChoices.length > 1 && (
+            <>
+              <div className="composer-model-section">{t('推理强度')}</div>
+              <div className="composer-effort-row">
+                {effortChoices.map(level => (
+                  <button
+                    key={level}
+                    type="button"
+                    data-active={level === 'off' ? !effort : effort === level}
+                    disabled={saving}
+                    onClick={() => void applyEffort(level)}
+                  >
+                    {effortLabel(level, zh)}
+                  </button>
+                ))}
+              </div>
+              <div className="composer-model-divider" />
+            </>
+          )}
           <div className="composer-model-section">{t('模型')}</div>
           <div className="composer-model-list">
             {models.map(entry => (

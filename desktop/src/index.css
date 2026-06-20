@@ -4719,12 +4719,15 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   padding: 4px 6px 6px;
 }
 .composer-effort-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .composer-effort-row button {
+  flex: 1 1 auto;
+  min-width: 44px;
   height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: transparent;

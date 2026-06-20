@@ -106,19 +106,26 @@ class OpenAICompatBackend(LLMBackend):
         return False
 
     def _reasoning_params(self) -> Optional[Dict[str, Any]]:
-        """DeepSeek v4 推理参数（opt-in）。其它供应商/模型返回 None，绝不注入不支持的字段。
+        """opt-in 推理强度。按模型支持的档位透传真实档位（不再统一塌成 high）。
 
-        映射沿用 DeepSeek 文档：low/medium/high -> reasoning_effort=high；max -> max；均带
-        thinking enabled。off/空 -> 不注入（保持非推理行为）。
+        off/空 -> 不注入（保持非推理行为）。选中的档位若超出该模型支持范围，clamp
+        到最接近的有效档位（例如 'max' 落到只支持到 'xhigh' 的模型 -> 'xhigh'）。
+        DeepSeek 额外带 thinking enabled 标志。
         """
+        from backend.runtime.reasoning_tiers import clamp_effort, effort_levels_for
+
         effort = (self.reasoning_effort or "").strip().lower()
-        if not effort or effort == "off":
+        if not effort or effort in ("off", "none"):
             return None
-        model = (self.detected_model or self.model or "").lower()
-        if "deepseek" not in self.base_url.lower() or not model.startswith("deepseek-v4"):
+        model = self.detected_model or self.model or ""
+        levels = effort_levels_for(model)
+        if not levels:
             return None
-        level = "max" if effort == "max" else "high"
-        return {"reasoning_effort": level, "thinking": {"type": "enabled"}}
+        level = clamp_effort(effort, levels)
+        params: Dict[str, Any] = {"reasoning_effort": level}
+        if "deepseek" in self.base_url.lower():
+            params["thinking"] = {"type": "enabled"}
+        return params
 
     @property
     def supports_parallel_tool_calls(self) -> bool:

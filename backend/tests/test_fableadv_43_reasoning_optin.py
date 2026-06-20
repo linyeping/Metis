@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""FABLEADV-43: 推理强度 opt-in 开关。
+"""FABLEADV-43: 推理强度 opt-in 开关（+ 按模型档位，见 reasoning_tiers）。
 
-默认关 = 零行为变化；开启后仅对 DeepSeek v4 推理模型注入 reasoning_effort + thinking，
-其它供应商/旧模型一律不注入（避免不支持的参数报错）。
+默认关 = 零行为变化；开启后对推理能力模型（DeepSeek v4+/reasoner、GPT-5.x/o系列、
+Claude、Gemini…）注入其支持的真实档位；非推理模型（gpt-4o、deepseek-chat…）一律不注入，
+避免不支持的参数报错。
 """
 from __future__ import annotations
 
@@ -63,8 +64,23 @@ def test_legacy_deepseek_chat_not_injected(monkeypatch):
 
 
 def test_non_deepseek_not_injected(monkeypatch):
+    # gpt-4o is NOT a reasoning model -> never inject (would error).
     p = _run(monkeypatch, base_url="https://api.openai.com/v1", model="gpt-4o", effort="high")
     assert "reasoning_effort" not in p and "thinking" not in p
+
+
+def test_gpt5_passes_real_level_through(monkeypatch):
+    # GPT-5.5 supports low/medium/high/xhigh -> the real chosen level is sent
+    # (not collapsed to "high"), and no DeepSeek-only "thinking" flag.
+    p = _run(monkeypatch, base_url="https://api.openai.com/v1", model="gpt-5.5", effort="xhigh")
+    assert p["reasoning_effort"] == "xhigh"
+    assert "thinking" not in p
+
+
+def test_effort_clamped_to_model_max(monkeypatch):
+    # 'max' is above GPT-5.5's ceiling (xhigh) -> clamp down to xhigh.
+    p = _run(monkeypatch, base_url="https://api.openai.com/v1", model="gpt-5.5", effort="max")
+    assert p["reasoning_effort"] == "xhigh"
 
 
 def test_off_value_not_injected(monkeypatch):
