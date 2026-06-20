@@ -201,7 +201,10 @@ def test_runtime_job_tool_is_exposed_and_prioritized_for_artifact_workflow() -> 
 
     assert "metis_runtime_job" in names
     assert "metis_runtime_job_status" in names
-    assert names.index("metis_runtime_job") < names.index("metis_runtime_create")
+    # The high-level composite is exposed; the low-level runtime primitives it
+    # composes are hidden as internal tools (no step-multiplying duplicates).
+    assert "metis_runtime_create" not in names
+    assert "metis_runtime_run" not in names
 
 
 class _FailOnceBackend(LLMBackend):

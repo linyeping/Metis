@@ -44,7 +44,7 @@ from .tool_profiles import normalize_tool_profile
 from .tool_registry import ToolRegistry, get_registry
 from backend.bridges.model_capability import detect_from_model_name
 from backend.bridges.provider_registry import resolve_provider_for_config, requires_reasoning_passback_enabled
-from backend.runtime.tool_tiers import tools_for_tier
+from backend.runtime.tool_tiers import INTERNAL_TOOLS, expose_internal_tools, tools_for_tier
 from .cancellation import (
     OperationCancelled,
     cancellation_context,
@@ -2162,6 +2162,25 @@ def _tool_schemas_for_config(
             before_count,
             len(tools),
         )
+
+    # Hide maintainer-only sandbox build/verify tools (and the low-level runtime
+    # primitives that metis_runtime_job already composes) from end-user agents on
+    # every tier — including tier 1's "all tools". Explicit enabled_tools and the
+    # METIS_EXPOSE_INTERNAL_TOOLS override still win.
+    if not config.enabled_tools and not expose_internal_tools():
+        kept = [
+            tool
+            for tool in tools
+            if _tool_name_from_openai_schema(tool) not in INTERNAL_TOOLS
+        ]
+        if len(kept) != len(tools):
+            logger.info(
+                "internal tool hiding model=%s tools_before=%s tools_after=%s",
+                config.llm_model,
+                len(tools),
+                len(kept),
+            )
+        tools = kept
 
     # FABLEADV-23: deferred 模式下，若仍有未激活的可检索工具，注入 search_tools 元工具。
     from .tool_registry import deferred_tools_enabled

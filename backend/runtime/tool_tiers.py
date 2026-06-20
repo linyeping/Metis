@@ -1,7 +1,80 @@
-"""Tool tiers for model capability adaptation."""
+"""Tool tiers for model capability adaptation.
+
+Two axes shrink the tool surface a model sees:
+
+1. INTERNAL_TOOLS — maintainer-only tools that build/verify the sandbox runtime
+   pack (metis_rootfs_* / metis_vm_* / metis_wsl_* / metis_runtime_bundle_*) plus
+   the low-level runtime primitives that the high-level `metis_runtime_job`
+   already composes. End-user agents never need these; exposing them just
+   confuses weaker models into long, wrong tool chains. They stay registered
+   and executable — only hidden from the model — and reappear when
+   METIS_EXPOSE_INTERNAL_TOOLS is set (so we can drive them while building Metis).
+
+2. Tiers — weaker models (e.g. DeepSeek = tier 2) get a smaller curated set.
+"""
 from __future__ import annotations
 
+import os
 from typing import Optional, Set
+
+
+# Maintainer-only sandbox build/verify tools + redundant low-level runtime
+# primitives. Hidden from end-user agents on every tier unless explicitly
+# exposed. The user-facing sandbox surface is just: metis_runtime_job,
+# metis_runtime_job_status, metis_runtime_status, metis_sandbox_status.
+INTERNAL_TOOLS: frozenset[str] = frozenset(
+    {
+        # rootfs build/verify
+        "metis_rootfs_asset_status",
+        "metis_rootfs_source_status",
+        "metis_rootfs_asset_download",
+        "metis_rootfs_builder_status",
+        "metis_rootfs_build",
+        "metis_rootfs_image_builder_status",
+        "metis_rootfs_image_build",
+        "metis_rootfs_asset_register",
+        # runtime pack packaging
+        "metis_runtime_bundle_prepare",
+        "metis_runtime_bundle_package",
+        "metis_runtime_bundle_package_v2",
+        # VM direct/hcs/guest/boot scaffolding + verification
+        "metis_vm_direct_assets_prepare",
+        "metis_vm_direct_runner_prepare",
+        "metis_vm_direct_runner_smoke",
+        "metis_vm_hcs_starter_prepare",
+        "metis_vm_hcs_starter_start",
+        "metis_vm_guest_handshake_prepare",
+        "metis_vm_guest_handshake_verify",
+        "metis_vm_rootfs_boot_verifier_prepare",
+        "metis_vm_rootfs_boot_verify",
+        "metis_vm_bundle_status",
+        "metis_vm_pack_scaffold",
+        "metis_vm_pack_adopt_reference",
+        # WSL runtime management
+        "metis_wsl_runtime_status",
+        "metis_wsl_runtime_import",
+        # low-level runtime primitives — composed by metis_runtime_job
+        "metis_runtime_create",
+        "metis_runtime_run",
+        "metis_runtime_collect_artifacts",
+        "metis_runtime_export_patch",
+        "metis_runtime_export_diagnostics",
+    }
+)
+
+
+def expose_internal_tools() -> bool:
+    """True when maintainer-only tools should be visible to the model."""
+    return os.environ.get("METIS_EXPOSE_INTERNAL_TOOLS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# User-facing sandbox tools that survive the tier cut (composite + status only).
+_SANDBOX_USER_TOOLS = {
+    "metis_sandbox_status",
+    "metis_runtime_status",
+    "metis_runtime_job",
+    "metis_runtime_job_status",
+}
 
 
 TIER_3_TOOLS: Set[str] = {
@@ -40,19 +113,7 @@ TIER_3_TOOLS: Set[str] = {
     "docx_to_pdf",
     "docx_render_pages",
     "docx_inspect_layout",
-    "metis_rootfs_asset_status",
-    "metis_rootfs_source_status",
-    "metis_rootfs_builder_status",
-    "metis_rootfs_image_builder_status",
-    "metis_sandbox_status",
-    "metis_runtime_create",
-    "metis_runtime_run",
-    "metis_runtime_collect_artifacts",
-    "metis_runtime_export_patch",
-    "metis_runtime_export_diagnostics",
-    "metis_runtime_job",
-    "metis_runtime_job_status",
-    "metis_runtime_status",
+    *_SANDBOX_USER_TOOLS,
 }
 
 TIER_2_TOOLS: Set[str] = TIER_3_TOOLS | {
@@ -83,27 +144,6 @@ TIER_2_TOOLS: Set[str] = TIER_3_TOOLS | {
     "analyze_complexity",
     "edit_notebook",
     "load_workflow_guidelines",
-    "metis_rootfs_asset_download",
-    "metis_rootfs_asset_register",
-    "metis_rootfs_build",
-    "metis_rootfs_image_build",
-    "metis_runtime_bundle_package",
-    "metis_runtime_bundle_package_v2",
-    "metis_runtime_bundle_prepare",
-    "metis_vm_direct_assets_prepare",
-    "metis_vm_direct_runner_prepare",
-    "metis_vm_direct_runner_smoke",
-    "metis_vm_hcs_starter_prepare",
-    "metis_vm_hcs_starter_start",
-    "metis_vm_guest_handshake_prepare",
-    "metis_vm_guest_handshake_verify",
-    "metis_vm_rootfs_boot_verifier_prepare",
-    "metis_vm_rootfs_boot_verify",
-    "metis_vm_bundle_status",
-    "metis_vm_pack_adopt_reference",
-    "metis_vm_pack_scaffold",
-    "metis_wsl_runtime_status",
-    "metis_wsl_runtime_import",
 }
 
 
