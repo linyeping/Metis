@@ -46,6 +46,16 @@ from backend.runtime.tool_registry import ToolRegistry, register_builtin_tools
 from backend.tools.coding.foundation.core_mechanisms.execution_boundary_context import (
     workspace_root_override,
 )
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_hcs_autoselect(monkeypatch):
+    """Legacy backend-selection tests target the vm/wsl/docker/local tiers.
+    HCS is a newer top-preference tier probed from real host state (sandbox
+    service / Hyper-V), so disable it here for deterministic results regardless
+    of whether the host running the tests has the sandbox installed."""
+    monkeypatch.setattr(isolated_runtime, "_hcs_backend_available", lambda: False)
 
 
 def _json(text: str) -> dict:

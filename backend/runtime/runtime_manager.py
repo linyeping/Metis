@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -45,9 +46,25 @@ RUNTIME_MANAGER_RELEASE_SCHEMA = "metis.runtime_manager.release_integration.v1"
 RUNTIME_MANAGER_PACKAGE_VM_SCHEMA = "metis.runtime_manager.package_vm_bundle.v1"
 RUNTIME_MANAGER_BUILD_VM_ASSETS_SCHEMA = "metis.runtime_manager.build_vm_assets.v1"
 RUNTIME_MANAGER_VALIDATE_RELEASE_SCHEMA = "metis.runtime_manager.validate_release.v1"
-VM_REQUIRED_RUNTIME_FILES = ("vmlinuz", "initrd", "metis-vm-pack.json", "metis-bin.vhdx")
+# Guest tools (metisd) are baked into rootfs.vhdx since 0.3.0, so metis-bin.vhdx
+# is no longer a separate required asset.
+VM_REQUIRED_RUNTIME_FILES = ("vmlinuz", "initrd", "metis-vm-pack.json")
 VM_ROOTFS_FILE = "rootfs.vhdx"
 VM_ROOTFS_ZST_FILE = "rootfs.vhdx.zst"
+
+# Background runtime-pack download progress (polled by the desktop UI).
+_DOWNLOAD_LOCK = threading.Lock()
+_DOWNLOAD_STATE: Dict[str, Any] = {
+    "active": False, "phase": "idle", "downloaded_bytes": 0, "total_bytes": 0,
+    "percent": 0, "done": False, "ok": False, "error": "", "message": "",
+}
+
+
+def _set_download_state(**kw: Any) -> None:
+    with _DOWNLOAD_LOCK:
+        _DOWNLOAD_STATE.update(kw)
+        d, t = _DOWNLOAD_STATE["downloaded_bytes"], _DOWNLOAD_STATE["total_bytes"]
+        _DOWNLOAD_STATE["percent"] = int(d * 100 / t) if t else 0
 DEFAULT_RUNTIME_PACK_URL = "https://github.com/linyeping/Metis/releases/latest/download/metis-runtime-bundle-v2-latest.json"
 
 
@@ -471,6 +488,37 @@ def runtime_manager_repair(
             "error": f"{type(exc).__name__}: {exc}",
             "message": "Metis VM runtime repair failed.",
         }
+
+
+def _download_worker(root: str) -> None:
+    try:
+        res = runtime_manager_repair(root=root, source="download", allow_download=True, force=False)
+        ok = bool(res.get("ok"))
+        _set_download_state(
+            active=False, done=True, ok=ok,
+            phase="done" if ok else "error",
+            error="" if ok else str(res.get("error") or res.get("message") or "download failed"),
+            message=str(res.get("message") or ("沙箱运行时已安装" if ok else "")),
+        )
+    except Exception as exc:
+        _set_download_state(active=False, done=True, ok=False, phase="error", error=f"{type(exc).__name__}: {exc}")
+
+
+def runtime_manager_download_start(root: str = ".") -> Dict[str, Any]:
+    """Start (or report) a background runtime-pack download. Poll progress via
+    runtime_manager_download_progress()."""
+    with _DOWNLOAD_LOCK:
+        if _DOWNLOAD_STATE["active"]:
+            return {"ok": True, "already_active": True, **_DOWNLOAD_STATE}
+    _set_download_state(active=True, done=False, ok=False, phase="starting",
+                        downloaded_bytes=0, total_bytes=0, percent=0, error="", message="")
+    threading.Thread(target=_download_worker, args=(root,), daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+def runtime_manager_download_progress() -> Dict[str, Any]:
+    with _DOWNLOAD_LOCK:
+        return {"ok": True, **_DOWNLOAD_STATE}
 
 
 def runtime_manager_ensure(root: str = ".") -> Dict[str, Any]:
@@ -1020,6 +1068,7 @@ def _install_runtime_pack_from_dir(source_dir: Path, install_dir: Path, *, force
             continue
         shutil.copy2(item, dest)
         copied.append({"relative_path": rel.as_posix(), "path": str(dest), "size_bytes": dest.stat().st_size})
+    _set_download_state(phase="decompressing")
     extraction = _extract_rootfs_zst_if_needed(install_dir, force=force)
     _grant_hyperv_vm_read(install_dir)
     report = _bundle_report(install_dir)
@@ -1050,7 +1099,9 @@ def _download_runtime_pack(url: str, *, root: str, validate_only: bool = False) 
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https", "file"}:
         return {"ok": False, "code": "METIS_RUNTIME_PACK_URL_INVALID", "error": "runtime pack URL must be http, https, or file."}
-    downloads = Path(str(root or ".")).resolve(strict=False) / ".metis" / "runtime-pack" / "downloads"
+    # Fixed, user-visible location next to the install dir (not buried in the
+    # app folder): %LOCALAPPDATA%/Metis/runtime-pack/downloads.
+    downloads = _runtime_pack_install_dir().parent.parent / "runtime-pack" / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
     try:
         descriptor = _runtime_pack_release_descriptor(url)
@@ -1058,8 +1109,23 @@ def _download_runtime_pack(url: str, *, root: str, validate_only: bool = False) 
         expected_package_sha = str(descriptor.get("package_sha256") or "").strip().lower()
         filename = Path(urlparse(effective_url).path).name or "metis-runtime-pack.zip"
         target = downloads / filename
-        with urlopen(effective_url, timeout=90) as response, target.open("wb") as handle:  # noqa: S310 - user-configured release URL.
-            shutil.copyfileobj(response, handle)
+        # Reuse an already-downloaded zip if its SHA matches (skip re-downloading 800MB).
+        if target.is_file() and expected_package_sha and _sha256_file(target).lower() == expected_package_sha:
+            _set_download_state(phase="verifying", downloaded_bytes=target.stat().st_size, total_bytes=target.stat().st_size)
+        else:
+            _set_download_state(phase="downloading", downloaded_bytes=0, total_bytes=0)
+            with urlopen(effective_url, timeout=90) as response, target.open("wb") as handle:  # noqa: S310 - user-configured release URL.
+                total = int(response.headers.get("Content-Length") or 0)
+                _set_download_state(total_bytes=total)
+                done = 0
+                while True:
+                    chunk = response.read(262144)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    done += len(chunk)
+                    _set_download_state(downloaded_bytes=done, total_bytes=total)
+        _set_download_state(phase="extracting")
         package_sha = _sha256_file(target)
         if expected_package_sha and package_sha.lower() != expected_package_sha:
             return {
@@ -1235,10 +1301,9 @@ def _bundle_report(path: Path) -> Dict[str, Any]:
     boot_mode = str(manifest.get("boot_mode") or "").lower()
     initramfs_only = boot_mode == "initramfs"
 
-    # initramfs-only packs carry the whole userland in the initrd, so a
-    # separate rootfs.vhdx / metis-bin.vhdx is not required.
-    required = [name for name in VM_REQUIRED_RUNTIME_FILES
-                if not (initramfs_only and name == "metis-bin.vhdx")]
+    # initramfs-only packs carry the whole userland in the initrd; rootfs packs
+    # carry it in rootfs.vhdx(.zst). metisd is baked into the rootfs either way.
+    required = list(VM_REQUIRED_RUNTIME_FILES)
     missing = [name for name in required if not (path / name).is_file()]
     rootfs_present = (path / VM_ROOTFS_FILE).is_file() or (path / VM_ROOTFS_ZST_FILE).is_file()
     if not rootfs_present and not initramfs_only:

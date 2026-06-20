@@ -13,7 +13,6 @@ Communication modes (tried in order):
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 import uuid
@@ -24,11 +23,9 @@ from backend.runtime.hcs_client import (
     ConsoleReader,
     HcsAccessDenied,
     HcsError,
-    HcsNotAvailable,
     HcsVm,
     enumerate_compute_systems,
     find_any_bundle,
-    find_metis_bundle,
     force_terminate_vm_by_id,
     is_hcs_available,
 )

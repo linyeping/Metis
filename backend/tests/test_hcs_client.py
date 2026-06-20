@@ -11,7 +11,6 @@ Skipped automatically when HCS is not available.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import pytest
 
@@ -19,11 +18,7 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="HCS is Windows-only")
 
 from backend.runtime.hcs_client import (
-    HcsAccessDenied,
-    HcsError,
-    HcsNotAvailable,
     HcsVm,
-    GuestProcessResult,
     build_vm_document,
     enumerate_compute_systems,
     find_any_bundle,

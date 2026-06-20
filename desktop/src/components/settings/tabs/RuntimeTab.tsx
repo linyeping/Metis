@@ -19,11 +19,13 @@ import {
   runtimeManagerProvisionStatus,
   runtimeManagerStorageUsage,
   runtimeManagerCleanup,
-  runtimeManagerRepair,
   runtimeManagerSelfTest,
+  runtimeManagerDownloadStart,
+  runtimeManagerDownloadProgress,
   type RuntimeProvisionStatus,
   type RuntimeStorageUsage,
   type RuntimeSelfTestResult,
+  type RuntimeDownloadProgress,
 } from '../../../lib/api';
 import { safeJson, formatTime } from '../settingsShared';
 import { useT } from '../../../hooks/useT';
@@ -57,6 +59,7 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
   const [storage, setStorage] = useState<RuntimeStorageUsage | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<RuntimeDownloadProgress | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<RuntimeSelfTestResult | null>(null);
 
@@ -98,11 +101,26 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
 
   const downloadPack = useCallback(async () => {
     setDownloading(true);
+    setProgress(null);
     setNote(t('正在下载沙箱运行时（约 800 MB，解压后约 3.2 GB），首次下载较久，请保持网络通畅…'));
     try {
-      const res = await runtimeManagerRepair({ source: 'download', allowDownload: true, force: false });
-      await refresh(true);
-      setNote(res.ok ? t('沙箱运行时已下载并安装完成。') : (res.error || t('下载未完成，请重试。')));
+      await runtimeManagerDownloadStart();
+      // Poll progress until the background job finishes.
+      for (;;) {
+        await new Promise(r => setTimeout(r, 1000));
+        let p: RuntimeDownloadProgress;
+        try {
+          p = await runtimeManagerDownloadProgress();
+        } catch {
+          continue;
+        }
+        setProgress(p);
+        if (p.done) {
+          await refresh(true);
+          setNote(p.ok ? t('沙箱运行时已下载并安装完成。') : (p.error || t('下载未完成，请重试。')));
+          break;
+        }
+      }
     } catch (err) {
       setNote(String((err as Error)?.message || err));
     } finally {
@@ -196,6 +214,29 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
             <FileDown size={13} className={downloading ? 'spin' : ''} />
             <span>{downloading ? t('下载中…') : t('下载沙箱运行时（约 800 MB）')}</span>
           </button>
+        </div>
+      )}
+
+      {downloading && progress && (
+        <div className="runtime-download-progress">
+          <div className="runtime-download-bar">
+            <div
+              className="runtime-download-bar-fill"
+              style={{ width: `${progress.phase === 'downloading' ? progress.percent : (progress.done ? 100 : 100)}%` }}
+              data-indeterminate={progress.phase !== 'downloading' && !progress.done}
+            />
+          </div>
+          <span className="runtime-download-label">
+            {progress.phase === 'downloading'
+              ? `${t('下载中')} ${progress.percent}% · ${formatBytes(progress.downloadedBytes)} / ${formatBytes(progress.totalBytes)}`
+              : progress.phase === 'extracting'
+                ? t('解压中…')
+                : progress.phase === 'decompressing'
+                  ? t('展开运行时镜像中（约 3 GB，请稍候）…')
+                  : progress.phase === 'verifying'
+                    ? t('校验中…')
+                    : t('准备中…')}
+          </span>
         </div>
       )}
 

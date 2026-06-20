@@ -13,11 +13,10 @@ release-artifacts/
 /check_hyperv_group.ps1
 /read_claude_pipe_acl.ps1
 /desktop/stop
-# Throwaway debug probes
-backend/tests/hcs_debug_test.py
-backend/tests/hcs_full_dump.py
-backend/tests/hcs_caps_test.py
-backend/tests/hcs_net_nonet_test.py
+# Manual HCS dev/integration scripts (need real Windows+HCS hardware; not CI)
+backend/tests/hcs_*.py
+backend/tests/inspect_*.py
+backend/runtime/hcs_poc.py
 backend/runtime/guest/stage3_build.sh
 # Metis VM runtime pack build artifacts (large binaries — built in CI, not committed)
 backend/runtime/vmpack_build/

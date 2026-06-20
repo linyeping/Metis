@@ -22,3 +22,10 @@ extend-exclude = [
 [tool.ruff.lint]
 select = ["E", "W", "F", "I"]
 ignore = ["E501", "W291", "W292", "W293"]
+
+[tool.pytest.ini_options]
+# Only collect real unit tests (test_*.py). Manual HCS harnesses named
+# hcs_*_test.py / inspect_*.py are standalone scripts (they sys.exit at import)
+# and must not be collected by pytest.
+python_files = ["test_*.py"]
+testpaths = ["backend/tests"]

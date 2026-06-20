@@ -1080,6 +1080,43 @@ export interface RuntimeSelfTestResult {
   stderr: string;
 }
 
+export interface RuntimeDownloadProgress {
+  active: boolean;
+  phase: string;
+  downloadedBytes: number;
+  totalBytes: number;
+  percent: number;
+  done: boolean;
+  ok: boolean;
+  error: string;
+  message: string;
+}
+
+export async function runtimeManagerDownloadStart(): Promise<{ ok: boolean }> {
+  const row = await requestJson<Record<string, unknown>>('/settings/runtime-manager/download-start', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return { ok: Boolean(row.ok) };
+}
+
+export async function runtimeManagerDownloadProgress(): Promise<RuntimeDownloadProgress> {
+  const row = await requestJson<Record<string, unknown>>('/settings/runtime-manager/download-progress', {
+    method: 'GET',
+  });
+  return {
+    active: Boolean(row.active),
+    phase: String(row.phase ?? ''),
+    downloadedBytes: Number(row.downloaded_bytes ?? 0),
+    totalBytes: Number(row.total_bytes ?? 0),
+    percent: Number(row.percent ?? 0),
+    done: Boolean(row.done),
+    ok: Boolean(row.ok),
+    error: String(row.error ?? ''),
+    message: String(row.message ?? ''),
+  };
+}
+
 export async function runtimeManagerSelfTest(): Promise<RuntimeSelfTestResult> {
   const row = await requestJson<Record<string, unknown>>('/settings/runtime-manager/selftest', {
     method: 'POST',

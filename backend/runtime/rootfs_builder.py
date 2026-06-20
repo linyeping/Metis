@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 log = logging.getLogger("metis.rootfs_builder")
 

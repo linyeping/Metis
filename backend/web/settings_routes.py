@@ -229,6 +229,20 @@ def runtime_manager_selftest_route() -> Any:
     return jsonify(runtime_manager_selftest())
 
 
+@settings_bp.route("/settings/runtime-manager/download-start", methods=["POST"])
+def runtime_manager_download_start_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_download_start
+
+    return jsonify(runtime_manager_download_start())
+
+
+@settings_bp.route("/settings/runtime-manager/download-progress", methods=["GET"])
+def runtime_manager_download_progress_route() -> Any:
+    from backend.runtime.runtime_manager import runtime_manager_download_progress
+
+    return jsonify(runtime_manager_download_progress())
+
+
 @settings_bp.route("/settings/runtime-manager/diagnostics", methods=["POST"])
 def runtime_manager_diagnostics_route() -> Any:
     from backend.runtime.runtime_manager import runtime_manager_export_diagnostics

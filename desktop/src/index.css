@@ -10893,6 +10893,38 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   color: #d8a23c;
 }
 
+/* Runtime pack download progress bar */
+.runtime-download-progress {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.runtime-download-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2, rgba(127,127,127,0.18));
+  overflow: hidden;
+}
+.runtime-download-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #4c8dff);
+  transition: width 0.4s ease;
+}
+.runtime-download-bar-fill[data-indeterminate="true"] {
+  width: 100% !important;
+  animation: runtime-dl-pulse 1.2s ease-in-out infinite;
+}
+@keyframes runtime-dl-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.runtime-download-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* Collapsible advanced sections (Runtime Manager, VM Runtime Pack) */
 .runtime-collapsible {
   padding: 0;

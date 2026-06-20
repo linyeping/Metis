@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
-import pytest
 
 from backend.runtime.guest.metisd import dispatch, PROTOCOL_VERSION
 
