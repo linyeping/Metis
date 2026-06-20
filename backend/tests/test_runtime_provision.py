@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import pytest
 
+from backend.runtime import runtime_provision
 from backend.runtime.runtime_provision import (
     PROVISION_SCHEMA,
     build_provision_script,
@@ -54,13 +55,23 @@ class TestScript:
         s = build_provision_script([])
         assert "provisioning done" in s
 
-    def test_install_service_script(self):
+    def test_install_service_script(self, monkeypatch):
+        # Pin the svc exe path so the script deterministically emits the install
+        # command regardless of whether the host running the test has it built.
+        monkeypatch.setattr(runtime_provision, "_svc_exe_path", lambda: r"C:\fake\metis-vm-svc.exe")
         s = build_provision_script(["install_service"])
-        # references the service install (exe path + 'install', or not-found note)
-        assert "install" in s.lower()
-        assert ("metis-vm-svc" in s) or ("not found" in s)
+        assert "metis-vm-svc.exe' install" in s
+        assert "service" in s.lower()
 
-    def test_vm_platform_plus_service_one_script(self):
+    def test_install_service_script_handles_missing_exe(self, monkeypatch):
+        monkeypatch.setattr(runtime_provision, "_svc_exe_path", lambda: "")
+        s = build_provision_script(["install_service"])
+        # Still a valid script; records that the exe wasn't found.
+        assert "provisioning done" in s
+        assert "not found" in s.lower()
+
+    def test_vm_platform_plus_service_one_script(self, monkeypatch):
+        monkeypatch.setattr(runtime_provision, "_svc_exe_path", lambda: r"C:\fake\metis-vm-svc.exe")
         s = build_provision_script(["enable_vm_platform", "install_service"])
         assert "VirtualMachinePlatform" in s
         assert "install" in s.lower()
