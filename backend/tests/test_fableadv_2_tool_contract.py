@@ -42,8 +42,16 @@ def test_lean_profile_is_default_and_hides_overlap_tools(monkeypatch) -> None:
     assert "robust_replace_in_file" in names
     assert "browse_web" in names
     assert "load_skill" in names
-    assert "pdf_extract_text" in names
-    assert "docx_create" in names
+    # Document tools are route-gated: absent on a default (non-document) route,
+    # present when the task routes to a document/artifact workflow.
+    assert "pdf_extract_text" not in names
+    assert "docx_create" not in names
+    doc_schemas = _tool_schemas_for_config(
+        registry, AgentConfig(llm_backend="fake", llm_model="fake", routing_task_type="artifact_workflow")
+    )
+    doc_names = _schema_names(doc_schemas)
+    assert "pdf_extract_text" in doc_names
+    assert "docx_create" in doc_names
     assert "semantic_search" not in names
     assert "read_file_chunk" not in names
 

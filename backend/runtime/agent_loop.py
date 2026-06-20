@@ -31,10 +31,12 @@ from .model_router import (
     TaskRoute,
     build_task_route,
     desktop_control_tools,
+    document_workflow_tools,
     prioritized_tools_for_route,
     render_route_hint,
     router_enabled,
     should_block_desktop_control,
+    should_block_document_tools,
 )
 from .permission_control import evaluate_permission
 from .result_compactor import ResultCompactor
@@ -2137,6 +2139,7 @@ def _tool_schemas_for_config(
 
     tools = _include_preferred_tool_schemas(registry, tools, config.routing_preferred_tools)
     tools = _filter_desktop_control_tools_for_route(tools, config)
+    tools = _filter_document_tools_for_route(tools, config)
 
     capabilities = detect_from_model_name(config.llm_model)
     forced_tier = os.environ.get("METIS_TOOL_TIER", "").strip()
@@ -2224,6 +2227,30 @@ def _filter_desktop_control_tools_for_route(
             "computer use router guard blocked desktop control tools route=%s removed=%s",
             config.routing_task_type,
             sorted({_tool_name_from_openai_schema(tool) for tool in tools} & blocked),
+        )
+    return filtered
+
+
+def _filter_document_tools_for_route(
+    tools: List[Dict[str, Any]],
+    config: AgentConfig,
+) -> List[Dict[str, Any]]:
+    if config.enabled_tools or not should_block_document_tools(config.routing_task_type):
+        return tools
+    blocked = document_workflow_tools()
+    # Keep any document tool the route explicitly preferred (a real doc task).
+    preferred = {str(name or "").strip() for name in (config.routing_preferred_tools or [])}
+    filtered = [
+        tool
+        for tool in tools
+        if _tool_name_from_openai_schema(tool) not in blocked
+        or _tool_name_from_openai_schema(tool) in preferred
+    ]
+    if len(filtered) != len(tools):
+        logger.info(
+            "document tool route guard removed=%s route=%s",
+            sorted({_tool_name_from_openai_schema(tool) for tool in tools} & blocked),
+            config.routing_task_type,
         )
     return filtered
 

@@ -742,3 +742,35 @@ def should_block_desktop_control(task_type: str) -> bool:
     if os.environ.get("METIS_COMPUTER_USE_ROUTER_GUARD", "1").strip().lower() in {"0", "false", "no", "off"}:
         return False
     return str(task_type or "").strip().lower() == "artifact_workflow"
+
+
+# Office/document generation tools — a heavy cluster (~12 tools, ~2k schema
+# tokens) that only document tasks need. They stay out of the schema for every
+# other route so strong models don't re-send them every turn.
+_DOCUMENT_WORKFLOW_TOOLS = frozenset(
+    {
+        "pdf_info",
+        "pdf_extract_text",
+        "pdf_render_pages",
+        "pdf_screenshot_page",
+        "pdf_merge_split",
+        "pdf_create",
+        "docx_create",
+        "docx_edit",
+        "docx_to_pdf",
+        "docx_render_pages",
+        "docx_inspect_layout",
+        "office_report_from_code_run",
+    }
+)
+
+
+def document_workflow_tools() -> frozenset[str]:
+    return _DOCUMENT_WORKFLOW_TOOLS
+
+
+def should_block_document_tools(task_type: str) -> bool:
+    """Block document tools unless the route is a document/artifact task."""
+    if os.environ.get("METIS_LEAN_DOCUMENT_TOOLS", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    return str(task_type or "").strip().lower() != "artifact_workflow"
