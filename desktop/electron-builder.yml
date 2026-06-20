@@ -28,6 +28,14 @@ extraResources:
   # small (~50MB instead of ~1GB) and lets us ship pack updates without rebuilding.
   - from: resources/runtime-svc
     to: runtime-svc
+# No spaces in the artifact name so the asset name stays stable across uploads
+# (gh CLI rewrites spaces to dots, which then mismatches latest.yml).
+artifactName: ${productName}-Setup-${version}.${ext}
+# Generates a correct latest.yml each build + lets the updater find the feed.
+publish:
+  provider: github
+  owner: linyeping
+  repo: Metis
 win:
   target:
     - nsis
