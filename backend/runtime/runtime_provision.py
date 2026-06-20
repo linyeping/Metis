@@ -230,6 +230,17 @@ def provision_status(deep: bool = False) -> Dict[str, Any]:
             "elevation": "admin",
             "reboot": "none",
         })
+    elif not svc["responding"]:
+        # Installed but the pipe isn't answering (stale/wedged instance) — a
+        # restart re-creates the pipe + re-resolves the user ACL. Without this
+        # the panel was stuck: not ready, but no actionable fix.
+        needs.append("repair_service")
+        actions.append({
+            "id": "repair_service",
+            "title": "Restart the Metis sandbox service (it is installed but not responding)",
+            "elevation": "admin",
+            "reboot": "none",
+        })
 
     reboot_required = any(a.get("reboot") == "required" for a in actions)
     # Ready = the service can run jobs (responding) and the pack is installed.
@@ -310,6 +321,16 @@ def build_provision_script(actions: List[str]) -> str:
             ]
         else:
             lines.append("$results['service'] = 'error: metis-vm-svc.exe not found'")
+    if "repair_service" in actions:
+        lines += [
+            "Write-Output '[metis] restarting sandbox service...'",
+            "try {",
+            "  sc.exe stop MetisVMService | Out-Null",
+            "  Start-Sleep -Seconds 1",
+            "  sc.exe start MetisVMService | Out-Null",
+            "  $results['service'] = 'restarted'",
+            "} catch { $results['service'] = 'error: ' + $_.Exception.Message }",
+        ]
     if "add_hyperv_admins" in actions:
         # Legacy path (non-service / direct elevated). Not used in the service model.
         lines += [
@@ -338,7 +359,7 @@ def run_provision_elevated(actions: List[str], timeout_s: int = 180) -> Dict[str
     """
     if sys.platform != "win32":
         return {"ok": False, "error": "Windows only"}
-    actions = [a for a in actions if a in ("enable_vm_platform", "install_service", "add_hyperv_admins")]
+    actions = [a for a in actions if a in ("enable_vm_platform", "install_service", "repair_service", "add_hyperv_admins")]
     if not actions:
         return {"ok": True, "skipped": True, "message": "no elevated actions needed"}
 

@@ -10909,6 +10909,12 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   color: var(--success);
 }
 
+/* Expected-by-design states (legacy WSL bundle, download-on-demand pack):
+   neutral gray, not an alarming warning yellow. */
+.runtime-health-metric[data-neutral='true'] strong {
+  color: var(--text-muted);
+}
+
 .runtime-actions {
   display: flex;
   flex-wrap: wrap;

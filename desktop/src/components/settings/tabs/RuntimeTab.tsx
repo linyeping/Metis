@@ -193,10 +193,12 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
               <ShieldCheck size={13} />
               <span>
                 {busy
-                  ? t('开通中…')
-                  : status.rebootRequired
-                    ? t('开通沙箱（需一次 UAC + 重启）')
-                    : t('开通沙箱（需一次 UAC）')}
+                  ? t('处理中…')
+                  : elevatedNeeds.length === 1 && elevatedNeeds[0] === 'repair_service'
+                    ? t('修复服务（需一次 UAC）')
+                    : status.rebootRequired
+                      ? t('开通沙箱（需一次 UAC + 重启）')
+                      : t('开通沙箱（需一次 UAC）')}
               </span>
             </button>
           )}
@@ -350,8 +352,8 @@ export const RuntimeTab = memo(function RuntimeTab({
         <div className="runtime-health-grid">
           <RuntimeMetric label={t('Metis WSL')} ok={health?.metisWslReady} value={installed ? t('已安装') : t('未安装')} />
           <RuntimeMetric label={t('rootfs')} ok={health?.rootfsReady} value={rootfs.size ? formatBytes(rootfs.size) : t('未检测到')} />
-          <RuntimeMetric label={t('Bundle')} ok={health?.runtimeBundleReady} value={health?.runtimeBundleReady ? t('已准备') : t('未准备')} />
-          <RuntimeMetric label={t('Docker')} ok={health?.dockerAvailable} value={health?.dockerAvailable ? t('可用') : t('不可用')} />
+          <RuntimeMetric label={t('Bundle')} neutral ok={health?.runtimeBundleReady} value={health?.runtimeBundleReady ? t('已准备') : t('未准备')} />
+          <RuntimeMetric label={t('Docker')} neutral ok={health?.dockerAvailable} value={health?.dockerAvailable ? t('可用') : t('不可用')} />
           <RuntimeMetric label={t('WSL')} ok={health?.wslAvailable} value={health?.wslAvailable ? t('可用') : t('不可用')} />
         </div>
 
@@ -408,7 +410,7 @@ export const RuntimeTab = memo(function RuntimeTab({
           <RuntimeMetric label={t('资产大小')} ok={(vmRuntime?.assetBytes ?? 0) > 0} value={formatBytes(vmRuntime?.assetBytes ?? 0)} />
           <RuntimeMetric label={t('SHA 校验')} ok={vmRuntime?.assetsVerified} value={vmRuntime?.assetsVerified ? t('通过') : t('未通过/无校验')} />
           <RuntimeMetric label={t('Guest')} ok={vmRuntime?.guestProtocolReady || vmRuntime?.hcsDirectReady} value={vmRuntime?.runnerTransport || t('未就绪')} />
-          <RuntimeMetric label={t('安装包内置')} ok={release?.bundledAvailable} value={release?.bundledAvailable ? t('可用') : t('未内置')} />
+          <RuntimeMetric label={t('安装包内置')} neutral ok={release?.bundledAvailable} value={release?.bundledAvailable ? t('可用') : t('按需下载')} />
           <RuntimeMetric label={t('下载源')} ok={release?.downloadAvailable} value={release?.downloadAvailable ? t('已配置') : t('未配置')} />
         </div>
 
@@ -483,9 +485,13 @@ export const RuntimeTab = memo(function RuntimeTab({
   );
 });
 
-function RuntimeMetric({ label, ok, value }: { label: string; ok?: boolean; value: string }) {
+function RuntimeMetric({ label, ok, value, neutral }: { label: string; ok?: boolean; value: string; neutral?: boolean }) {
   return (
-    <div className="runtime-health-metric" data-ok={Boolean(ok)}>
+    <div
+      className="runtime-health-metric"
+      data-ok={neutral ? undefined : Boolean(ok)}
+      data-neutral={neutral ? 'true' : undefined}
+    >
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
