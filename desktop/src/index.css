@@ -10071,6 +10071,43 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   color: var(--danger);
 }
 
+.provider-registry-activate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.provider-registry-activate:hover {
+  border-color: var(--accent);
+  background: var(--accent-ink-soft);
+  color: var(--accent-ink);
+}
+.provider-registry-activate:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.provider-registry-activate .spin {
+  animation: runtime-spin 900ms linear infinite;
+}
+.provider-registry-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .provider-registry-form {
   display: grid;
   gap: 8px;

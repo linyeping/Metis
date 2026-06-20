@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, RefreshCw, Server, Trash2 } from 'lucide-react';
+import { Check, Plus, Power, RefreshCw, Server, Trash2 } from 'lucide-react';
 import {
   deleteProviderRegistry,
   getProviderRegistry,
+  getSettings,
   probeProviderRegistry,
   saveProviderRegistry,
+  updateSettings,
 } from '../../lib/api';
 import type { ProviderRegistryProbeResult } from '../../lib/types';
 import type { ProviderRegistryEntry, ProviderRegistryInput } from '../../lib/types';
@@ -34,17 +36,40 @@ export function ProviderRegistryManager() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [probing, setProbing] = useState('');
+  const [activating, setActivating] = useState('');
+  const [activeProviderId, setActiveProviderId] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      setEntries(await getProviderRegistry());
+      const [list, settings] = await Promise.all([getProviderRegistry(), getSettings().catch(() => null)]);
+      setEntries(list);
+      if (settings) setActiveProviderId(settings.providerId || settings.backend || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const onActivate = useCallback(async (entry: ProviderRegistryEntry) => {
+    setActivating(entry.providerId);
+    setError('');
+    try {
+      await updateSettings({
+        backend: entry.providerId,
+        providerId: entry.providerId,
+        baseUrl: entry.baseUrl,
+        model: entry.defaultModel || entry.fallbackModels[0] || '',
+      });
+      setActiveProviderId(entry.providerId);
+      window.dispatchEvent(new Event('metis:settings-refresh'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActivating('');
     }
   }, []);
 
@@ -202,6 +227,23 @@ export function ProviderRegistryManager() {
               {entry.capabilities.parallelToolCalls && <span className="provider-registry-cap">{t('并行')}</span>}
             </div>
             <code className="provider-registry-url">{entry.baseUrl || entry.backendType}</code>
+            {activeProviderId === entry.providerId ? (
+              <span className="provider-registry-active" title={t('当前启用')}>
+                <Check size={13} />
+                {t('已启用')}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="provider-registry-activate"
+                title={t('启用此供应商')}
+                disabled={Boolean(activating)}
+                onClick={() => void onActivate(entry)}
+              >
+                <Power className={activating === entry.providerId ? 'spin' : undefined} size={13} />
+                {t('启用')}
+              </button>
+            )}
             <button
               type="button"
               className="provider-registry-probe"
