@@ -213,6 +213,14 @@ _CROSS_WORKSPACE_READ_TOOLS = {
     "glob_search",
     "semantic_search",
 }
+# Shell/process tools whose working directory is gated by the workspace-root
+# boundary (execute_shell._validated_shell_cwd). Composer full access ("最高
+# 权限") opens their cwd to outside the workspace, same as it opens file paths
+# for read/write tools.
+_SHELL_TOOLS = {
+    "execute_bash_command",
+    "start_long_running_process",
+}
 _RUN_TERMINAL_STATES = {"done", "failed", "canceled"}
 _RUN_ACTIVE_STATES = {"queued", "running", "canceling"}
 _RUN_RETENTION_LIMIT = 80
@@ -874,6 +882,13 @@ def _permission_request_metadata(
 
 def _tool_boundary_overrides(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Dict[str, bool]:
     root = os.path.abspath(workspace_root or _active_workspace_root())
+    if tool_name in _SHELL_TOOLS:
+        # Composer full access lets shell/process tools run with a cwd outside
+        # the workspace (e.g. installing toolchains under D:\). Without it the
+        # default workspace-root boundary still applies.
+        if _composer_full_access_enabled(root):
+            return {"allow_shell_cwd_outside_workspace": True}
+        return {}
     if tool_name in _CROSS_WORKSPACE_READ_TOOLS:
         if not _composer_full_access_enabled(root):
             return {}
