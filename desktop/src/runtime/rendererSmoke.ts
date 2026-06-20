@@ -1498,34 +1498,38 @@ async function verifyComposerPermissionAccess(checks: SmokeCheck[]): Promise<voi
   record(
     checks,
     'composer-access-menu-visible',
-    menuText.includes('请求批准') && menuText.includes('替我审批') && menuText.includes('完全访问权限'),
+    menuText.includes('询问权限') &&
+      menuText.includes('接受编辑') &&
+      menuText.includes('计划模式') &&
+      menuText.includes('自动模式') &&
+      menuText.includes('绕过权限'),
     menuText,
   );
 
-  const fullOption = Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-access-option')).find(option =>
-    option.textContent?.includes('完全访问权限'),
+  const bypassOption = Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-access-option')).find(option =>
+    option.textContent?.includes('绕过权限'),
   );
-  record(checks, 'composer-access-full-option-visible', Boolean(fullOption), menuText);
-  fullOption?.click();
-  await waitForCondition(() => (document.querySelector('.composer-access-button')?.textContent || '').includes('完全访问'), 'composer full access saved');
-  const fullMode = await getComposerPermissionMode();
-  const fullState = await getPermissions();
+  record(checks, 'composer-access-bypass-option-visible', Boolean(bypassOption), menuText);
+  bypassOption?.click();
+  await waitForCondition(() => (document.querySelector('.composer-access-button')?.textContent || '').includes('绕过权限'), 'composer bypass access saved');
+  const bypassMode = await getComposerPermissionMode();
+  const bypassState = await getPermissions();
   record(
     checks,
-    'composer-access-full-persists-rule',
-    fullMode === 'full' &&
-      fullState.rules.some(rule => rule.tool === '*' && rule.action === 'allow' && rule.source === 'composer_access'),
-    JSON.stringify(fullState.rules),
+    'composer-access-bypass-persists-rule',
+    bypassMode === 'bypass' &&
+      bypassState.rules.some(rule => rule.tool === '*' && rule.action === 'allow' && rule.source === 'composer_access'),
+    JSON.stringify(bypassState.rules),
   );
 
   document.querySelector<HTMLButtonElement>('.composer-access-button')?.click();
   await waitForCondition(() => Boolean(document.querySelector('.composer-access-menu')), 'composer menu reopen for auto');
   const autoOption = Array.from(document.querySelectorAll<HTMLButtonElement>('.composer-access-option')).find(option =>
-    option.textContent?.includes('替我审批'),
+    option.textContent?.includes('自动模式'),
   );
   record(checks, 'composer-access-auto-option-visible', Boolean(autoOption), document.querySelector('.composer-access-menu')?.textContent || '');
   autoOption?.click();
-  await waitForCondition(() => (document.querySelector('.composer-access-button')?.textContent || '').includes('替我审批'), 'composer auto access saved');
+  await waitForCondition(() => (document.querySelector('.composer-access-button')?.textContent || '').includes('自动模式'), 'composer auto access saved');
   const autoMode = await getComposerPermissionMode();
   const autoState = await getPermissions();
   record(

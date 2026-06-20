@@ -894,7 +894,7 @@ export interface PermissionStatePayload {
   auditPath: string;
 }
 
-export type PermissionAccessMode = 'ask' | 'auto' | 'full';
+export type PermissionAccessMode = 'ask' | 'edit' | 'plan' | 'auto' | 'bypass';
 
 export interface FileChangeRevertItem {
   id: string;

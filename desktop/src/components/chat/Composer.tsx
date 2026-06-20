@@ -3,17 +3,19 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  ClipboardList,
   FileText,
   Image as ImageIcon,
   Loader2,
+  Pencil,
   Plus,
   ShieldAlert,
-  ShieldCheck,
   ShieldQuestion,
   Sparkles,
   Square,
   Upload,
   X,
+  Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion';
 import {
@@ -96,21 +98,33 @@ const accessOptions: Array<{
 }> = [
   {
     mode: 'ask',
-    label: '请求批准',
-    buttonLabel: '请求批准',
-    description: '编辑外部文件和使用互联网时始终询问',
+    label: '询问权限',
+    buttonLabel: '询问权限',
+    description: '每次使用工具前都征求许可',
+  },
+  {
+    mode: 'edit',
+    label: '接受编辑',
+    buttonLabel: '接受编辑',
+    description: '自动应用文件编辑；运行命令、桌面或联网操作前询问',
+  },
+  {
+    mode: 'plan',
+    label: '计划模式',
+    buttonLabel: '计划模式',
+    description: '只读研究并制定计划，不做任何更改',
   },
   {
     mode: 'auto',
-    label: '替我审批',
-    buttonLabel: '替我审批',
-    description: '仅对检测到的风险操作请求批准',
+    label: '自动模式',
+    buttonLabel: '自动模式',
+    description: '自主运行命令与编辑，仅在危险或破坏性操作前询问',
   },
   {
-    mode: 'full',
-    label: '完全访问权限',
-    buttonLabel: '完全访问',
-    description: '可不受限制地访问互联网和您电脑上的任何文件',
+    mode: 'bypass',
+    label: '绕过权限',
+    buttonLabel: '绕过权限',
+    description: '不再询问，完全访问文件、命令与网络',
   },
 ];
 
@@ -776,6 +790,8 @@ function ComposerAccessMenu() {
 
 function accessIcon(mode: PermissionAccessMode) {
   if (mode === 'ask') return <ShieldQuestion size={15} />;
-  if (mode === 'full') return <ShieldAlert size={15} />;
-  return <ShieldCheck size={15} />;
+  if (mode === 'edit') return <Pencil size={15} />;
+  if (mode === 'plan') return <ClipboardList size={15} />;
+  if (mode === 'bypass') return <ShieldAlert size={15} />;
+  return <Zap size={15} />;
 }

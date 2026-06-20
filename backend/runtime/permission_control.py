@@ -10,7 +10,33 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 PERMISSION_ACTIONS = {"allow", "deny", "ask"}
 READ_ONLY_MODES = {"read_only", "readonly", "chat"}
 AUTO_GUARD_MODES = {"auto_guard", "autoguard", "guarded_auto"}
-ALLOWING_MODES = {"auto", "bypass", "plan"}
+# Modes that allow tools outright when no rule/registry gate decides.
+# (plan is NOT here — it researches read-only; edit/auto_guard gate per tool.)
+ALLOWING_MODES = {"auto", "bypass"}
+
+# "Accept edits" (edit) auto-applies file edits but still asks before these
+# system-affecting actions: shell, desktop control, and live web browsing.
+EDIT_ASK_TOOLS = {
+    "execute_bash_command",
+    "start_long_running_process",
+    "stop_long_running_process",
+    "desktop_action",
+    "desktop_vision_task",
+    "desktop_win2_action",
+    "desktop_win2_task",
+    "browse_web",
+    "browse_and_extract",
+}
+
+# "Auto" (auto_guard) runs autonomously — even shell + edits — and only stops to
+# ask before the genuinely destructive / full-machine-control actions.
+VERY_DANGEROUS_TOOLS = {
+    "delete_directory",
+    "desktop_action",
+    "desktop_vision_task",
+    "desktop_win2_action",
+    "desktop_win2_task",
+}
 
 READ_ONLY_TOOL_PREFIXES = (
     "read",
@@ -268,6 +294,18 @@ def evaluate_permission(
             risk_level="medium",
         )
 
+    # Plan mode: research and present a plan without changing anything. Reading,
+    # searching, asking, and todo/plan bookkeeping are fine; edits/shell/desktop
+    # are blocked until the user leaves plan mode. This wins over allow rules.
+    if normalized_mode == "plan" and _tool_looks_high_risk(tool_name):
+        return PermissionDecision(
+            action="deny",
+            source="mode",
+            reason="Plan mode researches and plans without making changes. Switch out of plan mode to apply.",
+            mode=normalized_mode,
+            risk_level="medium",
+        )
+
     normalized_hook_action = str(hook_action or "").strip().lower()
     if normalized_hook_action in PERMISSION_ACTIONS:
         return PermissionDecision(
@@ -288,15 +326,29 @@ def evaluate_permission(
         if rule_decision.action != "none":
             return rule_decision
 
-    if normalized_mode == "auto_guard" and _tool_looks_high_risk(tool_name):
-        return PermissionDecision(
-            action="ask",
-            source="auto_guard",
-            reason="AutoGuard asks before high-risk tools without a narrow allow rule.",
-            mode=normalized_mode,
-            risk_level="high",
-        )
+    # Mode-driven decision: the user's explicit mode choice wins over the
+    # registry's per-tool approval default (so Accept-edits truly auto-applies
+    # edits, Auto truly runs autonomously, etc.).
+    if normalized_mode == "ask":
+        return PermissionDecision(action="ask", source="mode", reason="Ask mode requires approval for every tool.", mode=normalized_mode)
+    if normalized_mode in ALLOWING_MODES:
+        return PermissionDecision(action="allow", source="mode", reason=f"{normalized_mode} mode allows this tool.", mode=normalized_mode)
+    if normalized_mode == "auto_guard":
+        if _tool_is_very_dangerous(tool_name):
+            return PermissionDecision(
+                action="ask",
+                source="auto_guard",
+                reason="Auto mode runs autonomously but asks before destructive or full-machine-control actions.",
+                mode=normalized_mode,
+                risk_level="high",
+            )
+        return PermissionDecision(action="allow", source="mode", reason="Auto mode allows this tool.", mode=normalized_mode)
+    if normalized_mode == "edit":
+        if _tool_is_edit_ask(tool_name):
+            return PermissionDecision(action="ask", source="mode", reason="Accept-edits mode auto-applies file edits but asks before shell, desktop, and web actions.", mode=normalized_mode, risk_level="medium")
+        return PermissionDecision(action="allow", source="mode", reason="Accept-edits mode auto-applies file edits.", mode=normalized_mode)
 
+    # Fallback for any non-canonical mode: honor registry approval metadata.
     if registry_requires_approval is not None:
         return PermissionDecision(
             action="ask" if registry_requires_approval else "allow",
@@ -305,13 +357,6 @@ def evaluate_permission(
             mode=normalized_mode,
             risk_level="medium" if registry_requires_approval else "low",
         )
-
-    if normalized_mode == "ask":
-        return PermissionDecision(action="ask", source="mode", reason="Ask mode requires approval for every tool.", mode=normalized_mode)
-    if normalized_mode in ALLOWING_MODES:
-        return PermissionDecision(action="allow", source="mode", reason=f"{normalized_mode} mode allows this tool.", mode=normalized_mode)
-    if normalized_mode == "edit" and _tool_looks_high_risk(tool_name):
-        return PermissionDecision(action="ask", source="mode", reason="Edit mode asks before high-risk tools.", mode=normalized_mode, risk_level="medium")
     return PermissionDecision(action="allow", source="mode", reason="No permission gate matched.", mode=normalized_mode)
 
 
@@ -334,7 +379,10 @@ def permission_control_payload(*, mode: str, rules: Iterable[Mapping[str, Any]])
             "registry_metadata",
             "user_prompt",
         ],
-        "available_modes": ["ask", "edit", "plan", "auto", "auto_guard", "read_only", "bypass"],
+        # The 5 user-facing modes (mirrors Claude Code): ask / edit (accept
+        # edits) / plan / auto_guard (auto) / bypass. auto + read_only stay as
+        # accepted aliases for older sessions.
+        "available_modes": ["ask", "edit", "plan", "auto_guard", "bypass"],
         "dangerous_allow_rules": dangerous,
         "dangerous_allow_count": len(dangerous),
         "notes": [
@@ -354,6 +402,19 @@ def _risk_for_rule(rule: Mapping[str, Any]) -> str:
     if action == "ask":
         return "medium"
     return "low"
+
+
+def _tool_is_edit_ask(tool_name: str) -> bool:
+    """System-affecting tools that 'Accept edits' mode still asks about."""
+    name = str(tool_name or "")
+    if name in EDIT_ASK_TOOLS:
+        return True
+    return any(marker in name for marker in ("shell", "bash", "desktop", "browser", "browse"))
+
+
+def _tool_is_very_dangerous(tool_name: str) -> bool:
+    """Destructive / full-machine-control tools that 'Auto' mode asks about."""
+    return str(tool_name or "") in VERY_DANGEROUS_TOOLS
 
 
 def _tool_looks_high_risk(tool_name: str) -> bool:

@@ -1851,29 +1851,66 @@ export async function deletePermissionRule(ruleId: string): Promise<void> {
   await requestJson(`/permissions/${encodeURIComponent(ruleId)}`, { method: 'DELETE' });
 }
 
+// The 5 user-facing modes map onto backend execution_mode names (Auto =
+// auto_guard). Only "bypass" also opens out-of-workspace access via the
+// composer full-access rule (_composer_full_access_enabled).
+const ACCESS_TO_BACKEND_MODE: Record<PermissionAccessMode, string> = {
+  ask: 'ask',
+  edit: 'edit',
+  plan: 'plan',
+  auto: 'auto_guard',
+  bypass: 'bypass',
+};
+
+function backendModeToAccess(mode: string): PermissionAccessMode {
+  switch (mode) {
+    case 'ask':
+      return 'ask';
+    case 'edit':
+      return 'edit';
+    case 'plan':
+      return 'plan';
+    case 'bypass':
+      return 'bypass';
+    case 'read_only':
+      return 'plan';
+    default:
+      return 'auto';
+  }
+}
+
+export async function setExecutionMode(mode: string): Promise<string> {
+  const data = await requestJson<Record<string, unknown>>('/mode', {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+  return stringValue(data.mode) || mode;
+}
+
 export async function getComposerPermissionMode(): Promise<PermissionAccessMode> {
   const state = await getPermissions();
+  const planeMode = state.controlPlane?.mode || '';
+  if (planeMode) return backendModeToAccess(planeMode);
+  // Legacy fallback: derive from any saved composer access rule.
   const latestRule = state.rules
     .filter(isComposerAccessRule)
     .sort((left, right) => (right.updatedAt || right.createdAt) - (left.updatedAt || left.createdAt))[0];
-  if (latestRule?.action === 'allow') return 'full';
+  if (latestRule?.action === 'allow') return 'bypass';
   if (latestRule?.action === 'ask') return 'ask';
   return 'auto';
 }
 
 export async function setComposerPermissionMode(mode: PermissionAccessMode): Promise<PermissionAccessMode> {
+  await setExecutionMode(ACCESS_TO_BACKEND_MODE[mode] ?? 'auto_guard');
+  // Reset any composer access rule, then grant out-of-workspace full access
+  // only for Bypass (matches Claude Code: only bypass leaves the workspace).
   const state = await getPermissions();
   const composerRules = state.rules.filter(isComposerAccessRule);
   await Promise.all(composerRules.map(rule => deletePermissionRule(rule.id)));
-  if (mode === 'ask') {
-    await createPermissionRule({ tool: '*', action: 'ask', source: COMPOSER_PERMISSION_SOURCE });
-    return 'ask';
-  }
-  if (mode === 'full') {
+  if (mode === 'bypass') {
     await createPermissionRule({ tool: '*', action: 'allow', source: COMPOSER_PERMISSION_SOURCE });
-    return 'full';
   }
-  return 'auto';
+  return mode;
 }
 
 export async function toggleCronTask(taskId: string): Promise<CronTask> {

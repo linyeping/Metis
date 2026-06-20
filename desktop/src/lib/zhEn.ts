@@ -24,6 +24,18 @@ export const zhEn: Record<string, string> = {
   '正在重新连接': 'Reconnecting',
 
   // —— 输入栏 / Composer ——
+  // 5 个权限档（对齐 Claude Code）
+  '询问权限': 'Ask permissions',
+  '每次使用工具前都征求许可': 'Ask before every tool use',
+  '接受编辑': 'Accept edits',
+  '自动应用文件编辑；运行命令、桌面或联网操作前询问': 'Auto-apply file edits; ask before commands, desktop, or web actions',
+  '计划模式': 'Plan mode',
+  '只读研究并制定计划，不做任何更改': 'Research read-only and draft a plan without making changes',
+  '自动模式': 'Auto mode',
+  '自主运行命令与编辑，仅在危险或破坏性操作前询问': 'Run commands and edits autonomously; ask only before dangerous or destructive actions',
+  '绕过权限': 'Bypass permissions',
+  '不再询问，完全访问文件、命令与网络': 'No more prompts — full access to files, commands, and the network',
+  // 旧三档文案（保留兼容）
   '请求批准': 'Ask to approve',
   '编辑外部文件和使用互联网时始终询问': 'Always ask before editing external files or using the internet',
   '替我审批': 'Auto-approve',

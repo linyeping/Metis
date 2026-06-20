@@ -165,12 +165,15 @@ def test_agent_approval_uses_registry_metadata() -> None:
         )
     )
 
+    # Mode-driven semantics (mirror Claude Code's 5 modes):
     assert _permission_action("edit", "read_file", {}, registry=registry) == "allow"
-    assert _permission_action("edit", "write_file", {}, registry=registry) == "ask"
+    # Accept-edits auto-applies file edits but still asks before shell.
+    assert _permission_action("edit", "write_file", {}, registry=registry) == "allow"
     assert _permission_action("edit", "execute_bash_command", {}, registry=registry) == "ask"
     assert _permission_action("ask", "read_file", {}, registry=registry) == "ask"
     assert _permission_action("auto", "write_file", {}, registry=registry) == "allow"
-    assert _permission_action("plan", "execute_bash_command", {}, registry=registry) == "allow"
+    # Plan mode researches read-only; state-changing tools are blocked.
+    assert _permission_action("plan", "execute_bash_command", {}, registry=registry) == "deny"
 
 
 def test_rule_checker_still_overrides_registry() -> None:

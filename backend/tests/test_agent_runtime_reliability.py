@@ -254,7 +254,9 @@ def _events(backend: LLMBackend, *, config: Optional[AgentConfig] = None) -> Lis
 def _events_with_permission(approved: bool, executed: List[str]) -> List[Any]:
     gen = run_stream(
         _messages(),
-        _config(execution_mode="edit"),
+        # "ask" prompts for every tool — exercises the approval stream itself.
+        # (Accept-edits auto-applies file edits, so it would not prompt here.)
+        _config(execution_mode="ask"),
         registry=_approval_registry(executed),
         backend=ApprovalBackend(),
     )
