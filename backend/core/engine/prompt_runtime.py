@@ -52,6 +52,16 @@ _EFFICIENCY_RULES = (
     "6. Plan first (list all steps), then execute in batch. No trial-and-error.\n"
     "7. When creating new files, provide complete content in one call.\n"
 )
+_STRONG_MODEL_DIRECTIVE = (
+    "\n\n---\n[High-Agency Execution — you are a capable model; minimize round-trips]\n"
+    "- Batch reconnaissance: in ONE turn, fire every independent read_file / grep_search / "
+    "glob_search you already know you need. Reading files one-at-a-time across turns is the "
+    "single biggest way you waste turns — do not do it.\n"
+    "- Act in large, complete steps: apply the whole edit at once (a multi-hunk apply_patch, or "
+    "several edits in the same turn). Do not dribble one small change per turn.\n"
+    "- Decide and do. Skip narrating intentions and re-exploring what is already in context.\n"
+    "- Calibrate effort: a one-line fix should take a handful of turns, not a dozen.\n"
+)
 _WEB_STRATEGY_RULES = (
     "\n\n---\n[Web Tool Strategy]\n"
     "1. Use web_fetch first for static pages, docs, titles, article text, and news; it returns cleaned Markdown by default.\n"
@@ -67,8 +77,9 @@ _LAYER_ORDER = {
     "workflow_guidelines_hint": 3,
     "loop_discipline": 4,
     "efficiency_rules": 5,
-    "web_strategy": 6,
-    "recency_reinforcement": 7,
+    "strong_model_directive": 6,
+    "web_strategy": 7,
+    "recency_reinforcement": 8,
     "workspace_hint": 10,
     "skills_index": 10,
     "repo_map_hint": 11,
@@ -560,6 +571,18 @@ def compile_prompt_runtime(
             stability="static",
         )
     )
+    # Strong models (tier 1, e.g. GPT/Claude class) tend to step one tool per
+    # turn; push them toward batching + large, decisive actions. Weaker tiers
+    # already run lean/verbose variants and don't need (or want) this.
+    if model_tier == 1:
+        layers.append(
+            PromptRuntimeLayer(
+                name="strong_model_directive",
+                content=_STRONG_MODEL_DIRECTIVE,
+                source="engine.prompt_runtime",
+                stability="static",
+            )
+        )
     layers.append(
         PromptRuntimeLayer(
             name="web_strategy",
