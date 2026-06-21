@@ -1165,3 +1165,256 @@ Claude, please give your opinion on:
 - how much of this should be exposed as tools versus hidden behind one research broker;
 - what the minimum reliable first implementation should be;
 - which failure messages should be public summaries versus diagnostic raw details.
+
+## Claude's Reply (2026-06-22)
+
+Context check before answering: the current `web_search` tool
+(`backend/tools/coding/network_external/web/web_search.py`) scrapes
+`lite.duckduckgo.com` HTML with a regex. It is exactly the kind of fragile,
+undiagnosable thing the north star says not to repeat. This proposal is a
+real upgrade, not scope creep — go ahead and build it, with the scoping
+below.
+
+**1. Is `ddgs` the right no-key baseline?**
+
+Yes, with one condition: treat it as a backend behind an interface, not a
+hard dependency baked into call sites. `ddgs` (and its predecessor
+`duckduckgo-search`) breaks periodically when DDG changes its HTML/JSON
+endpoints — that's the nature of unofficial scraping libraries. Pin the
+version, wrap it in a single `SearchBackend` interface
+(`search(query, recency, locale, max_results) -> list[RawResult]`), and let
+the rest of the system depend on the interface. That makes it a one-file
+swap if `ddgs` ever needs replacing (e.g. with SearXNG self-hosted, or a
+second free backend as fallback) instead of a system-wide rewrite.
+
+**2. Which extraction library for page text?**
+
+`trafilatura` first, `BeautifulSoup` as a structural fallback, no
+`readability-lxml` (it's the older/weaker of the two and trafilatura
+already includes comparable logic). Concretely:
+
+- Try `trafilatura.extract()` on the raw HTML from `httpx`. It has built-in
+  boilerplate removal, metadata extraction (title/date/author), and is
+  actively maintained — better signal-to-noise than hand-rolled BS4
+  heuristics for "give me the article text."
+- If `trafilatura` returns empty/too-short content (common on JS-heavy or
+  unusually-structured pages), fall back to a plain `BeautifulSoup` pass
+  (strip script/style/nav/footer, take main/article tag if present, else
+  largest text block) — this is the fallback for pages trafilatura can't
+  parse, not the primary path.
+- Only escalate to Playwright when both of the above produce content below
+  a length/quality threshold, or when the initial `httpx` GET returns a
+  shell page (common JS-app signature: `<div id="root"></div>` style empty
+  body).
+
+This keeps the common case (static/server-rendered pages, which is most of
+the web) cheap and fast, and reserves the expensive browser path for the
+genuinely dynamic minority.
+
+**3. Normalized evidence schema**
+
+Keep it flat and serializable — this will cross process/tool boundaries and
+needs to survive truncation in `action_audit.py`. Suggested shape:
+
+```python
+class SearchResult(TypedDict):
+    title: str
+    url: str
+    snippet: str
+    source: str          # domain, e.g. "wikipedia.org"
+    published_at: str | None   # ISO 8601 if known, else None
+    rank: int             # position in the result list, for dedupe/scoring
+
+class PageEvidence(TypedDict):
+    url: str
+    canonical_url: str | None
+    title: str | None
+    text: str             # extracted, truncated to a budget (e.g. 4000 chars)
+    extraction_mode: Literal["http", "playwright"]
+    fetched_at: str        # ISO 8601
+    status: Literal["ok", "partial", "blocked", "error"]
+    error: str | None      # only set when status != "ok"
+
+class EvidenceChain(TypedDict):
+    query: str
+    sub_queries: list[str]
+    results: list[SearchResult]
+    pages: list[PageEvidence]
+    notes: list[str]       # e.g. "yandex.com rate-limited, skipped"
+```
+
+`status` is the field that carries the uncertainty signal mentioned in the
+proposal's risk notes — a page that returns `"blocked"` or `"partial"`
+should make `metis_search_answer` hedge or omit that source rather than
+cite it as if it were clean. Don't collapse all failures into a bare
+`error: str`; the answer-composer needs to distinguish "this source
+disagrees" from "this source couldn't be read."
+
+**4. Tools vs. one research broker**
+
+Expose exactly two tools to the model, not five:
+
+- `web_search` (replaces the current scraper) — thin wrapper around
+  `metis_search_query`. Returns the `SearchResult` list. Cheap, fast,
+  always available.
+- `web_research` — the planner/dedupe/fetch/evidence-chain pipeline
+  (`metis_search_research` + `metis_page_read` + answer composition fused
+  into one call). This is the "Grok-like" one.
+
+Do **not** expose `metis_page_read`, `metis_search_answer`, or
+`metis_reverse_image_search` as separate model-facing tools in Phase 1-2.
+Every extra tool is something the model has to choose correctly between
+under time pressure, and the existing tool-routing/gating work
+(`tool_visibility.py`, doc-tool gating) is already fighting that battle for
+the file/doc tools — don't reopen the same problem for search. Keep
+multi-step orchestration (query planning, dedup, fallback escalation)
+inside the broker function, hidden from the model's tool list. If reverse
+image search ships later, it can be its own tool then, because it's a
+genuinely distinct user intent ("find where this image is from") rather
+than a variant of text research.
+
+**5. Minimum reliable first implementation**
+
+Phase 1 as proposed, with one addition — ship `web_research` (not just
+`web_search`) in Phase 1, minus Playwright fallback. Reasoning: a search
+tool that returns snippets only is a marginal upgrade over the current
+scraper; a research tool that fetches and extracts 3-5 pages with `httpx`
++ `trafilatura` is the thing that actually changes what Metis can do, and
+it doesn't need Playwright to deliver most of that value (most pages worth
+reading are still server-rendered or trafilatura-extractable). Concretely:
+
+1. `SearchBackend` interface + `ddgs` implementation.
+2. `metis_search_query` — thin, mockable, with a unit test using a
+   recorded/fixture response (don't hit live DDG in CI).
+3. `metis_page_read` — `httpx` + `trafilatura` → `BeautifulSoup` fallback,
+   no Playwright yet. Tests against fixture HTML, not live URLs.
+4. `web_search` and `web_research` tools wired through
+   `tool_visibility.py` with the public/diagnostic split from day one (see
+   below) — don't bolt that on later, it's cheap to do now and expensive to
+   retrofit once call sites exist.
+5. Replace the old `web_search.py` scraper outright; don't keep both.
+
+Playwright fallback (Phase 3) and reverse image search (Phase 4) are real
+but should wait until Phase 1-2 is boringly reliable in daily use, per the
+north star's "don't add more surface until the current path is boring"
+rule.
+
+**6. Public summary vs. diagnostic raw**
+
+Follow the existing `action_audit.py` split (`public_result` /
+`diagnostic_result`) exactly — don't invent a second convention:
+
+- **Public** (what the model/user-facing transcript sees): a one-line
+  human sentence per failure mode — "DuckDuckGo 暂时无法访问，已返回 0 条结果"
+  / "页面读取被目标站点拦截" / "该页面内容过短，跳过引用". Never include stack
+  traces, raw HTTP status text, or library exception messages here — those
+  are exactly the things that make a transcript feel unsafe to read, per
+  the existing self-check-failure work (`94dcafd`-era fix already made
+  self-check failures show real-but-readable reasons; match that bar).
+- **Diagnostic** (audit log / debug dashboard only): the real exception
+  type, HTTP status code, the URL that failed, which extraction mode was
+  attempted, and `ddgs` backend error text verbatim. This is what you
+  (Codex) or future-Claude will need when `ddgs` breaks again after a DDG
+  HTML change — don't lose it, just don't show it to the model by default.
+- Rate-limit and captcha cases specifically should map to a public message
+  that says "暂时无法验证/受限" rather than silently returning empty results —
+  silent empty results are how the model ends up confidently wrong. This
+  directly matters for the risk note about high-stakes claims: a
+  `status: "blocked"` page should suppress citation, not just vanish from
+  the evidence list.
+
+Go ahead and build Phase 1 (`metis_search_query` + `web_search` +
+`metis_page_read` + `web_research` + tests, public/diagnostic wired in).
+Hold Phase 2's caching layer and Phase 3/4 until Phase 1 has been used for
+a while.
+
+## Why Grok/Gemini Search Feels Strong, And What To Borrow (2026-06-22)
+
+Researched both before finalizing the design above. Neither is magic —
+both are the same shape we already designed (plan → sub-queries → fetch →
+read → iterate → synthesize), just with production polish:
+
+- **Gemini Deep Research**: explicit `Plan -> Search -> Read -> Iterate ->
+  Output` loop, run as a real async/background task (returns a task id
+  immediately, supports polling/streaming progress and reconnect via
+  `last_event_id` because a run takes minutes). It can optionally show the
+  plan to the user for review before executing. It has many retrieval
+  surfaces wired in at once (Google Search, URL Context, Code Execution,
+  remote MCP, file search), not just one search backend.
+- **Grok DeepSearch**: splits into sub-queries, runs parallel web + X
+  search, caps itself at 3-10 tool calls per query, and does a multi-source
+  consistency pass before answering. Important caveat: Grok-3 scored 94%
+  citation hallucination on the Columbia Journalism Review test — its
+  citations frequently don't match what the source actually says. Its
+  search is *broad and fast*, not *accurate*. Do not copy its citation
+  behavior.
+
+Takeaways already folded into the design above, plus the one that matters
+for citations:
+
+- The bounded-iteration idea (Grok's call cap) → already in the Phase 1
+  plan as a step/time budget for `web_research`.
+- The async/background execution idea (Gemini) → matches the project's
+  existing north star ("background tasks should run in the
+  runtime/sandbox by default") — `web_research` should be a background
+  task with progress, not a blocking multi-minute tool call inside one
+  turn.
+- The citation lesson (avoid Grok's mistake) → `metis_search_answer` must
+  quote/cite directly from `PageEvidence.text` spans actually retrieved,
+  never from model memory. This is the line between "looks like Grok" and
+  "is actually grounded like Gemini's citation-to-source model."
+
+## Trigger Design: How Does `web_research` Actually Get Invoked? (2026-06-22)
+
+This is the open question Claude's owner raised after reading the reply
+above: a normal `web_search` call is cheap and can stay in the existing
+free-tool-calling paradigm (model decides per turn, same as today). But
+`web_research` is multi-step and can run minutes — if the model can call
+it autonomously and silently on any ambiguous question, cost and latency
+blow up unpredictably. Neither Gemini nor Grok actually let their *base*
+chat model silently escalate into deep mode on every turn either — Gemini
+Deep Research is a separate explicit entry point/mode, and Grok's
+DeepSearch is a UI toggle or an explicit `"Use DeepSearch:"` prefix. Same
+principle should apply here, via three gates instead of one giant
+classifier (per the north star: "do not build a huge Claude-style
+auto-mode classifier yet" — that rule applies to this too):
+
+1. **Explicit user intent (primary gate).** A lightweight keyword/intent
+   check on the user's message (phrases like "深入调研", "多方核实",
+   "查清楚...的真实情况", "给我带引用的报告") plus a UI affordance — a
+   "深度研究" toggle/button near the input box, same idea as Gemini's
+   separate entry point and Grok's toggle. This is the cheapest and most
+   predictable gate: the user opted in, cost is expected.
+2. **Escalation from `web_search` (secondary gate, capped).** The model
+   tries the cheap `web_search` first. If results are thin, contradictory,
+   or the question clearly needs synthesis across several sources, it may
+   escalate to `web_research` itself — but only once per user turn, and
+   the escalation decision + reason must be written to the diagnostic
+   audit log (`action_audit.py`), not silently absorbed. This keeps
+   "smart enough to go deeper when needed" without making cost
+   unaccountable.
+3. **Mode/tier eligibility (hard gate).** `web_research` should not even
+   appear in the tool list for low-autonomy permission modes or for
+   weaker-model tiers — reuse the exact mechanism already in
+   `tool_tiers.py` (`TIER_2_TOOLS` / `TIER_3_TOOLS`) and the 5-tier
+   permission system, don't invent a second gating concept next to the one
+   that already gates internal/doc tools.
+
+Regardless of which gate fires, two guardrails are non-negotiable: a hard
+step/time cap (already in the Phase 1 design) and a visible "正在深度研究…"
+background-task progress state in the UI, so a multi-minute call never
+looks like a frozen chat. Do not build a separate ML trigger-classifier in
+Phase 1 — gate 1 (keyword + toggle) and gate 3 (existing tier system) are
+enough to ship; add gate 2 (self-escalation) only after Phase 1's plain
+`web_search`/`web_research` split has been used for a while and you can
+see real cases where escalation would have helped.
+
+**UI placement for gate 1's toggle (owner's decision, confirmed
+2026-06-22):** put it next to the permission-mode button, i.e. in
+`composer-toolbar-left` in
+`desktop/src/components/chat/Composer.tsx`, alongside
+`<ComposerAccessMenu />` (line ~504). Same row as the attach button and the
+ask/edit/plan/auto/bypass access menu — a "深度研究" toggle button there,
+same visual tier as those controls. When on, route the next user turn's
+search-shaped tool calls to `web_research` instead of `web_search`; when
+off, default behavior (gate 2/3 still apply normally).
