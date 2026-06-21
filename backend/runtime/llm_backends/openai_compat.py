@@ -154,6 +154,11 @@ class OpenAICompatBackend(LLMBackend):
         }
         if request_tools:
             payload["tools"] = request_tools
+            # Explicitly allow parallel tool calls so the model can batch
+            # independent actions in one turn (fewer round-trips). Some relays
+            # default this off when the field is omitted.
+            if self.supports_parallel_tool_calls:
+                payload["parallel_tool_calls"] = True
         reasoning = self._reasoning_params()
         if reasoning:
             payload.update(reasoning)
@@ -209,6 +214,11 @@ class OpenAICompatBackend(LLMBackend):
         }
         if request_tools:
             payload["tools"] = request_tools
+            # Explicitly allow parallel tool calls so the model can batch
+            # independent actions in one turn (fewer round-trips). Some relays
+            # default this off when the field is omitted.
+            if self.supports_parallel_tool_calls:
+                payload["parallel_tool_calls"] = True
         reasoning = self._reasoning_params()
         if reasoning:
             payload.update(reasoning)
