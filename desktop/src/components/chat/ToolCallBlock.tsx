@@ -263,7 +263,7 @@ export function ToolCard({
     <div className="tool-card tool-activity-row" data-open={open} data-status={status} data-call-id={toolCallId || cardId}>
       <button className="tool-card-head tool-activity-head" type="button" onClick={() => setToolCardExpanded(cardId, !open)}>
         <span className="tool-activity-caret">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
-        <span className="tool-activity-status">{toolStatusIcon(status)}</span>
+        <span className="tool-activity-status">{toolStatusIcon(toolName, status)}</span>
         <span className="tool-title">{toolDisplayName(toolName)}</span>
         <small>{summary}</small>
         <span className="tool-activity-meta">

@@ -422,6 +422,7 @@ function permissionControlPlaneFromRecord(row: Record<string, unknown>) {
 }
 
 const COMPOSER_PERMISSION_SOURCE = 'composer_access';
+const COMPOSER_DEEP_RESEARCH_KEY = 'metis.composer.deepResearch';
 
 function isComposerAccessRule(rule: PermissionRule): boolean {
   return rule.source === COMPOSER_PERMISSION_SOURCE && rule.tool === '*' && Object.keys(rule.argsMatch || {}).length === 0;
@@ -1924,6 +1925,23 @@ export async function setComposerPermissionMode(mode: PermissionAccessMode): Pro
     await createPermissionRule({ tool: '*', action: 'allow', source: COMPOSER_PERMISSION_SOURCE });
   }
   return mode;
+}
+
+export async function getComposerDeepResearchEnabled(): Promise<boolean> {
+  try {
+    return globalThis.localStorage?.getItem(COMPOSER_DEEP_RESEARCH_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function setComposerDeepResearchEnabled(enabled: boolean): Promise<boolean> {
+  try {
+    globalThis.localStorage?.setItem(COMPOSER_DEEP_RESEARCH_KEY, enabled ? '1' : '0');
+  } catch {
+    /* localStorage may be unavailable in hardened webviews. */
+  }
+  return enabled;
 }
 
 export async function toggleCronTask(taskId: string): Promise<CronTask> {

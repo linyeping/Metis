@@ -13,6 +13,7 @@ import {
   getActiveSessionRun,
   getAwaySummary,
   getCompactStatus,
+  getComposerDeepResearchEnabled,
   getPromptSuggestions,
   getSession,
   getSessionCheckpoints,
@@ -453,13 +454,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     setActiveRunController(sessionId, { assistantId, controller, runId: '' });
 
     try {
+      const deepResearch = await getComposerDeepResearchEnabled().catch(() => false);
       try {
-        const run = await startChatRun({ message: userContent, session_id: sessionId, assistant_id: assistantId });
+        const run = await startChatRun({ message: userContent, session_id: sessionId, assistant_id: assistantId, deep_research: deepResearch });
         setActiveRunController(sessionId, { assistantId, controller, runId: run.runId });
         await runEventStream(run.runId, event => handleRunEvent(run.runId, event, assistantId, sessionId, processedRunSeq, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
       } catch (runError) {
         if (isRunApiUnavailable(runError)) {
-          await chatStream({ message: userContent, session_id: sessionId }, event => applyChatEvent(event, assistantId, sessionId, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
+          await chatStream({ message: userContent, session_id: sessionId, deep_research: deepResearch }, event => applyChatEvent(event, assistantId, sessionId, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
         } else {
           throw runError;
         }

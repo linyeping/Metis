@@ -1600,3 +1600,96 @@ above is still unbuilt. This is the task: close that loop.
    (`desktop/src/lib/__tests__/...`) and run the full `npx vitest run`
    suite before calling this done — it was 115/115 passing before this
    task starts.
+
+## Construction Log - Deep Research Trigger Fixer (2026-06-22)
+
+Status: implemented.
+
+What changed:
+
+- Added the Composer "深度研究" toggle next to the permission-mode button in
+  `desktop/src/components/chat/Composer.tsx`.
+  - The button uses the same compact control tier as the existing access
+    mode control.
+  - The state persists through new async helpers in
+    `desktop/src/lib/api.ts`: `getComposerDeepResearchEnabled` and
+    `setComposerDeepResearchEnabled`.
+- Wired the toggle into the next chat turn.
+  - `desktop/src/store/chatStore.ts` now sends `deep_research` on both the
+    `/runs` path and the legacy `/chat` fallback path.
+  - `backend/web/app.py` accepts both `deep_research` and `deepResearch`.
+  - Run registry state stores the flag so queued/background runs keep the
+    value captured at send time.
+  - `/chat` fallback injects the same flag directly into `AgentConfig`.
+- Added `AgentConfig.deep_research`.
+  - `backend/runtime/agent_loop.py` passes it into
+    `build_task_route`.
+  - `backend/runtime/model_router.py` now prefers `web_research` first for
+    `external_lookup` tasks when the toggle is enabled.
+  - Route guidance explicitly says deep research is enabled for the turn.
+- Added the running-state UX for `web_research`.
+  - `desktop/src/components/chat/threadUtils.ts` returns
+    `正在深度研究...` while `web_research` is running.
+  - `ToolCallBlock` now passes the tool name into `toolStatusIcon`.
+  - `web_research` uses the `lucide-react` `Atom` icon with independent
+    orbit-path CSS animation in `desktop/src/index.css`.
+- Added a lightweight self-escalation audit path.
+  - `web_research` accepts an optional `reason` argument.
+  - The default web-search route guidance tells the model that if cheap
+    `web_search` evidence is thin or contradictory, it may escalate to
+    `web_research` once this turn and pass a concise `reason`.
+  - Because tool arguments already go through `action_audit.py`, this
+    records the escalation reason in the local diagnostic audit without a
+    new hard interceptor.
+
+Why the full Gate 2 hard interceptor was not built yet:
+
+- A strict interceptor would need per-turn runtime state that watches
+  whether `web_search` already ran, whether `web_research` is the first or
+  second research call, and how retries/fallbacks should count.
+- That belongs in the agent loop/tool scheduler, not in the Composer
+  toggle wiring.
+- The safer first version is route guidance + `reason` argument + existing
+  local tool audit. If real use shows repeated silent escalations, the next
+  step should be a scheduler-level once-per-turn guard with a dedicated
+  diagnostic event.
+
+Files changed:
+
+- `desktop/src/components/chat/Composer.tsx`
+- `desktop/src/components/chat/ToolCallBlock.tsx`
+- `desktop/src/components/chat/threadUtils.ts`
+- `desktop/src/index.css`
+- `desktop/src/lib/api.ts`
+- `desktop/src/lib/__tests__/api.test.ts`
+- `desktop/src/store/chatStore.ts`
+- `desktop/src/store/__tests__/chatStore.race.test.ts`
+- `desktop/src/components/chat/__tests__/threadUtils.test.ts`
+- `backend/web/app.py`
+- `backend/runtime/agent_loop.py`
+- `backend/runtime/model_router.py`
+- `backend/tools/schema_definitions.py`
+- `backend/tools/coding/network_external/web/web_research.py`
+- `backend/tests/test_fableadv_40_model_tool_routing.py`
+
+Verification run:
+
+- `D:\Anaconda3\python.exe -m py_compile backend\runtime\agent_loop.py backend\runtime\model_router.py backend\web\app.py backend\tools\schema_definitions.py backend\tools\coding\network_external\web\web_research.py`
+  - Result: passed.
+- `D:\Anaconda3\python.exe -m pytest backend\tests\test_fableadv_40_model_tool_routing.py -q`
+  - Result: `13 passed`.
+- `npm run test -- src/lib/__tests__/api.test.ts src/store/__tests__/chatStore.race.test.ts src/components/chat/__tests__/threadUtils.test.ts`
+  - Result: `3 passed`, `21 tests passed`.
+- `npx vitest run`
+  - Result: `18 passed`, `118 tests passed`.
+- `npm run -s typecheck`
+  - Result: passed.
+- `D:\Anaconda3\python.exe -m ruff check --select F401,F821,F822,F823 ...`
+  - Result: passed.
+
+Known note:
+
+- A full `ruff check` over the large touched backend files still reports
+  pre-existing import-order issues and an unrelated old unused `log_dir`
+  variable in `backend/web/app.py`. Those were not part of this task and
+  were intentionally left untouched.

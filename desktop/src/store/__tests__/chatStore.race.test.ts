@@ -9,6 +9,7 @@ vi.mock('../../lib/api', () => ({
   deleteSession: vi.fn(async () => undefined),
   getActiveSessionRun: vi.fn(async () => ({ ok: false, run: null })),
   getCompactStatus: vi.fn(async () => ({ running: false })),
+  getComposerDeepResearchEnabled: vi.fn(async () => false),
   getSession: vi.fn(async () => sessionPayload('session-new', [])),
   getSessions: vi.fn(async () => ({
     sessions: [sessionMeta('session-new')],
@@ -88,6 +89,18 @@ describe('chatStore loadSession runtime correctness', () => {
 
     start.resolve(runPayload());
     await sendPromise;
+  });
+
+  it('send forwards the deep research toggle to the run API', async () => {
+    vi.mocked(api.getComposerDeepResearchEnabled).mockResolvedValueOnce(true);
+
+    await useChatStore.getState().send('research this');
+
+    expect(api.startChatRun).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'research this',
+      session_id: 'session-new',
+      deep_research: true,
+    }));
   });
 
   it('loadSession skips destructive overwrite when streaming in the same session', async () => {

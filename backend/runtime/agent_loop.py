@@ -204,6 +204,7 @@ class AgentConfig:
     # 推理强度开关（opt-in，默认空=关，零行为变化）。取值 off/low/medium/high/max；
     # 仅对 DeepSeek v4 推理模型注入 reasoning_effort + thinking，其它供应商/模型忽略。
     reasoning_effort: str = ""
+    deep_research: bool = False
     temperature: float = 0.3
     # FABLEADV-19: 4096 was too small for writing whole files (e.g. a 569-line
     # CSS exceeds it → truncated tool_call → "No response" task failure). Modern
@@ -468,6 +469,7 @@ def _config_with_task_route(config: AgentConfig, messages: List[Dict[str, Any]])
             llm_backend=config.llm_backend,
             llm_base_url=config.llm_base_url,
             llm_model=config.llm_model,
+            deep_research=config.deep_research,
         )
     except Exception:
         logger.debug("task routing failed; using current model/tool order", exc_info=True)

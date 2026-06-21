@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import { remarkMetisLinks } from '../../lib/remarkMetisLinks';
 import {
   AlertTriangle,
+  Atom,
   CheckCircle2,
   ClipboardCheck,
   LoaderCircle,
@@ -122,7 +123,10 @@ export function compact(value: unknown): string {
   return text.length > 160 ? `${text.slice(0, 160)}...` : text || 'No details';
 }
 
-export function toolStatusIcon(status: string) {
+export function toolStatusIcon(toolName: string, status: string) {
+  if (status === 'running' && toolName === 'web_research') {
+    return createElement(Atom, { className: 'atom-orbit-spin', size: 14 });
+  }
   if (status === 'running') return createElement(LoaderCircle, { size: 13 });
   if (status === 'error') return createElement(AlertTriangle, { size: 13 });
   if (status === 'waiting_approval') return createElement(ClipboardCheck, { size: 13 });
@@ -148,6 +152,7 @@ export function toolCommandPreview(toolName: string, args: unknown, result: unkn
 }
 
 export function toolProgressText(toolName: string, status: string): string {
+  if (toolName === 'web_research' && status === 'running') return '正在深度研究...';
   const name = toolDisplayName(toolName);
   if (status === 'running') return `正在执行 ${name}`;
   if (status === 'waiting_approval') return `${name} 等待确认`;

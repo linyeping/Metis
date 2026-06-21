@@ -1556,6 +1556,21 @@ def _request_session_id() -> str:
     return str(data.get("session_id") or data.get("sessionId") or "").strip()
 
 
+def _request_deep_research_enabled() -> bool:
+    if request.method == "GET":
+        raw = request.args.get("deep_research") or request.args.get("deepResearch") or ""
+    else:
+        data = request.get_json(silent=True) or {}
+        raw = data.get("deep_research", data.get("deepResearch", False))
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+    return False
+
+
 def _prepare_chat_session(user_message: Any) -> tuple[str, List[Dict[str, Any]], Dict[str, Any], str, bool]:
     """Return the session targeted by this chat request and an editable history copy."""
     requested_session_id = _request_session_id()
@@ -1599,6 +1614,7 @@ def _create_run_state(
     assistant_id: str,
     history: List[Dict[str, Any]],
     mode: str,
+    deep_research: bool = False,
     compact_state: Optional[Dict[str, Any]] = None,
     model_context: Optional[List[Dict[str, Any]]] = None,
     workspace_root: str = "",
@@ -1610,6 +1626,7 @@ def _create_run_state(
         "session_id": session_id,
         "assistant_id": assistant_id,
         "mode": mode or "auto",
+        "deep_research": bool(deep_research),
         "workspace_root": os.path.abspath(workspace_root or _request_workspace_root(session_id)),
         "status": "queued",
         "phase": "queued",
@@ -2236,6 +2253,7 @@ def _run_registry_worker(run_id: str) -> None:
     _set_run_status(run, "running", phase="starting")
     try:
         config = _load_config_for_workspace(str(run.get("workspace_root") or ""))
+        config = replace(config, deep_research=bool(run.get("deep_research")))
     except Exception as exc:
         logger.error("Agent run configuration failed: %s", sanitize_for_log(exc))
         _append_run_event(run, _event_payload(_error_event_from_exception(exc, recoverable=False)))
@@ -2470,6 +2488,7 @@ def create_run() -> Any:
         assistant_id=assistant_id,
         history=history,
         mode=mode,
+        deep_research=_request_deep_research_enabled(),
         compact_state=compact_state,
         model_context=model_context,
         workspace_root=workspace_root,
@@ -2890,6 +2909,7 @@ def chat() -> Any:
 
     try:
         config = _load_config_for_workspace(workspace_root)
+        config = replace(config, deep_research=_request_deep_research_enabled())
     except Exception as exc:
         checkpoint.finalize("failed")
         return _sse_response(

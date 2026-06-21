@@ -10,7 +10,9 @@ def web_research(
     max_results: int = 5,
     max_pages: int = 3,
     max_chars_per_page: int = 3000,
+    reason: str = "",
 ) -> str:
+    _ = reason
     return format_research_response(
         metis_search_research(
             question=question,

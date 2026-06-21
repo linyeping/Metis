@@ -4897,14 +4897,78 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   animation: runtime-spin 900ms linear infinite;
 }
 
+.composer-deep-research-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--accent));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.composer-deep-research-button:hover,
+.composer-deep-research-button[data-active='true'] {
+  border-color: color-mix(in srgb, var(--accent) 82%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 74%, var(--bg-elevated));
+  color: var(--text);
+}
+
+.composer-deep-research-button:active {
+  transform: translateY(1px);
+}
+
+.composer-deep-research-button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.composer-deep-research-button .spin {
+  animation: runtime-spin 900ms linear infinite;
+}
+
+.atom-orbit-spin path {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.atom-orbit-spin path:nth-of-type(1) {
+  animation: atom-orbit-a 1.1s linear infinite;
+}
+
+.atom-orbit-spin path:nth-of-type(2) {
+  animation: atom-orbit-b 1.6s linear infinite reverse;
+}
+
+@keyframes atom-orbit-a {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes atom-orbit-b {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .composer-access-menu {
   position: absolute;
   z-index: 40;
   left: 0;
   bottom: calc(100% + 8px);
   display: grid;
-  width: min(340px, calc(100vw - 40px));
-  gap: 4px;
+  width: min(214px, calc(100vw - 40px));
+  gap: 3px;
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent));
   border-radius: 10px;
@@ -4917,10 +4981,10 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 
 .composer-access-option {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  padding: 9px 10px;
+  grid-template-columns: 16px 18px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  padding: 7px 9px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -4938,26 +5002,39 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
   color: var(--accent-strong);
+}
+
+.composer-access-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  color: var(--text-muted);
+}
+
+.composer-access-option[data-active='true'] .composer-access-option-icon {
+  color: var(--text);
 }
 
 .composer-access-option strong {
   display: block;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 650;
+  line-height: 1.2;
 }
 
-.composer-access-option small,
 .composer-access-error {
   display: block;
   margin-top: 2px;
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 11.5px;
+  line-height: 1.32;
 }
 
 .composer-access-error {
-  margin: 2px 8px 4px 34px;
+  margin: 2px 8px 4px 41px;
   color: var(--danger);
 }
 

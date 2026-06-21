@@ -1135,6 +1135,7 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
             "max_results": _integer("搜索结果上限，默认 5，最大 10"),
             "max_pages": _integer("读取证据页数量，默认 3，最大 5"),
             "max_chars_per_page": _integer("每个证据页返回字符数，默认 3000"),
+            "reason": _string("可选；从普通搜索自升级到深度研究时写明简短原因，供本地诊断审计"),
         },
         ["question"],
     ),

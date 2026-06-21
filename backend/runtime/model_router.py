@@ -160,6 +160,7 @@ def build_task_route(
     llm_backend: str,
     llm_base_url: str = "",
     llm_model: str = "",
+    deep_research: bool = False,
 ) -> TaskRoute:
     text = _latest_user_text(messages)
     task_type, reason = classify_task(text)
@@ -171,7 +172,7 @@ def build_task_route(
         llm_base_url=llm_base_url,
         current_model=llm_model,
     )
-    preferred_tools = _preferred_tools_for_task(task_type)
+    preferred_tools = _preferred_tools_for_task(task_type, deep_research=deep_research)
     return TaskRoute(
         task_type=task_type,
         model_role=model_role,
@@ -181,7 +182,7 @@ def build_task_route(
         fallback_models=fallback_models,
         preferred_tools=preferred_tools,
         reason=reason,
-        tool_guidance=_tool_guidance_for_task(task_type),
+        tool_guidance=_tool_guidance_for_task(task_type, deep_research=deep_research),
     )
 
 
@@ -570,7 +571,7 @@ def _model_role_for_task(task_type: str, text: str) -> str:
     return "fast"
 
 
-def _preferred_tools_for_task(task_type: str) -> List[str]:
+def _preferred_tools_for_task(task_type: str, *, deep_research: bool = False) -> List[str]:
     if task_type == "artifact_workflow":
         return list(_ARTIFACT_WORKFLOW_TOOLS) + list(_DESKTOP_OBSERVE_TOOLS)
     if task_type == "desktop":
@@ -580,13 +581,15 @@ def _preferred_tools_for_task(task_type: str) -> List[str]:
     if task_type == "code":
         return list(_CODE_TOOLS)
     if task_type == "external_lookup":
+        if deep_research:
+            return ["web_research"] + [tool for tool in _EXTERNAL_WEB_TOOLS if tool != "web_research"]
         return list(_EXTERNAL_WEB_TOOLS)
     if task_type == "long_context":
         return list(_LONG_CONTEXT_TOOLS)
     return []
 
 
-def _tool_guidance_for_task(task_type: str) -> str:
+def _tool_guidance_for_task(task_type: str, *, deep_research: bool = False) -> str:
     if task_type == "artifact_workflow":
         return (
             "Use a background artifact workflow first: call metis_runtime_job for code execution, tests, builds, chart generation, report generation, and document/PDF rendering. "
@@ -602,7 +605,16 @@ def _tool_guidance_for_task(task_type: str) -> str:
     if task_type == "code":
         return "Use repo tools for direct reads/edits. Use metis_runtime_job for commands, tests, builds, repros, generated artifacts, or risky experiments before applying changes to the source project."
     if task_type == "external_lookup":
-        return "Use web_search/web_fetch for cheap fresh facts. Use web_research when the user asks to check multiple sources or prove claims. Escalate to browse_web only for dynamic or interactive pages."
+        if deep_research:
+            return (
+                "Deep research is explicitly enabled for this turn. Prefer web_research first for multi-source evidence, then use web_fetch for known URLs. "
+                "Use web_search only for a cheap supplementary query, and escalate to browse_web only for dynamic or interactive pages."
+            )
+        return (
+            "Use web_search/web_fetch for cheap fresh facts. Use web_research when the user asks to check multiple sources or prove claims. "
+            "If cheap search results are thin or contradictory, you may escalate from web_search to web_research once this turn and pass a concise reason argument for the diagnostic audit. "
+            "Escalate to browse_web only for dynamic or interactive pages."
+        )
     if task_type == "long_context":
         return "Use chunked reading and semantic/repo search. Avoid loading huge documents into one tool result."
     return "Answer directly unless a tool is clearly needed."

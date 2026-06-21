@@ -31,6 +31,7 @@ const api = await import('../api');
 
 beforeEach(() => {
   fetchMock.mockReset();
+  localStorage.clear();
 });
 
 // ---------------------------------------------------------------------------
@@ -229,6 +230,22 @@ describe('getSettings', () => {
     expect(settings.hasApiKey).toBe(true);
     expect(settings.autoMemory).toBe(true);
     expect(settings.terminalShell).toBe('powershell');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// composer deep research toggle
+// ---------------------------------------------------------------------------
+
+describe('composer deep research toggle', () => {
+  it('persists the deep research preference locally', async () => {
+    await expect(api.getComposerDeepResearchEnabled()).resolves.toBe(false);
+
+    await expect(api.setComposerDeepResearchEnabled(true)).resolves.toBe(true);
+    await expect(api.getComposerDeepResearchEnabled()).resolves.toBe(true);
+
+    await expect(api.setComposerDeepResearchEnabled(false)).resolves.toBe(false);
+    await expect(api.getComposerDeepResearchEnabled()).resolves.toBe(false);
   });
 });
 

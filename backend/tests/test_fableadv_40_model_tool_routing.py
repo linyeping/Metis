@@ -57,6 +57,35 @@ def test_router_prioritizes_preview_browser_for_local_page_tasks() -> None:
     ]
 
 
+def test_router_prioritizes_web_research_when_deep_research_is_enabled() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "查一下 Claude Code 最近更新了什么，要多来源核实"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=True,
+    )
+
+    assert route.task_type == "external_lookup"
+    assert route.preferred_tools[0] == "web_research"
+    assert route.preferred_tools[1] == "web_search"
+    assert "Deep research is explicitly enabled" in route.tool_guidance
+
+
+def test_router_default_web_search_guidance_allows_audited_single_escalation() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "今天有哪些 Codex 更新？"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+    )
+
+    assert route.task_type == "external_lookup"
+    assert route.preferred_tools[:3] == ["web_search", "web_fetch", "web_research"]
+    assert "once this turn" in route.tool_guidance
+    assert "reason argument" in route.tool_guidance
+
+
 def test_router_uses_background_artifact_workflow_for_report_code_tasks() -> None:
     route = build_task_route(
         [

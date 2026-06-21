@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   ArrowUp,
+  Atom,
   Check,
   ChevronDown,
   ClipboardList,
@@ -31,10 +32,12 @@ import {
   useState,
 } from 'react';
 import {
+  getComposerDeepResearchEnabled,
   getComposerPermissionMode,
   getProviderStatus,
   getSettings,
   getSkills,
+  setComposerDeepResearchEnabled,
   setComposerPermissionMode,
   updateSettings,
 } from '../../lib/api';
@@ -502,6 +505,7 @@ export function Composer() {
               <Plus size={22} />
             </button>
             <ComposerAccessMenu />
+            <ComposerDeepResearchToggle />
           </div>
           <div className="composer-toolbar-right">
             <ComposerModelMenu />
@@ -579,6 +583,49 @@ function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function ComposerDeepResearchToggle() {
+  const t = useT();
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void getComposerDeepResearchEnabled().then(next => {
+      if (alive) setEnabled(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const toggle = async () => {
+    const next = !enabled;
+    setSaving(true);
+    try {
+      const persisted = await setComposerDeepResearchEnabled(next);
+      setEnabled(persisted);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <button
+      className="composer-deep-research-button"
+      type="button"
+      data-active={enabled}
+      aria-pressed={enabled}
+      title={enabled ? t('深度研究已开启：下一轮优先使用多来源网页证据') : t('开启深度研究')}
+      onPointerDown={event => event.stopPropagation()}
+      onClick={() => void toggle()}
+      disabled={saving}
+    >
+      {saving ? <Loader2 className="spin" size={15} /> : <Atom size={15} />}
+      <span>{t('深度研究')}</span>
+    </button>
+  );
 }
 
 function ComposerModelMenu() {
@@ -769,15 +816,17 @@ function ComposerAccessMenu() {
               type="button"
               role="menuitemradio"
               aria-checked={mode === option.mode}
+              aria-label={`${t(option.label)}：${t(option.description)}`}
               data-active={mode === option.mode}
               className="composer-access-option"
+              title={t(option.description)}
               disabled={saving}
               onClick={() => void chooseMode(option.mode)}
             >
               <span className="composer-access-check">{mode === option.mode && <Check size={15} />}</span>
+              <span className="composer-access-option-icon">{accessIcon(option.mode)}</span>
               <span>
                 <strong>{t(option.label)}</strong>
-                <small>{t(option.description)}</small>
               </span>
             </button>
           ))}
