@@ -17,29 +17,32 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useSideChatStore } from '../../store/sideChatStore';
-import { useUiStore, type WorkspaceCardId } from '../../store/uiStore';
+import {
+  SHORTCUTTABLE_CARDS,
+  useUiStore,
+  type WorkspaceCardId,
+  type WorkspaceCardShortcut,
+} from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
 
 interface TitlebarProps {
   model: string;
 }
 
-type CardShortcut = { key: string; shift?: boolean };
-
-const titlebarWorkspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: typeof Globe; keys?: CardShortcut }> = [
-  { id: 'web', label: 'Preview', icon: Globe, keys: { key: 'p', shift: true } },
-  { id: 'diff', label: 'Diff', icon: FileCode, keys: { key: 'd', shift: true } },
-  { id: 'terminal', label: 'Terminal', icon: SquareTerminal, keys: { key: '`' } },
-  { id: 'files', label: 'Files', icon: Folder, keys: { key: 'f', shift: true } },
+const titlebarWorkspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: typeof Globe }> = [
+  { id: 'web', label: 'Preview', icon: Globe },
+  { id: 'diff', label: 'Diff', icon: FileCode },
+  { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
+  { id: 'files', label: 'Files', icon: Folder },
   { id: 'activity', label: 'Background tasks', icon: Network },
   { id: 'plan', label: 'Plan', icon: StickyNote },
 ];
 
-const isMacPlatform =
+export const isMacPlatform =
   typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
 
 // Render the platform-correct hint: ⇧⌘P on macOS, Ctrl+Shift+P on Windows/Linux.
-function shortcutLabel(keys: CardShortcut): string {
+export function shortcutLabel(keys: WorkspaceCardShortcut): string {
   const k = keys.key === '`' ? '`' : keys.key.toUpperCase();
   if (isMacPlatform) return `${keys.shift ? '⇧' : ''}⌘${k}`;
   return `Ctrl+${keys.shift ? 'Shift+' : ''}${k}`;
@@ -53,6 +56,7 @@ export function Titlebar({ model }: TitlebarProps) {
   const sideChatOpen = useUiStore(state => state.sideChatOpen);
   const setSideChatOpen = useUiStore(state => state.setSideChatOpen);
   const workspaceCardVisibility = useUiStore(state => state.workspaceCardVisibility);
+  const workspaceCardShortcuts = useUiStore(state => state.workspaceCardShortcuts);
   const toggleWorkspaceCard = useUiStore(state => state.toggleWorkspaceCard);
   const sideChatStreaming = useSideChatStore(state => state.streaming);
   const setWorkspaceMenuOpen = useUiStore(state => state.setWorkspaceMenuOpen);
@@ -93,24 +97,25 @@ export function Titlebar({ model }: TitlebarProps) {
     toggleWorkspaceCard(cardId);
   };
 
-  // Wire the card shortcuts (Ctrl/⌘ [+Shift] + key) — they used to be decorative
-  // labels only. Read state via getState to avoid stale closures.
+  // Wire the (user-customizable) card shortcuts: Ctrl/⌘ [+Shift] + key. Read
+  // state via getState to avoid stale closures.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const mod = isMacPlatform ? event.metaKey : event.ctrlKey;
       if (!mod || event.altKey) return;
       const key = event.key.toLowerCase();
-      const option = titlebarWorkspaceCardOptions.find(
-        item => item.keys && key === item.keys.key && Boolean(item.keys.shift) === event.shiftKey,
-      );
-      if (!option) return;
-      event.preventDefault();
       const ui = useUiStore.getState();
-      if (!ui.rightRailOpen && ui.workspaceCardVisibility[option.id]) {
+      const matchId = SHORTCUTTABLE_CARDS.find(id => {
+        const sc = ui.workspaceCardShortcuts[id];
+        return sc && key === sc.key.toLowerCase() && Boolean(sc.shift) === event.shiftKey;
+      });
+      if (!matchId) return;
+      event.preventDefault();
+      if (!ui.rightRailOpen && ui.workspaceCardVisibility[matchId]) {
         ui.setRightRailOpen(true);
         return;
       }
-      ui.toggleWorkspaceCard(option.id);
+      ui.toggleWorkspaceCard(matchId);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -166,7 +171,7 @@ export function Titlebar({ model }: TitlebarProps) {
                 >
                   <Icon size={13} />
                   <span>{option.label}</span>
-                  {option.keys && <em>{shortcutLabel(option.keys)}</em>}
+                  {workspaceCardShortcuts[option.id] && <em>{shortcutLabel(workspaceCardShortcuts[option.id]!)}</em>}
                   <Check size={12} />
                 </button>
               );

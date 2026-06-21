@@ -10,6 +10,25 @@ type RightRailMode = 'files' | 'tool' | 'web' | 'diff' | 'activity';
 export type WorkspaceCardId = 'web' | 'terminal' | 'files' | 'diff' | 'activity' | 'plan' | 'tool';
 export type WorkspaceCardColumnId = 'left' | 'middle' | 'right';
 export type WorkspaceCardVisibility = Record<WorkspaceCardId, boolean>;
+
+// A card toggle shortcut. The primary modifier is always the platform key
+// (Ctrl on Windows/Linux, ⌘ on macOS); `shift` is the optional extra. null
+// means the card has no shortcut.
+export interface WorkspaceCardShortcut {
+  key: string;
+  shift?: boolean;
+}
+export type WorkspaceCardShortcuts = Partial<Record<WorkspaceCardId, WorkspaceCardShortcut | null>>;
+
+export const DEFAULT_WORKSPACE_CARD_SHORTCUTS: WorkspaceCardShortcuts = {
+  web: { key: 'p', shift: true },
+  diff: { key: 'd', shift: true },
+  terminal: { key: '`' },
+  files: { key: 'f', shift: true },
+};
+
+// Cards that support a toggle shortcut (in display order).
+export const SHORTCUTTABLE_CARDS: WorkspaceCardId[] = ['web', 'diff', 'terminal', 'files'];
 export type WorkspaceCardColumnWidths = {
   left: number;
   middle: number;
@@ -145,6 +164,8 @@ interface UiState {
   setTerminalOpen: (open: boolean) => void;
   setTerminalHeight: (height: number) => void;
   setWorkspaceCardVisible: (cardId: WorkspaceCardId, visible: boolean) => void;
+  workspaceCardShortcuts: WorkspaceCardShortcuts;
+  setWorkspaceCardShortcut: (cardId: WorkspaceCardId, shortcut: WorkspaceCardShortcut | null) => void;
   toggleWorkspaceCard: (cardId: WorkspaceCardId) => void;
   setWorkspaceCardColumnWidths: (widths: WorkspaceCardColumnWidths) => void;
   setWorkspaceCardRowSplit: (columnId: WorkspaceCardColumnId, percent: number) => void;
@@ -325,6 +346,27 @@ function persistWorkspaceCardVisibility(value: WorkspaceCardVisibility): Workspa
   return value;
 }
 
+function storedWorkspaceCardShortcuts(): WorkspaceCardShortcuts {
+  const merged: WorkspaceCardShortcuts = { ...DEFAULT_WORKSPACE_CARD_SHORTCUTS };
+  try {
+    const raw = localStorage.getItem('metis.workspaceCardShortcuts');
+    if (raw) {
+      const parsed = JSON.parse(raw) as WorkspaceCardShortcuts;
+      for (const id of SHORTCUTTABLE_CARDS) {
+        if (id in parsed) merged[id] = parsed[id];
+      }
+    }
+  } catch {
+    // ignore malformed storage
+  }
+  return merged;
+}
+
+function persistWorkspaceCardShortcuts(value: WorkspaceCardShortcuts): WorkspaceCardShortcuts {
+  localStorage.setItem('metis.workspaceCardShortcuts', JSON.stringify(value));
+  return value;
+}
+
 function hasVisibleWorkspaceCard(value: WorkspaceCardVisibility): boolean {
   return Object.values(value).some(Boolean);
 }
@@ -366,6 +408,7 @@ export const useUiStore = create<UiState>(set => ({
   terminalOpen: false,
   terminalHeight: 220,
   workspaceCardVisibility: initialWorkspaceCardVisibility,
+  workspaceCardShortcuts: storedWorkspaceCardShortcuts(),
   workspaceCardColumnWidths: storedWorkspaceCardColumnWidths(),
   workspaceCardRowSplits: storedWorkspaceCardRowSplits(),
   previewPath: null,
@@ -470,6 +513,10 @@ export const useUiStore = create<UiState>(set => ({
       };
     }),
   setTerminalHeight: terminalHeight => set({ terminalHeight: Math.min(Math.max(terminalHeight, 140), 420) }),
+  setWorkspaceCardShortcut: (cardId, shortcut) =>
+    set(state => ({
+      workspaceCardShortcuts: persistWorkspaceCardShortcuts({ ...state.workspaceCardShortcuts, [cardId]: shortcut }),
+    })),
   setWorkspaceCardVisible: (cardId, visible) =>
     set(state => {
       const workspaceCardVisibility = persistWorkspaceCardVisibility({

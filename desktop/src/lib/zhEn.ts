@@ -117,6 +117,13 @@ export const zhEn: Record<string, string> = {
   '项目记忆': 'Project memory',
   '工具已启用': 'tools enabled',
   '主题与语言': 'Theme & language',
+  // 快捷键设置
+  '快捷键': 'Shortcuts',
+  '右上角工作区卡片的开关快捷键。主键为': 'Toggle shortcuts for the top-right workspace cards. Primary key is',
+  '，点「录制」后按下组合键（可加 Shift）。': '. Click Record, then press the combo (Shift optional).',
+  '按下组合键…': 'Press a combo…',
+  '录制': 'Record',
+  '清除': 'Clear',
   '字体': 'Font',
   'UI 字号': 'UI size',
   '代码字号': 'Code size',

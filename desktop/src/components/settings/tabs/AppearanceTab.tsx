@@ -1,9 +1,10 @@
 import { memo } from 'react';
-import { Moon, Palette, Sun, Type } from 'lucide-react';
+import { Keyboard, Moon, Palette, Sun, Type } from 'lucide-react';
 import { themeLabels, themeMode, themeNames, themes } from '../../../lib/themes';
 import type { FontFamily, Language, ThemeName } from '../../../lib/types';
 import { tr } from '../../../lib/i18n';
 import { FontSizeControl } from '../FontSizeControl';
+import { ShortcutSettings } from '../ShortcutSettings';
 import { fontOptions } from '../settingsShared';
 import { useT } from '../../../hooks/useT';
 
@@ -138,6 +139,13 @@ export const AppearanceTab = memo(function AppearanceTab({
           onChange={onCodeFontSizeChange}
           value={codeFontSize}
         />
+      </section>
+      <section className="settings-section">
+        <div className="settings-section-header">
+          <Keyboard size={16} className="section-icon" />
+          <h3>{t('快捷键')}</h3>
+        </div>
+        <ShortcutSettings />
       </section>
     </div>
   );
