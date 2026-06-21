@@ -29,6 +29,13 @@ const LOCAL_PREVIEW_URL_RE =
 const LOCAL_PREVIEW_HOST_PORT_RE =
   /(?:^|[\s([>])((?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]):\d{2,5}(?:\/[^\s<>"'`)\]}]*)?)/gi;
 const TRAILING_PUNCTUATION_RE = /[.,;:!?]+$/;
+// GFM's autolink-literal only trims ASCII trailing punctuation and stops at
+// whitespace. When a model writes a bare URL immediately followed by CJK
+// prose with no space and full-width punctuation (e.g. "https://x.com）的内容："),
+// remark-gfm swallows everything up to the next real whitespace into the
+// link. This is the boundary of what remark-gfm could plausibly have meant
+// as "the URL": a run of printable ASCII characters.
+const URL_SAFE_RUN_RE = /^[!-~]+/;
 
 export function remarkMetisLinks() {
   return (tree: MdNode) => {
@@ -76,8 +83,40 @@ function transformNode(node: MdNode): void {
       }
       continue;
     }
+    if (child.type === 'link') {
+      const replacements = splitOverrunAutolink(child);
+      markLinkKind(replacements[0]);
+      if (replacements.length > 1) {
+        node.children.splice(index, 1, ...replacements);
+        index += replacements.length - 1;
+        continue;
+      }
+    }
     transformNode(child);
   }
+}
+
+/** Trim a GFM autolink-literal node back to its real URL when remark-gfm
+ *  over-matched into trailing CJK/full-width-punctuation text, and return
+ *  the recovered trailing text as a sibling node. No-op for normal links
+ *  (e.g. `[label](url)`) where the label differs from the URL. */
+function splitOverrunAutolink(node: MdNode): MdNode[] {
+  const url = String(node.url || '');
+  if (!/^https?:\/\//i.test(url)) return [node];
+  const children = node.children || [];
+  if (children.length !== 1 || children[0].type !== 'text') return [node];
+  const text = String(children[0].value || '');
+  if (text !== url) return [node];
+
+  const match = text.match(URL_SAFE_RUN_RE);
+  const safeRun = match ? match[0] : '';
+  const trimmed = safeRun.replace(TRAILING_PUNCTUATION_RE, '');
+  if (!trimmed || trimmed.length >= text.length) return [node];
+
+  const remainder = text.slice(trimmed.length);
+  node.url = trimmed;
+  children[0].value = trimmed;
+  return [node, { type: 'text', value: remainder }];
 }
 
 function segmentToNode(segment: MetisLinkSegment): MdNode {

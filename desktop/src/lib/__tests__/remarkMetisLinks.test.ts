@@ -52,6 +52,51 @@ describe('remarkMetisLinks', () => {
     });
     expect(tree.children[1].value).toBe('const path = "src/app.tsx";');
   });
+
+  it('recovers CJK prose swallowed into a bare-URL autolink by remark-gfm', () => {
+    // remark-gfm's autolink-literal only trims ASCII trailing punctuation and
+    // stops at whitespace, so "https://x.com）的主要内容：..." with no space
+    // after the URL gets matched as one giant link by remark-gfm before this
+    // plugin ever sees it. Simulate that already-overrun node here.
+    const overrunUrl = 'https://www.anthropic.com/）的主要内容：介绍了新模型';
+    const tree: any = {
+      type: 'root',
+      children: [
+        {
+          type: 'paragraph',
+          children: [{ type: 'link', url: overrunUrl, children: [{ type: 'text', value: overrunUrl }] }],
+        },
+      ],
+    };
+
+    remarkMetisLinks()(tree);
+
+    const [link, trailing] = tree.children[0].children;
+    expect(link).toMatchObject({
+      type: 'link',
+      url: 'https://www.anthropic.com/',
+      children: [{ type: 'text', value: 'https://www.anthropic.com/' }],
+      data: { hProperties: { 'data-link-kind': 'web' } },
+    });
+    expect(trailing).toEqual({ type: 'text', value: '）的主要内容：介绍了新模型' });
+  });
+
+  it('leaves normal [label](url) links alone even when label is CJK', () => {
+    const tree: any = {
+      type: 'root',
+      children: [
+        {
+          type: 'paragraph',
+          children: [{ type: 'link', url: 'https://example.com', children: [{ type: 'text', value: '官网链接' }] }],
+        },
+      ],
+    };
+
+    remarkMetisLinks()(tree);
+
+    expect(tree.children[0].children).toHaveLength(1);
+    expect(tree.children[0].children[0]).toMatchObject({ url: 'https://example.com' });
+  });
 });
 
 describe('chatLinkActionFromHref', () => {
