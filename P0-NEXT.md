@@ -1530,3 +1530,54 @@ Did the two things the owner asked for after reviewing Codex's Phase 1:
 
 Still open for whoever picks this up next: the `composer-toolbar-left`
 "深度研究" toggle (frontend, not touched here) and Phase 2's cache layer.
+
+## Next Task For Codex: Wire The Deep-Research Trigger (2026-06-22)
+
+Backend `web_research` works and is live-verified. Nothing triggers it
+yet — gate 1 (explicit user toggle) from the "Trigger Design" section
+above is still unbuilt. This is the task: close that loop.
+
+1. **Toggle button.** Add a "深度研究" toggle in
+   `desktop/src/components/chat/Composer.tsx`, `composer-toolbar-left`,
+   next to `<ComposerAccessMenu />` (~line 504). Follow the existing
+   `accessOptions` array + dropdown pattern already used for the
+   ask/edit/plan/auto/bypass permission menu — same visual tier, not a
+   new design language.
+2. **Persistence.** Copy the existing
+   `getComposerPermissionMode`/`setComposerPermissionMode` round-trip
+   pattern for the new toggle's on/off state.
+3. **Routing.** When the toggle is on, the next turn's tool guidance
+   should steer the model toward `web_research` over `web_search` —
+   there's already a hook for this in
+   `backend/runtime/model_router.py::_tool_guidance_for_task` (the
+   `external_lookup` branch already mentions both tools; extend it to
+   read the toggle state instead of just static text).
+4. **Gate 2 (self-escalation).** Per the Trigger Design section: when the
+   toggle is off, the model may still escalate `web_search` →
+   `web_research` itself if results are thin/contradictory, but only once
+   per turn, and the escalation + reason must be written to
+   `action_audit.py`'s diagnostic log — not silent. This part doesn't
+   exist yet either; add it now alongside the toggle so both gates land
+   together.
+5. **Progress indicator — "正在深度研究…" with a spinning icon.** Reuse the
+   existing pattern, don't invent a new one:
+   - Icon: `LoaderCircle` from `lucide-react` (already imported in
+     `threadUtils.ts`, `RightRail.tsx`, `SideChatPanel.tsx` for this exact
+     purpose) with `className="spin"`.
+   - Animation: this codebase scopes `.spin` per parent container rather
+     than one global rule — see `.composer-access-button .spin` /
+     `.runtime-status .spin` in `desktop/src/index.css` (~line 4625,
+     4896), both binding to the `runtime-spin` keyframe
+     (`900ms linear infinite`). Add a new scoped rule for whatever
+     container wraps the research-progress chip, e.g.
+     `.deep-research-progress .spin { animation: runtime-spin 900ms linear infinite; }`
+     — reuse the `runtime-spin` keyframe itself, don't define a third one.
+   - Where it shows: same place a running tool call already renders its
+     status (`toolProgressText`/`toolStatusIcon` in `threadUtils.ts` follow
+     the same `running` → spin, `done` → check pattern) — `web_research`
+     should look like any other in-flight tool call while it's reading
+     evidence pages, not a separate UI concept.
+6. Add/extend frontend tests the same way the autolink fix above did
+   (`desktop/src/lib/__tests__/...`) and run the full `npx vitest run`
+   suite before calling this done — it was 115/115 passing before this
+   task starts.
