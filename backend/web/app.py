@@ -1493,11 +1493,31 @@ def _generate_smart_title(session_id: str, user_message: Any) -> None:
 # _ext_to_lang moved to workspace_routes.py
 
 
+def _default_workspace_path() -> str:
+    """A sensible default workspace folder.
+
+    In the packaged app, os.getcwd() is the backend install dir (…/_internal,
+    metis-backend.exe) — never expose that as a workspace. Fall back to a clean
+    per-user folder instead.
+    """
+    cwd = os.path.abspath(os.getcwd())
+    looks_like_app_dir = bool(getattr(sys, "frozen", False)) or os.path.exists(os.path.join(cwd, "metis-backend.exe"))
+    if not looks_like_app_dir:
+        return cwd
+    home = os.path.expanduser("~")
+    workspace = os.path.join(home, "Metis Workspace")
+    try:
+        os.makedirs(workspace, exist_ok=True)
+        return workspace
+    except OSError:
+        return home
+
+
 def _init_session() -> None:
     """Load the initial session at startup without creating an empty chat."""
     workspace_manager = get_workspace_manager()
     session_manager = get_session_manager()
-    default_workspace = workspace_manager.create_workspace(os.getcwd())
+    default_workspace = workspace_manager.create_workspace(_default_workspace_path())
     _runtime_state.active_workspace_id = default_workspace.id
     session_manager.assign_unscoped_sessions(default_workspace.id)
     _load_latest_session_for_workspace(_runtime_state.active_workspace_id)

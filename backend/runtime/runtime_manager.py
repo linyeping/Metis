@@ -595,7 +595,14 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
             and "SELFTEST_XLSX_OK" in stdout
         )
         if used_local:
-            message = "自检失败:沙箱回退到本地执行(VM 未真正运行)。"
+            reason = fallback or "未知原因"
+            hint = ""
+            low = reason.lower()
+            if "bundle" in low or "pack" in low or "not found" in low or "缺" in reason:
+                hint = " 多半是运行时包没下载——请在「VM Runtime Pack」里点下载（约 800 MB）。"
+            elif "service" in low or "服务" in reason or "pipe" in low:
+                hint = " 沙箱服务未运行——请在沙箱面板里点「开通/修复」后重试。"
+            message = f"自检失败:沙箱回退到本地执行(VM 未真正运行)。原因:{reason}。{hint}"
         elif passed:
             message = "自检通过:VM 真实启动并运行了任务(含办公库)。"
         else:
