@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from backend.runtime.llm_backends.openai_compat import OpenAICompatBackend
 
 
