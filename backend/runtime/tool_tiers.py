@@ -130,6 +130,7 @@ TIER_2_TOOLS: Set[str] = TIER_3_TOOLS | {
     "git_commit_pr",
     "git_workflow",
     "web_search",
+    "web_research",
     "web_fetch",
     "browse_web",
     "browse_and_extract",

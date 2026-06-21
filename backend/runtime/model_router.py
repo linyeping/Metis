@@ -139,7 +139,7 @@ _ARTIFACT_WORKFLOW_TOOLS = [
     "generate_repo_map",
     "todo_write",
 ]
-_EXTERNAL_WEB_TOOLS = ["web_search", "web_fetch", "browse_web", "browse_and_extract"]
+_EXTERNAL_WEB_TOOLS = ["web_search", "web_fetch", "web_research", "browse_web", "browse_and_extract"]
 _LONG_CONTEXT_TOOLS = [
     "read_file_chunk",
     "semantic_search",
@@ -602,7 +602,7 @@ def _tool_guidance_for_task(task_type: str) -> str:
     if task_type == "code":
         return "Use repo tools for direct reads/edits. Use metis_runtime_job for commands, tests, builds, repros, generated artifacts, or risky experiments before applying changes to the source project."
     if task_type == "external_lookup":
-        return "Use web_search/web_fetch for fresh external facts. Escalate to browse_web only for dynamic or interactive pages."
+        return "Use web_search/web_fetch for cheap fresh facts. Use web_research when the user asks to check multiple sources or prove claims. Escalate to browse_web only for dynamic or interactive pages."
     if task_type == "long_context":
         return "Use chunked reading and semantic/repo search. Avoid loading huge documents into one tool result."
     return "Answer directly unless a tool is clearly needed."

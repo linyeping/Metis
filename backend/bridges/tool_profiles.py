@@ -25,6 +25,7 @@ SAFE_TOOLS: frozenset[str] = frozenset(
         "git_diff",
         "git_log",
         "web_search",
+        "web_research",
         "web_fetch",
         "browse_web",
         "browse_and_extract",

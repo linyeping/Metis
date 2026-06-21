@@ -33,6 +33,7 @@ READONLY_SUBAGENT_TOOLS = [
     "ast_search_code",
     "web_fetch",
     "web_search",
+    "web_research",
 ]
 
 _SUBAGENT_SYSTEM_PROMPT = (

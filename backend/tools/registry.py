@@ -61,6 +61,7 @@ from backend.tools.coding.modify_refactor.refactor.extract_method import extract
 from backend.tools.coding.modify_refactor.refactor.rename_symbol import rename_symbol
 from backend.tools.coding.network_external.media.generate_image import generate_image
 from backend.tools.coding.network_external.web.web_fetch import web_fetch
+from backend.tools.coding.network_external.web.web_research import web_research
 from backend.tools.coding.network_external.web.web_search import web_search
 from backend.tools.browser_automation.tools import browse_and_extract, browse_web
 from backend.tools.coding.read_search.read_analyze.generate_repo_map import generate_repo_map
@@ -273,6 +274,7 @@ AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
     "undo_last_edit": undo_last_edit,
     "verify_compilation": verify_compilation,
     "web_search": web_search,
+    "web_research": web_research,
     "web_fetch": web_fetch,
     "browse_web": browse_web,
     "browse_and_extract": browse_and_extract,
@@ -429,6 +431,12 @@ def normalize_tool_kwargs(canonical: str, raw: Dict[str, Any]) -> Dict[str, Any]
     elif canonical == "web_search":
         if "search_term" in kw and "query" not in kw:
             kw["query"] = kw.pop("search_term")
+
+    elif canonical == "web_research":
+        if "query" in kw and "question" not in kw:
+            kw["question"] = kw.pop("query")
+        if "search_term" in kw and "question" not in kw:
+            kw["question"] = kw.pop("search_term")
 
     elif canonical == "generate_image":
         if "description" in kw and "prompt" not in kw:

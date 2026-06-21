@@ -26,7 +26,7 @@ _FILE_READ_TOOLS = {"read_file", "read_multiple_files"}
 _SHELL_TOOLS = {"execute_bash_command", "run_tests", "metis_runtime_run"}
 _SEARCH_TOOLS = {"grep_search", "glob_search", "semantic_search", "web_search"}
 _LIST_TOOLS = {"list_directory"}
-_BROWSER_TOOLS = {"browse_web", "browse_and_extract", "browser_read_page", "web_search"}
+_BROWSER_TOOLS = {"browse_web", "browse_and_extract", "browser_read_page", "web_search", "web_research"}
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +105,7 @@ _STRATEGY_MAP: Dict[str, str] = {
     "browse_and_extract": "browser_cap",
     "browser_read_page": "browser_cap",
     "web_search": "dedup_lines",
+    "web_research": "browser_cap",
 }
 
 

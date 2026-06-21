@@ -20,6 +20,8 @@ LEAN_PROFILE = frozenset(
         "load_skill",
         "delegate_explore",
         "delegate_shell",
+        "web_search",
+        "web_research",
         "web_fetch",
         "browse_web",
         "browse_and_extract",

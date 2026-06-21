@@ -10,6 +10,7 @@ requires-python = ">=3.9"
 dependencies = [
     "flask>=3.0",
     "requests>=2.28",
+    "ddgs>=9.0",
     "Pillow>=9.0",
 ]
 

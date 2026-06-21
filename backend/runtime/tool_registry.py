@@ -615,6 +615,7 @@ _TOOL_USAGE_HINTS: Dict[str, str] = {
     "setup_workspace": "Use to prepare a project on a fresh machine by detecting runtimes and installing common dependencies.",
     "browse_web": "Use when a task needs a real browser to navigate, click, fill forms, or inspect dynamic pages.",
     "browse_and_extract": "Use when you know the URL and need specific information extracted through browser automation.",
+    "web_research": "Use when the user asks for multi-source web evidence or a claim needs verification beyond one search result.",
     "ask_question": "Use when requirements are unclear or when a destructive action needs explicit user confirmation.",
     "apply_patch": "Use when you have a precise patch for one or more files and want the smallest possible diff.",
     "run_tests": "Use after code changes to verify behavior or reproduce a failure with a focused command.",
@@ -2611,6 +2612,12 @@ def _normalize_builtin_kwargs(canonical: str, raw: Dict[str, Any]) -> Dict[str, 
     elif canonical == "web_search":
         if "search_term" in kwargs and "query" not in kwargs:
             kwargs["query"] = kwargs.pop("search_term")
+
+    elif canonical == "web_research":
+        if "query" in kwargs and "question" not in kwargs:
+            kwargs["question"] = kwargs.pop("query")
+        if "search_term" in kwargs and "question" not in kwargs:
+            kwargs["question"] = kwargs.pop("search_term")
 
     elif canonical == "generate_image":
         if "description" in kwargs and "prompt" not in kwargs:

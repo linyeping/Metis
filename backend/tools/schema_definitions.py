@@ -1121,8 +1121,22 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
         {
             "query": _string("查询（可用 search_term 别名）"),
             "max_results": _integer("条数上限，默认 5"),
+            "region": _string("可选 ddgs 区域，如 us-en / cn-zh"),
+            "timelimit": _string("可选时间过滤，如 d/w/m/y"),
         },
         ["query"],
+    ),
+    (
+        "web_research",
+        """【WebResearch】免费深度网页研究：先用 ddgs 搜索，再读取少量 HTTPS 证据页并返回可引用证据。
+适合“查清楚/对比多个来源/需要证据链”的问题；普通实时事实先用 web_search，已知 URL 先用 web_fetch。不会处理登录、点击或 JS 动态页面，遇到这类页面再升级 browse_web。""",
+        {
+            "question": _string("研究问题，应具体到实体、年份、版本或判断标准"),
+            "max_results": _integer("搜索结果上限，默认 5，最大 10"),
+            "max_pages": _integer("读取证据页数量，默认 3，最大 5"),
+            "max_chars_per_page": _integer("每个证据页返回字符数，默认 3000"),
+        },
+        ["question"],
     ),
     (
         "web_fetch",

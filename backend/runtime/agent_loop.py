@@ -801,6 +801,9 @@ _SAFE_TOOLS: set[str] = {
     "find_files",
     "ast_search_code",
     "generate_repo_map",
+    "web_search",
+    "web_research",
+    "web_fetch",
     "desktop_screenshot",
     "desktop_inventory",
     "metis_rootfs_asset_status",
@@ -820,6 +823,8 @@ _PARALLEL_READONLY_TOOLS: set[str] = {
     "glob_search",
     "search_in_files",
     "generate_repo_map",
+    "web_search",
+    "web_research",
     "web_fetch",
 }
 _EDIT_TOOLS: set[str] = {
@@ -2925,7 +2930,7 @@ _SEARCH_TOOLS = {"search_in_file", "search_in_codebase", "find_files"}
 _SHELL_TOOLS = {"execute_bash_command", "execute_command"}
 _LIST_TOOLS = {"list_directory"}
 _BROWSER_TOOLS = {"browser_navigate", "browser_get_text", "browser_extract_text",
-                  "browser_read_page", "web_search"}
+                  "browser_read_page", "web_search", "web_research"}
 
 _MAX_RESULT_CHARS = 24_000  # ~6K tokens
 

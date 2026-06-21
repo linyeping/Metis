@@ -48,6 +48,8 @@ READ_ONLY_TOOL_PREFIXES = (
     "generate_repo_map",
     "git_diff",
     "check_git_status",
+    "web_search",
+    "web_research",
     "web_fetch",
 )
 

@@ -1418,3 +1418,115 @@ ask/edit/plan/auto/bypass access menu — a "深度研究" toggle button there,
 same visual tier as those controls. When on, route the next user turn's
 search-shaped tool calls to `web_research` instead of `web_search`; when
 off, default behavior (gate 2/3 still apply normally).
+
+## Construction Log - Free Search / Grok-Like Browse Phase 1 Fixer (2026-06-22)
+
+Status: implemented backend Phase 1 foundation. This does **not** claim Grok-level browsing yet; it gives Metis a free, no-key search base that can be measured, routed, and improved.
+
+What changed:
+
+- Replaced the old DDG Lite HTML-regex `web_search` path with a `ddgs`-backed broker.
+- Added `metis_search_query` in `backend/tools/coding/network_external/web/search_broker.py`.
+  - Normalizes `ddgs` results into `rank/title/url/snippet/source`.
+  - Dedupes URLs and decodes DuckDuckGo redirect URLs.
+  - Caps `max_results` to avoid runaway tool output.
+  - Returns a clean public error when `ddgs` is missing: `pip install ddgs`.
+- Added `metis_page_read`.
+  - Reuses existing HTTPS-only / SSRF guard from `web_fetch`.
+  - Reuses existing `extract_html_markdown`.
+  - Reads only `https://` pages.
+  - Blocks localhost/private/internal hosts and unsafe redirects.
+  - Truncates page evidence per page instead of dumping whole documents.
+- Added `metis_search_research`.
+  - Runs search, dedupes URLs, reads a capped number of evidence pages.
+  - Separates readable evidence pages from read failures.
+  - Returns instructions that citations must come from evidence page URLs, not search snippets.
+- Added model-facing `web_research`.
+  - Tool schema added in `backend/tools/schema_definitions.py`.
+  - Execution wired in `backend/tools/registry.py`.
+  - Runtime alias handling added in `backend/runtime/tool_registry.py` and `backend/tools/registry.py` so `query` / `search_term` can map to `question`.
+- Added `ddgs>=9.0` to:
+  - `backend/pyproject.toml`
+  - `backend/requirements-build.txt`
+- Routed `web_research` into the existing web/search system:
+  - `backend/runtime/model_router.py`: external lookup can prefer `web_search` / `web_fetch`, and use `web_research` for multi-source proof.
+  - `backend/runtime/tool_tiers.py`: visible to tier-2+ models, not the weakest tool tier.
+  - `backend/runtime/tool_profiles.py` and `backend/bridges/tool_profiles.py`: treated as safe read-only web work.
+  - `backend/runtime/permission_control.py`: treated as read-only.
+  - `backend/runtime/parallel_subagents.py`: available to read-only research subagents.
+  - `backend/runtime/result_compactor.py` and `backend/runtime/agent_loop.py`: capped like browser/evidence output so it does not flood context.
+
+Public / diagnostic behavior:
+
+- Search/page failures do not return raw Python tracebacks to the model/user.
+- User-facing output is compact and actionable: missing dependency, blocked host, HTTPS-only, fetch failure, read failure.
+- Raw low-level stack traces are intentionally not introduced here; this Phase 1 stays compatible with the existing `action_audit.py` / `tool_visibility.py` diagnostic split.
+
+Tests added:
+
+- `backend/tests/test_free_search_broker.py`
+  - DDG/DDGS result normalization and redirect decoding.
+  - Missing `ddgs` public error.
+  - HTML fixture page extraction without live network.
+  - HTTP blocking without live network.
+  - `web_research` URL dedupe and max-page cap.
+  - Tool/schema registration.
+
+Verification run:
+
+- `D:\Anaconda3\python.exe -m py_compile backend\tools\coding\network_external\web\search_broker.py backend\tools\coding\network_external\web\web_search.py backend\tools\coding\network_external\web\web_research.py backend\tools\registry.py backend\tools\schema_definitions.py backend\runtime\model_router.py backend\runtime\result_compactor.py backend\runtime\tool_registry.py`
+- `D:\Anaconda3\python.exe -m pytest backend\tests\test_free_search_broker.py backend\tests\test_tool_registry_bridge.py backend\tests\test_result_compactor.py backend\tests\test_fableadv_40_model_tool_routing.py backend\tests\test_permission_control_plane.py backend\tests\test_permission_rules.py backend\tests\test_tool_visibility.py backend\tests\test_runtime_tool_registry_metadata.py -q`
+  - Result: `71 passed`.
+- `D:\Anaconda3\python.exe -m ruff check backend\tools\coding\network_external\web\search_broker.py backend\tools\coding\network_external\web\web_search.py backend\tools\coding\network_external\web\web_research.py backend\tests\test_free_search_broker.py`
+  - Result: all checks passed.
+
+Intentional deferrals:
+
+- No cache layer yet. Phase 1 should be used first so we know what to cache: raw search results, extracted page text, or synthesized evidence bundles.
+- No Playwright fallback yet. Dynamic/JS/login pages still escalate to existing `browse_web`.
+- No reverse image search yet. That remains a separate Phase 3/4 capability.
+- No Deep Research UI toggle yet. The backend tool exists; the next UI step is the planned `composer-toolbar-left` "深度研究" toggle near permission mode.
+- No full Grok/Gemini-style answer synthesizer yet. Current tool returns evidence; answer synthesis remains the model's job, grounded in retrieved page text.
+
+Notes for Claude:
+
+- The important safety line is already in the formatter: do not let the model cite snippets as final proof. Future `metis_search_answer` should cite only `PageEvidence.text` spans from pages actually read.
+- I kept this intentionally small. Please do not replace it with a giant auto-mode classifier yet. The better next move is a visible opt-in "深度研究" toggle plus audit logging for any automatic escalation from `web_search` to `web_research`.
+- If you continue this, please add a real progress surface before making `web_research` long-running. A multi-page research call must look like an active background task, not a frozen chat turn.
+
+## Claude's Follow-Up (2026-06-22, same day)
+
+Did the two things the owner asked for after reviewing Codex's Phase 1:
+
+1. **Live smoke test.** Installed `ddgs` in the local dev env (it was only
+   declared in `pyproject.toml`/`requirements-build.txt`, not actually
+   installed) and ran `metis_search_query` / `metis_page_read` /
+   `metis_search_research` against the real network — search, dedupe,
+   HTTPS fetch, and markdown extraction all worked end-to-end against
+   live pages (e.g. pulled and extracted `anthropic.com/news/...` cleanly,
+   22k chars). Full regression suite still green after: 74 passed.
+
+2. **Upgraded the evidence status field** from the `ok: bool` two-state in
+   `search_broker.py` to the four-state design from the original reply:
+   `metis_page_read` now returns `status: "ok" | "partial" | "blocked" |
+   "error"`.
+   - `blocked`: SSRF-blocked host, non-HTTPS redirect, or HTTP 401/403/405/
+     429/451 (site is refusing/rate-limiting, not actually erroring).
+   - `partial`: fetch succeeded but extracted text is under ~200 chars
+     (usually a JS-shell page) — `ok` stays `True` but `note` flags it
+     fragile.
+   - `error`: missing dependency or any other exception.
+   - `ok` stays as the existing usable/not-usable boolean so this is
+     additive, not breaking — Codex's existing call sites and tests did
+     not need to change shape, only the new status-aware ones.
+   - `format_research_response` now tags `[PARTIAL EVIDENCE]` pages inline
+     and labels failures as `blocked/rate-limited` vs `error`, with an
+     explicit instruction not to silently drop a blocked source if a claim
+     depends on it — surface the verification gap to the user instead.
+   - Added 3 new tests (`test_page_read_marks_rate_limited_status_as_blocked`,
+     `test_page_read_marks_thin_content_as_partial`,
+     `test_format_research_response_flags_partial_and_blocked_evidence`).
+     10/10 pass in `test_free_search_broker.py`, ruff clean.
+
+Still open for whoever picks this up next: the `composer-toolbar-left`
+"深度研究" toggle (frontend, not touched here) and Phase 2's cache layer.
