@@ -83,8 +83,9 @@ class OpenAICompatBackend(LLMBackend):
         # DeepSeek /beta 端点：仅 chat completions 走 /beta，开启 strict tool mode + chat prefix
         # completion（提升工具调用可靠性，配合稳定前缀更利于上下文缓存命中）。用户显式带 /v1 或
         # /beta 视为自主选择不再追加；/models 等其它路径不受影响（走独立函数）。
+        # strict 模式拒绝自由形态对象参数(如 map/无属性对象)；METIS_DEEPSEEK_STRICT=0 退回普通模式。
         base = self.base_url.rstrip("/")
-        if base.lower().endswith("api.deepseek.com"):
+        if base.lower().endswith("api.deepseek.com") and _deepseek_strict_enabled():
             base = base + "/beta"
         return normalize_chat_completions_url(base)
 
@@ -396,9 +397,15 @@ def _provider_tools(
 ) -> Optional[List[Dict[str, Any]]]:
     if not tools:
         return tools
-    if _is_deepseek_target(base_url, model):
+    if _is_deepseek_target(base_url, model) and _deepseek_strict_enabled():
         return sanitize_deepseek_strict_tools(tools)
     return tools
+
+
+def _deepseek_strict_enabled() -> bool:
+    """DeepSeek /beta strict tool mode. Off => normal /chat/completions, which
+    accepts loose schemas (free-form object params strict mode would reject)."""
+    return os.environ.get("METIS_DEEPSEEK_STRICT", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _is_deepseek_target(base_url: str, model: str) -> bool:

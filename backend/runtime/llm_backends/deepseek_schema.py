@@ -54,7 +54,10 @@ def sanitize_deepseek_json_schema(schema: Dict[str, Any], *, root: bool = False)
             for name, value in properties.items()
         }
         clean["required"] = list(clean["properties"].keys())
-        clean["additionalProperties"] = False
+        # DeepSeek strict mode rejects "an object with no properties". For a
+        # free-form object (no declared properties) allow arbitrary keys; lock
+        # objects that do declare properties to a closed schema.
+        clean["additionalProperties"] = not clean["properties"]
 
     if is_array:
         items = clean.get("items")
