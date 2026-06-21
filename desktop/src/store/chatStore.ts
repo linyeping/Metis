@@ -20,6 +20,7 @@ import {
   rewindSession,
   runEventStream,
   startChatRun,
+  undoTurn,
 } from '../lib/api';
 import { buildUserContent } from '../lib/chatUtils';
 import type {
@@ -124,6 +125,7 @@ interface ChatState {
   loadSession: (sessionId: string | null, options?: { force?: boolean }) => Promise<void>;
   rewindLatest: () => Promise<void>;
   rewindToMessage: (messageId: string) => Promise<void>;
+  undoLastTurn: () => Promise<void>;
   send: (overrideText?: string) => Promise<void>;
   stop: () => void;
   clearLocal: () => void;
@@ -217,6 +219,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   rewindLatest: async () => rewindToCheckpoint({}),
   rewindToMessage: async messageId => rewindToCheckpoint({ messageId }),
+  undoLastTurn: async () => {
+    const ui = useUiStore.getState();
+    const sessionId = useSessionStore.getState().activeSessionId;
+    if (!sessionId) return;
+    if (get().streaming || hasActiveRunController(sessionId)) {
+      ui.pushToast({ title: '当前会话正在运行', description: '请等待本轮完成或停止后再撤回。', type: 'warning', sessionId });
+      return;
+    }
+    try {
+      const result = await undoTurn(sessionId);
+      if (!result.ok) {
+        ui.pushToast({ title: '无法撤回', description: result.error || '没有可撤回的回合。', type: 'warning', sessionId });
+        return;
+      }
+      await useSessionStore.getState().load();
+      await get().loadSession(sessionId, { force: true });
+      // Drop the user message back into the composer so it can be edited + resent.
+      const existing = get().composerText.trim();
+      set({ composerText: existing ? existing : result.userText });
+    } catch (error) {
+      ui.pushToast({ title: '撤回失败', description: formatError(error), type: 'error', sessionId });
+    }
+  },
   hydrateRecoverySnapshot: sessionId => set({ recoveryNotice: readRecoverySnapshot(sessionId) }),
   markRecoveryFailed: () => {
     const notice = get().recoveryNotice;

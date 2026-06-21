@@ -2659,6 +2659,59 @@ def session_rewind(session_id: str) -> Any:
     )
 
 
+def _user_message_text(message: Dict[str, Any]) -> str:
+    """Best-effort plain text of a stored user message (str or multimodal list)."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in {"text", None} and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            elif isinstance(item, str):
+                parts.append(item)
+        return "\n".join(parts).strip()
+    return ""
+
+
+@app.route("/sessions/<session_id>/undo-turn", methods=["POST"])
+def session_undo_turn(session_id: str) -> Any:
+    """Lightweight Claude-style undo: drop the last user turn (its message + the
+    assistant reply / tool calls that followed) and hand the user message back
+    so the UI can drop it into the composer. Conversation-only, no checkpoint or
+    file restore — always works, even when the last turn had no text output."""
+    active_run = _active_run_for_session(session_id)
+    if active_run is not None:
+        return jsonify({"ok": False, "error": "当前会话仍有任务运行，结束后才能撤回。", "run": _run_public_payload(active_run)}), 409
+
+    manager = get_session_manager()
+    session = manager.get_session(session_id)
+    if session is None:
+        return jsonify({"ok": False, "error": "session not found"}), 404
+
+    history = list(session.history)
+    user_index = next((i for i in range(len(history) - 1, -1, -1) if str(history[i].get("role")) == "user"), -1)
+    if user_index < 0:
+        return jsonify({"ok": False, "error": "没有可撤回的用户消息。"}), 404
+
+    removed_user = history[user_index]
+    next_history = history[:user_index]
+    next_compact_state = _compact_state_after_truncate(session.history, next_history, session.compact_state)
+    manager.update_session(session_id, history=next_history, compact_state=next_compact_state, mode=session.mode)
+    if session_id == _runtime_state.active_session_id:
+        _runtime_state.chat_history = list(next_history)
+        _runtime_state.compact_state = dict(next_compact_state)
+
+    return jsonify(
+        {
+            "ok": True,
+            "history_length": len(next_history),
+            "user_text": _user_message_text(removed_user),
+        }
+    )
+
+
 def _checkpoint_paths_from(checkpoint: Dict[str, Any], session_id: str) -> List[str]:
     checkpoints = list_checkpoints(session_id)
     selected_id = str(checkpoint.get("checkpoint_id") or "")

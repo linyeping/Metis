@@ -266,7 +266,9 @@ export function App() {
       if (now - lastEscapeAt <= 650) {
         lastEscapeAt = 0;
         event.preventDefault();
-        void useChatStore.getState().rewindLatest();
+        // Claude-style quick undo: drop the last turn + restore the user message
+        // to the composer. Works even for tool-only / no-output turns.
+        void useChatStore.getState().undoLastTurn();
         return;
       }
       lastEscapeAt = now;

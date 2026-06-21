@@ -538,6 +538,19 @@ export async function getSessionCheckpoints(sessionId: string): Promise<SessionC
   });
 }
 
+export async function undoTurn(sessionId: string): Promise<{ ok: boolean; error: string; historyLength: number; userText: string }> {
+  const data = await requestJson<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/undo-turn`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return {
+    ok: Boolean(data.ok),
+    error: stringValue(data.error),
+    historyLength: numberValue(data.history_length),
+    userText: stringValue(data.user_text),
+  };
+}
+
 export async function rewindSession(
   sessionId: string,
   payload: {
