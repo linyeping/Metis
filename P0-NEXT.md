@@ -1559,24 +1559,43 @@ above is still unbuilt. This is the task: close that loop.
    `action_audit.py`'s diagnostic log — not silent. This part doesn't
    exist yet either; add it now alongside the toggle so both gates land
    together.
-5. **Progress indicator — "正在深度研究…" with a spinning icon.** Reuse the
-   existing pattern, don't invent a new one:
-   - Icon: `LoaderCircle` from `lucide-react` (already imported in
-     `threadUtils.ts`, `RightRail.tsx`, `SideChatPanel.tsx` for this exact
-     purpose) with `className="spin"`.
-   - Animation: this codebase scopes `.spin` per parent container rather
-     than one global rule — see `.composer-access-button .spin` /
-     `.runtime-status .spin` in `desktop/src/index.css` (~line 4625,
-     4896), both binding to the `runtime-spin` keyframe
-     (`900ms linear infinite`). Add a new scoped rule for whatever
-     container wraps the research-progress chip, e.g.
-     `.deep-research-progress .spin { animation: runtime-spin 900ms linear infinite; }`
-     — reuse the `runtime-spin` keyframe itself, don't define a third one.
+5. **Progress indicator — "正在深度研究…" with an orbiting-atom icon, not a
+   plain spinner.** Owner specifically asked for the electrons-orbiting-a-
+   nucleus look (like the Electron.js-style atom mark), not a generic
+   circular loader. Don't hand-roll a new SVG for this —
+   `lucide-react` already ships an `Atom` icon
+   (`node_modules/lucide-react/dist/esm/icons/atom.mjs`) that renders
+   exactly that shape: one `<circle>` (nucleus) + two `<path>` ellipses
+   (orbits), both centered on a 24×24 viewBox at (12,12). It is not used
+   anywhere else in this app yet, so there's no naming collision.
+   - Render `<Atom className="atom-orbit-spin" size={14} />` (import from
+     `lucide-react`, same way `LoaderCircle` is imported elsewhere).
+   - Animate the two orbit paths independently via CSS `nth-of-type`
+     (DOM order inside the icon is circle, path, path — confirmed by
+     reading the icon source), so they rotate at different speeds/
+     directions for the "flying" look instead of the whole icon spinning
+     as one rigid shape (a single spin would look identical to the old
+     `LoaderCircle`, which is exactly the complaint being fixed):
+     ```css
+     .atom-orbit-spin path { transform-box: fill-box; transform-origin: center; }
+     .atom-orbit-spin path:nth-of-type(1) { animation: atom-orbit-a 1.1s linear infinite; }
+     .atom-orbit-spin path:nth-of-type(2) { animation: atom-orbit-b 1.6s linear infinite reverse; }
+     @keyframes atom-orbit-a { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+     @keyframes atom-orbit-b { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+     ```
+     (`transform-box: fill-box` is needed because SVG children otherwise
+     rotate around the viewport origin, not their own center — Electron/
+     Chromium supports this, this app only ships on Electron.)
+   - This is a one-off custom animated icon, same precedent as the
+     existing `.context-cube` 3D loader in `index.css` (~line 2629) — it's
+     fine for this app to have a couple of bespoke loaders, don't feel
+     obligated to reuse `.spin`/`runtime-spin` here just for consistency's
+     sake; the owner explicitly wants this one to look different.
    - Where it shows: same place a running tool call already renders its
      status (`toolProgressText`/`toolStatusIcon` in `threadUtils.ts` follow
-     the same `running` → spin, `done` → check pattern) — `web_research`
-     should look like any other in-flight tool call while it's reading
-     evidence pages, not a separate UI concept.
+     the same `running` → icon, `done` → check pattern) — swap in the atom
+     icon specifically for `web_research`'s running state there, instead
+     of the default `LoaderCircle`.
 6. Add/extend frontend tests the same way the autolink fix above did
    (`desktop/src/lib/__tests__/...`) and run the full `npx vitest run`
    suite before calling this done — it was 115/115 passing before this
