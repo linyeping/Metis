@@ -48,6 +48,7 @@ def _tool_schema() -> List[Dict[str, Any]]:
 
 
 def test_deepseek_payload_uses_strict_closed_tool_schema(monkeypatch):
+    monkeypatch.setenv("METIS_DEEPSEEK_STRICT", "1")  # strict is opt-in now
     captured: Dict[str, Any] = {}
 
     def fake_post(*args: Any, **kwargs: Any) -> _FakeResponse:

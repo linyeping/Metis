@@ -45,6 +45,29 @@ export function ContextWindowBar({ model }: ContextWindowBarProps) {
 
   return (
     <aside className="context-window-card" data-level={level} aria-label={t('上下文窗口')}>
+      {/* Details expand upward: the card is bottom-anchored, so rendering the
+          breakdown above the header makes it grow up, not push off-screen. */}
+      {contextDetailsOpen && (
+        <div className="context-window-details context-window-details-above">
+          {detailRows.map(row => (
+            <div className="context-window-detail-row" key={row.id}>
+              <div>
+                <span>{row.label}</span>
+                <strong>{formatTokenCount(row.tokens)}</strong>
+              </div>
+              <div className="context-window-detail-track" aria-hidden="true">
+                <span style={{ width: `${row.percent}%` }} />
+              </div>
+            </div>
+          ))}
+          {cacheTotal > 0 && (
+            <div className="context-window-cache-row">
+              <span>{t('缓存命中')}</span>
+              <strong>{cachePercent}%</strong>
+            </div>
+          )}
+        </div>
+      )}
       <button
         type="button"
         className="context-window-head context-window-toggle"
@@ -68,27 +91,6 @@ export function ContextWindowBar({ model }: ContextWindowBarProps) {
         <span>/ {formatTokenCount(limit)}</span>
         {cacheTotal > 0 && <span>{t('缓存')} {cachePercent}%</span>}
       </div>
-      {contextDetailsOpen && (
-        <div className="context-window-details">
-          {detailRows.map(row => (
-            <div className="context-window-detail-row" key={row.id}>
-              <div>
-                <span>{row.label}</span>
-                <strong>{formatTokenCount(row.tokens)}</strong>
-              </div>
-              <div className="context-window-detail-track" aria-hidden="true">
-                <span style={{ width: `${row.percent}%` }} />
-              </div>
-            </div>
-          ))}
-          {cacheTotal > 0 && (
-            <div className="context-window-cache-row">
-              <span>{t('缓存命中')}</span>
-              <strong>{cachePercent}%</strong>
-            </div>
-          )}
-        </div>
-      )}
       {shouldSuggest && <p className="context-window-suggestion">{t('上下文偏高，建议压缩后继续长任务。')}</p>}
       <button
         type="button"

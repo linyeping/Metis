@@ -405,7 +405,10 @@ def _provider_tools(
 def _deepseek_strict_enabled() -> bool:
     """DeepSeek /beta strict tool mode. Off => normal /chat/completions, which
     accepts loose schemas (free-form object params strict mode would reject)."""
-    return os.environ.get("METIS_DEEPSEEK_STRICT", "1").strip().lower() not in {"0", "false", "no", "off"}
+    # Default OFF: /beta strict mode 400s on common tool schemas (free-form
+    # object params like todo items / env maps), which breaks every tool call.
+    # Opt back in with METIS_DEEPSEEK_STRICT=1 if you know your tools are strict-safe.
+    return os.environ.get("METIS_DEEPSEEK_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _is_deepseek_target(base_url: str, model: str) -> bool:

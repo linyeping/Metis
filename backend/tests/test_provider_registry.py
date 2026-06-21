@@ -164,8 +164,8 @@ def test_get_backend_deepseek_constructs_openai_compat_offline() -> None:
     assert isinstance(backend, OpenAICompatBackend)
     assert backend.base_url == "https://api.deepseek.com"
     assert backend.model == "deepseek-v4-flash"
-    # DeepSeek 默认走 /beta（strict tool mode + chat prefix completion，利工具可靠性与缓存）。
-    assert backend.chat_completions_url == "https://api.deepseek.com/beta/chat/completions"
+    # DeepSeek 默认走普通 /chat/completions（strict /beta 会 400 掉工具调用，改为 opt-in）。
+    assert backend.chat_completions_url == "https://api.deepseek.com/chat/completions"
 
 
 def test_get_backend_openai_compat_preserves_old_explicit_kwargs() -> None:
