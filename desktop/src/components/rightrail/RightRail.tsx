@@ -40,6 +40,7 @@ import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPrev
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore, type WebPreviewTab, type WorkspaceCardColumnId, type WorkspaceCardId } from '../../store/uiStore';
+import { MarkdownText } from '../chat/threadUtils';
 import { SubagentActivityPanel } from '../chat/SubagentGroup';
 import { TerminalPanel } from '../terminal/TerminalPanel';
 import { useT } from '../../hooks/useT';
@@ -860,7 +861,13 @@ export function RightRail({ backendReady }: RightRailProps) {
         {(file?.type === 'text' || file?.type === 'markdown') && (
           <>
             {file.truncated && <p className="rail-warning">{t('文件较大，已显示前半部分。')}</p>}
-            <pre className="file-content">{file.content || (file.truncated ? t('文件过大，已省略内容。') : '')}</pre>
+            {file.type === 'markdown' && file.content ? (
+              <div className="file-content file-content-markdown markdown-body">
+                <MarkdownText text={file.content} />
+              </div>
+            ) : (
+              <pre className="file-content">{file.content || (file.truncated ? t('文件过大，已省略内容。') : '')}</pre>
+            )}
           </>
         )}
         {file?.type === 'binary' && (
