@@ -24,14 +24,26 @@ interface TitlebarProps {
   model: string;
 }
 
-const titlebarWorkspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: typeof Globe; shortcut?: string }> = [
-  { id: 'web', label: 'Preview', icon: Globe, shortcut: 'Shift Cmd P' },
-  { id: 'diff', label: 'Diff', icon: FileCode, shortcut: 'Shift Cmd D' },
-  { id: 'terminal', label: 'Terminal', icon: SquareTerminal, shortcut: 'Cmd `' },
-  { id: 'files', label: 'Files', icon: Folder, shortcut: 'Shift Cmd F' },
+type CardShortcut = { key: string; shift?: boolean };
+
+const titlebarWorkspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: typeof Globe; keys?: CardShortcut }> = [
+  { id: 'web', label: 'Preview', icon: Globe, keys: { key: 'p', shift: true } },
+  { id: 'diff', label: 'Diff', icon: FileCode, keys: { key: 'd', shift: true } },
+  { id: 'terminal', label: 'Terminal', icon: SquareTerminal, keys: { key: '`' } },
+  { id: 'files', label: 'Files', icon: Folder, keys: { key: 'f', shift: true } },
   { id: 'activity', label: 'Background tasks', icon: Network },
   { id: 'plan', label: 'Plan', icon: StickyNote },
 ];
+
+const isMacPlatform =
+  typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || '');
+
+// Render the platform-correct hint: ⇧⌘P on macOS, Ctrl+Shift+P on Windows/Linux.
+function shortcutLabel(keys: CardShortcut): string {
+  const k = keys.key === '`' ? '`' : keys.key.toUpperCase();
+  if (isMacPlatform) return `${keys.shift ? '⇧' : ''}⌘${k}`;
+  return `Ctrl+${keys.shift ? 'Shift+' : ''}${k}`;
+}
 
 export function Titlebar({ model }: TitlebarProps) {
   const sidebarOpen = useUiStore(state => state.sidebarOpen);
@@ -80,6 +92,29 @@ export function Titlebar({ model }: TitlebarProps) {
     }
     toggleWorkspaceCard(cardId);
   };
+
+  // Wire the card shortcuts (Ctrl/⌘ [+Shift] + key) — they used to be decorative
+  // labels only. Read state via getState to avoid stale closures.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const mod = isMacPlatform ? event.metaKey : event.ctrlKey;
+      if (!mod || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const option = titlebarWorkspaceCardOptions.find(
+        item => item.keys && key === item.keys.key && Boolean(item.keys.shift) === event.shiftKey,
+      );
+      if (!option) return;
+      event.preventDefault();
+      const ui = useUiStore.getState();
+      if (!ui.rightRailOpen && ui.workspaceCardVisibility[option.id]) {
+        ui.setRightRailOpen(true);
+        return;
+      }
+      ui.toggleWorkspaceCard(option.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <header className="titlebar">
@@ -131,7 +166,7 @@ export function Titlebar({ model }: TitlebarProps) {
                 >
                   <Icon size={13} />
                   <span>{option.label}</span>
-                  {option.shortcut && <em>{option.shortcut}</em>}
+                  {option.keys && <em>{shortcutLabel(option.keys)}</em>}
                   <Check size={12} />
                 </button>
               );
