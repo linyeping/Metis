@@ -4967,7 +4967,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   left: 0;
   bottom: calc(100% + 8px);
   display: grid;
-  width: min(214px, calc(100vw - 40px));
+  width: min(174px, calc(100vw - 40px));
   gap: 3px;
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--border) 78%, var(--accent));
