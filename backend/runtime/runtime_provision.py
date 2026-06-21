@@ -243,8 +243,11 @@ def provision_status(deep: bool = False) -> Dict[str, Any]:
         })
 
     reboot_required = any(a.get("reboot") == "required" for a in actions)
-    # Ready = the service can run jobs (responding) and the pack is installed.
-    ready = svc["responding"] and bundle is not None
+    # Ready means the host can talk to HCS, the service is responding, and the
+    # runtime pack exists. It still requires the explicit self-test to prove the
+    # guest booted; the UI labels this as prerequisites-ready instead of a VM
+    # pass so we do not show a false green sandbox.
+    ready = bool(available and svc["responding"] and bundle is not None)
 
     return {
         "schema": PROVISION_SCHEMA,
@@ -272,7 +275,7 @@ def provision_status(deep: bool = False) -> Dict[str, Any]:
 
 def _ux_summary(ready: bool, has_bundle: bool, needs: List[str], reboot_required: bool) -> str:
     if ready and has_bundle:
-        return "Sandbox ready."
+        return "Sandbox prerequisites ready. Run self-test to verify the VM guest."
     if "enable_virtualization_bios" in needs:
         return ("CPU virtualization (VT-x/AMD-V) is disabled in your BIOS/UEFI. "
                 "Enable it in firmware settings, then retry — Metis cannot change this for you.")

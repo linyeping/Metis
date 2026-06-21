@@ -1073,8 +1073,13 @@ def _truncate_tool_record(result: Any) -> str:
 
 def _tool_result_is_error(result: Any) -> bool:
     text = str(result or "").lstrip()
+    lower = text[:500].lower()
     return text.startswith(("❌", "Error", "错误", "[Permission denied]", "[Cancelled]")) or (
         "Traceback (most recent call last)" in text
+        or "执行失败" in text[:500]
+        or "status=failed" in lower
+        or '"status": "failed"' in lower
+        or "'status': 'failed'" in lower
     )
 
 
@@ -3867,7 +3872,15 @@ def upload_parse() -> Any:
     size = file.tell()
     file.seek(0)
     if size > max_size:
-        return jsonify({"error": f"File too large ({size // 1024}KB). Max 10MB."}), 400
+        return jsonify(
+            _file_parse_debug(
+                filename,
+                ext,
+                "file_too_large",
+                f"File too large ({size // 1024}KB). Max 10MB.",
+                "压缩文件、拆分后再上传,或改用工作区文件读取。",
+            )
+        ), 400
 
     try:
         extracted = extract_uploaded_file(filename, file.read())
@@ -3875,15 +3888,40 @@ def upload_parse() -> Any:
         ext = extracted.extension
     except MissingParserDependency as exc:
         return jsonify(
-            {
-                "error": f"Missing dependency for {ext} parsing. Install: {exc.dependency}",
-                "detail": exc.detail or str(exc),
-            }
+            _file_parse_debug(
+                filename,
+                ext or exc.ext,
+                "missing_parser_dependency",
+                f"Missing dependency for {ext or exc.ext} parsing. Install: {exc.dependency}",
+                "安装提示里的解析库/转换器,或先转成 docx/xlsx/pptx/pdf 再上传。",
+                detail=exc.detail or str(exc),
+                dependency=exc.dependency,
+            )
         ), 503
     except UnsupportedFileType as exc:
-        return jsonify({"error": str(exc), "dependency": dependency_for_extension(ext)}), 415
+        return jsonify(
+            _file_parse_debug(
+                filename,
+                ext,
+                "unsupported_file_type",
+                str(exc),
+                "换成受支持格式,或安装 LibreOffice/antiword 等转换器后重试旧 Office 文件。",
+                dependency=dependency_for_extension(ext),
+            )
+        ), 415
     except Exception as exc:
-        return jsonify({"error": f"Failed to parse {filename}: {exc}"}), 500
+        category = _file_parse_exception_category(exc)
+        return jsonify(
+            _file_parse_debug(
+                filename,
+                ext,
+                category,
+                f"Failed to parse {filename}: {exc}",
+                "确认文件未损坏、扩展名和真实格式一致；若是 Office 文件,优先另存为新版 docx/xlsx/pptx 后重试。",
+                detail=f"{type(exc).__name__}: {exc}",
+                dependency=dependency_for_extension(ext),
+            )
+        ), 500
 
     return jsonify(
         {
@@ -3894,6 +3932,38 @@ def upload_parse() -> Any:
             "truncated": truncated,
         }
     )
+
+
+def _file_parse_debug(
+    filename: str,
+    ext: str,
+    category: str,
+    error: str,
+    next_action: str,
+    *,
+    detail: str = "",
+    dependency: str = "",
+) -> Dict[str, Any]:
+    extension = (ext or os.path.splitext(filename)[1] or "").lower()
+    return {
+        "error": error,
+        "detail": detail,
+        "dependency": dependency or dependency_for_extension(extension),
+        "debug_category": category,
+        "debug_summary": f"文件解析失败:{category}; 文件={filename}; 类型={extension or '(unknown)'}。",
+        "debug_next_action": next_action,
+    }
+
+
+def _file_parse_exception_category(exc: Exception) -> str:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    if "permission" in text or "access is denied" in text or "权限" in text:
+        return "permission_denied"
+    if "timeout" in text or "timed out" in text or "超时" in text:
+        return "parse_timeout"
+    if "zip" in text or "corrupt" in text or "damaged" in text or "not a package" in text:
+        return "file_damaged_or_wrong_extension"
+    return "parse_failed"
 
 
 

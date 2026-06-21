@@ -17,6 +17,8 @@ import time
 import uuid
 from typing import Any, Dict, Iterable, List, Tuple
 
+from .tool_visibility import redact_secrets, sanitize_tool_result
+
 _lock = threading.Lock()
 
 _MAX_FIELD_CHARS = 2000
@@ -34,6 +36,7 @@ def _audit_path(workspace_root: str) -> str:
 
 
 def _truncate(value: Any) -> Any:
+    value = redact_secrets(value)
     if isinstance(value, str):
         return value if len(value) <= _MAX_FIELD_CHARS else value[:_MAX_FIELD_CHARS] + f"...(+{len(value) - _MAX_FIELD_CHARS} chars)"
     try:
@@ -82,6 +85,7 @@ def record_actions(
         call_id = getattr(tool_call, "id", "") or ""
         args = getattr(tool_call, "arguments", None)
         result_text = "" if result is None else str(result)
+        visibility = sanitize_tool_result(name, result_text)
         rows.append(
             {
                 "id": str(uuid.uuid4()),
@@ -92,7 +96,10 @@ def record_actions(
                 "tool": name,
                 "call_id": call_id,
                 "args": _truncate(args),
-                "result": _truncate(result_text),
+                "result": _truncate(visibility.diagnostic_result),
+                "result_public": _truncate(visibility.public_result),
+                "visibility": "diagnostic_raw",
+                "visibility_changed": visibility.changed,
                 "status": "error" if _looks_like_error(result_text) else "success",
                 "result_chars": len(result_text),
             }

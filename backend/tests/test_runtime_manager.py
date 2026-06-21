@@ -131,6 +131,20 @@ def test_runtime_manager_smoke_requires_artifact(monkeypatch) -> None:
     assert result["created"]["session_id"] == "rt_smoke"
 
 
+def test_runtime_selftest_debug_classifies_missing_pack() -> None:
+    debug = runtime_manager._selftest_debug(
+        passed=False,
+        used_local=True,
+        reason="runtime bundle not found",
+        backend="local",
+        stdout="",
+        stderr="",
+    )
+
+    assert debug["debug_category"] == "missing_runtime_pack"
+    assert "运行时包" in debug["debug_summary"]
+
+
 def test_runtime_manager_repair_installs_bundled_pack(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "resources" / "runtime-pack" / "metisvm.bundle"
     source.mkdir(parents=True)

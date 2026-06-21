@@ -77,6 +77,17 @@ def test_deepseek_payload_uses_strict_closed_tool_schema(monkeypatch):
     assert tools[0]["function"]["parameters"]["additionalProperties"] is True
 
 
+def test_deepseek_strict_schema_closes_empty_objects() -> None:
+    from backend.runtime.llm_backends.deepseek_schema import sanitize_deepseek_json_schema
+
+    sanitized = sanitize_deepseek_json_schema({"type": "object", "properties": {}})
+
+    assert sanitized["type"] == "object"
+    assert sanitized["properties"] == {}
+    assert sanitized["required"] == []
+    assert sanitized["additionalProperties"] is False
+
+
 def test_non_deepseek_payload_keeps_tool_schema_unchanged(monkeypatch):
     captured: Dict[str, Any] = {}
 

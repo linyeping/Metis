@@ -22,12 +22,14 @@ describe('normalizeChatStreamEvent', () => {
         call_id: 'call-1',
         turn: 3,
         tool_calls: 7,
+        details: { request_model: 'pro', served_model: 'pro' },
       },
     });
 
     expect(event.runtimeStatus?.turn).toBe(3);
     expect(event.runtimeStatus?.toolCalls).toBe(7);
     expect(event.runtimeStatus?.callId).toBe('call-1');
+    expect(event.runtimeStatus?.details?.request_model).toBe('pro');
   });
 
   it('normalizes done usage cache fields', () => {

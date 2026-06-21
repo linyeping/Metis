@@ -22,7 +22,11 @@ export type ThemeName =
   | 'gold-jade'
   | 'gold-clay'
   | 'gold-wisteria'
-  | 'gold-pine';
+  | 'gold-pine'
+  | 'frost-obsidian'
+  | 'obsidian-pearl'
+  | 'mistbound-jade'
+  | 'crimson-reliquary';
 
 export type SectionId = 'chat' | 'skills' | 'mcp' | 'computer' | 'cron';
 
@@ -1098,6 +1102,7 @@ export interface RuntimeStatus {
   updatedAt?: number;
   hint: string;
   recoverable: boolean;
+  details?: Record<string, unknown>;
 }
 
 export interface ChatRunRecoverySnapshot {

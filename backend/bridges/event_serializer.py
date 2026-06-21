@@ -125,6 +125,10 @@ def _with_legacy_fields(
         legacy["call_id"] = str(payload.get("call_id") or payload.get("callId") or "")
         legacy["callId"] = legacy["call_id"]
         legacy["recoverable"] = bool(payload.get("recoverable", True))
+        details = payload.get("details")
+        if isinstance(details, Mapping):
+            legacy["details"] = dict(details)
+            legacy["payload"]["details"] = legacy["details"]
     elif kind == "todo_update":
         todos = payload.get("todos") if isinstance(payload.get("todos"), list) else []
         legacy["todos"] = todos
@@ -207,6 +211,7 @@ def _payload_from_runtime_event(kind: str, event: Any) -> Dict[str, Any]:
             "tool": getattr(event, "tool_name", ""),
             "call_id": getattr(event, "call_id", ""),
             "recoverable": getattr(event, "recoverable", True),
+            "details": getattr(event, "details", {}) or {},
         }
     if kind == "todo_update":
         return {

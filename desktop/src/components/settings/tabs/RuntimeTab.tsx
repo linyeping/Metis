@@ -163,9 +163,9 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
     <div className="runtime-provision" data-ready={status.ready}>
       <div className="runtime-provision-head">
         {status.ready ? <CheckCircle2 size={15} className="ok" /> : <ShieldCheck size={15} />}
-        <span className="runtime-provision-title">{t('HCS 沙箱环境')}</span>
+        <span className="runtime-provision-title">{t('HCS 沙箱基础条件')}</span>
         <span className="runtime-provision-badge" data-ok={status.ready}>
-          {status.ready ? t('就绪') : t('需要设置')}
+          {status.ready ? t('可自检') : t('需要设置')}
         </span>
       </div>
 

@@ -594,19 +594,13 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
             and "SELFTEST_BOOT_OK" in stdout
             and "SELFTEST_XLSX_OK" in stdout
         )
+        debug = _selftest_debug(passed=passed, used_local=used_local, reason=fallback, backend=backend, stdout=stdout, stderr=str(job.get("stderr") or ""))
         if used_local:
-            reason = fallback or "未知原因"
-            hint = ""
-            low = reason.lower()
-            if "bundle" in low or "pack" in low or "not found" in low or "缺" in reason:
-                hint = " 多半是运行时包没下载——请在「VM Runtime Pack」里点下载（约 800 MB）。"
-            elif "service" in low or "服务" in reason or "pipe" in low:
-                hint = " 沙箱服务未运行——请在沙箱面板里点「开通/修复」后重试。"
-            message = f"自检失败:沙箱回退到本地执行(VM 未真正运行)。原因:{reason}。{hint}"
+            message = debug["debug_summary"]
         elif passed:
             message = "自检通过:VM 真实启动并运行了任务(含办公库)。"
         else:
-            message = "自检失败:VM 启动了但任务未通过,请查看诊断。"
+            message = debug["debug_summary"]
         return {
             "ok": passed,
             "schema": RUNTIME_MANAGER_SCHEMA,
@@ -619,6 +613,7 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
             "stdout": stdout[:1000],
             "stderr": str(job.get("stderr") or "")[:1000],
             "message": message,
+            **debug,
         }
     finally:
         if prev_root is None:
@@ -629,6 +624,40 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
             shutil.rmtree(workspace, ignore_errors=True)
         except Exception:
             pass
+
+
+def _selftest_debug(*, passed: bool, used_local: bool, reason: str, backend: str, stdout: str, stderr: str) -> Dict[str, str]:
+    text = f"{backend}\n{reason}\n{stderr}\n{stdout}".lower()
+    raw_reason = reason or ""
+    if passed:
+        return {
+            "debug_category": "ok",
+            "debug_summary": "自检通过:VM 已真实启动、guest 有响应、办公库可用。",
+            "debug_next_action": "",
+        }
+    if used_local and any(token in text for token in ("bundle", "pack", "rootfs", "vhdx", "not found", "missing", "缺")):
+        return {
+            "debug_category": "missing_runtime_pack",
+            "debug_summary": f"自检失败:运行时包缺失或不完整,所以回退到本地执行。原因:{raw_reason or '未找到 VM runtime pack'}。",
+            "debug_next_action": "在 VM Runtime Pack 里下载/修复运行时包后重试自检。",
+        }
+    if any(token in text for token in ("service", "pipe", "hcs", "hyper-v", "computesystem", "compute system", "服务")):
+        return {
+            "debug_category": "hcs_or_service_unavailable",
+            "debug_summary": f"自检失败:HCS/沙箱服务不可用或未响应。原因:{raw_reason or '服务未返回可用状态'}。",
+            "debug_next_action": "先点开通/修复沙箱基础条件,再重试自检。",
+        }
+    if used_local:
+        return {
+            "debug_category": "fallback_local",
+            "debug_summary": f"自检失败:VM 未真正运行,任务回退到了本地执行。原因:{raw_reason or '未知原因'}。",
+            "debug_next_action": "查看运行时诊断包,确认 runtime pack、HCS 服务和 guest handshake。",
+        }
+    return {
+        "debug_category": "guest_selftest_failed",
+        "debug_summary": "自检失败:VM 已尝试启动,但 guest 任务/握手/办公库检查未通过。",
+        "debug_next_action": "导出运行时诊断包,查看 stdout/stderr、guest lifecycle 和 console log。",
+    }
 
 
 def runtime_manager_export_diagnostics(session_id: str = "", root: str = ".") -> Dict[str, Any]:

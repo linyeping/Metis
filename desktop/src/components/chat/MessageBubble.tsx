@@ -15,8 +15,8 @@ import {
   Copy,
   FileText,
   Image as ImageIcon,
-  RotateCcw,
   Sparkles,
+  Undo2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -144,16 +144,41 @@ export function UserMessage() {
   const messageId = useAuiState(state => state.message.id);
   const text = useAuiState(state => messageText(state.message.content));
   const attachments = useAuiState(state => messageAttachments(state.message.metadata));
-  const rewindToMessage = useChatStore(state => state.rewindToMessage);
+  const undoLastTurn = useChatStore(state => state.undoLastTurn);
+  const isLatestUserMessage = useChatStore(state => {
+    const lastUser = [...state.messages].reverse().find(message => message.role === 'user');
+    return lastUser?.id === messageId;
+  });
+  const [copied, setCopied] = useState(false);
+  const copyUserText = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const payload = text.trim() || attachments.map(attachment => attachment.name).filter(Boolean).join('\n');
+    if (!payload) return;
+    await copyTextToClipboard(payload);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1000);
+  };
+  const rewindUserTurn = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void undoLastTurn();
+  };
   return (
     <MessagePrimitive.Root className="message-row user">
       <div className="user-message-shell">
-        <div className="user-message-actions">
-          <button type="button" className="user-rewind-button" title={t('回到这里')} onClick={() => void rewindToMessage(messageId)}>
-            <RotateCcw size={13} />
-            <span>{t('回到这里')}</span>
-          </button>
-        </div>
+        {(text.trim() || attachments.length > 0 || isLatestUserMessage) && (
+          <div className="user-message-actions">
+            <button type="button" className="user-action-button user-action-copy" title={t('复制消息')} aria-label={t('复制消息')} onClick={event => void copyUserText(event)}>
+              {copied ? <ClipboardCheck size={13} /> : <Copy size={13} />}
+            </button>
+            {isLatestUserMessage && (
+              <button type="button" className="user-action-button user-action-rewind" title={t('撤回并编辑')} aria-label={t('撤回并编辑')} onClick={rewindUserTurn}>
+                <Undo2 size={14} />
+              </button>
+            )}
+          </div>
+        )}
         <div className="message-bubble user-bubble">
           {text && <p>{text}</p>}
           {attachments.length > 0 && <UserAttachmentList attachments={attachments} />}

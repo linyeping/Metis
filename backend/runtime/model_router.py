@@ -632,8 +632,13 @@ def _select_models(
     override = _model_override_for_role(role, provider_id)
     if override:
         candidates = _dedupe([override, *candidates])
+        selected = override
+    else:
+        # Respect the user's concrete model selection. Role routing still
+        # controls tools/runtime boundaries, but it must not silently downgrade
+        # an explicitly selected Pro/strong model to a "fast" candidate.
+        selected = current_model or _select_model_for_role(role, candidates, profile, current_model)
 
-    selected = _select_model_for_role(role, candidates, profile, current_model)
     if not selected:
         selected = current_model or (candidates[0] if candidates else "")
     fallback_models = _dedupe([selected, *candidates, current_model])

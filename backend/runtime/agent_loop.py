@@ -44,6 +44,7 @@ from .tool_call_tracker import ToolCallTracker
 from .tool_errors import teaching_error_text
 from .tool_profiles import normalize_tool_profile
 from .tool_registry import ToolRegistry, get_registry
+from .tool_visibility import sanitize_tool_result
 from backend.bridges.model_capability import detect_from_model_name
 from backend.bridges.provider_registry import resolve_provider_for_config, requires_reasoning_passback_enabled
 from backend.runtime.tool_tiers import INTERNAL_TOOLS, expose_internal_tools, tools_for_tier
@@ -191,6 +192,7 @@ class RuntimeStatusEvent(Event):
     tool_name: str = ""
     call_id: str = ""
     recoverable: bool = True
+    details: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -223,6 +225,7 @@ class AgentConfig:
     routing_tool_guidance: str = ""
     routing_preferred_tools: List[str] = field(default_factory=list)
     model_fallbacks: List[str] = field(default_factory=list)
+    requested_model: str = ""
 
 
 # FABLEADV-25: 环境探测结果记忆化。原实现每个 run 现探测、带 20ms 超时——
@@ -481,6 +484,7 @@ def _config_with_task_route(config: AgentConfig, messages: List[Dict[str, Any]])
     return replace(
         config,
         llm_model=next_model,
+        requested_model=config.requested_model or config.llm_model,
         routing_task_type=route.task_type,
         routing_model_role=route.model_role,
         routing_reason=route.reason,
@@ -522,6 +526,51 @@ def _routing_status_message(config: AgentConfig) -> str:
 
 def _model_fallback_status_message(current: AgentConfig, fallback: AgentConfig) -> str:
     return f"模型 {current.llm_model or 'current'} 调用失败，已自动切换到 {fallback.llm_model} 重试。"
+
+
+def _model_debug_details(
+    config: AgentConfig,
+    backend: Optional[LLMBackend] = None,
+    response: Optional[LLMResponse] = None,
+    *,
+    fallback_from: str = "",
+    fallback_to: str = "",
+    error: BaseException | None = None,
+) -> Dict[str, Any]:
+    raw = response.raw if response is not None and isinstance(response.raw, dict) else {}
+    raw_model = str(raw.get("model") or "").strip()
+    if not raw_model and isinstance(raw.get("chunks"), list):
+        for chunk in reversed(raw.get("chunks") or []):
+            if isinstance(chunk, dict) and str(chunk.get("model") or "").strip():
+                raw_model = str(chunk.get("model")).strip()
+                break
+    return {
+        "user_selected_model": config.requested_model or config.llm_model,
+        "router_selected_model": config.llm_model,
+        "request_model": str(getattr(backend, "model", "") or config.llm_model),
+        "served_model": raw_model or str(getattr(backend, "detected_model", "") or ""),
+        "backend": config.llm_backend,
+        "base_url_host": _base_url_host(config.llm_base_url),
+        "routing_task_type": config.routing_task_type,
+        "routing_model_role": config.routing_model_role,
+        "fallback_models": list(config.model_fallbacks or []),
+        "fallback_from": fallback_from,
+        "fallback_to": fallback_to,
+        "error": f"{type(error).__name__}: {sanitize_for_log(error)}" if error else "",
+    }
+
+
+def _base_url_host(url: str) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return ""
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(value if "://" in value else f"https://{value}")
+        return parsed.netloc or parsed.path.split("/", 1)[0]
+    except Exception:
+        return value.split("/", 1)[0]
 
 
 def _next_model_fallback_config(config: AgentConfig, exc: BaseException) -> Optional[AgentConfig]:
@@ -868,6 +917,7 @@ def _runtime_status_event(
     tool_name: str = "",
     call_id: str = "",
     recoverable: bool = True,
+    details: Optional[Dict[str, Any]] = None,
 ) -> RuntimeStatusEvent:
     return RuntimeStatusEvent(
         phase=phase,
@@ -877,6 +927,7 @@ def _runtime_status_event(
         tool_name=tool_name,
         call_id=call_id,
         recoverable=recoverable,
+        details=details or {},
     )
 
 
@@ -936,7 +987,12 @@ def run(
         },
     )
     if config.routing_task_type:
-        yield _runtime_status_event("model_routing", _routing_status_message(config), recoverable=True)
+        yield _runtime_status_event(
+            "model_routing",
+            _routing_status_message(config),
+            recoverable=True,
+            details=_model_debug_details(config, backend),
+        )
     yield _runtime_status_event("starting", "Agent runtime started")
 
     while turn_count < config.max_turns:
@@ -972,6 +1028,7 @@ def run(
             "Calling LLM",
             turn=turn_count,
             tool_calls=tool_call_count,
+            details=_model_debug_details(config, backend),
         )
         try:
             request_messages = _messages_for_llm_request(working_messages, config)
@@ -989,6 +1046,13 @@ def run(
                 max_tokens=config.max_tokens,
                 timeout=config.timeout,
             )
+            yield _runtime_status_event(
+                "llm_response",
+                "模型响应已返回",
+                turn=turn_count,
+                tool_calls=tool_call_count,
+                details=_model_debug_details(config, backend, response),
+            )
             consecutive_errors = 0
         except Exception as exc:
             consecutive_errors += 1
@@ -1000,6 +1064,13 @@ def run(
                     turn=turn_count,
                     tool_calls=tool_call_count,
                     recoverable=True,
+                    details=_model_debug_details(
+                        config,
+                        backend,
+                        fallback_from=config.llm_model,
+                        fallback_to=fallback_config.llm_model,
+                        error=exc,
+                    ),
                 )
                 config = fallback_config
                 backend = _create_backend(config)
@@ -1127,7 +1198,7 @@ def run(
                     results.append((tool_call, result))
                     yield ToolResultEvent(
                         tool_name=tool_call.name,
-                        result=result,
+                        result=_public_tool_result(tool_call, result),
                         call_id=tool_call.id,
                     )
                     yield _runtime_status_event(
@@ -1164,7 +1235,7 @@ def run(
                         results.append((tool_call, result))
                         yield ToolResultEvent(
                             tool_name=tool_call.name,
-                            result=result,
+                            result=_public_tool_result(tool_call, result),
                             call_id=tool_call.id,
                         )
                         yield _runtime_status_event(
@@ -1193,7 +1264,7 @@ def run(
                         results.append((tool_call, result))
                         yield ToolResultEvent(
                             tool_name=tool_call.name,
-                            result=result,
+                            result=_public_tool_result(tool_call, result),
                             call_id=tool_call.id,
                         )
                         yield _runtime_status_event(
@@ -1225,7 +1296,7 @@ def run(
                             results.append((tool_call, result))
                             yield ToolResultEvent(
                                 tool_name=tool_call.name,
-                                result=result,
+                                result=_public_tool_result(tool_call, result),
                                 call_id=tool_call.id,
                             )
                             yield _runtime_status_event(
@@ -1251,7 +1322,7 @@ def run(
                     results.append((tool_call, result))
                     yield ToolResultEvent(
                         tool_name=tool_call.name,
-                        result=result,
+                        result=_public_tool_result(tool_call, result),
                         call_id=tool_call.id,
                     )
                     todo_event = _todo_update_event_if_any(registry, tool_call, result)
@@ -1403,7 +1474,12 @@ def run_stream(
         },
     )
     if config.routing_task_type:
-        yield _runtime_status_event("model_routing", _routing_status_message(config), recoverable=True)
+        yield _runtime_status_event(
+            "model_routing",
+            _routing_status_message(config),
+            recoverable=True,
+            details=_model_debug_details(config, backend),
+        )
     yield _runtime_status_event("starting", "Agent runtime started")
 
     while turn_count < config.max_turns:
@@ -1445,6 +1521,7 @@ def run_stream(
             "Calling LLM stream",
             turn=turn_count,
             tool_calls=tool_call_count,
+            details=_model_debug_details(config, backend),
         )
         try:
             stream_kwargs: Dict[str, Any] = {
@@ -1489,6 +1566,13 @@ def run_stream(
                     turn=turn_count,
                     tool_calls=tool_call_count,
                     recoverable=True,
+                    details=_model_debug_details(
+                        config,
+                        backend,
+                        fallback_from=config.llm_model,
+                        fallback_to=fallback_config.llm_model,
+                        error=exc,
+                    ),
                 )
                 config = fallback_config
                 backend = _create_backend(config)
@@ -1600,6 +1684,13 @@ def run_stream(
                     turn=turn_count,
                     tool_calls=tool_call_count,
                     recoverable=True,
+                    details=_model_debug_details(
+                        config,
+                        backend,
+                        fallback_from=config.llm_model,
+                        fallback_to=fallback_config.llm_model,
+                        error=exc,
+                    ),
                 )
                 config = fallback_config
                 backend = _create_backend(config)
@@ -1663,6 +1754,13 @@ def run_stream(
             response = LLMResponse(content=accumulated_text)
         elif accumulated_text and not response.content:
             response = replace(response, content=accumulated_text)
+        yield _runtime_status_event(
+            "llm_response",
+            "模型响应已返回",
+            turn=turn_count,
+            tool_calls=tool_call_count,
+            details=_model_debug_details(config, backend, response),
+        )
 
         cumulative_usage = _combine_usage(cumulative_usage, response.usage)
         last_context_ledger = _log_context_ledger(
@@ -1759,7 +1857,7 @@ def run_stream(
                     results.append((tool_call, result))
                     yield ToolResultEvent(
                         tool_name=tool_call.name,
-                        result=result,
+                        result=_public_tool_result(tool_call, result),
                         call_id=tool_call.id,
                     )
                     yield _runtime_status_event(
@@ -1833,7 +1931,7 @@ def run_stream(
                     results.append((tool_call, result))
                     yield ToolResultEvent(
                         tool_name=tool_call.name,
-                        result=result,
+                        result=_public_tool_result(tool_call, result),
                         call_id=tool_call.id,
                     )
                     yield _runtime_status_event(
@@ -1862,7 +1960,7 @@ def run_stream(
                     results.append((tool_call, result))
                     yield ToolResultEvent(
                         tool_name=tool_call.name,
-                        result=result,
+                        result=_public_tool_result(tool_call, result),
                         call_id=tool_call.id,
                     )
                     yield _runtime_status_event(
@@ -1894,7 +1992,7 @@ def run_stream(
                         results.append((tool_call, result))
                         yield ToolResultEvent(
                             tool_name=tool_call.name,
-                            result=result,
+                            result=_public_tool_result(tool_call, result),
                             call_id=tool_call.id,
                         )
                         yield _runtime_status_event(
@@ -1935,7 +2033,7 @@ def run_stream(
                 results.append((tool_call, result))
                 yield ToolResultEvent(
                     tool_name=tool_call.name,
-                    result=result,
+                    result=_public_tool_result(tool_call, result),
                     call_id=tool_call.id,
                 )
                 todo_event = _todo_update_event_if_any(registry, tool_call, result)
@@ -2772,6 +2870,7 @@ def _format_tool_result(
     seen_files: Optional[Dict[str, str]] = None,
     compactor: Optional[ResultCompactor] = None,
 ) -> Dict[str, Any]:
+    result = _public_tool_result(tool_call, result)
     if compactor is not None:
         content = compactor.compact(tool_call.name, result)
     else:
@@ -2782,6 +2881,10 @@ def _format_tool_result(
         "name": tool_call.name,
         "content": content,
     }
+
+
+def _public_tool_result(tool_call: ToolCall, result: str) -> str:
+    return sanitize_tool_result(tool_call.name, result).public_result
 
 
 # ---------------------------------------------------------------------------

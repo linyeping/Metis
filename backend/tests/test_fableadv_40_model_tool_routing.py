@@ -10,7 +10,7 @@ from backend.runtime.model_router import ROUTE_MARKER, build_task_route, runtime
 from backend.runtime.tool_registry import ToolRegistry, register_desktop_tools
 
 
-def test_router_selects_stronger_deepseek_model_for_code_tasks() -> None:
+def test_router_keeps_explicit_deepseek_model_for_code_tasks() -> None:
     route = build_task_route(
         [{"role": "user", "content": "修复 desktop/src/App.tsx 里的状态问题并跑 typecheck"}],
         llm_backend="deepseek",
@@ -22,8 +22,22 @@ def test_router_selects_stronger_deepseek_model_for_code_tasks() -> None:
     assert route.model_role == "code"
     assert route.execution_boundary == "repo_plus_runtime"
     assert route.runtime_policy["recommended_tool"] == "metis_runtime_job"
-    assert route.selected_model == "deepseek-v4-pro"
+    assert route.selected_model == "deepseek-v4-flash"
     assert route.preferred_tools[:3] == ["metis_runtime_job", "metis_runtime_job_status", "generate_repo_map"]
+
+
+def test_router_does_not_downgrade_explicit_pro_chat_model() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "你是什么模型？"}],
+        llm_backend="deepseek",
+        llm_base_url="https://api.deepseek.com",
+        llm_model="deepseek-v4-pro",
+    )
+
+    assert route.task_type == "chat"
+    assert route.model_role == "fast"
+    assert route.selected_model == "deepseek-v4-pro"
+    assert route.fallback_models[0] == "deepseek-v4-pro"
 
 
 def test_router_prioritizes_preview_browser_for_local_page_tasks() -> None:

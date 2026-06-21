@@ -280,7 +280,7 @@ def _phases(events: List[Any]) -> List[str]:
 
 def test_run_stream_emits_status_content_delta_content_and_done() -> None:
     events = _events(StreamingBackend())
-    assert _phases(events) == ["starting", "llm_request", "streaming", "completed"]
+    assert _phases(events) == ["starting", "llm_request", "streaming", "llm_response", "completed"]
     assert [event.text for event in events if isinstance(event, ContentDeltaEvent)] == ["Hello runtime"]
     assert any(isinstance(event, DoneEvent) and event.total_tokens == 3 for event in events)
 
@@ -387,6 +387,7 @@ def test_runtime_status_serializes_to_agent_event_envelope() -> None:
             tool_calls=1,
             tool_name="echo",
             call_id="call_1",
+            details={"request_model": "pro", "served_model": "pro"},
         )
     )
     assert payload["kind"] == "runtime_status"
@@ -395,6 +396,8 @@ def test_runtime_status_serializes_to_agent_event_envelope() -> None:
     assert payload["message"] == "Calling LLM"
     assert payload["tool"] == "echo"
     assert payload["payload"]["phase"] == "llm_request"
+    assert payload["details"]["request_model"] == "pro"
+    assert payload["payload"]["details"]["served_model"] == "pro"
 
 
 # FABLEADV-19: truncation continuation

@@ -85,6 +85,7 @@ def test_web_sse_runtime_status_event() -> None:
                 tool_calls=1,
                 tool_name="read_file",
                 call_id="call_1",
+                details={"request_model": "pro", "served_model": "pro"},
             )
         )
     )
@@ -95,6 +96,7 @@ def test_web_sse_runtime_status_event() -> None:
     assert parsed["message"] == "Calling LLM"
     assert parsed["tool"] == "read_file"
     assert parsed["payload"]["phase"] == "llm_request"
+    assert parsed["details"]["request_model"] == "pro"
 
 
 def test_web_contract_endpoint() -> None:

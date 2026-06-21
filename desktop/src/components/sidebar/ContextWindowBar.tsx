@@ -50,7 +50,7 @@ export function ContextWindowBar({ model }: ContextWindowBarProps) {
       {contextDetailsOpen && (
         <div className="context-window-details context-window-details-above">
           {detailRows.map(row => (
-            <div className="context-window-detail-row" key={row.id}>
+            <div className="context-window-detail-row" data-context-id={row.id} key={row.id}>
               <div>
                 <span>{row.label}</span>
                 <strong>{formatTokenCount(row.tokens)}</strong>

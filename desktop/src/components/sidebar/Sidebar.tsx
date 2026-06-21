@@ -1,4 +1,4 @@
-import { ChevronRight, FolderOpen, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { createElement, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
 import { getActiveSessionRun } from '../../lib/api';
 import type { ChatRunStatus, SessionMeta, Workspace } from '../../lib/types';
@@ -180,6 +180,7 @@ function WorkspaceGroup({
           }}
         >
           <ChevronRight className="workspace-chevron" data-open={isOpen} size={15} />
+          <Folder className="workspace-folder-icon" size={14} />
           <span>{t(workspace.name || '当前工作区')}</span>
           <em>{group.sessions.length}</em>
         </button>

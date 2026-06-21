@@ -102,6 +102,7 @@ test('DeepSeek, slash menu, cache dashboard, and release gates stay wired', () =
   const openaiCompat = fs.readFileSync(path.join(repoRoot, 'backend', 'runtime', 'llm_backends', 'openai_compat.py'), 'utf8');
   const deepseekSchema = fs.readFileSync(path.join(repoRoot, 'backend', 'runtime', 'llm_backends', 'deepseek_schema.py'), 'utf8');
   const agentLoop = fs.readFileSync(path.join(repoRoot, 'backend', 'runtime', 'agent_loop.py'), 'utf8');
+  const mainPrompt = fs.readFileSync(path.join(repoRoot, 'backend', 'core', 'prompts', 'MAIN_PROMPT.txt'), 'utf8');
 
   assert.match(composer, /slashMenuRef/);
   assert.match(composer, /scrollIntoView\(\{ block: 'nearest' \}\)/);
@@ -116,6 +117,8 @@ test('DeepSeek, slash menu, cache dashboard, and release gates stay wired', () =
   assert.match(agentLoop, /MAX_TOOL_CALL_REPAIR_ATTEMPTS/);
   assert.match(agentLoop, /tool_call_repair/);
   assert.match(agentLoop, /native tool\/function call/);
+  assert.match(mainPrompt, /Public vs Diagnostic Details/);
+  assert.match(mainPrompt, /do not expose internal runtime implementation details/);
 
   assert.match(rightRail, /contextLedger/);
   assert.match(rightRail, /cacheHitRate/);
@@ -147,11 +150,13 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(backend, /METIS_BUNDLED_RUNTIME_PACK_DIR/);
   assert.match(backend, /bundledRuntimePackDir/);
   assert.match(backend, /maybeEnsureRuntimePack/);
-  assert.match(builder, /resources\/runtime-pack/);
+  assert.match(builder, /runtime-pack is NO LONGER bundled/);
+  assert.match(builder, /METIS_RUNTIME_PACK_URL/);
   assert.match(settings, /RuntimeTab/);
   assert.match(settings, /Metis Runtime Manager/);
   assert.match(settings, /VM Runtime Pack/);
-  assert.match(settings, /最近 Runtime Job/);
+  assert.match(settings, /HCS 沙箱基础条件/);
+  assert.match(settings, /最近结果/);
   assert.match(settings, /runtime-result-paths/);
   assert.match(settings, /extractResultPaths/);
   assert.match(api, /getRuntimeManagerStatus/);
@@ -1280,10 +1285,12 @@ test('NEW-53 permission center productization stays wired', () => {
   assert.match(api, /setComposerPermissionMode/);
   assert.match(api, /composer_access/);
   assert.match(types, /interface PermissionRule/);
-  assert.match(types, /PermissionAccessMode = 'ask' \| 'auto' \| 'full'/);
+  assert.match(types, /PermissionAccessMode = 'ask' \| 'edit' \| 'plan' \| 'auto' \| 'bypass'/);
+  assert.match(realBackend, /composer_access/);
   assert.match(composer, /ComposerAccessMenu/);
   assert.match(composer, /composer-access-button/);
-  assert.match(composer, /完全访问权限/);
+  assert.match(composer, /绕过权限/);
+  assert.match(composer, /ShieldAlert/);
   assert.match(settings, /权限中心/);
   assert.match(settings, /手动添加规则/);
   assert.match(settings, /permission-search-input/);
@@ -1295,13 +1302,12 @@ test('NEW-53 permission center productization stays wired', () => {
   assert.match(css, /\.permission-filter/);
   assert.match(css, /\.composer-access-menu/);
   assert.match(smoke, /new53-permission-center-visible/);
-  assert.match(smoke, /composer-access-full-persists-rule/);
+  assert.match(smoke, /composer-access-bypass-persists-rule/);
   assert.match(smoke, /composer-access-auto-removes-owned-rule/);
   assert.match(smoke, /new53-permission-manual-rule-created/);
   assert.match(smoke, /new53-permission-manual-rule-deleted/);
   assert.match(fakeBackend, /pathname === '\/permissions'/);
   assert.match(fakeBackend, /rule\.source === source/);
-  assert.match(realBackend, /composer_access/);
   assert.match(doc, /Permission Center Productization/);
 });
 
@@ -2694,14 +2700,18 @@ test('FABLEADV-15 provider probe and FABLEADV-17 rewind stay wired', () => {
   assert.match(types, /interface RewindResult/);
   assert.match(chatStore, /rewindLatest/);
   assert.match(chatStore, /rewindToMessage/);
+  assert.match(chatStore, /undoLastTurn/);
   assert.match(chatStore, /text\.toLowerCase\(\) === '\/rewind'/);
-  assert.match(messageBubble, /回到这里/);
-  assert.match(messageBubble, /user-rewind-button/);
+  assert.match(messageBubble, /undoLastTurn/);
+  assert.match(messageBubble, /复制消息/);
+  assert.match(messageBubble, /撤回并编辑/);
+  assert.match(messageBubble, /user-action-button/);
   assert.match(composer, /\/rewind/);
   assert.match(commands, /conversation\.rewind/);
   assert.match(commandPalette, /rewindConversation/);
   assert.match(app, /lastEscapeAt/);
   assert.match(rightRail, /workspaceRefreshNonce/);
   assert.match(uiStore, /refreshWorkspaceView/);
-  assert.match(css, /\.user-rewind-button/);
+  assert.match(css, /\.user-message-shell:hover \.user-message-actions/);
+  assert.match(css, /\.user-action-button/);
 });

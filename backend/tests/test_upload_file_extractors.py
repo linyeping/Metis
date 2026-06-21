@@ -8,6 +8,7 @@ import zipfile
 import pytest
 
 from backend.runtime.document_converters import document_converter_status
+from backend.web import app as web_app
 from backend.web.file_extractors import UnsupportedFileType, extract_uploaded_file, truncate_text
 
 
@@ -135,3 +136,12 @@ def test_truncate_text_reports_original_count() -> None:
     assert original_count == 6
     assert text.startswith("abc")
     assert "6 total characters" in text
+
+
+def test_upload_parse_debug_classifies_damaged_file() -> None:
+    category = web_app._file_parse_exception_category(zipfile.BadZipFile("File is not a zip file"))
+    payload = web_app._file_parse_debug("broken.docx", ".docx", category, "Failed to parse broken.docx", "retry")
+
+    assert category == "file_damaged_or_wrong_extension"
+    assert payload["debug_category"] == "file_damaged_or_wrong_extension"
+    assert payload["dependency"] == "python-docx"

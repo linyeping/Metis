@@ -1040,6 +1040,53 @@ def _compact_preview_browser_activity(value: Any) -> Dict[str, Any]:
     }
 
 
+def _preview_debug_info(value: Any) -> Dict[str, str]:
+    result = value if isinstance(value, dict) else {}
+    diagnostics = result.get("diagnostics", {}) if isinstance(result.get("diagnostics"), dict) else {}
+    counts = diagnostics.get("counts", {}) if isinstance(diagnostics.get("counts"), dict) else {}
+    page_health = result.get("page_health", {}) if isinstance(result.get("page_health"), dict) else {}
+    screenshot_health = result.get("screenshot_health", {}) if isinstance(result.get("screenshot_health"), dict) else {}
+    url = str(result.get("url") or "").strip()
+    title = str(result.get("title") or "").strip()
+    label = title or url or "当前 Preview 页面"
+    if result.get("ok") is False:
+        return {
+            "debug_category": "preview_bridge_failed",
+            "debug_summary": f"Preview Browser 调用失败:{result.get('error') or result.get('message') or '未返回成功状态'}。",
+            "debug_next_action": "检查右栏 Preview 是否打开、目标端口是否监听,然后重新 observe。",
+        }
+    if bool(page_health.get("blank")):
+        reasons = ", ".join(str(item) for item in (page_health.get("reasons") or [])[:3])
+        return {
+            "debug_category": "blank_page",
+            "debug_summary": f"Preview 页面疑似白屏:{reasons or label}。",
+            "debug_next_action": "查看 console error、failed network 和当前 URL/端口是否正确。",
+        }
+    if bool(screenshot_health.get("appears_blank")):
+        return {
+            "debug_category": "blank_screenshot",
+            "debug_summary": "Preview 截图疑似纯白/纯黑,页面可能未渲染或被遮挡。",
+            "debug_next_action": "重新截图并检查 page_health、viewport 和 failed network。",
+        }
+    if int(counts.get("exceptions") or 0) > 0 or int(counts.get("console_errors") or 0) > 0:
+        return {
+            "debug_category": "console_errors",
+            "debug_summary": f"Preview 页面有 JS 异常/console error:{counts}。",
+            "debug_next_action": "优先查看 diagnostics.recent_console 和 diagnostics.exceptions。",
+        }
+    if int(counts.get("network_failed") or 0) > 0:
+        return {
+            "debug_category": "network_failed",
+            "debug_summary": f"Preview 页面有失败网络请求:{counts.get('network_failed')} 个。",
+            "debug_next_action": "检查 failed network 列表里的 URL、状态码和本地端口。",
+        }
+    return {
+        "debug_category": "ok",
+        "debug_summary": f"Preview Browser 状态正常:{label}。",
+        "debug_next_action": "",
+    }
+
+
 def _preview_text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -1460,6 +1507,8 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
         from backend.web.preview_bridge import request_preview_command
 
         result = request_preview_command(kind, payload or {}, timeout=timeout)
+        if isinstance(result, dict):
+            result = {**result, **_preview_debug_info(result)}
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     def preview_browser_status() -> str:
@@ -1540,6 +1589,7 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
             "screenshot_health": result.get("screenshot_health", {}),
             "diagnostics": _compact_preview_diagnostics(result.get("diagnostics", {})),
             "browser_activity": _compact_preview_browser_activity(result.get("browser_activity", {})),
+            **_preview_debug_info(result),
         }
         return json.dumps(compact, ensure_ascii=False, indent=2)
 
@@ -1778,6 +1828,12 @@ def register_desktop_tools(registry: ToolRegistry) -> None:
             "screenshot": screenshot_summary,
             "diagnostics": diagnostics_compact,
             "browser_activity": _compact_preview_browser_activity(observed.get("browser_activity", {})),
+            **_preview_debug_info(
+                {
+                    **observed,
+                    "screenshot_health": screenshot_summary.get("screenshot_health", {}),
+                }
+            ),
             **verification,
             "evidence_chain": verification["evidence_chain_v2"],
         }

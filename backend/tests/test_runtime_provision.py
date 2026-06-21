@@ -90,3 +90,15 @@ class TestStatus:
     def test_status_supported_on_windows(self):
         s = provision_status()
         assert s["supported"] is True
+
+    def test_ready_requires_hcs_service_and_runtime_pack(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(runtime_provision, "is_hcs_available", lambda: (False, "computecore.dll not found"))
+        monkeypatch.setattr(runtime_provision, "find_metis_bundle", lambda: object())
+        monkeypatch.setattr(runtime_provision, "_is_admin", lambda: False)
+        monkeypatch.setattr(runtime_provision, "_service_state", lambda: {"installed": True, "running": True, "responding": True})
+
+        s = provision_status()
+
+        assert s["ready"] is False
+        assert "enable_vm_platform" in s["needs"]

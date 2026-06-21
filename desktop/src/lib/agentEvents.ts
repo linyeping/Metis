@@ -141,6 +141,7 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
             timestamp,
             hint: stringValue(value(payload, eventRecord, 'hint')),
             recoverable: booleanValue(value(payload, eventRecord, 'recoverable'), true),
+            details: recordValue(value(payload, eventRecord, 'details')),
           })
         : null,
     compactStatus:
@@ -360,6 +361,7 @@ function runtimeStatus(input: {
   timestamp: number;
   hint: string;
   recoverable: boolean;
+  details?: Record<string, unknown>;
 }): RuntimeStatus {
   const severity = runtimeSeverity(input.phase);
   return {
@@ -374,6 +376,7 @@ function runtimeStatus(input: {
     updatedAt: Math.round(input.timestamp * 1000),
     hint: input.hint,
     recoverable: input.recoverable,
+    details: input.details || {},
   };
 }
 

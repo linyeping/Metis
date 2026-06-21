@@ -420,12 +420,49 @@ def run_task(goal: str, max_steps: int = 20, prefer_existing: bool = False) -> d
 
 def format_tool_result(payload: dict[str, Any]) -> str:
     """Return JSON plus a screenshot line that the multimodal runtime can attach."""
+    payload = _with_desktop_debug(payload)
     lines: list[str] = []
     screenshot = _find_screenshot_path(payload)
     if screenshot:
         lines.append(f"Screenshot saved: {screenshot}")
     lines.append(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
     return "\n".join(lines)
+
+
+def _with_desktop_debug(payload: dict[str, Any]) -> dict[str, Any]:
+    data = dict(payload or {})
+    ok = bool(data.get("ok"))
+    status_value = str(data.get("status") or ("completed" if ok else "failed"))
+    steps = int(data.get("steps") or len(data.get("history") or []) or 0)
+    chain = ["started"]
+    if data.get("observation") or data.get("observations"):
+        chain.append("observing")
+    if data.get("history") or data.get("action"):
+        chain.append("acting")
+    if data.get("checks") or data.get("verdict") or data.get("evidence_chain"):
+        chain.append("verifying")
+    chain.append("completed" if ok else status_value)
+    if ok:
+        category = "completed"
+        summary = f"Computer Use 已完成:状态={status_value},步骤={steps}。"
+        next_action = ""
+    elif status_value == "max_steps":
+        category = "max_steps"
+        summary = f"Computer Use 未完成:达到最大步数({steps})。"
+        next_action = "缩小任务目标,或改用 desktop_win2_verify 先确认当前窗口状态。"
+    elif data.get("fallback_recommended"):
+        category = "fallback_recommended"
+        summary = f"Computer Use 未完成:建议切换兜底视觉/手动路径。原因:{data.get('error') or data.get('reason') or status_value}。"
+        next_action = "重新 observe 当前窗口,必要时使用 desktop_vision_task 或用户接管。"
+    else:
+        category = "failed"
+        summary = f"Computer Use 未完成:{data.get('error') or data.get('reason') or status_value}。"
+        next_action = "查看 history/result/checks,确认停在观察、执行还是验证。"
+    data.setdefault("debug_category", category)
+    data.setdefault("debug_summary", summary)
+    data.setdefault("debug_next_action", next_action)
+    data.setdefault("status_chain", chain)
+    return data
 
 
 def _resolve_window(hwnd: int = 0, title: str = "") -> Any | None:

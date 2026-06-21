@@ -219,6 +219,7 @@ def test_chat_sse_fake_provider_emits_runtime_status_done_and_done_marker(isolat
         "starting",
         "llm_request",
         "streaming",
+        "llm_response",
         "completed",
     ]
     assert "content_delta" in [event["kind"] for event in events]

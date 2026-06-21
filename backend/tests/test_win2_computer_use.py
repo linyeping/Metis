@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from backend.runtime.tool_registry import ToolRegistry, register_desktop_tools
@@ -339,6 +340,23 @@ def test_desktop_vision_task_returns_win2_success(monkeypatch):
     result = registry.execute("desktop_vision_task", {"goal": "打开记事本", "max_steps": 2})
     assert '"provider": "metis-python-window2"' in result
     assert '"status": "done"' in result
+
+
+def test_win2_tool_result_includes_debug_summary() -> None:
+    payload = json.loads(
+        win2_loop.format_tool_result(
+            {
+                "ok": False,
+                "provider": "metis-python-window2",
+                "status": "max_steps",
+                "steps": 3,
+                "history": [{"action": "click"}],
+            }
+        )
+    )
+
+    assert payload["debug_category"] == "max_steps"
+    assert payload["status_chain"] == ["started", "acting", "max_steps"]
 
 
 def test_desktop_vision_task_falls_back_to_legacy(monkeypatch):

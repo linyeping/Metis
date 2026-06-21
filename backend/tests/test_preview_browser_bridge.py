@@ -95,6 +95,28 @@ def test_preview_browser_tools_advertise_diagnostics() -> None:
     assert "diagnostics" in verify.description
 
 
+def test_preview_browser_observe_returns_debug_summary(monkeypatch) -> None:
+    def fake_request_preview_command(kind: str, payload: dict[str, object], timeout: int = 12) -> dict[str, object]:
+        assert kind == "observe"
+        return {
+            "ok": True,
+            "url": "http://localhost:5174",
+            "title": "Broken App",
+            "diagnostics": {"counts": {"console_errors": 1, "exceptions": 0, "network_failed": 0}},
+            "page_health": {"blank": False, "reasons": []},
+        }
+
+    monkeypatch.setattr(preview_bridge, "request_preview_command", fake_request_preview_command)
+    registry = ToolRegistry()
+    register_desktop_tools(registry)
+    observe = registry.get("preview_browser_observe")
+
+    assert observe is not None
+    result = json.loads(observe.execute_fn())
+    assert result["debug_category"] == "console_errors"
+    assert "JS" in result["debug_summary"]
+
+
 def test_preview_browser_verify_supports_browser_verifier(monkeypatch) -> None:
     calls: list[str] = []
 
