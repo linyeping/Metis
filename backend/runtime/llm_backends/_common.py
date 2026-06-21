@@ -157,7 +157,10 @@ def post_with_retries(
     """POST JSON with retries on timeouts, connection failures, and 5xx errors."""
     delays = list(backoff_seconds)
     last_error: Optional[BaseException] = None
-    bypass_env_proxy = False
+    # When the user disabled the proxy (mode=off) or bypassed this host, ignore
+    # the OS env proxy from the first request — otherwise requests' trust_env
+    # would still route through it (e.g. a clash tunnel that breaks DeepSeek TLS).
+    bypass_env_proxy = _force_direct_connection(url)
     for attempt in range(max_retries + 1):
         raise_if_cancelled(cancel_event)
         try:
@@ -280,6 +283,14 @@ def _proxies_for_url(url: str) -> Optional[Dict[str, str]]:
 def _is_local_url(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     return host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _force_direct_connection(url: str) -> bool:
+    """True when the request must ignore the OS env proxy entirely."""
+    if _is_local_url(url) or _is_proxy_bypassed(url):
+        return True
+    mode = os.environ.get("METIS_PROXY_MODE", os.environ.get("MIRO_PROXY_MODE", "")).strip().lower()
+    return mode == "off"
 
 
 def _is_proxy_bypassed(url: str) -> bool:
