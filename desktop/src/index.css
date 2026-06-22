@@ -3219,16 +3219,6 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   min-width: 0;
 }
 
-.tool-card[data-status='error'] {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  background: color-mix(in srgb, var(--panel) 91%, var(--danger) 9%);
-}
-
-.tool-card[data-status='waiting_approval'] {
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
-  background: color-mix(in srgb, var(--panel) 91%, var(--warning) 9%);
-}
-
 .tool-card-head {
   display: grid;
   width: 100%;
