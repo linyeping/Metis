@@ -1117,9 +1117,11 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
     ),
     (
         "web_search",
-        """【WebSearch】需要实时信息时使用；查询词应含年份与具体关键词（以系统注入当前日期为准）。""",
+        """【WebSearch】需要实时信息时使用；查询词应含年份与具体关键词（以系统注入当前日期为准）。
+查询词直接转发给底层搜索引擎，支持其原生高级语法：site:域名 限定站内搜索、"精确短语" 强制完整匹配、
+-排除词 剔除噪音、filetype:pdf 等文件类型过滤（不同语法在不同底层引擎下生效程度可能不同，非绝对可靠）。""",
         {
-            "query": _string("查询（可用 search_term 别名）"),
+            "query": _string("查询（可用 search_term 别名）；支持 site:/\"短语\"/-排除/filetype: 等搜索引擎原生语法"),
             "max_results": _integer("条数上限，默认 5"),
             "region": _string("可选 ddgs 区域，如 us-en / cn-zh"),
             "timelimit": _string("可选时间过滤，如 d/w/m/y"),

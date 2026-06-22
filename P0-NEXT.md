@@ -1693,3 +1693,65 @@ Known note:
   pre-existing import-order issues and an unrelated old unused `log_dir`
   variable in `backend/web/app.py`. Those were not part of this task and
   were intentionally left untouched.
+
+## Real-World Test Found The Actual Bug: Deep Research Toggle Did Nothing (2026-06-22)
+
+Owner tested the toggle live with: "Claude Sonnet 4.6 和 GPT-5.5 在编码能力上的
+对比，需要多个独立来源互相核实，并标注每条结论的引用网址。" Toggle on, the model
+still called `web_fetch` directly on a `google.com/search?q=...` URL (got
+403'd, expected — that's exactly why `web_search` exists), then gave up.
+A second attempt used the unrelated `/browser` slash command (forces
+`browse_web`, nothing to do with `web_research`) and produced a
+suspiciously specific "comparison report" (exact dates, a codename
+"Spud") citing sources that almost certainly don't contain that content —
+the Grok-style citation-hallucination trap from the original design reply,
+now observed for real instead of just warned about in theory.
+
+Root cause, confirmed by calling `build_task_route` directly:
+
+```python
+build_task_route([...that exact sentence...], deep_research=True)
+# -> task_type="chat", preferred_tools=[], tool_guidance="Answer directly..."
+```
+
+`classify_task` is purely keyword-gated (`_EXTERNAL_LOOKUP_KEYWORDS` needs
+"最新/搜索/查一下/官网" etc.). The owner's sentence contains none of them, so
+it fell through to `"chat"` — and because `_preferred_tools_for_task`/
+`_tool_guidance_for_task` only apply `deep_research` *inside* the
+`if task_type == "external_lookup":` branch, the toggle had zero effect
+whenever the keyword gate missed. The toggle was real but silently inert
+on exactly this kind of natural research-comparison phrasing.
+
+Fix (`backend/runtime/model_router.py`):
+
+1. `build_task_route` now overrides `task_type` to `external_lookup` when
+   `deep_research=True` and the keyword classifier landed on `"chat"` or
+   `"external_lookup"` — i.e. the explicit toggle wins over a keyword miss,
+   but never hijacks a task the classifier already strongly identified as
+   `code`/`desktop`/`artifact_workflow`/`browser`/`long_context`.
+2. Broadened `_EXTERNAL_LOOKUP_KEYWORDS` with `核实`/`核查`/`多方来源`/
+   `独立来源`/`引用网址`/`互相核实`/`对比一下` so plain research-comparison
+   language gets classified correctly even with the toggle *off* — this
+   was the actual phrasing in the owner's test sentence.
+3. Added `web_search`'s advanced-syntax hint to its schema description
+   (`backend/tools/schema_definitions.py`): `ddgs` forwards the query
+   string verbatim to the underlying engine, so `site:`/`"phrase"`/
+   `-exclude`/`filetype:` already work today with zero extra code — the
+   model just didn't know it could use them. Live-tested `site:` and
+   `"phrase" -exclude` against the real network before writing this;
+   `filetype:` is less reliable since `ddgs` rotates between several
+   backend engines and not all of them honor it the same way.
+
+Added 3 regression tests in `test_fableadv_40_model_tool_routing.py`
+covering: toggle rescuing the exact reported sentence, toggle rescuing a
+sentence with zero lookup keywords at all, and confirming the toggle does
+NOT hijack a clearly code-shaped request. 79 backend tests passing,
+ruff clean.
+
+Still unverified: whether the *citation-hallucination* report from the
+`/browser` run is a `browse_web`-specific problem (separate from
+`web_research`, out of scope here) or a general pattern worth a system-
+prompt-level rule ("don't synthesize specific dates/codenames you didn't
+actually read on a page"). Flagging for whoever picks this up next —
+`web_research`'s formatter already refuses to let snippets stand in for
+citations; `browse_web` may need the same discipline.

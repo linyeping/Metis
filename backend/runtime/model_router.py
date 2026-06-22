@@ -164,6 +164,16 @@ def build_task_route(
 ) -> TaskRoute:
     text = _latest_user_text(messages)
     task_type, reason = classify_task(text)
+    if deep_research and task_type in {"chat", "external_lookup"}:
+        # The deep-research toggle is an explicit, unambiguous user signal —
+        # it should win over the keyword classifier guessing "chat" for a
+        # research/comparison request that happens not to contain any of
+        # _EXTERNAL_LOOKUP_KEYWORDS (e.g. "对比一下...需要多方核实引用网址"
+        # has no "最新/搜索/查一下" in it but is clearly a lookup task).
+        # Don't override stronger, more specific buckets like code/desktop/
+        # artifact_workflow/browser/long_context — those already won the
+        # keyword race for a reason.
+        task_type, reason = "external_lookup", "deep research toggle explicitly enabled for this turn"
     model_role = _model_role_for_task(task_type, text)
     runtime_policy = runtime_policy_for_task(task_type, text)
     selected_model, fallback_models = _select_models(
@@ -443,6 +453,13 @@ _EXTERNAL_LOOKUP_KEYWORDS = {
     "官网",
     "查一下",
     "查清楚",
+    "核实",
+    "核查",
+    "多方来源",
+    "独立来源",
+    "引用网址",
+    "互相核实",
+    "对比一下",
     "github",
     "gmail",
     "oauth",

@@ -86,6 +86,70 @@ def test_router_default_web_search_guidance_allows_audited_single_escalation() -
     assert "reason argument" in route.tool_guidance
 
 
+def test_deep_research_toggle_rescues_keyword_free_comparison_request() -> None:
+    # Real bug report: this exact sentence has none of _EXTERNAL_LOOKUP_KEYWORDS
+    # (no "最新/搜索/查一下"), so the classifier alone calls it "chat" and the
+    # deep-research toggle silently did nothing — the model fell back to
+    # web_fetch on a raw google.com/search URL and got a 403.
+    text = "Claude Sonnet 4.6 和 GPT-5.5 在编码能力上的对比，需要多个独立来源互相核实，并标注每条结论的引用网址。"
+
+    route_off = build_task_route(
+        [{"role": "user", "content": text}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=False,
+    )
+    assert route_off.task_type == "external_lookup"  # keyword list now also catches "核实"/"引用网址"
+
+    route_on = build_task_route(
+        [{"role": "user", "content": text}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=True,
+    )
+    assert route_on.task_type == "external_lookup"
+    assert route_on.preferred_tools[0] == "web_research"
+
+
+def test_deep_research_toggle_overrides_chat_classification_with_no_keywords_at_all() -> None:
+    text = "帮我看看这两个东西哪个更好用，给我点依据。"
+
+    route_off = build_task_route(
+        [{"role": "user", "content": text}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=False,
+    )
+    assert route_off.task_type == "chat"
+    assert route_off.preferred_tools == []
+
+    route_on = build_task_route(
+        [{"role": "user", "content": text}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=True,
+    )
+    assert route_on.task_type == "external_lookup"
+    assert "web_research" in route_on.preferred_tools
+
+
+def test_deep_research_toggle_does_not_hijack_a_code_task() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "帮我修一下 backend 里这个文件的代码 bug"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=True,
+    )
+
+    assert route.task_type == "code"
+    assert "web_research" not in route.preferred_tools
+
+
 def test_router_uses_background_artifact_workflow_for_report_code_tasks() -> None:
     route = build_task_route(
         [
