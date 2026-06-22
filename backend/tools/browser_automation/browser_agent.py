@@ -54,11 +54,23 @@ class BrowserResult:
 
     def __str__(self) -> str:
         if self.ok:
-            parts = [self.output or "Browser task completed."]
+            summary = self.output or "Browser task completed."
+            parts = [
+                f"[Sub-agent summary — its own conclusion, not verified text from the page]\n{summary}"
+            ]
             if self.url:
                 parts.append(f"URL: {self.url}")
             if self.extracted_content:
-                parts.append(f"Extracted content:\n{self.extracted_content}")
+                parts.append(
+                    "[Extracted page content — this is the actual text read from the page; "
+                    f"prefer this over the summary above for specific facts/dates/numbers]\n{self.extracted_content}"
+                )
+            else:
+                parts.append(
+                    "No raw extracted content was returned — the summary above is the sub-agent's own "
+                    "narrative. Do not present its specific dates, version numbers, or names as verified "
+                    "facts; re-run with extract_content=True or use web_research if the user needs citable evidence."
+                )
             return "\n\n".join(parts)
         return (
             f"Browser task failed: {self.error}\n\n"

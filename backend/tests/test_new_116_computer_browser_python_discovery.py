@@ -93,6 +93,21 @@ def test_new_116_browser_types_and_dependency_fallback(monkeypatch) -> None:
     assert "browser-use" in browse_web("check docs")
 
 
+def test_browser_result_labels_summary_vs_extracted_content() -> None:
+    # The sub-agent's own narrative output and the actually-extracted page
+    # text must be visibly distinct, otherwise a model relaying browse_web's
+    # result has no way to know which parts were verified and which were
+    # synthesized by the browsing sub-agent itself.
+    with_extracted = str(BrowserResult(ok=True, output="GPT-5.5 released April 23", extracted_content="real page text"))
+    assert "Sub-agent summary" in with_extracted
+    assert "Extracted page content" in with_extracted
+    assert "real page text" in with_extracted
+
+    without_extracted = str(BrowserResult(ok=True, output="GPT-5.5 released April 23"))
+    assert "Sub-agent summary" in without_extracted
+    assert "Do not present its specific dates" in without_extracted
+
+
 def test_browser_show_browser_runs_visible_without_user_profile(monkeypatch) -> None:
     captured: dict[str, BrowserTask] = {}
 

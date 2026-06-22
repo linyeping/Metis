@@ -53,3 +53,14 @@ allowed-tools: [preview_browser_status, preview_browser_navigate, preview_browse
 - Preview 的高风险动作会在 Electron 执行层拦截并要求用户确认：登录/OAuth、submit、upload、send、purchase、delete、payment、password/file input。
 - browser-use 多步任务尽量交给一次 `browse_web` 调用，给清楚 `task`，不要拆成很多次小调用。
 - 网页任务不要用 `desktop_*` 像素点击；网页有 DOM、元素、URL 和文本，比坐标可靠。
+
+## 引用纪律（重要）
+
+`browse_web`/`browse_and_extract` 的返回值里，`[Sub-agent summary]` 部分是
+browser-use 自己的浏览子代理写的总结/结论，**不是从页面原文逐字抽取的**；
+只有 `[Extracted page content]` 部分才是真正读到的原文。
+
+- 不要把 `[Sub-agent summary]` 里的具体日期、版本号、代号、数字当成已核实的事实直接复述——子代理也会编。
+- 只有在 `[Extracted page content]` 里能找到同样的具体信息时，才能把它当作确认过的事实呈现给用户。
+- 如果返回结果里没有 `[Extracted page content]`（没设 `extract_content=True`），且用户需要的是可引用、可核实的具体事实（日期/版本号/数据），重新带 `extract_content=True` 调一次，或者改用 `/search` 的 `web_research`——它的证据链有 URL，能让用户自己点开核实。
+- 不确定时，明确告诉用户"这是浏览器子代理的总结，未逐字核实"，而不是输出一份看起来权威但可能是编的报告。

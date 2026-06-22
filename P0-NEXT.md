@@ -1885,3 +1885,53 @@ needed the ddgs fix manually applied once before this version existed.
 This fix only prevents it from happening *again* on the *next* dependency
 addition — it does not retroactively need to, since the one-time manual
 `pip install` already happened for all three this session.
+
+## Closing The Loop: `browse_web` Citation Discipline (2026-06-22)
+
+Last open item from the real-world bug report — the `/browser`-routed run
+that produced a suspiciously specific "comparison report" (exact dates,
+codename "Spud") citing sources unlikely to say that. Traced the actual
+mechanism: `browse_web`/`browse_and_extract` run on the `browser-use`
+library, whose own sub-agent (using whatever model/provider is currently
+configured — confirmed via `_active_provider_config()` in
+`browser_agent.py`, not hard-coded to a weak model) produces a
+`final_result()`/`output` text that is *its own narrative conclusion*,
+separate from `extracted_content` (the actual page text, only returned
+when `extract_content=True`). Nothing previously marked this distinction
+— a model relaying `browse_web`'s result had no signal that `output`
+could contain synthesized specifics never actually read from a page.
+
+Fix, mirroring the discipline already built into `web_research`'s
+formatter and the `/search` skill:
+
+1. `BrowserResult.__str__` in `backend/tools/browser_automation/browser_agent.py`
+   now labels the two sections explicitly: `[Sub-agent summary — its own
+   conclusion, not verified text from the page]` vs `[Extracted page
+   content — ...prefer this over the summary above for specific facts]`.
+   When no `extracted_content` is present at all, it says so explicitly
+   and tells the model not to present the summary's specifics as fact.
+2. `backend/resources/builtin_skills/browser/SKILL.md` gets a new "引用纪律"
+   section: don't restate the sub-agent summary's dates/version
+   numbers/codenames as verified facts unless they also appear in the
+   extracted content; re-run with `extract_content=True` or fall back to
+   `/search`'s `web_research` (URL-backed evidence) when the user needs
+   citable specifics; when unsure, say "this is the browsing sub-agent's
+   summary, not verified word-for-word" instead of presenting a
+   confident-looking but possibly fabricated report.
+3. Bumped `BUILTIN_SKILLS_VERSION` 11 → 12 (this changes an *existing*
+   builtin skill's content, not just adds a new one — the refresh-on-
+   version-bump path is what makes already-installed copies pick up the
+   new rule).
+
+Verified: `expand_user_skill_command("/browser ...")` against the real
+installed copy now contains "引用纪律" after the version bump (refresh-path
+exercised for real, not simulated). Added
+`test_browser_result_labels_summary_vs_extracted_content`; 22/22 passing
+across `test_fableadv_12_skills_system.py` and
+`test_new_116_computer_browser_python_discovery.py`.
+
+This closes the last open item from this session's deep-research/search
+bug reports. Remaining backlog is back to the pre-existing four: Phase 2
+search cache, auto-update mechanism, the three-product P1 benchmark
+(Browser Dev Mode / AutoGuard v2 / skill lifecycle / Record&Replay), and
+extending the public/diagnostic split beyond search to every tool.
