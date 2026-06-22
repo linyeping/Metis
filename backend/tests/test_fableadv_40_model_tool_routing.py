@@ -137,6 +137,45 @@ def test_deep_research_toggle_overrides_chat_classification_with_no_keywords_at_
     assert "web_research" in route_on.preferred_tools
 
 
+def test_explicit_search_command_forces_external_lookup_even_over_code_keywords() -> None:
+    # "/search" is a literal explicit trigger, same mechanism as the existing
+    # "/browser" keyword, but unconditional — it must win even when the rest
+    # of the sentence reads like a code task.
+    route = build_task_route(
+        [{"role": "user", "content": "/search 帮我修一下 backend 里这个项目的代码实现"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+    )
+
+    assert route.task_type == "external_lookup"
+    assert route.preferred_tools[:3] == ["web_search", "web_fetch", "web_research"]
+
+
+def test_explicit_search_command_chinese_alias() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "/搜索 今天有什么新闻"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+    )
+
+    assert route.task_type == "external_lookup"
+
+
+def test_explicit_search_command_combines_with_deep_research_toggle() -> None:
+    route = build_task_route(
+        [{"role": "user", "content": "/search 这两个东西哪个更好用"}],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=True,
+    )
+
+    assert route.task_type == "external_lookup"
+    assert route.preferred_tools[0] == "web_research"
+
+
 def test_deep_research_toggle_does_not_hijack_a_code_task() -> None:
     route = build_task_route(
         [{"role": "user", "content": "帮我修一下 backend 里这个文件的代码 bug"}],

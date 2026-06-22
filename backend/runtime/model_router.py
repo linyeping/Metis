@@ -291,10 +291,18 @@ def runtime_policy_for_task(task_type: str, text: str = "") -> Dict[str, Any]:
     }
 
 
+_EXPLICIT_SEARCH_COMMANDS = ("/search", "/搜索", "/websearch")
+
+
 def classify_task(text: str) -> tuple[str, str]:
     value = _normalized(text)
     if not value:
         return "chat", "empty or greeting-like request"
+    if _has_any(value, _EXPLICIT_SEARCH_COMMANDS):
+        # Explicit user command — same precedence rule as the deep_research
+        # toggle override below: an unambiguous trigger wins over every
+        # keyword guess, including code/artifact/desktop classification.
+        return "external_lookup", "explicit /search command detected"
     artifact_like = _looks_like_artifact_workflow_task(value)
     if artifact_like and not _requires_desktop_control(value):
         return (

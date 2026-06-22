@@ -1755,3 +1755,31 @@ prompt-level rule ("don't synthesize specific dates/codenames you didn't
 actually read on a page"). Flagging for whoever picks this up next —
 `web_research`'s formatter already refuses to let snippets stand in for
 citations; `browse_web` may need the same discipline.
+
+## Explicit `/search` Trigger (2026-06-22, owner's request)
+
+Owner's framing: deep research already has its own toggle, so it doesn't
+need a slash command. Search itself should — same idea as the existing
+`/browser` keyword that already forces the `browser` task type, just for
+search. Implemented as the same mechanism, one priority tier higher:
+
+- `_EXPLICIT_SEARCH_COMMANDS = ("/search", "/搜索", "/websearch")` checked
+  at the very top of `classify_task`, before even the artifact/code/desktop
+  checks — unconditional, because it's an explicit command, not a keyword
+  guess. (`/browser`'s existing keyword match sits *after* the code-task
+  check, so a code-flavored sentence containing "/browser" can still lose
+  to `code` — not touched here since it wasn't reported as broken, but
+  worth knowing this is an existing inconsistency if `/browser` ever gets
+  revisited.)
+- Combines cleanly with the deep-research toggle: `/search` alone gives
+  `external_lookup` with `web_search` first (cheap default); `/search` +
+  toggle on gives `web_research` first. Either works independently.
+- 3 new tests: forces external_lookup over code keywords, Chinese alias
+  `/搜索`, and combination with the toggle. 19/19 passing in
+  `test_fableadv_40_model_tool_routing.py`, ruff clean.
+- Intentionally not added to the Composer's discoverable slash-menu
+  (`immediateSlashActions` in `Composer.tsx`) — those are client-
+  intercepted actions that run a local function instead of sending text
+  (`/new`, `/compact`, `/rewind`). `/search` needs to be sent as normal
+  message text for the backend keyword match to see it, same as `/browser`
+  already is. No UI change needed or made.
