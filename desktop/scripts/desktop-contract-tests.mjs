@@ -748,7 +748,8 @@ test('NEW-84 session isolation and shell profiles stay wired', () => {
   );
 
   assert.match(chatStore, /runSessionId:\s*string\s*\|\s*null/);
-  assert.match(chatStore, /chatStream\(\{ message: userContent, session_id: sessionId \}/);
+  // session_id 必须随每次 chatStream 传入（会话隔离）；允许后面再带别的参数（如 deep_research）。
+  assert.match(chatStore, /chatStream\(\{ message: userContent, session_id: sessionId\b/);
   assert.match(sseParser, /export function applyChatEvent/);
   assert.match(sseParser, /assistantId,\s*sessionId/);
   assert.match(sseParser, /export function isActiveSession/);
@@ -828,7 +829,8 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(api, /export async function getActiveSessionRun/);
   assert.match(runManager, /const activeRunControllers = new Map/);
   assert.match(runManager, /export const processedRunSeq = new Map/);
-  assert.match(chatStore, /startChatRun\(\{ message: userContent, session_id: sessionId, assistant_id: assistantId \}\)/);
+  // 并发会话注册需 session_id + assistant_id；允许后面再带别的参数（如 deep_research）。
+  assert.match(chatStore, /startChatRun\(\{ message: userContent, session_id: sessionId, assistant_id: assistantId\b/);
   assert.match(chatStore, /attachRunStream\(activeRunInfo, sessionId\)/);
   assert.match(chatStore, /cancelChatRun\(activeRun\.runId\)/);
   assert.match(fakeBackend, /const fakeRuns = new Map/);
