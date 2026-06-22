@@ -86,6 +86,7 @@ export function App() {
   const modelPickerOpen = useUiStore(state => state.modelPickerOpen);
   const workspaceMenuOpen = useUiStore(state => state.workspaceMenuOpen);
   const appDialog = useUiStore(state => state.appDialog);
+  const pushToast = useUiStore(state => state.pushToast);
   const loadSessions = useSessionStore(state => state.load);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
   const loadChatSession = useChatStore(state => state.loadSession);
@@ -175,6 +176,29 @@ export function App() {
       unsubscribe();
     };
   }, [refreshAfterReady]);
+
+  useEffect(() => {
+    if (!window.metis.onUpdateEvent) return undefined;
+    // Only surface the actionable "ready to restart" moment as a toast.
+    // "checking"/"downloading"/"not-available" fire on every periodic
+    // background check (every few hours, since the app often runs for
+    // days via the tray) and would just be noise; background check
+    // failures (e.g. no internet right now) stay silent here too — the
+    // manual "检查更新" button in Settings already surfaces those inline.
+    return window.metis.onUpdateEvent(payload => {
+      if (payload.status !== 'downloaded') return;
+      pushToast({
+        title: `新版本 v${payload.version || ''} 已下载完成`,
+        description: '点击重启即可更新，未保存的对话不受影响。',
+        action: '重启更新',
+        onAction: () => {
+          void window.metis.installUpdate();
+        },
+        type: 'success',
+        duration: 0,
+      });
+    });
+  }, [pushToast]);
 
   useEffect(() => {
     void loadChatSession(activeSessionId);

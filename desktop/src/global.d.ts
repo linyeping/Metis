@@ -32,7 +32,8 @@ declare global {
       appInfo: () => Promise<{ name: string; version: string; packaged: boolean; updateUrl: string; githubHome?: string; fakeBackend?: boolean; storage?: StoragePayload }>;
       diagnostics: () => Promise<DiagnosticsPayload>;
       saveDiagnosticsBundle: () => Promise<DiagnosticsBundleResult>;
-      checkUpdates: () => Promise<{ ok: boolean; status: string; message: string }>;
+      checkUpdates: () => Promise<{ ok: boolean; status: string; message: string; url?: string }>;
+      installUpdate: () => Promise<{ ok: boolean; message?: string }>;
       devServerDetect: (payload?: DevServerStartPayload) => Promise<DevServerDetectResult>;
       devServerStart: (payload?: DevServerStartPayload) => Promise<DevServerStatus>;
       devServerStop: (payload?: DevServerStartPayload) => Promise<DevServerStatus>;
@@ -95,6 +96,12 @@ declare global {
         loading?: boolean;
       }) => void) => () => void;
       onWindowState: (callback: (payload: { isMaximized: boolean; isFullScreen: boolean }) => void) => () => void;
+      onUpdateEvent: (callback: (payload: {
+        status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+        version?: string;
+        percent?: number;
+        message?: string;
+      }) => void) => () => void;
     };
   }
 }

@@ -1935,3 +1935,82 @@ bug reports. Remaining backlog is back to the pre-existing four: Phase 2
 search cache, auto-update mechanism, the three-product P1 benchmark
 (Browser Dev Mode / AutoGuard v2 / skill lifecycle / Record&Replay), and
 extending the public/diagnostic split beyond search to every tool.
+
+## P0: Auto-Update Actually Updates Now (2026-06-22)
+
+Owner's framing: this is P0, it directly affects every user's update
+experience, and today it only downloads to the machine without ever
+installing. Confirmed the exact gap by reading `desktop/electron/main.cjs`:
+
+- `electron-updater` (`autoUpdater`) was already a real dependency with
+  real event wiring (`configureAutoUpdates()`), but the whole thing was
+  gated behind `process.env.METIS_UPDATE_URL` being set — which it isn't,
+  in normal use. Without it, the function silently did nothing.
+- The manual "检查更新" button in Settings hit the *same* gate: when
+  `METIS_UPDATE_URL` is unset (the common case), it fell through to a
+  plain GitHub Releases API fetch that just told the user "前往 GitHub 下载"
+  — point them at a web page to download and run the installer themselves.
+  This is the literal "只能下载到本机" behavior reported.
+- Even when `autoUpdater` *did* run (e.g. with `METIS_UPDATE_URL` set), it
+  downloaded silently and fired `update-downloaded`, but **nothing ever
+  called `autoUpdater.quitAndInstall()`** anywhere in the codebase. The
+  default `autoInstallOnAppQuit` would only kick in on a real `app.quit()`
+  — and `closeBehavior: 'tray'` means clicking the window's close button
+  never actually quits the app, it just hides to tray. So even a fully
+  successful background download had no real path to ever getting
+  installed during normal usage.
+
+Fix, scoped to `desktop/electron/main.cjs` + the renderer surfaces needed
+to act on it — explicitly **not** touching anything about how the user's
+own Python environment works, that's a separate concern:
+
+1. **Removed the `METIS_UPDATE_URL` gate as the enabler.** `electron-builder.yml`
+   already declares `publish: { provider: github, owner: linyeping, repo: Metis }`,
+   which bakes a default `app-update.yml` feed into every build — so
+   `autoUpdater.checkForUpdatesAndNotify()` works against real GitHub
+   Releases with zero extra config. `METIS_UPDATE_URL` still works as an
+   optional override to point at a private/generic update server instead,
+   it's just no longer required to get auto-updates working at all.
+2. **Periodic re-check**, not just once 5s after launch — added a
+   4-hour `setInterval` (`UPDATE_RECHECK_INTERVAL_MS`), since the app
+   commonly runs for days via the tray and a single launch-time check
+   means new releases would otherwise basically never get noticed.
+3. **`metis:install-update` IPC handler** that calls
+   `autoUpdater.quitAndInstall(true, true)` (silent install, relaunch
+   after) — the actually-missing step. Sets `app.isQuitting = true`
+   first, same as the existing tray "退出" handler, so the window's
+   `close` listener doesn't intercept the quit sequence and hide to tray
+   instead of actually exiting.
+4. **Renderer surfaces, two of them, both wired through `pendingUpdateInfo`
+   state in main + a new `metis:update-event` IPC channel**:
+   - A toast (extended `ToastNotice`/`Toast.tsx` with a real `onAction`
+     click handler — previously `action` was a plain string with no click
+     behavior at all) appears app-wide the moment `update-downloaded`
+     fires: "新版本 vX 已下载完成" with a "重启更新" button, persistent
+     (`duration: 0`) until acted on. Only the actionable `downloaded`
+     status surfaces a toast — `checking`/`downloading`/`not-available`
+     fire on every periodic background check and would just be noise;
+     background check failures stay silent too, matching how the manual
+     button already surfaces failures inline.
+   - The Settings → About tab's existing "检查更新" flow now also shows a
+     "重启更新" button when a download is already sitting ready, and
+     `metis:check-updates` itself checks `pendingUpdateInfo` first so it
+     reports "已下载完成，点击重启" instead of re-triggering a redundant check.
+
+Verified: `node -c electron/main.cjs` syntax-clean, `electron-updater`
+resolves from `node_modules`, `npm run typecheck` clean, full `vitest run`
+(118/118) and the `.cjs` contract suite (`security`/`data-root`/`backend`,
+12/12) still pass with no regressions. Did not write a new
+`node --test` contract test for the update flow itself — `main.cjs`
+`require('electron')` at module load, so unlike `backend.cjs`/`data-root.cjs`
+(which don't), it can't be unit-tested outside a real Electron process
+with this repo's current test setup. Flagging that gap rather than
+quietly skipping it: whoever revisits this should consider either an
+Electron-based test harness or at least a static source-assertion
+contract test (the `NEW-XX`-style ones already in
+`scripts/desktop-contract-tests.mjs` read main.cjs as text and assert
+wiring exists, without executing it — that pattern could cover this).
+
+Not done: code-signing (NSIS installs are unsigned, so Windows SmartScreen
+may still warn on the downloaded installer even though the update flow
+itself now works end-to-end); a rollback path if a bad version ships.

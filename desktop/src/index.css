@@ -726,6 +726,23 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   font-size: 11px;
 }
 
+.toast-action {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--bg-elevated));
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated));
+}
+
 .toast-close {
   display: grid;
   width: 26px;

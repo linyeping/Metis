@@ -19,10 +19,12 @@ interface AboutTabProps {
   diagnostics: DiagnosticsPayload | null;
   diagnosticsMessage: string;
   onCheckUpdates: () => void | Promise<void>;
+  onInstallUpdate: () => void | Promise<void>;
   onRefreshDiagnostics: () => void | Promise<void>;
   onSaveDiagnosticsBundle: () => void | Promise<void>;
   savingDiagnostics: boolean;
   updateMessage: string;
+  updateReady: boolean;
 }
 
 export const AboutTab = memo(function AboutTab({
@@ -31,10 +33,12 @@ export const AboutTab = memo(function AboutTab({
   diagnostics,
   diagnosticsMessage,
   onCheckUpdates,
+  onInstallUpdate,
   onRefreshDiagnostics,
   onSaveDiagnosticsBundle,
   savingDiagnostics,
   updateMessage,
+  updateReady,
 }: AboutTabProps) {
   const t = useT();
   const storage = diagnostics?.storage || appInfo?.storage;
@@ -68,6 +72,11 @@ export const AboutTab = memo(function AboutTab({
           <button type="button" disabled={checkingUpdates} onClick={() => void onCheckUpdates()}>
             {checkingUpdates ? t('检查中...') : t('检查更新')}
           </button>
+          {updateReady && (
+            <button type="button" className="primary" onClick={() => void onInstallUpdate()}>
+              {t('重启更新')}
+            </button>
+          )}
         </div>
         {updateMessage && <p className="section-desc">{updateMessage}</p>}
       </section>

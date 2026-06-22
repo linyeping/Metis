@@ -38,7 +38,14 @@ function ToastItem({
       <div className="toast-copy">
         <strong>{toast.title}</strong>
         {toast.description && <p>{toast.description}</p>}
-        {toast.action && <small>{toast.action}</small>}
+        {toast.action &&
+          (toast.onAction ? (
+            <button type="button" className="toast-action" onClick={() => toast.onAction?.()}>
+              {toast.action}
+            </button>
+          ) : (
+            <small>{toast.action}</small>
+          ))}
       </div>
       <button className="toast-close" type="button" aria-label="关闭通知" onClick={() => dismissToast(toast.id)}>
         <X size={14} />

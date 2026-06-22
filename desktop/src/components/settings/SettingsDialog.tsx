@@ -173,6 +173,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const [diagnosticsMessage, setDiagnosticsMessage] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateMessage, setUpdateMessage] = useState('');
+  const [updateReady, setUpdateReady] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -512,11 +513,27 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     try {
       const result = await window.metis.checkUpdates();
       setUpdateMessage(result.message);
+      setUpdateReady(result.status === 'downloaded');
       const url = (result as { url?: string }).url;
       if (url) void window.metis.openExternal?.(url);
     } finally {
       setCheckingUpdates(false);
     }
+  }, []);
+
+  const installUpdate = useCallback(async () => {
+    const result = await window.metis.installUpdate();
+    if (!result.ok && result.message) setUpdateMessage(result.message);
+  }, []);
+
+  useEffect(() => {
+    if (!window.metis.onUpdateEvent) return undefined;
+    return window.metis.onUpdateEvent(payload => {
+      if (payload.status === 'downloaded') {
+        setUpdateReady(true);
+        setUpdateMessage(`新版本 v${payload.version || ''} 已下载完成，点击重启以更新。`);
+      }
+    });
   }, []);
 
   const runRuntimeAction = useCallback(
@@ -679,10 +696,12 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             diagnostics={diagnostics}
             diagnosticsMessage={diagnosticsMessage}
             onCheckUpdates={checkUpdates}
+            onInstallUpdate={installUpdate}
             onRefreshDiagnostics={refreshDiagnostics}
             onSaveDiagnosticsBundle={saveDiagnosticsBundle}
             savingDiagnostics={savingDiagnostics}
             updateMessage={updateMessage}
+            updateReady={updateReady}
           />
         );
       default:

@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('metis', {
   diagnostics: () => ipcRenderer.invoke('metis:diagnostics'),
   saveDiagnosticsBundle: () => ipcRenderer.invoke('metis:save-diagnostics-bundle'),
   checkUpdates: () => ipcRenderer.invoke('metis:check-updates'),
+  installUpdate: () => ipcRenderer.invoke('metis:install-update'),
   devServerDetect: payload => ipcRenderer.invoke('metis:dev-server-detect', payload),
   devServerStart: payload => ipcRenderer.invoke('metis:dev-server-start', payload),
   devServerStop: payload => ipcRenderer.invoke('metis:dev-server-stop', payload),
@@ -86,5 +87,10 @@ contextBridge.exposeInMainWorld('metis', {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('metis:window-state', listener)
     return () => ipcRenderer.removeListener('metis:window-state', listener)
+  },
+  onUpdateEvent: callback => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('metis:update-event', listener)
+    return () => ipcRenderer.removeListener('metis:update-event', listener)
   }
 })

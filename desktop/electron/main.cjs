@@ -47,6 +47,8 @@ let mainWindow = null
 let previewView = null
 let previewTabId = ''
 let lastPreviewBoundsKey = ''
+let pendingUpdateInfo = null
+let updateCheckTimer = null
 let lastPreviewBounds = null
 // 原生 WebContentsView 永远盖在 DOM 之上（Electron 无 z-index）。任意 DOM 浮层（设置/命令面板/弹窗）打开时
 // 必须把它藏掉，否则就会像截图那样压在弹窗上面。这是 VS Code / 各家稳定方案的核心做法。
@@ -448,6 +450,11 @@ function emitPreviewState(patch = {}) {
     ...patch
   }
   mainWindow.webContents.send('metis:preview-state', payload)
+}
+
+function emitUpdateEvent(payload = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('metis:update-event', payload)
 }
 
 function hidePreviewView() {
@@ -2697,28 +2704,65 @@ function showWindow() {
   mainWindow.focus()
 }
 
+// 重新检查间隔：app 常驻托盘运行数天是常态（closeBehavior=tray），只在启动时查一次
+// 等于几乎永远不会发现新版本——所以这里要周期性重新检查。
+const UPDATE_RECHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
+
+function triggerUpdateCheck() {
+  if (!autoUpdater) return
+  autoUpdater.checkForUpdatesAndNotify().catch(error => {
+    log(`[update] check skipped: ${error?.message || error}`)
+    emitUpdateEvent({ status: 'error', message: error?.message || String(error) })
+  })
+}
+
 function configureAutoUpdates() {
   if (!app.isPackaged || !autoUpdater) {
     return
   }
 
+  // electron-builder's `publish: { provider: github, ... }` config already bakes
+  // a default feed (app-update.yml) into the build, so autoUpdater works without
+  // setFeedURL out of the box. METIS_UPDATE_URL stays as an optional override for
+  // a private/generic update server — it is no longer required to enable
+  // auto-updates at all (that was the actual P0 bug: without it, this whole
+  // function used to silently do nothing and the manual "check updates" button
+  // fell through to "go download it from GitHub yourself").
   const updateUrl = process.env.METIS_UPDATE_URL
   if (updateUrl) {
     autoUpdater.setFeedURL({ provider: 'generic', url: updateUrl })
   }
 
   autoUpdater.autoDownload = true
-  autoUpdater.on('checking-for-update', () => log('[update] checking'))
-  autoUpdater.on('update-available', info => log(`[update] available ${info?.version || ''}`))
-  autoUpdater.on('update-not-available', info => log(`[update] not available ${info?.version || ''}`))
-  autoUpdater.on('error', error => log(`[update] error ${error?.message || error}`))
-  autoUpdater.on('update-downloaded', info => log(`[update] downloaded ${info?.version || ''}`))
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('checking-for-update', () => {
+    log('[update] checking')
+    emitUpdateEvent({ status: 'checking' })
+  })
+  autoUpdater.on('update-available', info => {
+    log(`[update] available ${info?.version || ''}`)
+    emitUpdateEvent({ status: 'available', version: info?.version || '' })
+  })
+  autoUpdater.on('update-not-available', info => {
+    log(`[update] not available ${info?.version || ''}`)
+    emitUpdateEvent({ status: 'not-available' })
+  })
+  autoUpdater.on('download-progress', progress => {
+    emitUpdateEvent({ status: 'downloading', percent: Math.round(progress?.percent || 0) })
+  })
+  autoUpdater.on('error', error => {
+    log(`[update] error ${error?.message || error}`)
+    emitUpdateEvent({ status: 'error', message: error?.message || String(error) })
+  })
+  autoUpdater.on('update-downloaded', info => {
+    log(`[update] downloaded ${info?.version || ''}`)
+    pendingUpdateInfo = info || {}
+    emitUpdateEvent({ status: 'downloaded', version: info?.version || '' })
+  })
 
-  setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch(error => {
-      log(`[update] skipped ${error?.message || error}`)
-    })
-  }, 5000)
+  setTimeout(triggerUpdateCheck, 5000)
+  clearInterval(updateCheckTimer)
+  updateCheckTimer = setInterval(triggerUpdateCheck, UPDATE_RECHECK_INTERVAL_MS)
 }
 
 function terminalCwd(value) {
@@ -3341,11 +3385,25 @@ ipcMain.handle('metis:preview-activity', (_event, payload = {}) => previewActivi
 ipcMain.handle('metis:check-updates', async () => {
   const current = app.getVersion()
 
-  // 1) 若配置了私有更新源，走 electron-updater 自动下载。
-  const updateUrl = process.env.METIS_UPDATE_URL
-  if (app.isPackaged && autoUpdater && updateUrl) {
-    try {
+  if (pendingUpdateInfo) {
+    return {
+      ok: true,
+      status: 'downloaded',
+      message: `新版本 v${pendingUpdateInfo.version || ''} 已下载完成，点击重启以更新。`,
+    }
+  }
+
+  // 1) 默认主路径：electron-updater，走 electron-builder 打包时生成的 GitHub
+  //    发布源（app-update.yml），不需要 METIS_UPDATE_URL 才能用——这是本来
+  //    的 P0 bug：之前只有配置了私有更新源这个分支才会真的自动下载，普通用
+  //    户走的是下面分支 2，只会被指向"自己去 GitHub 下载"，从不会自动更新。
+  //    METIS_UPDATE_URL 仍保留，作为覆盖到私有/通用更新服务器的可选项。
+  if (app.isPackaged && autoUpdater) {
+    const updateUrl = process.env.METIS_UPDATE_URL
+    if (updateUrl) {
       autoUpdater.setFeedURL({ provider: 'generic', url: updateUrl })
+    }
+    try {
       const result = await autoUpdater.checkForUpdatesAndNotify()
       const v = result?.updateInfo?.version
       return v && compareVersions(v, current) > 0
@@ -3356,7 +3414,7 @@ ipcMain.handle('metis:check-updates', async () => {
     }
   }
 
-  // 2) 默认查 GitHub Releases：无发布/网络异常时优雅降级。
+  // 2) 开发模式 / electron-updater 不可用时的兜底：直接查 GitHub Releases。
   try {
     const resp = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Metis' },
@@ -3377,6 +3435,16 @@ ipcMain.handle('metis:check-updates', async () => {
   } catch {
     return { ok: false, status: 'error', message: '无法连接 GitHub 检查更新，请稍后再试。' }
   }
+})
+
+ipcMain.handle('metis:install-update', () => {
+  if (!pendingUpdateInfo || !autoUpdater) {
+    return { ok: false, message: '没有已下载好的更新可以安装。' }
+  }
+  app.isQuitting = true
+  // isSilent/isForceRunAfter: 不再弹 NSIS 安装界面，装完直接重新启动 Metis。
+  setImmediate(() => autoUpdater.quitAndInstall(true, true))
+  return { ok: true }
 })
 
 ipcMain.handle('metis:window', (_event, action) => {
@@ -3580,6 +3648,7 @@ app.on('activate', showWindow)
 app.on('before-quit', () => {
   app.isQuitting = true
   clearBackendRestartTimer()
+  clearInterval(updateCheckTimer)
   stopAllDevServers()
   killAllTerminalSessions()
   stopBackend()

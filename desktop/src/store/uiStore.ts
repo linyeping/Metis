@@ -56,6 +56,7 @@ export interface ToastNotice {
   title: string;
   description: string;
   action?: string;
+  onAction?: () => void;
   type: ToastType;
   duration?: number;
   sessionId?: string | null;
