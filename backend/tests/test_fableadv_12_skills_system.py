@@ -192,7 +192,25 @@ def test_builtin_browser_skill_refreshes_and_routes_preview_browser(metis_home: 
     assert "preview_browser_action" in expanded
     assert "show_browser=True" in expanded
     assert "browse_web" in expanded
-    assert "localhost" in expanded
+
+
+def test_builtin_search_skill_is_discoverable_and_expands(metis_home: Path, tmp_path: Path) -> None:
+    skills = discover_skills(workspace_root=str(tmp_path))
+    search = next(skill for skill in skills if skill.name == "search")
+
+    assert search.user_invocable is True
+    assert search.allowed_tools == ["web_search", "web_research", "web_fetch"]
+
+    expanded = expand_user_skill_command(
+        "/search Claude Sonnet 4.6 和 GPT-5.5 在编码能力上的对比，需要多个独立来源互相核实",
+        workspace_root=str(tmp_path),
+    )
+
+    assert "web_research" in expanded
+    assert "web_search" in expanded
+    assert "google.com/search" in expanded  # warns against fetching the SERP directly
+    assert "[Original user request after skill invocation]" in expanded
+    assert "Claude Sonnet 4.6" in expanded
 
 
 def test_builtin_artifact_skills_install_pdf_and_documents_tools(metis_home: Path, tmp_path: Path) -> None:

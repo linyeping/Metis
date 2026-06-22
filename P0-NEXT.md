@@ -1783,3 +1783,43 @@ search. Implemented as the same mechanism, one priority tier higher:
   (`/new`, `/compact`, `/rewind`). `/search` needs to be sent as normal
   message text for the backend keyword match to see it, same as `/browser`
   already is. No UI change needed or made.
+
+## Correction: `/browser` Is A Real Skill, Not Just A Keyword (2026-06-22)
+
+Owner pointed out `/search` didn't show up in the actual slash-menu
+screenshot next to `/browser`/`/computer`/`/documents`/`/pdf`. That menu
+is the **skills** system (`backend/resources/builtin_skills/*/SKILL.md`,
+loaded by `backend/runtime/skill_loader.py`), not the `model_router.py`
+keyword match I'd implemented — `/browser` is a real builtin skill with
+`user-invocable: true`, and typing `/browser ...` goes through
+`expand_user_skill_command()` (wired in `backend/web/app.py`), which
+replaces the message with the skill's full routing guidance + the
+original request, *before* the message ever reaches `classify_task`. The
+model_router keyword match from the previous section still helps (belt-
+and-suspenders for plain-text mentions of "/search" inside a longer
+message), but it was never going to make `/search` show up in the menu —
+that requires an actual skill.
+
+Added `backend/resources/builtin_skills/search/SKILL.md`:
+
+- `name: search`, `user-invocable: true`,
+  `allowed-tools: [web_search, web_research, web_fetch]`.
+- Routing body mirrors `browser`'s style: cheap `web_search` (+ advanced
+  syntax reminder) for simple lookups, `web_research` for multi-source/
+  citation-required questions, `web_fetch` for known URLs, and an explicit
+  "never `web_fetch` a `google.com/search?...` URL directly" rule (that's
+  the literal 403 from the owner's bug report) plus the no-fabrication
+  rule for partial/blocked evidence.
+- Bumped `BUILTIN_SKILLS_VERSION` 10 → 11 in `skill_loader.py` so existing
+  installs actually pick up the new skill file on next launch (the
+  installer only copies bundled skills once per version bump — without
+  this the file would sit in the repo and never reach a user's
+  `~/.metis/skills/`).
+- Verified for real: `discover_skills()` finds it with the right
+  `allowed_tools`, and `expand_user_skill_command("/search ...")` expands
+  to the routing guidance + original request, confirmed by directly
+  reading the installed copy this produced at
+  `C:\Users\20118\.metis\skills\search\SKILL.md` (not just a temp-dir
+  simulation). Added `test_builtin_search_skill_is_discoverable_and_expands`
+  next to the existing `/browser` skill test; 10/10 passing in
+  `test_fableadv_12_skills_system.py`, 39/39 across the touched test files.
