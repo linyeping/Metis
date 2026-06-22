@@ -3267,15 +3267,20 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   gap: 5px;
   margin: 7px 0 9px;
   padding: 6px 0 6px 10px;
-  border-left: 1px solid color-mix(in srgb, var(--border) 72%, var(--accent));
 }
 
+/* 左边的金线只标在"工具活动"标题旁边，不沿着展开后的子工具调用往下延伸。
+   margin-left 抵消父级的 padding-left，让 border+padding 落在跟父级 padding
+   一样的位置上，标题文字位置不变，子工具的左边距继续靠父级 padding 撑开。 */
 .tool-activity-group-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-height: 24px;
+  margin-left: -10px;
+  padding-left: 9px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, var(--accent));
 }
 
 .tool-activity-toggle {
