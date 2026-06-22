@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import queue
 import hashlib
 import os
@@ -595,6 +596,19 @@ def _next_model_fallback_config(config: AgentConfig, exc: BaseException) -> Opti
     return None
 
 
+def _turn_budget_warn_threshold(max_turns: int) -> int:
+    """剩多少轮开始催交付。随预算缩放、上限封顶。
+
+    原来固定 ≤3。但 capability 类任务 max_turns=12 时，模型常在第 8~9 轮前就把轮次
+    耗在探索/规划上，等到剩 3 轮提示已经太晚（DeepSeek eval 实测整批 capability 失败
+    都是撞满 12 轮还没写出 answer.md）。改成按预算的 ~30% 提前预警，封顶 8 轮，避免
+    大预算（如 64 轮）下从太早就开始反复刷提示。
+    """
+    if max_turns <= 0:
+        return 3
+    return min(8, max(3, math.ceil(max_turns * 0.3)))
+
+
 def _append_turn_budget_hint(
     messages: List[Dict[str, Any]],
     *,
@@ -602,7 +616,7 @@ def _append_turn_budget_hint(
     completed_turns: int,
 ) -> List[Dict[str, Any]]:
     remaining = max_turns - completed_turns
-    if remaining <= 0 or remaining > 3:
+    if remaining <= 0 or remaining > _turn_budget_warn_threshold(max_turns):
         return messages
     marker = f"{_TURN_BUDGET_MARKER} remaining={remaining}"
     if any(marker in str(message.get("content") or "") for message in messages):
@@ -2061,6 +2075,14 @@ def run_stream(
             working_messages.append(_format_assistant_message(response, config))
             for tool_call, result in results:
                 working_messages.append(_format_tool_result(tool_call, result, seen_files, compactor))
+
+            # --- 反 churn：反复写待办却不动手 ---
+            churn_hint = tracker.detect_todo_churn()
+            if churn_hint:
+                working_messages.append({
+                    "role": "user",
+                    "content": f"[System hint] {churn_hint}",
+                })
 
             # --- 效率建议注入 ---
             efficiency_hint = tracker.get_efficiency_hint()

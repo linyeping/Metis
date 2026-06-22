@@ -163,6 +163,67 @@ class TestEfficiencyHint:
 
 
 # ---------------------------------------------------------------------------
+# todo_write churn 检测（反复规划却不动手）
+# ---------------------------------------------------------------------------
+
+class TestTodoChurn:
+    def test_no_churn_below_limit(self):
+        t = ToolCallTracker(todo_churn_limit=3)
+        t.record("todo_write", {"todos": [{"a": 1}]})
+        t.record("todo_write", {"todos": [{"a": 2}]})
+        assert t.detect_todo_churn() is None
+
+    def test_churn_detected_at_limit_with_evolving_args(self):
+        # 每次 todo_write 参数都不同（hash 不同），detect_loop 抓不到，但 churn 能抓到。
+        t = ToolCallTracker(todo_churn_limit=3)
+        for i in range(3):
+            t.record("todo_write", {"todos": [{"step": i}]})
+        assert t.detect_loop() is None
+        hint = t.detect_todo_churn()
+        assert hint is not None
+        assert "todo_write" in hint
+
+    def test_exploration_between_todos_still_churns(self):
+        # read/search 不算"实干"，夹在 todo_write 之间不清零 streak。
+        t = ToolCallTracker(todo_churn_limit=3)
+        t.record("todo_write", {"todos": [{"step": 0}]})
+        t.record("read_file", {"path": "a.py"})
+        t.record("todo_write", {"todos": [{"step": 1}]})
+        t.record("grep_search", {"pattern": "x"})
+        t.record("todo_write", {"todos": [{"step": 2}]})
+        assert t.detect_todo_churn() is not None
+
+    def test_productive_tool_resets_streak(self):
+        t = ToolCallTracker(todo_churn_limit=3)
+        t.record("todo_write", {"todos": [{"step": 0}]})
+        t.record("todo_write", {"todos": [{"step": 1}]})
+        t.record("write_file", {"path": "answer.md", "content": "done"})
+        t.record("todo_write", {"todos": [{"step": 2}]})
+        # 写文件后 streak 归零，只剩 1 次 todo_write
+        assert t.detect_todo_churn() is None
+
+    def test_churn_survives_reset(self):
+        # 这是真正的 bug：循环里每次 todo_write 成功都会调用 reset()，
+        # churn 计数必须扛过 reset()，否则反复写待办的空转永远检测不到。
+        t = ToolCallTracker(todo_churn_limit=3)
+        for i in range(3):
+            t.record("todo_write", {"todos": [{"step": i}]})
+            t.reset()  # 模拟 agent_loop 在每次 todo_write 成功后的 reset()
+        assert t.detect_todo_churn() is not None
+
+    def test_nudge_dedupes_per_streak_level(self):
+        t = ToolCallTracker(todo_churn_limit=3)
+        for i in range(3):
+            t.record("todo_write", {"todos": [{"step": i}]})
+        assert t.detect_todo_churn() is not None
+        # 同一 streak 水平不再重复提示
+        assert t.detect_todo_churn() is None
+        # streak 再涨一次，重新提示
+        t.record("todo_write", {"todos": [{"step": 99}]})
+        assert t.detect_todo_churn() is not None
+
+
+# ---------------------------------------------------------------------------
 # 摘要
 # ---------------------------------------------------------------------------
 

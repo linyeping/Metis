@@ -23,9 +23,32 @@ class ToolCallTracker:
         # -> "You've called read_file with the same arguments 3 times. ..."
     """
 
-    def __init__(self, repeat_limit: int = 3):
+    # 真正推进交付/改动工作区的工具：调用这些会把"规划连击"清零。
+    _PRODUCTIVE_TOOLS = frozenset({
+        "write_file",
+        "robust_replace_in_file",
+        "apply_patch",
+        "edit_file",
+        "str_replace",
+        "str_replace_editor",
+        "create_file",
+        "execute_bash_command",
+        "run_terminal_cmd",
+    })
+    # 只是规划、不产出交付物的工具。
+    _PLANNING_TOOLS = frozenset({"todo_write"})
+
+    def __init__(self, repeat_limit: int = 3, todo_churn_limit: int = 3):
         self._history: List[Tuple[str, str]] = []  # (tool_name, args_hash)
         self._repeat_limit = repeat_limit
+        # 连续 todo_write（中间没有任何"实干"工具）的计数。这个计数刻意独立于
+        # _history：循环里每次 todo_write 成功都会调用 reset() 清空 _history，
+        # 若 churn 计数也跟着清零，模型就能 todo_write→探索→todo_write→… 无限
+        # 规划而永不交付（DeepSeek eval 里实测连刷 12~20 次 todo_write 撞满轮次
+        # 却没写出 answer.md）。所以它只被"实干"工具清零，不被 reset() 清零。
+        self._todo_churn_limit = todo_churn_limit
+        self._planning_streak = 0
+        self._last_churn_nudge = 0
 
     # ------------------------------------------------------------------
     # 记录
@@ -37,6 +60,14 @@ class ToolCallTracker:
             json.dumps(args or {}, sort_keys=True, ensure_ascii=False, default=str).encode()
         ).hexdigest()[:12]
         self._history.append((tool_name, args_hash))
+
+        # 维护"规划连击"：连续 todo_write +1，一旦做了实干工具就清零。
+        # 探索类工具（read/search 等）既不加也不减——"光规划+光看不动手"也算 churn。
+        if tool_name in self._PLANNING_TOOLS:
+            self._planning_streak += 1
+        elif tool_name in self._PRODUCTIVE_TOOLS:
+            self._planning_streak = 0
+            self._last_churn_nudge = 0
 
     @property
     def call_count(self) -> int:
@@ -80,6 +111,27 @@ class ToolCallTracker:
                 )
 
         return None
+
+    def detect_todo_churn(self) -> Optional[str]:
+        """检测"反复写待办却不动手"的规划空转。返回纠偏提示或 None。
+
+        与 detect_loop 不同：detect_loop 要求**参数完全相同**的连续调用，而 churn
+        里每次 todo_write 的清单都略有演化（hash 不同），所以会从 detect_loop 漏过去。
+        这里只看"连续 todo_write、中间没有任何实干工具"的次数。
+
+        为了不每轮重复刷屏：只在 streak 首次达到阈值、以及之后每再增长一次时返回一次。
+        """
+        if self._planning_streak < self._todo_churn_limit:
+            return None
+        if self._planning_streak <= self._last_churn_nudge:
+            return None
+        self._last_churn_nudge = self._planning_streak
+        return (
+            f"你已经连续 {self._planning_streak} 次更新待办清单（todo_write）却没有任何"
+            "实际推进（没有写文件、编辑或执行命令）。立即停止规划：用 write_file / 编辑 / "
+            "execute_bash_command 推进当前待办项并产出交付物（例如把答案写入 answer.md）。"
+            "不要再写待办。"
+        )
 
     def is_consecutive_repeat(self) -> bool:
         """检查最近一次调用是否与前一次完全相同（用于快速判断）。"""
@@ -156,5 +208,9 @@ class ToolCallTracker:
         }
 
     def reset(self) -> None:
-        """清空历史。"""
+        """清空调用历史（用于 todo_write 成功后给循环检测一个干净起点）。
+
+        刻意**不**清 _planning_streak / _last_churn_nudge：todo_write 成功本身就会
+        触发本方法，若连 churn 计数一起清掉，反复写待办的空转就永远检测不到。
+        """
         self._history.clear()

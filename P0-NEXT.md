@@ -2014,3 +2014,41 @@ wiring exists, without executing it — that pattern could cover this).
 Not done: code-signing (NSIS installs are unsigned, so Windows SmartScreen
 may still warn on the downloaded installer even though the update flow
 itself now works end-to-end); a rollback path if a bad version ships.
+
+## DeepSeek 特化：反 churn 轮次预算硬化 (2026-06-22)
+
+跑了一轮 DeepSeek 重型 eval（chat + v4-pro，smoke×3 + capability×1，绕过本机
+Clash 代理直连 api.deepseek.com 才稳定——`HTTP(S)_PROXY=127.0.0.1:7897` 会反复
+掐断流式 SSE，`NO_PROXY` 加上 deepseek 域名即可）。结果：smoke 两模型都 91.7%，
+capability chat 50% / pro 83%。缓存健康（hit ratio 0.73~0.88），不是瓶颈。
+
+挖每个失败的事件流，根因高度一致 = **轮次预算被"规划/探索 churn"耗尽，不是模型不聪明**：
+- chat 的每个 capability 失败都是撞满 max_turns(12) 却还没写出 `answer.md`，而那个
+  checker(`check_probe_answer.py`)宽松到只要文件存在且 ≥20 字符。
+- `skills-frontend-self-verify` 两个模型都挂：连刷 12~20 次 `todo_write`，反复重写
+  待办却不执行。
+- 现有护栏抓不住：`ToolCallTracker.detect_loop` 只抓**参数完全相同**的连续调用，
+  todo_write 每次清单略有演化(hash 不同)就溜过去了；更糟的是循环里每次 todo_write
+  成功都 `tracker.reset()` 清空历史，等于给 churn 反复"洗白"。
+
+修法（`backend/runtime/tool_call_tracker.py` + `agent_loop.py`，通用机制不挑模型）：
+1. ToolCallTracker 新增独立于 `_history` 的"规划连击" `_planning_streak`：连续
+   todo_write +1，做了实干工具(write_file/编辑/execute_bash_command 等)才清零，
+   **刻意不被 reset() 清零**——否则 todo_write 自己触发的 reset() 会把 churn 计数擦掉。
+   `detect_todo_churn()` 在 streak≥3 时返回"停止规划立即交付"提示，按 streak 水平去重。
+2. `_append_turn_budget_hint` 的预警阈值从固定 ≤3 改成按预算缩放(`~30%`，封顶 8)：
+   capability 的 12 轮预算下现在剩 4 轮就开始催交付（原来剩 3 轮太晚），大预算封顶
+   避免刷屏。
+3. agent_loop run_stream 在效率提示旁边注入 churn 提示。
+
+验证诚实记录：单跑一轮 capability **没能在 eval 聚合分上确认收益**——因为 DeepSeek
+是否 churn 本身随机，那一轮恰好 0 次 todo_write，机制根本没被触发(还撞上一次
+`Eval checker not found` 的 harness 抖动)。所以收益靠**确定性测试**保证：12 个
+tracker 单测 + 1 个 run_stream 集成测（fake backend 故意连发 3 次 todo_write，断言
+churn 提示扛过 reset() 注入到第 4 轮请求里）+ 阈值缩放单测，全绿。要在 eval 聚合上
+量化，需要 capability 多 repeat 跑（churn 是间歇性的）。
+
+下一步(未做)：还有一种 churn 是 `metis_runtime_job` 空转(skills-debug-auto-load
+失败那次连发 12 次 runtime_job + read/grep，0 次 todo_write，本次修复不覆盖)。
+可考虑把"反复起 runtime_job 却不产出交付物"也纳入 churn 检测，或给 chat 的
+capability 类任务路由到 v4-pro(83% vs 50%)。
