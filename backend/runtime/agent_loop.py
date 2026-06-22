@@ -46,7 +46,11 @@ from .tool_errors import teaching_error_text
 from .tool_profiles import normalize_tool_profile
 from .tool_registry import ToolRegistry, get_registry
 from .tool_visibility import sanitize_tool_result
-from backend.bridges.model_capability import detect_from_model_name
+from backend.bridges.model_capability import (
+    DEEPSEEK_EFFICIENCY_MARKER,
+    detect_from_model_name,
+    family_prompt_for_model,
+)
 from backend.bridges.provider_registry import resolve_provider_for_config, requires_reasoning_passback_enabled
 from backend.runtime.tool_tiers import INTERNAL_TOOLS, expose_internal_tools, tools_for_tier
 from .cancellation import (
@@ -304,24 +308,42 @@ def _detect_environment_context() -> str:
     return text
 
 
-def _system_prompt_with_environment_context(system_prompt: str) -> str:
+def _family_prompt_enabled() -> bool:
+    # Default OFF: a 2026-06-22 A/B on deepseek-chat (capability×3) showed the
+    # family efficiency prompt did NOT improve success (55.6%→50.0%, the drop
+    # driven by an unrelated stochastic task) and cost ~14k extra input tokens
+    # per run. Kept as opt-in infrastructure (METIS_FAMILY_PROMPT=1) for future
+    # tuning / other families, but not active by default.
+    value = os.environ.get("METIS_FAMILY_PROMPT", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _system_prompt_with_environment_context(system_prompt: str, model_name: str = "") -> str:
     prompt = str(system_prompt or "").rstrip()
     if "[Loop Discipline]" not in prompt:
         prompt = prompt + "\n\n" + LOOP_DISCIPLINE_PROMPT
+    if _family_prompt_enabled() and DEEPSEEK_EFFICIENCY_MARKER not in prompt:
+        family_block = family_prompt_for_model(model_name)
+        if family_block:
+            prompt = prompt + "\n\n" + family_block
     return prompt.strip()
 
 
 def _prepare_working_messages(messages: List[Dict[str, Any]], config: AgentConfig) -> List[Dict[str, Any]]:
     working_messages = list(messages)
-    prompt = _system_prompt_with_environment_context(config.system_prompt)
+    prompt = _system_prompt_with_environment_context(config.system_prompt, config.llm_model)
     if prompt and (
         not working_messages or working_messages[0].get("role") != "system"
     ):
         working_messages.insert(0, {"role": "system", "content": prompt})
     elif prompt and working_messages and working_messages[0].get("role") == "system":
         content = str(working_messages[0].get("content") or "")
-        if "[Loop Discipline]" not in content:
-            working_messages[0] = {**working_messages[0], "content": _system_prompt_with_environment_context(content)}
+        if "[Loop Discipline]" not in content or (
+            _family_prompt_enabled()
+            and DEEPSEEK_EFFICIENCY_MARKER not in content
+            and family_prompt_for_model(config.llm_model)
+        ):
+            working_messages[0] = {**working_messages[0], "content": _system_prompt_with_environment_context(content, config.llm_model)}
     env_context = _build_environment_context()
     if env_context:
         _insert_environment_context_message(working_messages, env_context)

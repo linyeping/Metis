@@ -6,9 +6,16 @@ from typing import Any, Dict, Generator, List, Optional
 from backend.evals.metrics import MetricsCollector
 from backend.evals.runner import _build_eval_config, run_checker
 from backend.evals.tasks.task_spec import EvalTask
+import os
+
+from backend.bridges.model_capability import (
+    DEEPSEEK_EFFICIENCY_MARKER,
+    family_prompt_for_model,
+)
 from backend.runtime.agent_loop import (
     AgentConfig,
     ErrorEvent,
+    _system_prompt_with_environment_context,
     _turn_budget_warn_threshold,
     run_stream,
 )
@@ -215,6 +222,46 @@ def test_run_stream_injects_todo_churn_hint(tmp_path: Path) -> None:
     fourth_request = str(backend.messages_by_call[3])
     assert "[System hint]" in fourth_request
     assert "连续" in fourth_request and "todo_write" in fourth_request
+
+
+def test_family_prompt_only_for_deepseek() -> None:
+    assert DEEPSEEK_EFFICIENCY_MARKER in family_prompt_for_model("deepseek-chat")
+    assert DEEPSEEK_EFFICIENCY_MARKER in family_prompt_for_model("deepseek-v4-pro")
+    assert family_prompt_for_model("gpt-5.5") == ""
+    assert family_prompt_for_model("claude-sonnet-4") == ""
+
+
+def test_system_prompt_default_off_no_deepseek_block() -> None:
+    # Default OFF (A/B 负面结论)：不显式开启就不注入，但通用纪律仍在。
+    prev = os.environ.pop("METIS_FAMILY_PROMPT", None)
+    try:
+        out = _system_prompt_with_environment_context("Base prompt", "deepseek-chat")
+        assert DEEPSEEK_EFFICIENCY_MARKER not in out
+        assert "[Loop Discipline]" in out
+    finally:
+        if prev is not None:
+            os.environ["METIS_FAMILY_PROMPT"] = prev
+
+
+def test_system_prompt_appends_deepseek_block_when_enabled() -> None:
+    prev = os.environ.get("METIS_FAMILY_PROMPT")
+    os.environ["METIS_FAMILY_PROMPT"] = "1"
+    try:
+        ds = _system_prompt_with_environment_context("Base prompt", "deepseek-chat")
+        assert DEEPSEEK_EFFICIENCY_MARKER in ds
+        assert "[Loop Discipline]" in ds
+
+        other = _system_prompt_with_environment_context("Base prompt", "gpt-5.5")
+        assert DEEPSEEK_EFFICIENCY_MARKER not in other  # 非 deepseek 家族不注入
+
+        # 已含 marker 不重复追加
+        twice = _system_prompt_with_environment_context(ds, "deepseek-chat")
+        assert twice.count(DEEPSEEK_EFFICIENCY_MARKER) == 1
+    finally:
+        if prev is None:
+            os.environ.pop("METIS_FAMILY_PROMPT", None)
+        else:
+            os.environ["METIS_FAMILY_PROMPT"] = prev
 
 
 def test_turn_budget_warn_threshold_scales_with_budget() -> None:
