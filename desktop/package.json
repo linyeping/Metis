@@ -19,7 +19,7 @@
     "dist:win": "npm run test:fixed-regression && npm run build-backend && npm run build && electron-builder --win nsis",
     "perf:desktop": "node scripts/desktop-perf-runner.mjs",
     "smoke:desktop": "node scripts/desktop-smoke-runner.mjs",
-    "test:contracts": "node --test scripts/desktop-contract-tests.mjs electron/security.test.cjs electron/data-root.test.cjs",
+    "test:contracts": "node --test scripts/desktop-contract-tests.mjs electron/security.test.cjs electron/data-root.test.cjs electron/backend.test.cjs",
     "test:fixed-regression": "node scripts/fixed-regression-runner.mjs",
     "test:fixed-regression:list": "node scripts/fixed-regression-runner.mjs --list",
     "test": "vitest run",

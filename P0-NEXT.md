@@ -1823,3 +1823,65 @@ Added `backend/resources/builtin_skills/search/SKILL.md`:
   simulation). Added `test_builtin_search_skill_is_discoverable_and_expands`
   next to the existing `/browser` skill test; 10/10 passing in
   `test_fableadv_12_skills_system.py`, 39/39 across the touched test files.
+
+## Real Fix: Managed Venv Now Re-Syncs When backend/pyproject.toml Changes (2026-06-22)
+
+The ddgs-missing error came back a third time — same bug, third different
+venv, because three separate machines/dev setups on this one machine each
+have their own managed venv (`~/.metis/python-backend`,
+`AppData/Local/Metis/python-backend`, and the one actually in use this
+session, `desktop/data/metis/python-backend` — turns out this dev setup
+resolves its data root to a project-local portable directory, not
+`~/.metis`). Owner's framing: fix this for real, but **do not** touch the
+existing "use the user's own Python environment" fallback — that has to
+keep working as-is for other people's machines that don't end up with a
+managed venv at all.
+
+Root cause confirmed by reading `desktop/electron/backend.cjs::detectPython()`:
+the managed-venv fast path only checked `import flask, requests` — if that
+passed, it returned immediately and never touched pip again, forever,
+regardless of what `backend/pyproject.toml` gained afterward. The
+`install.json` stamp file existed but was write-only; nothing ever read it
+back to decide whether to reinstall.
+
+Fix, scoped only to the managed-venv branch of `detectPython()` — the
+`pythonCandidates()` scan and the final `rawReady` fallback (user's own
+Python: PATH, conda, project `.venv`, `python_path` setting) are
+byte-for-byte untouched:
+
+- `backendDependencyFingerprint(backendRoot)`: sha256 of
+  `backendRoot/pyproject.toml` (the only file `pip install -e backendRoot`
+  actually reads for dependencies).
+- `readManagedPythonStamp()` / `writeManagedPythonStamp()` (the latter now
+  merges into the existing stamp instead of overwriting it, so re-syncing
+  doesn't lose the original `bootstrapSource`/`installedAt` provenance).
+- `ensureManagedPythonDependenciesSynced(candidate, backendRoot, emit)`:
+  compares the current fingerprint against the stamp's. Matches → returns
+  immediately, **zero subprocess calls**, so every normal launch pays
+  nothing extra. Mismatch (including a pre-existing venv from before this
+  feature existed, which has no `dependencyFingerprint` field at all) →
+  runs `pip install -e backendRoot` once against the *existing* venv (no
+  recreation), then updates the stamp.
+- Wired into `detectPython()`'s managed-venv branch: probe passes →
+  `ensureManagedPythonDependenciesSynced` → only return `ok: true` if that
+  also succeeds; otherwise fall through to the existing
+  bootstrap/rawReady fallback chain exactly as if the probe itself had
+  failed.
+
+Verified for real, not just simulated: ran it against the actual
+`~/.metis/python-backend/venv` (the one I'd manually `pip install ddgs`'d
+earlier this session) with `METIS_HOME` pointed at the real path — first
+run correctly detected the missing-fingerprint stamp and ran a real `pip
+install -e backend/` (succeeded, idempotent since deps were already
+satisfied), second run skipped pip entirely since the fingerprint now
+matched. Added `desktop/electron/backend.test.cjs` (5 tests, `node --test`,
+same style as `data-root.test.cjs`) covering the fingerprint hash, stamp
+merge behavior, and both the skip-fast-path and attempt-resync branches of
+the sync function — registered in `package.json`'s `test:contracts`
+script.
+
+Still true after this fix: three different venvs on this one machine each
+needed the ddgs fix manually applied once before this version existed.
+This fix only prevents it from happening *again* on the *next* dependency
+addition — it does not retroactively need to, since the one-time manual
+`pip install` already happened for all three this session.

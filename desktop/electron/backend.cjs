@@ -305,6 +305,19 @@ function managedPythonExecutable() {
     : path.join(managedPythonVenvDir(), 'bin', 'python')
 }
 
+function backendDependencyFingerprint(backendRoot) {
+  // pip install -e backendRoot only reads backendRoot/pyproject.toml for its
+  // dependency list, so that's the one file whose contents determine whether
+  // the managed venv is up to date. Hashing it lets us tell "ddgs was added
+  // last week and this venv predates that" from "nothing changed, skip pip".
+  try {
+    const content = fs.readFileSync(path.join(backendRoot, 'pyproject.toml'), 'utf8')
+    return crypto.createHash('sha256').update(content).digest('hex')
+  } catch {
+    return ''
+  }
+}
+
 function managedPythonStampPath() {
   return path.join(managedPythonRoot(), 'install.json')
 }
@@ -489,11 +502,51 @@ async function probePythonCandidate(candidate, requireDeps = false, timeoutMs = 
   }
 }
 
+function readManagedPythonStamp() {
+  try {
+    return JSON.parse(fs.readFileSync(managedPythonStampPath(), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
 function writeManagedPythonStamp(payload) {
   try {
     fs.mkdirSync(managedPythonRoot(), { recursive: true })
-    fs.writeFileSync(managedPythonStampPath(), JSON.stringify(payload, null, 2), 'utf8')
+    const merged = { ...(readManagedPythonStamp() || {}), ...payload }
+    fs.writeFileSync(managedPythonStampPath(), JSON.stringify(merged, null, 2), 'utf8')
   } catch {}
+}
+
+/** Re-run `pip install -e backendRoot` on an already-bootstrapped managed
+ *  venv when backend/pyproject.toml changed since the last install, instead
+ *  of trusting "flask+requests still import" forever. Without this, any new
+ *  dependency (e.g. ddgs) silently never reaches an existing install across
+ *  every machine that already has a managed venv. No-ops (no pip call at
+ *  all) when the fingerprint matches, so normal launches pay nothing extra.
+ *  Only touches the managed venv — the user's-own-Python fallback path in
+ *  detectPython() is untouched by this. */
+async function ensureManagedPythonDependenciesSynced(candidate, backendRoot, emit = () => {}) {
+  const currentFingerprint = backendDependencyFingerprint(backendRoot)
+  if (!currentFingerprint) return { ok: true }
+  const stamp = readManagedPythonStamp()
+  if (stamp && stamp.dependencyFingerprint === currentFingerprint) {
+    return { ok: true }
+  }
+  emitBoot(emit, {
+    phase: 'preflight',
+    line: '检测到后端依赖声明变化，正在同步托管环境依赖'
+  })
+  const installResult = await runProbe(
+    candidate.exe,
+    ['-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', '-e', backendRoot],
+    300000,
+  )
+  if (!installResult.ok) {
+    return { ok: false, reason: `同步托管环境依赖失败: ${summarizeProbeFailure(installResult)}` }
+  }
+  writeManagedPythonStamp({ dependencyFingerprint: currentFingerprint, syncedAt: new Date().toISOString() })
+  return { ok: true }
 }
 
 function clearManagedPythonEnv() {
@@ -605,6 +658,7 @@ async function bootstrapManagedPythonEnv(candidate, backendRoot, emit = () => {}
     bootstrapCommand: pythonCommandLabel(candidate),
     resolved: verifyResult.resolved,
     installedAt: new Date().toISOString(),
+    dependencyFingerprint: backendDependencyFingerprint(backendRoot),
   })
 
   emitBoot(emit, {
@@ -637,15 +691,21 @@ async function detectPython(backendRoot, emit = () => {}) {
     })
     const managedProbe = await probePythonCandidate(managedCandidate, true, 15000)
     if (managedProbe.ok) {
-      emitBoot(emit, {
-        phase: 'preflight',
-        line: `Metis 托管环境可用: ${managedProbe.resolved}`
-      })
-      return { ok: true, exe: managedCandidate.exe, source: managedCandidate.source, resolved: managedProbe.resolved, prefixArgs: [] }
+      const syncResult = await ensureManagedPythonDependenciesSynced(managedCandidate, backendRoot, emit)
+      if (syncResult.ok) {
+        emitBoot(emit, {
+          phase: 'preflight',
+          line: `Metis 托管环境可用: ${managedProbe.resolved}`
+        })
+        return { ok: true, exe: managedCandidate.exe, source: managedCandidate.source, resolved: managedProbe.resolved, prefixArgs: [] }
+      }
+      failures.push(`${managedCandidate.source} (${managedCandidate.exe}): ${syncResult.reason}`)
+      appendLogLine(`[python] ${managedCandidate.source} dependency sync failed: ${syncResult.reason}`)
+    } else {
+      const reason = summarizeProbeFailure(managedProbe)
+      failures.push(`${managedCandidate.source} (${managedCandidate.exe}): ${reason}`)
+      appendLogLine(`[python] ${managedCandidate.source} failed: ${reason}`)
     }
-    const reason = summarizeProbeFailure(managedProbe)
-    failures.push(`${managedCandidate.source} (${managedCandidate.exe}): ${reason}`)
-    appendLogLine(`[python] ${managedCandidate.source} failed: ${reason}`)
   }
 
   for (const candidate of pythonCandidates()) {
@@ -3668,9 +3728,13 @@ function stopBackend() {
 }
 
 module.exports = {
+  backendDependencyFingerprint,
   detectPython,
+  ensureManagedPythonDependenciesSynced,
   getBackendLogPath,
+  readManagedPythonStamp,
   startBackend,
   stopBackend,
-  tailBackendLog
+  tailBackendLog,
+  writeManagedPythonStamp
 }
