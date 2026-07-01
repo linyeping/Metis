@@ -94,7 +94,7 @@ def classify_llm_error(
             code="LLM_TLS_ERROR",
             title="TLS/证书连接失败",
             message="与模型服务建立安全连接时失败。",
-            hint="检查系统时间、代理/VPN、公司网络证书拦截；必要时关闭代理后重试。",
+            hint="检查系统时间、公司网络证书拦截和 Base URL；如果开启了代理/VPN，再检查代理链路。",
             recoverable=True,
             status=status,
             details=details,

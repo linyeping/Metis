@@ -31,6 +31,7 @@ READONLY_SUBAGENT_TOOLS = [
     "semantic_search",
     "generate_repo_map",
     "ast_search_code",
+    "fetch_content",
     "web_fetch",
     "web_search",
     "web_research",

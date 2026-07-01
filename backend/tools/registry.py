@@ -60,6 +60,7 @@ from backend.tools.coding.modify_refactor.modify_text.undo_edit import undo_edit
 from backend.tools.coding.modify_refactor.refactor.extract_method import extract_method
 from backend.tools.coding.modify_refactor.refactor.rename_symbol import rename_symbol
 from backend.tools.coding.network_external.media.generate_image import generate_image
+from backend.tools.coding.network_external.web.fetch_content import fetch_content
 from backend.tools.coding.network_external.web.web_fetch import web_fetch
 from backend.tools.coding.network_external.web.web_research import web_research
 from backend.tools.coding.network_external.web.web_search import web_search
@@ -172,6 +173,7 @@ TOOL_NAME_ALIASES: Dict[str, str] = {
     "SemanticSearch": "semantic_search",
     "WebSearch": "web_search",
     "WebFetch": "web_fetch",
+    "FetchContent": "fetch_content",
     "GenerateImage": "generate_image",
     "AskQuestion": "ask_question",
     "TodoWrite": "todo_write",
@@ -275,6 +277,7 @@ AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
     "verify_compilation": verify_compilation,
     "web_search": web_search,
     "web_research": web_research,
+    "fetch_content": fetch_content,
     "web_fetch": web_fetch,
     "browse_web": browse_web,
     "browse_and_extract": browse_and_extract,

@@ -1,3 +1,4 @@
+import { AnimatePresence, motion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getFirstRun, getSettings, pingHealth } from './lib/api';
 import type { BootEvent, BootState, RuntimeSettings } from './lib/types';
@@ -16,6 +17,7 @@ import { ToastViewport } from './components/common/Toast';
 import { ModelPickerOverlay } from './components/command/ModelPickerOverlay';
 import { CronPanel } from './components/cron/CronPanel';
 import { AppDialog } from './components/dialog/AppDialog';
+import { ResearchReportViewer } from './components/research/ResearchReportViewer';
 import { useChatStore } from './store/chatStore';
 import { useSessionStore } from './store/sessionStore';
 import { useUiStore } from './store/uiStore';
@@ -27,6 +29,35 @@ const emptyBootState: BootState = {
   reconnect: null,
   events: [],
   logPath: '',
+};
+
+const modeOrder = {
+  chat: 0,
+  cowork: 1,
+  code: 2,
+} as const;
+
+const mainPanelTransition = {
+  duration: 0.19,
+  ease: [0.16, 1, 0.3, 1] as const,
+};
+
+const mainPanelVariants = {
+  enter: (direction: number) => ({
+    opacity: 0,
+    x: direction === 0 ? 0 : direction * 18,
+    scale: 0.992,
+  }),
+  center: {
+    opacity: 1,
+    x: 0,
+    scale: 1,
+  },
+  exit: (direction: number) => ({
+    opacity: 0,
+    x: direction === 0 ? 0 : direction * -14,
+    scale: 0.996,
+  }),
 };
 
 function applyBootEvent(state: BootState, event: BootEvent): BootState {
@@ -80,14 +111,17 @@ function applyBootEvent(state: BootState, event: BootEvent): BootState {
 export function App() {
   useTheme();
   const activeSection = useUiStore(state => state.activeSection);
+  const appMode = useUiStore(state => state.appMode);
   const setSideChatOpen = useUiStore(state => state.setSideChatOpen);
   const settingsOpen = useUiStore(state => state.settingsOpen);
   const commandOpen = useUiStore(state => state.commandOpen);
   const modelPickerOpen = useUiStore(state => state.modelPickerOpen);
   const workspaceMenuOpen = useUiStore(state => state.workspaceMenuOpen);
   const appDialog = useUiStore(state => state.appDialog);
+  const activeResearchReportJobId = useUiStore(state => state.activeResearchReportJobId);
   const pushToast = useUiStore(state => state.pushToast);
   const loadSessions = useSessionStore(state => state.load);
+  const sessions = useSessionStore(state => state.sessions);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
   const loadChatSession = useChatStore(state => state.loadSession);
   const [backendReady, setBackendReady] = useState(false);
@@ -98,6 +132,21 @@ export function App() {
   const loadedPort = useRef<number | null>(null);
   // 用户「暂时跳过」首启向导后，本会话不再因 refresh 重新检测 first_run 而把向导弹回来。
   const firstRunDismissed = useRef(false);
+  const panelTransitionRef = useRef({ mode: appMode, section: activeSection, direction: 0 });
+  if (panelTransitionRef.current.mode !== appMode) {
+    panelTransitionRef.current = {
+      mode: appMode,
+      section: activeSection,
+      direction: Math.sign(modeOrder[appMode] - modeOrder[panelTransitionRef.current.mode]),
+    };
+  } else if (panelTransitionRef.current.section !== activeSection) {
+    panelTransitionRef.current = {
+      mode: appMode,
+      section: activeSection,
+      direction: 0,
+    };
+  }
+  const panelTransitionDirection = panelTransitionRef.current.direction;
 
   const refresh = useCallback(async () => {
     await loadSessions();
@@ -201,8 +250,13 @@ export function App() {
   }, [pushToast]);
 
   useEffect(() => {
+    const activeSession = activeSessionId ? sessions.find(session => session.id === activeSessionId) : null;
+    if (activeSession?.mode && activeSession.mode !== appMode) {
+      void loadChatSession(null);
+      return;
+    }
     void loadChatSession(activeSessionId);
-  }, [activeSessionId, loadChatSession]);
+  }, [activeSessionId, appMode, loadChatSession, sessions]);
 
   // FABLEADV-34: 心跳探测——进程活着但 API 假死时也能显示"正在重新连接 x/5"并自动恢复。
   useEffect(() => {
@@ -244,7 +298,15 @@ export function App() {
   // 但直接藏掉会让预览整页空白；故遮挡前先截一帧当占位（冻结画面），浮层关闭后再恢复原生视图。
   useEffect(() => {
     const occluded =
-      settingsOpen || commandOpen || modelPickerOpen || workspaceMenuOpen || Boolean(appDialog) || firstRun || bootState.status !== 'ready' || !backendReady;
+      settingsOpen ||
+      commandOpen ||
+      modelPickerOpen ||
+      workspaceMenuOpen ||
+      Boolean(appDialog) ||
+      Boolean(activeResearchReportJobId) ||
+      firstRun ||
+      bootState.status !== 'ready' ||
+      !backendReady;
     let cancelled = false;
     const setFrozen = useUiStore.getState().setPreviewFrozenSrc;
     void (async () => {
@@ -265,7 +327,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, firstRun, bootState.status, backendReady]);
+  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, activeResearchReportJobId, firstRun, bootState.status, backendReady]);
 
   useEffect(() => {
     let lastEscapeAt = 0;
@@ -311,8 +373,23 @@ export function App() {
 
   const mainContent = activeSection === 'chat' ? <MetisThread /> : activeSection === 'cron' ? <CronPanel /> : <SectionMain section={activeSection} />;
   const main = (
-    <div className="main-panel-stage" key={activeSection} data-section={activeSection}>
-      {mainContent}
+    <div className="main-panel-transition-shell" data-mode={appMode} data-section={activeSection}>
+      <AnimatePresence initial={false} custom={panelTransitionDirection}>
+        <motion.div
+          key={activeSection}
+          className="main-panel-stage"
+          data-section={activeSection}
+          data-mode={appMode}
+          custom={panelTransitionDirection}
+          variants={mainPanelVariants}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={mainPanelTransition}
+        >
+          {mainContent}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
   const showBootOverlay = bootState.status !== 'ready' || !backendReady;
@@ -321,9 +398,8 @@ export function App() {
     <AppShell
       backendReady={backendReady}
       reconnect={bootState.reconnect ?? healthReconnect}
-      model={settings?.model ?? ''}
       pythonPath={settings?.pythonPath}
-      sidebar={<Sidebar model={settings?.model ?? ''} />}
+      sidebar={<Sidebar />}
       main={main}
       sideChat={<SideChatPanel defaultModel={settings?.model ?? ''} onClose={() => setSideChatOpen(false)} />}
       rightRail={<RightRail backendReady={backendReady} />}
@@ -333,6 +409,7 @@ export function App() {
           <ModelPickerOverlay currentModel={settings?.model ?? ''} settingsChanged={refresh} />
           <SettingsDialog onSaved={refresh} />
           <AppDialog />
+          <ResearchReportViewer />
           <ToastViewport />
           {firstRun && (
             <SetupWizard

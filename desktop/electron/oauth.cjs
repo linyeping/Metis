@@ -10,6 +10,20 @@ const CONNECTORS = {
     scopes: ['repo', 'read:org'],
     tokenEnv: 'GITHUB_PERSONAL_ACCESS_TOKEN',
   },
+  x_docs: {
+    service: 'x_docs',
+    displayName: 'X Docs',
+    scopes: ['docs.search', 'docs.read'],
+    tokenEnv: '',
+  },
+  x_api: {
+    service: 'x_api',
+    displayName: 'X API',
+    scopes: ['tweet.read', 'users.read', 'offline.access'],
+    tokenEnv: '',
+    secretEnvs: ['CLIENT_ID', 'CLIENT_SECRET'],
+    optionalSecretEnvs: ['REDIRECT_URI'],
+  },
   gmail: {
     service: 'gmail',
     displayName: 'Gmail',
@@ -19,6 +33,38 @@ const CONNECTORS = {
       'https://www.googleapis.com/auth/gmail.labels',
     ],
     tokenEnv: 'GOOGLE_OAUTH_ACCESS_TOKEN',
+    // Gmail's stored secret is the full PKCE token JSON blob, and the gmail MCP
+    // server does its own auth — so we do NOT inject it raw into the env var.
+    injectBareToken: false,
+  },
+  // Manual-token connectors (no OAuth flow yet — the user pastes a token, which
+  // authorizeConnector stores via safeStorage just like github's PAT fallback).
+  // Their token_env must match backend/runtime/connectors/registry.py.
+  slack: {
+    service: 'slack',
+    displayName: 'Slack',
+    scopes: ['channels:read', 'channels:history', 'chat:write'],
+    tokenEnv: 'SLACK_BOT_TOKEN',
+  },
+  notion: {
+    service: 'notion',
+    displayName: 'Notion',
+    scopes: ['read', 'update', 'insert'],
+    tokenEnv: 'NOTION_TOKEN',
+  },
+  postgres: {
+    service: 'postgres',
+    displayName: 'PostgreSQL',
+    scopes: [],
+    tokenEnv: 'DATABASE_URL',
+  },
+  // No-token connector: no secret to store/inject. Listed so it surfaces in the
+  // Connectors UI for activation; the backend supplies its allowed directory.
+  filesystem: {
+    service: 'filesystem',
+    displayName: 'Local Filesystem',
+    scopes: [],
+    tokenEnv: '',
   },
 }
 
@@ -55,6 +101,17 @@ async function authorizeConnector({ app, safeStorage, shell, service, options })
   if (!connector) return { ok: false, error: 'unknown connector' }
   if (!isEncryptionAvailable(safeStorage)) {
     return { ok: false, service: connector.service, error: 'safeStorage unavailable' }
+  }
+  const secretPayload = normalizeConnectorSecrets(connector, options)
+  if (secretPayload) {
+    if (!secretPayload.ok) {
+      return { ok: false, service: connector.service, error: secretPayload.error }
+    }
+    await storeSecret(app, safeStorage, connector.service, JSON.stringify({
+      kind: 'env_secrets',
+      values: secretPayload.values
+    }))
+    return { ok: true, service: connector.service, method: 'env_secrets' }
   }
   const manualToken = String(options.token || options.personalAccessToken || '').trim()
   if (manualToken) {
@@ -215,6 +272,58 @@ async function storeSecret(app, safeStorage, service, plaintext) {
   await fs.writeFile(target, encrypted, { encoding: 'utf8', mode: 0o600 })
 }
 
+function normalizeConnectorSecrets(connector, options = {}) {
+  const required = Array.isArray(connector.secretEnvs) ? connector.secretEnvs : []
+  const optional = Array.isArray(connector.optionalSecretEnvs) ? connector.optionalSecretEnvs : []
+  if (required.length === 0 && optional.length === 0) return null
+
+  const rawSecrets = options && typeof options.secrets === 'object' && options.secrets ? options.secrets : {}
+  const values = {}
+  for (const envName of [...required, ...optional]) {
+    const value = String(rawSecrets[envName] ?? options[envName] ?? '').trim()
+    if (value) values[envName] = value
+  }
+  const missing = required.filter(envName => !values[envName])
+  if (missing.length > 0) {
+    return { ok: false, error: `missing required config: ${missing.join(', ')}` }
+  }
+  return { ok: true, values }
+}
+
+/**
+ * Decrypt every stored bare-token connector secret and return a
+ * { [tokenEnv]: token } map for injection into the backend process env at
+ * spawn time. The Python backend can't read safeStorage blobs itself, so this
+ * is how connector tokens reach backend/runtime/connectors/token_store.py.
+ * Skips connectors without a tokenEnv (e.g. none) and those flagged
+ * injectBareToken:false (e.g. gmail, whose secret is a JSON token blob).
+ */
+async function decryptStoredConnectorTokens({ app, safeStorage }) {
+  const out = {}
+  if (!isEncryptionAvailable(safeStorage)) return out
+  for (const connector of Object.values(CONNECTORS)) {
+    if ((!connector.tokenEnv && !connector.secretEnvs) || connector.injectBareToken === false) continue
+    try {
+      const encrypted = await fs.readFile(secretPath(app, connector.service), 'utf8')
+      const plaintext = safeStorage.decryptString(Buffer.from(encrypted, 'base64')).trim()
+      if (!plaintext) continue
+      if (Array.isArray(connector.secretEnvs) && connector.secretEnvs.length > 0) {
+        const parsed = JSON.parse(plaintext)
+        const values = parsed && typeof parsed === 'object' ? parsed.values || {} : {}
+        for (const envName of [...connector.secretEnvs, ...(connector.optionalSecretEnvs || [])]) {
+          const value = String(values[envName] || '').trim()
+          if (value) out[envName] = value
+        }
+        continue
+      }
+      if (connector.tokenEnv) out[connector.tokenEnv] = plaintext
+    } catch {
+      // not connected / unreadable -> skip silently (never log token material)
+    }
+  }
+  return out
+}
+
 async function hasStoredSecret(app, service) {
   try {
     const stat = await fs.stat(secretPath(app, service))
@@ -252,6 +361,7 @@ module.exports = {
   CONNECTORS,
   authorizeConnector,
   connectorStatus,
+  decryptStoredConnectorTokens,
   disconnectConnector,
   registerConnectorIpc,
 }

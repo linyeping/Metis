@@ -9,8 +9,9 @@ def web_research(
     question: str,
     max_results: int = 5,
     max_pages: int = 3,
-    max_chars_per_page: int = 3000,
+    max_chars_per_page: int = 1800,
     reason: str = "",
+    provider: str = "auto",
 ) -> str:
     _ = reason
     return format_research_response(
@@ -19,5 +20,6 @@ def web_research(
             max_results=max_results,
             max_pages=max_pages,
             max_chars_per_page=max_chars_per_page,
+            provider=provider,
         )
     )

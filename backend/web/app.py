@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -280,6 +281,23 @@ def _load_config_for_workspace(workspace_root: str = "") -> AgentConfig:
         config = _load_config()
         config.workspace_root = root
     return config
+
+
+def _surface_mode_for_session_mode(mode: str) -> str:
+    value = str(mode or "").strip().lower()
+    return value if value in {"chat", "cowork", "code"} else ""
+
+
+def _config_for_session_mode(
+    config: AgentConfig,
+    mode: str,
+    *,
+    deep_research: Optional[bool] = None,
+) -> AgentConfig:
+    updates: Dict[str, Any] = {"surface_mode": _surface_mode_for_session_mode(mode)}
+    if deep_research is not None:
+        updates["deep_research"] = bool(deep_research)
+    return replace(config, **updates)
 
 
 def _load_system_prompt() -> str:
@@ -1033,10 +1051,7 @@ def _disk_full_event() -> Dict[str, Any]:
 
 def _auto_title(message: str) -> str:
     """Generate a short session title from the first user message."""
-    text = message.strip()
-    if len(text) > 40:
-        text = text[:37] + "..."
-    return text or "New chat"
+    return generate_session_title([{"role": "user", "content": message}]) or "新会话"
 
 
 def _message_text(message: Any) -> str:
@@ -1073,6 +1088,11 @@ def _truncate_tool_record(result: Any) -> str:
 
 def _tool_result_is_error(result: Any) -> bool:
     text = str(result or "").lstrip()
+    research_status = _research_activity_result_status(text)
+    if research_status == "success":
+        return False
+    if research_status == "error":
+        return True
     lower = text[:500].lower()
     return text.startswith(("❌", "Error", "错误", "[Permission denied]", "[Cancelled]")) or (
         "Traceback (most recent call last)" in text
@@ -1081,6 +1101,29 @@ def _tool_result_is_error(result: Any) -> bool:
         or '"status": "failed"' in lower
         or "'status': 'failed'" in lower
     )
+
+
+def _research_activity_result_status(text: str) -> Optional[str]:
+    match = re.search(r"<!--\s*METIS_RESEARCH_JSON\s+([\s\S]*?)\s*-->", str(text or ""))
+    if not match:
+        return None
+    try:
+        payload = json.loads(match.group(1))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    activity = payload.get("research_activity") if isinstance(payload.get("research_activity"), dict) else payload
+    if not isinstance(activity, dict):
+        return None
+    schema = str(activity.get("schema") or "")
+    kind = str(activity.get("kind") or "").lower()
+    if schema != "metis.research_activity.v1" and kind not in {"search", "research", "fetch", "fetch_content"}:
+        return None
+    status = str(activity.get("job_status") or activity.get("status") or "").lower()
+    if status in {"error", "failed"} or payload.get("ok") is False:
+        return "error"
+    return "success"
 
 
 def _safe_int(value: Any, fallback: int = 0) -> int:
@@ -1580,15 +1623,17 @@ def _prepare_chat_session(user_message: Any) -> tuple[str, List[Dict[str, Any]],
         if session is None:
             abort(404, description="session not found")
         if _runtime_state.active_session_id == session.id:
-            return session.id, list(_runtime_state.chat_history), dict(_runtime_state.compact_state), _runtime_state.execution_mode, True
+            return session.id, list(_runtime_state.chat_history), dict(_runtime_state.compact_state), session.mode, True
         return session.id, list(session.history), dict(session.compact_state), session.mode, True
 
     _ensure_active_session_for_message(user_message)
+    active_session = manager.get_session(_runtime_state.active_session_id or "")
+    active_mode = active_session.mode if active_session is not None else "chat"
     return (
         _runtime_state.active_session_id or "",
         list(_runtime_state.chat_history),
         dict(_runtime_state.compact_state),
-        _runtime_state.execution_mode,
+        active_mode,
         False,
     )
 
@@ -2253,7 +2298,11 @@ def _run_registry_worker(run_id: str) -> None:
     _set_run_status(run, "running", phase="starting")
     try:
         config = _load_config_for_workspace(str(run.get("workspace_root") or ""))
-        config = replace(config, deep_research=bool(run.get("deep_research")))
+        config = _config_for_session_mode(
+            config,
+            str(run.get("mode") or ""),
+            deep_research=bool(run.get("deep_research")),
+        )
     except Exception as exc:
         logger.error("Agent run configuration failed: %s", sanitize_for_log(exc))
         _append_run_event(run, _event_payload(_error_event_from_exception(exc, recoverable=False)))
@@ -2909,7 +2958,7 @@ def chat() -> Any:
 
     try:
         config = _load_config_for_workspace(workspace_root)
-        config = replace(config, deep_research=_request_deep_research_enabled())
+        config = _config_for_session_mode(config, mode, deep_research=_request_deep_research_enabled())
     except Exception as exc:
         checkpoint.finalize("failed")
         return _sse_response(
@@ -2963,6 +3012,7 @@ def chat_edit() -> Any:
     _save_active_session()
     try:
         config = _load_config_for_workspace(_active_workspace_root())
+        config = _config_for_session_mode(config, _runtime_state.execution_mode)
     except Exception as exc:
         return _sse_response(_stream_exception_response(exc, "Agent configuration failed"))
     model_context = _model_context_for_history(_runtime_state.chat_history, _runtime_state.compact_state)
@@ -2998,6 +3048,7 @@ def chat_regenerate() -> Any:
     _save_active_session()
     try:
         config = _load_config_for_workspace(_active_workspace_root())
+        config = _config_for_session_mode(config, _runtime_state.execution_mode)
     except Exception as exc:
         return _sse_response(_stream_exception_response(exc, "Agent configuration failed"))
     model_context = _model_context_for_history(_runtime_state.chat_history, _runtime_state.compact_state)
@@ -3037,6 +3088,7 @@ def chat_sync() -> Any:
         _generate_smart_title(session_id, user_message)
     try:
         config = _load_config_for_workspace(workspace_root)
+        config = _config_for_session_mode(config, mode, deep_research=_request_deep_research_enabled())
     except Exception as exc:
         logger.error("Agent configuration failed: %s", sanitize_for_log(exc))
         info = classify_llm_error(exc, recoverable=False)
@@ -3873,6 +3925,62 @@ def mcp_read_resource() -> Any:
         return jsonify({"error": "MCP not initialized"}), 503
     return jsonify(manager.read_resource(server_name, uri))
 
+
+@app.route("/connectors", methods=["GET"])
+def connectors_list() -> Any:
+    """List connectors with catalog + live state (has_token / active / tools_count)."""
+    from backend.runtime.connectors import manager as connector_manager
+
+    return jsonify({"ok": True, "connectors": connector_manager.list_connectors()})
+
+
+@app.route("/connectors/connect", methods=["POST"])
+def connectors_connect() -> Any:
+    """Activate a connector's MCP server and register its tools.
+
+    The token is read from the process env (token_store) — the desktop injects it
+    at backend spawn, so plaintext never travels through the renderer/HTTP. For
+    the filesystem connector, allowed_dir defaults to the active workspace root.
+    """
+    from backend.runtime.connectors import manager as connector_manager
+
+    data = request.get_json(silent=True) or {}
+    service_id = str(data.get("service_id") or data.get("serviceId") or "")
+    if not service_id:
+        return jsonify({"ok": False, "error": "missing service_id"}), 400
+    allowed_dir = str(data.get("allowed_dir") or data.get("allowedDir") or "")
+    if service_id == "filesystem" and not allowed_dir:
+        allowed_dir = _active_workspace_root()
+    # Ensure the global registry/manager exist so connector tools land alongside
+    # the agent's other tools.
+    get_registry()
+    # Always 200: ok:false (e.g. "no token yet") is an expected connector state,
+    # not an HTTP error — the UI reads result.ok and shows result.error.
+    return jsonify(connector_manager.connect(service_id, allowed_dir=allowed_dir))
+
+
+@app.route("/connectors/test", methods=["POST"])
+def connectors_test() -> Any:
+    """Verify a connector's live MCP session."""
+    from backend.runtime.connectors import manager as connector_manager
+
+    data = request.get_json(silent=True) or {}
+    service_id = str(data.get("service_id") or data.get("serviceId") or "")
+    if not service_id:
+        return jsonify({"ok": False, "error": "missing service_id"}), 400
+    return jsonify(connector_manager.test(service_id))
+
+
+@app.route("/connectors/disconnect", methods=["POST"])
+def connectors_disconnect() -> Any:
+    """Tear down a connector's MCP session and unregister its tools."""
+    from backend.runtime.connectors import manager as connector_manager
+
+    data = request.get_json(silent=True) or {}
+    service_id = str(data.get("service_id") or data.get("serviceId") or "")
+    if not service_id:
+        return jsonify({"ok": False, "error": "missing service_id"}), 400
+    return jsonify(connector_manager.disconnect(service_id))
 
 
 @app.route("/upload/parse", methods=["POST"])

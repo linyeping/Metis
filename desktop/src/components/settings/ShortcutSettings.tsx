@@ -10,6 +10,7 @@ const CARD_LABELS: Record<WorkspaceCardId, string> = {
   files: 'Files',
   activity: 'Background tasks',
   plan: 'Plan',
+  research: 'Research',
   tool: 'Tool output',
 };
 

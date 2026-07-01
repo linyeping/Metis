@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -29,6 +30,11 @@ class MCPServerConfig:
     url: Optional[str] = None
     auth_token: str = ""
     token_env: str = ""
+    # Optional connector service id (e.g. "github"). When set and auth_token is
+    # empty, the token is resolved from the connector token_store (the desktop
+    # injects the decrypted token into our env at spawn). Lets a config point at
+    # a connector without baking the secret into the config file.
+    service_id: str = ""
 
 
 @dataclass
@@ -57,6 +63,7 @@ class MCPSession:
         self._rpc_lock = threading.Lock()
         self._stdout_queue: "queue.Queue[str]" = queue.Queue()
         self._stderr_tail: List[str] = []
+        self._http_rpc_url = ""
 
     def connect(self) -> None:
         if self.config.command:
@@ -70,8 +77,12 @@ class MCPSession:
         command = self.config.command
         if not command:
             raise ValueError(f"MCP server '{self.config.name}' has no command")
-        cmd = [command] + list(self.config.args)
         env = _stdio_env_for_config(self.config)
+        # Resolve the command via PATH so Windows finds launcher shims like
+        # npx.cmd/node.cmd (Popen without shell=True won't append .cmd itself).
+        # Falls back to the bare name on POSIX or when not found.
+        resolved = shutil.which(command, path=env.get("PATH")) or command
+        cmd = [resolved] + list(self.config.args)
 
         self._process = subprocess.Popen(
             cmd,
@@ -107,34 +118,55 @@ class MCPSession:
 
     def _connect_sse(self) -> None:
         try:
-            import requests
-
             url = self._sse_base_url()
-            response = requests.post(
-                self._sse_endpoint("initialize"),
-                json={
-                    "jsonrpc": "2.0",
-                    "id": self._next_id(),
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
-                        "clientInfo": {"name": "metis", "version": "3.0.0"},
-                    },
+            initialize_payload = {
+                "jsonrpc": "2.0",
+                "id": self._next_id(),
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
+                    "clientInfo": {"name": "metis", "version": "3.0.0"},
                 },
-                timeout=30,
-            )
-            response.raise_for_status()
-            init_data = response.json()
+            }
+            initialized_payload = {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            }
+            try:
+                # Streamable HTTP MCP servers (including X Docs) accept JSON-RPC
+                # directly at the configured URL and may wrap responses in
+                # text/event-stream `data:` frames.
+                self._http_rpc_url = self._sse_endpoint("")
+                init_data = self._post_jsonrpc_http(self._http_rpc_url, initialize_payload, timeout=30)
+                try:
+                    self._post_jsonrpc_http(
+                        self._http_rpc_url,
+                        initialized_payload,
+                        timeout=10,
+                        expect_response=False,
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                # Backward compatibility for older pseudo-SSE test servers that
+                # exposed /initialize and /initialized endpoints.
+                self._http_rpc_url = self._sse_endpoint("")
+                init_data = self._post_jsonrpc_http(self._sse_endpoint("initialize"), initialize_payload, timeout=30)
+                try:
+                    self._post_jsonrpc_http(
+                        self._sse_endpoint("initialized"),
+                        initialized_payload,
+                        timeout=10,
+                        expect_response=False,
+                    )
+                except Exception:
+                    pass
             if "error" in init_data:
                 raise RuntimeError(f"MCP initialize error: {init_data['error']}")
             result = init_data.get("result") if isinstance(init_data, dict) else {}
             self._server_capabilities = dict((result or {}).get("capabilities") or {})
-            requests.post(
-                self._sse_endpoint("initialized"),
-                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
-                timeout=10,
-            )
             self._connected = True
             self._transport = "sse"
             self._last_connected_at = time.time()
@@ -312,7 +344,6 @@ class MCPSession:
     def _send_jsonrpc_sse(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if not self.config.url:
             raise RuntimeError("SSE MCP server has no URL")
-        import requests
 
         with self._rpc_lock:
             request = {
@@ -321,15 +352,43 @@ class MCPSession:
                 "method": method,
                 "params": params,
             }
-        response = requests.post(self._sse_endpoint(""), json=request, timeout=60)
-        response.raise_for_status()
-        message = response.json()
+        message = self._post_jsonrpc_http(self._http_rpc_url or self._sse_endpoint(""), request, timeout=60)
         if "error" in message:
             error = message["error"]
             if isinstance(error, dict):
                 raise RuntimeError(f"MCP error: {error.get('message', error)}")
             raise RuntimeError(f"MCP error: {error}")
         return message
+
+    def _post_jsonrpc_http(
+        self,
+        url: str,
+        payload: Dict[str, Any],
+        timeout: int = 60,
+        expect_response: bool = True,
+    ) -> Dict[str, Any]:
+        import requests
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers=self._http_headers(),
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        if not expect_response or not response.text.strip():
+            return {}
+        return _decode_jsonrpc_http_response(response)
+
+    def _http_headers(self) -> Dict[str, str]:
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+        token = _resolve_auth_token(self.config)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -565,6 +624,7 @@ class MCPManager:
                     url=raw_config.get("url"),
                     auth_token=str(raw_config.get("auth_token") or raw_config.get("authToken") or ""),
                     token_env=str(raw_config.get("token_env") or raw_config.get("tokenEnv") or ""),
+                    service_id=str(raw_config.get("service_id") or raw_config.get("serviceId") or ""),
                 )
             )
         return configs
@@ -610,13 +670,62 @@ def get_mcp_manager() -> Optional[MCPManager]:
     return _global_manager
 
 
+def _decode_jsonrpc_http_response(response: Any) -> Dict[str, Any]:
+    content_type = str(response.headers.get("content-type", "")).lower()
+    text = str(response.text or "")
+    if "text/event-stream" not in content_type and not text.lstrip().startswith(("event:", "data:")):
+        return response.json()
+
+    messages: List[str] = []
+    current: List[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip("\r")
+        if line.startswith("data:"):
+            data = line[5:].strip()
+            if data and data != "[DONE]":
+                current.append(data)
+            continue
+        if not line.strip() and current:
+            messages.append("\n".join(current))
+            current = []
+    if current:
+        messages.append("\n".join(current))
+
+    for raw_message in messages:
+        try:
+            parsed = json.loads(raw_message)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("MCP HTTP response did not contain a JSON-RPC message")
+
+
 def _stdio_env_for_config(config: MCPServerConfig) -> Dict[str, str]:
     env = {**os.environ, **config.env}
     token_env = str(config.token_env or "").strip()
-    auth_token = str(config.auth_token or "")
+    # Resolution order: connector token_store (desktop-injected token, keyed by
+    # service_id) -> explicit auth_token from the config file. The token always
+    # travels via env (never command args), so it can't leak into args/status.
+    auth_token = _resolve_auth_token(config)
     if token_env and auth_token:
         env[token_env] = auth_token
     return env
+
+
+def _resolve_auth_token(config: MCPServerConfig) -> str:
+    service_id = str(config.service_id or "").strip()
+    if service_id:
+        try:
+            from .connectors.token_store import get_token
+
+            token = get_token(service_id)
+            if token:
+                return token
+        except Exception:
+            # token_store is best-effort; fall back to any explicit auth_token.
+            pass
+    return str(config.auth_token or "")
 
 
 def _cleanup_mcp_on_exit() -> None:

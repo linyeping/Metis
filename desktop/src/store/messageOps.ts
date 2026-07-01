@@ -62,7 +62,7 @@ export function friendlyErrorTitle(code?: string): string {
 
 export function friendlyErrorHint(code?: string): string {
   if (code === 'LLM_AUTH_FAILED') return '检查供应商、Base URL、模型名和 API Key 是否匹配。';
-  if (code === 'LLM_TLS_ERROR') return '检查代理/VPN、系统时间和证书拦截。';
+  if (code === 'LLM_TLS_ERROR') return '检查系统时间、证书拦截和 Base URL；如果开启了代理/VPN，再检查代理链路。';
   if (code === 'LLM_NETWORK_ERROR') return '检查网络、代理/VPN、Base URL 和防火墙。';
   if (code === 'LLM_TIMEOUT') return '稍后重试，或检查当前网络和模型服务状态。';
   if (code === 'LLM_RATE_LIMITED') return '稍等片刻后再试，或降低请求频率。';
@@ -90,6 +90,8 @@ export function summarizeToolValue(value: unknown): string {
 
 export function toolResultStatus(result: unknown): ChatToolEvent['status'] {
   const text = toolText(result).trim();
+  const researchStatus = researchActivityToolStatus(text);
+  if (researchStatus) return researchStatus;
   const head = text.slice(0, 240).toLowerCase();
   if (!text) return 'success';
   if (
@@ -103,6 +105,31 @@ export function toolResultStatus(result: unknown): ChatToolEvent['status'] {
     return 'error';
   }
   return 'success';
+}
+
+function researchActivityToolStatus(text: string): ChatToolEvent['status'] | null {
+  const match = String(text || '').match(/<!--\s*METIS_RESEARCH_JSON\s+([\s\S]*?)\s*-->/);
+  if (!match?.[1]) return null;
+  try {
+    const payload = JSON.parse(match[1]) as unknown;
+    if (!payload || typeof payload !== 'object') return null;
+    const payloadRecord = payload as Record<string, unknown>;
+    const nested = payloadRecord.research_activity;
+    const activity =
+      nested && typeof nested === 'object' && !Array.isArray(nested)
+        ? (nested as Record<string, unknown>)
+        : payloadRecord;
+    const schema = String(activity.schema || '');
+    const kind = String(activity.kind || '').toLowerCase();
+    if (schema !== 'metis.research_activity.v1' && !['search', 'research', 'fetch', 'fetch_content'].includes(kind)) {
+      return null;
+    }
+    const status = String(activity.job_status || activity.status || '').toLowerCase();
+    if (status === 'error' || status === 'failed' || payloadRecord.ok === false) return 'error';
+    return 'success';
+  } catch {
+    return null;
+  }
 }
 
 export function toolErrorHint(result: unknown): string {

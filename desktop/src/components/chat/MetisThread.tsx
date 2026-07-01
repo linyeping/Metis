@@ -9,17 +9,21 @@ import {
   ThreadPrimitive,
   useAuiState,
 } from '@assistant-ui/react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Code2, Handshake, MessageCircleMore } from 'lucide-react';
 import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentProps, RefObject } from 'react';
-import wordmark from '../../assets/metis-wordmark.png';
+import { themes } from '../../lib/themes';
+import type { AppMode, RuntimeStatus } from '../../lib/types';
 import { useMetisRuntime } from '../../runtime/metisRuntime';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
+import { useUiStore } from '../../store/uiStore';
 import { Composer } from './Composer';
 import { AssistantMessage, SystemMessage, UserMessage } from './MessageBubble';
 import { AwaySummaryNotice, ContextOrganizingNotice, LearningNotice, RunRecoveryNotice, RuntimeStatusBar, TodoNotice } from './NoticeCards';
 import { SubagentGroup } from './SubagentGroup';
+
+const coworkBackdropUrl = new URL('../../assets/cowork-dotwave-b.html', import.meta.url).href;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -49,6 +53,7 @@ interface MessageMeta {
 
 export function MetisThread() {
   const runtime = useMetisRuntime();
+  const appMode = useUiStore(state => state.appMode);
   const memoryNotice = useChatStore(state => state.memoryNotice);
   const clearMemoryNotice = useChatStore(state => state.clearMemoryNotice);
   const todoNotice = useChatStore(state => state.todoNotice);
@@ -85,6 +90,7 @@ export function MetisThread() {
     [activeSessionId, subagents],
   );
   const [hiddenSubagentSignature, setHiddenSubagentSignature] = useState('');
+  const [coworkBackdropMounted, setCoworkBackdropMounted] = useState(appMode === 'cowork');
   const showSubagentStrip = Boolean(subagentSignature && hiddenSubagentSignature !== subagentSignature);
   const messageComponents = useMemo<ThreadMessageComponents>(
     () => ({
@@ -94,10 +100,24 @@ export function MetisThread() {
     }),
     [],
   );
+  const dockRuntimeStatus = useMemo(
+    () => runtimeStatusForDock(runtimeStatus, appMode),
+    [appMode, runtimeStatus],
+  );
+
+  useEffect(() => {
+    if (appMode === 'cowork') {
+      setCoworkBackdropMounted(true);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setCoworkBackdropMounted(true), 900);
+    return () => window.clearTimeout(timer);
+  }, [appMode]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="thread-shell" data-compacting={compacting} ref={shellRef}>
+      <div className="thread-shell" data-compacting={compacting} data-mode={appMode} ref={shellRef}>
+        {(appMode === 'cowork' || coworkBackdropMounted) && <CoworkBackdrop visible={appMode === 'cowork'} />}
         {memoryNotice && (
           <LearningNotice notice={memoryNotice} onDismiss={clearMemoryNotice} />
         )}
@@ -119,10 +139,7 @@ export function MetisThread() {
         <ThreadPrimitive.Root className="thread-root">
           <ThreadPrimitive.Viewport className="thread-viewport" ref={viewportRef}>
             <ThreadPrimitive.Empty>
-              <div className="welcome-panel">
-                <img className="welcome-wordmark" src={wordmark} alt="Metis" />
-                <p>今天我们来创造点什么？</p>
-              </div>
+              <WelcomeHome />
             </ThreadPrimitive.Empty>
             <WindowedThreadMessages
               compacting={compacting}
@@ -137,11 +154,91 @@ export function MetisThread() {
         </ThreadPrimitive.Root>
         <div className="thread-dock" ref={dockRef}>
           {showSubagentStrip && <SubagentGroup items={subagents} onDismiss={() => setHiddenSubagentSignature(subagentSignature)} />}
-          <RuntimeStatusBar status={runtimeStatus} />
+          {dockRuntimeStatus && <RuntimeStatusBar status={dockRuntimeStatus} />}
           <Composer />
         </div>
       </div>
     </AssistantRuntimeProvider>
+  );
+}
+
+function runtimeStatusForDock(status: RuntimeStatus | null, appMode: AppMode): RuntimeStatus | null {
+  if (!status) return null;
+  if (appMode !== 'chat') return status;
+  const phase = String(status.phase || '').toLowerCase();
+  if (phase === 'llm_request' || phase === 'streaming') {
+    return {
+      ...status,
+      callId: '',
+      display: '正在整理答案',
+      hint: status.message && status.message !== status.display ? status.message : '来源已返回，正在综合结论',
+      toolName: '',
+    };
+  }
+  if (['failed', 'timeout', 'timed_out', 'tool_timeout', 'retrying', 'sse_reconnecting', 'cancel_requested'].includes(phase)) {
+    return status;
+  }
+  return null;
+}
+
+function CoworkBackdrop({ visible }: { visible: boolean }) {
+  const appearanceMode = useUiStore(state => state.appearanceMode);
+  const theme = useUiStore(state => state.theme);
+  const src = useMemo(() => {
+    const palette = themes[theme] || themes['cathedral-obsidian'];
+    const params = new URLSearchParams({
+      mode: appearanceMode,
+      bg: palette['--bg'] || '',
+      text: palette['--text'] || '',
+      accent: palette['--accent-ink'] || palette['--accent'] || '',
+      border: palette['--border'] || '',
+    });
+    return `${coworkBackdropUrl}?${params.toString()}`;
+  }, [appearanceMode, theme]);
+
+  return (
+    <div className="cowork-backdrop" aria-hidden="true" data-visible={visible}>
+      <iframe src={src} tabIndex={-1} title="" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WelcomeHome — 模式感知的空状态首页（对齐 Metis Chat/Cowork/Code）
+// ---------------------------------------------------------------------------
+
+const WELCOME_COPY: Record<AppMode, { zh: [string, string]; en: [string, string] }> = {
+  chat: {
+    zh: ['有什么可以帮你？', '随时提问，高效解答'],
+    en: ['How can I help?', 'Ask anytime, get efficient answers'],
+  },
+  cowork: {
+    zh: ['一起完成目标', '告诉我们的需求，我来推进执行'],
+    en: ["Let's complete the goal", "Tell me what you need; I'll drive execution"],
+  },
+  code: {
+    zh: ['开始编码会话', '描述需求，我来生成与优化代码'],
+    en: ['Start a coding session', "Describe what you need; I'll generate and refine code"],
+  },
+};
+
+const WELCOME_ICONS = {
+  chat: MessageCircleMore,
+  cowork: Handshake,
+  code: Code2,
+} satisfies Record<AppMode, typeof MessageCircleMore>;
+
+function WelcomeHome() {
+  const appMode = useUiStore(state => state.appMode);
+  const language = useUiStore(state => state.language);
+  const [heading, subtitle] = WELCOME_COPY[appMode][language === 'zh' ? 'zh' : 'en'];
+  const Icon = WELCOME_ICONS[appMode];
+  return (
+    <div className="welcome-panel" data-mode={appMode}>
+      <Icon className="welcome-spark welcome-mode-icon" size={30} strokeWidth={1.65} aria-hidden />
+      <h1 className="welcome-heading">{heading}</h1>
+      <p className="welcome-subtitle">{subtitle}</p>
+    </div>
   );
 }
 

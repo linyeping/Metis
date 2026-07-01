@@ -4,14 +4,18 @@ import {
   Atom,
   Check,
   ChevronDown,
+  ChevronRight,
   ClipboardList,
+  CornerDownLeft,
   FileText,
+  Folder,
+  FolderOpen,
+  Hand,
   Image as ImageIcon,
   Loader2,
+  Unlock,
   Pencil,
   Plus,
-  ShieldAlert,
-  ShieldQuestion,
   Sparkles,
   Square,
   Upload,
@@ -21,6 +25,7 @@ import {
 import { AnimatePresence, motion, useAnimationControls } from 'framer-motion';
 import {
   Fragment,
+  type CSSProperties,
   type ChangeEvent,
   type DragEvent,
   type KeyboardEvent,
@@ -41,8 +46,9 @@ import {
   setComposerPermissionMode,
   updateSettings,
 } from '../../lib/api';
+import { contextLimitForModel, contextWindowLevel, contextWindowPercent, estimateContextTokens, formatTokenCount } from '../../lib/contextWindow';
 import { filterSlashWorkflowCommands, moveSlashSelection } from '../../lib/slashCommands';
-import type { ParsedFile, PermissionAccessMode, ProviderProfile, RuntimeSettings, SkillSummary } from '../../lib/types';
+import type { ContextLedger, ContextLedgerDetail, ParsedFile, PermissionAccessMode, ProviderProfile, RuntimeSettings, SkillSummary } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
@@ -101,8 +107,8 @@ const accessOptions: Array<{
 }> = [
   {
     mode: 'ask',
-    label: '询问权限',
-    buttonLabel: '询问权限',
+    label: 'Ask',
+    buttonLabel: 'Ask',
     description: '每次使用工具前都征求许可',
   },
   {
@@ -131,6 +137,29 @@ const accessOptions: Array<{
   },
 ];
 
+const coworkAccessOptions: Array<{
+  state: 'ask' | 'act';
+  buttonLabel: string;
+  label: string;
+  description: string;
+  mode: PermissionAccessMode;
+}> = [
+  {
+    state: 'ask',
+    buttonLabel: '询问',
+    label: '执行前询问',
+    description: 'Metis 会在每次动作前暂停，等待你确认。',
+    mode: 'ask',
+  },
+  {
+    state: 'act',
+    buttonLabel: '执行',
+    label: '直接执行',
+    description: 'Metis 会连续执行，不再逐步询问。',
+    mode: 'bypass',
+  },
+];
+
 type SlashAction = { kind: 'action'; command: string; hint: string; run: () => void | Promise<void> };
 type SlashSkillAction = { kind: 'skill'; command: string; hint: string; skill: SkillSummary };
 type SlashMenuItem = SlashAction | SlashSkillAction;
@@ -152,21 +181,55 @@ export function Composer() {
   const stop = useChatStore(state => state.stop);
   const addFiles = useChatStore(state => state.addFiles);
   const removeAttachment = useChatStore(state => state.removeAttachment);
-  const compactContext = useChatStore(state => state.compactContext);
   const rewindLatest = useChatStore(state => state.rewindLatest);
   const promptSuggestions = useChatStore(state => state.promptSuggestions);
   const applyPromptSuggestion = useChatStore(state => state.applyPromptSuggestion);
-  const newSession = useSessionStore(state => state.newSession);
-  const selectSession = useSessionStore(state => state.selectSession);
+  const clearChat = useChatStore(state => state.clearLocal);
+  const startDraftSession = useSessionStore(state => state.startDraftSession);
+  const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
+  const workspaces = useSessionStore(state => state.workspaces);
+  const openWorkspacePath = useSessionStore(state => state.openWorkspacePath);
+  const selectWorkspace = useSessionStore(state => state.selectWorkspace);
+  const appMode = useUiStore(state => state.appMode);
   const [slashOpen, setSlashOpen] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [slashSkills, setSlashSkills] = useState<SkillSummary[]>([]);
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [currentModel, setCurrentModel] = useState('');
   const pendingAttachment = attachments.some(file => file.status === 'parsing');
   const readyAttachmentCount = attachments.filter(file => !file.status || file.status === 'ready').length;
   const sendDisabled = !streaming && (pendingAttachment || (!text.trim() && readyAttachmentCount === 0));
   const sendReady = streaming || !sendDisabled;
   const showPromptSuggestions = promptSuggestions.length > 0 && !text.trim() && !streaming;
+  const isCodeMode = appMode === 'code';
+  const activeWorkspace = activeWorkspaceId ? workspaces.find(workspace => workspace.id === activeWorkspaceId) : null;
+  const activeWorkspaceName = activeWorkspace?.name || '';
+  const recentWorkspaces = useMemo(
+    () => [...workspaces].sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0)).slice(0, 10),
+    [workspaces],
+  );
+  const minComposerHeight = appMode === 'cowork' ? 30 : 20;
+  const projectMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const loadModel = async () => {
+      try {
+        const settings = await getSettings();
+        if (alive) setCurrentModel(settings.model || '');
+      } catch {
+        if (alive) setCurrentModel('');
+      }
+    };
+    void loadModel();
+    const handleRefresh = () => { void loadModel(); };
+    window.addEventListener('metis:settings-refresh', handleRefresh);
+    return () => {
+      alive = false;
+      window.removeEventListener('metis:settings-refresh', handleRefresh);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -175,12 +238,12 @@ export function Composer() {
       cancelAnimationFrame(heightFrameRef.current);
       heightFrameRef.current = null;
     }
-    const maxHeight = Math.max(156, Math.min(window.innerHeight * 0.38, 320));
-    const previousHeight = Math.max(40, textarea.getBoundingClientRect().height || 40);
+    const maxHeight = Math.max(132, Math.min(window.innerHeight * 0.34, 280));
+    const previousHeight = Math.max(minComposerHeight, textarea.getBoundingClientRect().height || minComposerHeight);
     textarea.style.transition = heightAnimationReadyRef.current ? 'height 120ms cubic-bezier(0.16, 1, 0.3, 1)' : 'none';
     textarea.style.height = 'auto';
     const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
-    const resolvedHeight = Math.max(40, nextHeight);
+    const resolvedHeight = Math.max(minComposerHeight, nextHeight);
     const applyOverflow = () => {
       textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
     };
@@ -202,7 +265,24 @@ export function Composer() {
         heightFrameRef.current = null;
       }
     };
-  }, [text]);
+  }, [minComposerHeight, text]);
+
+  useEffect(() => {
+    if (!projectMenuOpen) return undefined;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (projectMenuRef.current?.contains(event.target as Node)) return;
+      setProjectMenuOpen(false);
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setProjectMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [projectMenuOpen]);
 
   useEffect(() => {
     const becameReady = sendReady && !sendReadyRef.current;
@@ -245,12 +325,11 @@ export function Composer() {
       kind: 'action',
       command: '/new',
       hint: '开新对话',
-      run: async () => {
-        const sessionId = await newSession();
-        if (sessionId) await selectSession(sessionId);
+      run: () => {
+        startDraftSession();
+        clearChat();
       },
     },
-    { kind: 'action', command: '/compact', hint: '压缩上下文，释放空间', run: () => compactContext() },
     { kind: 'action', command: '/rewind', hint: '撤销上一轮对话', run: () => rewindLatest() },
   ];
   const workflowSlashActions: SlashAction[] = filterSlashWorkflowCommands(slashQuery).map<SlashAction>(workflow => ({
@@ -391,10 +470,38 @@ export function Composer() {
     if (event.dataTransfer.files.length) void addFiles(event.dataTransfer.files);
   };
 
+  const attachButton = (
+    <button className="icon-button composer-attach-button" type="button" title={t('添加附件')} onClick={() => fileInputRef.current?.click()}>
+      <Plus size={isCodeMode ? 18 : 22} />
+    </button>
+  );
+
+  const sendButton = (
+    <motion.button
+      className="send-button"
+      type="button"
+      data-code={isCodeMode}
+      data-streaming={streaming}
+      aria-label={streaming ? t('停止生成') : t('发送消息')}
+      title={streaming ? t('停止生成') : t('发送消息')}
+      disabled={sendDisabled}
+      animate={sendControls}
+      whileTap={!sendDisabled ? { scale: 0.9 } : undefined}
+      transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+      onClick={() => (streaming ? stop() : void send())}
+    >
+      {streaming ? <Square size={15} /> : isCodeMode ? <CornerDownLeft size={17} /> : <ArrowUp size={20} />}
+    </motion.button>
+  );
+  const composerPlaceholder = appMode === 'chat'
+    ? t('随便问点什么...')
+    : t('让 Metis 在这个项目里开始工作...');
+
   return (
     <div
       className="composer-wrap"
       data-dragging-files={draggingFiles}
+      data-mode={appMode}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -477,6 +584,84 @@ export function Composer() {
           ))}
         </div>
       )}
+
+      {(appMode === 'cowork' || appMode === 'code') && (
+        <div className="composer-project-bar" ref={projectMenuRef}>
+          <button
+            type="button"
+            className="composer-project-pill"
+            aria-haspopup="menu"
+            aria-expanded={projectMenuOpen}
+            title={activeWorkspace?.path || t('未选择项目')}
+            onClick={() => setProjectMenuOpen(open => !open)}
+          >
+            <Folder size={12} />
+            <span className="composer-project-name">
+              {activeWorkspaceName || t('未选择项目')}
+            </span>
+            <ChevronDown size={11} />
+          </button>
+          <AnimatePresence>
+            {projectMenuOpen && (
+              <motion.div
+                className="composer-project-menu"
+                role="menu"
+                aria-label={t('最近工作区')}
+                initial={{ y: 6, opacity: 0, scale: 0.98 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: 4, opacity: 0, scale: 0.98, transition: { duration: 0.1 } }}
+                transition={{ type: 'spring', stiffness: 480, damping: 34 }}
+              >
+                <small>{t('最近')}</small>
+                <div className="composer-project-list">
+                  {recentWorkspaces.length > 0 ? (
+                    recentWorkspaces.map(workspace => {
+                      const active = workspace.id === activeWorkspaceId;
+                      return (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          className="composer-project-menu-item"
+                          role="menuitemradio"
+                          aria-checked={active}
+                          data-active={active}
+                          title={workspace.path}
+                          onClick={async () => {
+                            setProjectMenuOpen(false);
+                            if (!active) await selectWorkspace(workspace.id);
+                          }}
+                        >
+                          <span>
+                            <strong>{workspace.name}</strong>
+                            <em>{workspace.path}</em>
+                          </span>
+                          {active && <Check size={13} />}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <span className="composer-project-empty">{t('没有最近工作区')}</span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="composer-project-menu-item composer-project-open"
+                  role="menuitem"
+                  onClick={async () => {
+                    setProjectMenuOpen(false);
+                    const path = await window.metis.pickFolder();
+                    if (path) await openWorkspacePath(path);
+                  }}
+                >
+                  <FolderOpen size={13} />
+                  <strong>{t('打开新的工作区文件夹')}</strong>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
       <div className="composer">
         {/* 命令模式（斜杠开头、还没空格）时给真实文字染蓝——原生光标，永不错位；进入任务参数即转普通色。 */}
         <textarea
@@ -488,7 +673,7 @@ export function Composer() {
           rows={1}
           value={text}
           data-command={/^\/\S*$/.test(text)}
-          placeholder={t('让 Metis 在这个项目里开始工作...')}
+          placeholder={composerPlaceholder}
           onChange={event => {
             setText(event.target.value);
             // 只在「还在敲命令本身」（斜杠开头、且还没空格）时显示菜单；一旦开始输入任务参数就收起。
@@ -499,34 +684,36 @@ export function Composer() {
           }}
           onKeyDown={handleKeyDown}
         />
-        <div className="composer-toolbar">
+        {isCodeMode ? (
+          <div className="composer-send-row">{sendButton}</div>
+        ) : (
+          <div className="composer-toolbar">
+            <div className="composer-toolbar-left">
+              {attachButton}
+              {appMode !== 'chat' && <ComposerAccessMenu />}
+              <ComposerDeepResearchToggle />
+            </div>
+            <div className="composer-toolbar-right">
+              <ComposerModelMenu />
+              <ComposerContextOrb model={currentModel} />
+              {sendButton}
+            </div>
+          </div>
+        )}
+        <input ref={fileInputRef} type="file" multiple hidden onChange={handleFiles} />
+      </div>
+      {isCodeMode && (
+        <div className="composer-underbar">
           <div className="composer-toolbar-left">
-            <button className="icon-button composer-attach-button" type="button" title={t('添加附件')} onClick={() => fileInputRef.current?.click()}>
-              <Plus size={22} />
-            </button>
             <ComposerAccessMenu />
-            <ComposerDeepResearchToggle />
+            {attachButton}
           </div>
           <div className="composer-toolbar-right">
             <ComposerModelMenu />
-            <motion.button
-              className="send-button"
-              type="button"
-              data-streaming={streaming}
-              aria-label={streaming ? t('停止生成') : t('发送消息')}
-              title={streaming ? t('停止生成') : t('发送消息')}
-              disabled={sendDisabled}
-              animate={sendControls}
-              whileTap={!sendDisabled ? { scale: 0.9 } : undefined}
-              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-              onClick={() => (streaming ? stop() : void send())}
-            >
-              {streaming ? <Square size={15} /> : <ArrowUp size={20} />}
-            </motion.button>
+            <ComposerContextOrb model={currentModel} />
           </div>
         </div>
-        <input ref={fileInputRef} type="file" multiple hidden onChange={handleFiles} />
-      </div>
+      )}
     </div>
   );
 }
@@ -743,12 +930,16 @@ function ComposerModelMenu() {
 
 function ComposerAccessMenu() {
   const t = useT();
+  const appMode = useUiStore(state => state.appMode);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<PermissionAccessMode>('auto');
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const active = accessOptions.find(option => option.mode === mode) ?? accessOptions[1];
+  const coworkState = coworkModeState(mode);
+  const coworkActive = coworkAccessOptions.find(option => option.state === coworkState) ?? coworkAccessOptions[1];
+  const isCowork = appMode === 'cowork';
 
   useEffect(() => {
     let alive = true;
@@ -799,37 +990,62 @@ function ComposerAccessMenu() {
         className="composer-access-button"
         type="button"
         data-mode={mode}
+        data-cowork={isCowork}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={t(active.description)}
+        title={isCowork ? t(coworkActive.description) : t(active.description)}
         onClick={() => setOpen(value => !value)}
       >
-        {saving ? <Loader2 className="spin" size={15} /> : accessIcon(mode)}
-        <span>{t(active.buttonLabel)}</span>
+        {saving ? <Loader2 className="spin" size={15} /> : accessIcon(isCowork ? coworkActive.mode : mode)}
+        <span>{isCowork ? t(coworkActive.buttonLabel) : t(active.buttonLabel)}</span>
         <ChevronDown size={14} />
       </button>
       {open && (
-        <div className="composer-access-menu" role="menu">
-          {accessOptions.map(option => (
-            <button
-              key={option.mode}
-              type="button"
-              role="menuitemradio"
-              aria-checked={mode === option.mode}
-              aria-label={`${t(option.label)}：${t(option.description)}`}
-              data-active={mode === option.mode}
-              className="composer-access-option"
-              title={t(option.description)}
-              disabled={saving}
-              onClick={() => void chooseMode(option.mode)}
-            >
-              <span className="composer-access-check">{mode === option.mode && <Check size={15} />}</span>
-              <span className="composer-access-option-icon">{accessIcon(option.mode)}</span>
-              <span>
-                <strong>{t(option.label)}</strong>
-              </span>
-            </button>
-          ))}
+        <div className="composer-access-menu" data-cowork={isCowork} role="menu">
+          {isCowork
+            ? coworkAccessOptions.map(option => (
+                <button
+                  key={option.state}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={coworkState === option.state}
+                  aria-label={`${t(option.label)}：${t(option.description)}`}
+                  data-active={coworkState === option.state}
+                  data-cowork="true"
+                  className="composer-access-option"
+                  title={t(option.description)}
+                  disabled={saving}
+                  onClick={() => void chooseMode(option.mode)}
+                >
+                  <span className="composer-access-check">{coworkState === option.state && <Check size={15} />}</span>
+                  <span className="composer-access-option-icon">{accessIcon(option.mode)}</span>
+                  <span className="composer-access-option-copy">
+                    <strong>{t(option.label)}</strong>
+                    <small>{t(option.description)}</small>
+                  </span>
+                </button>
+              ))
+            : accessOptions.map(option => (
+                <button
+                  key={option.mode}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={mode === option.mode}
+                  aria-label={`${t(option.label)}：${t(option.description)}`}
+                  data-active={mode === option.mode}
+                  className="composer-access-option"
+                  title={t(option.description)}
+                  disabled={saving}
+                  onClick={() => void chooseMode(option.mode)}
+                >
+                  <span className="composer-access-check">{mode === option.mode && <Check size={15} />}</span>
+                  <span className="composer-access-option-icon">{accessIcon(option.mode)}</span>
+                  <span className="composer-access-option-copy">
+                    <strong>{t(option.label)}</strong>
+                    <small>{t(option.description)}</small>
+                  </span>
+                </button>
+              ))}
           {error && <p className="composer-access-error">{error}</p>}
         </div>
       )}
@@ -838,9 +1054,185 @@ function ComposerAccessMenu() {
 }
 
 function accessIcon(mode: PermissionAccessMode) {
-  if (mode === 'ask') return <ShieldQuestion size={15} />;
+  if (mode === 'ask') return <Hand size={15} />;
   if (mode === 'edit') return <Pencil size={15} />;
   if (mode === 'plan') return <ClipboardList size={15} />;
-  if (mode === 'bypass') return <ShieldAlert size={15} />;
+  if (mode === 'auto') return <Zap size={15} />;
+  if (mode === 'bypass') return <Unlock size={15} />;
   return <Zap size={15} />;
+}
+
+function coworkModeState(mode: PermissionAccessMode): 'ask' | 'act' {
+  return mode === 'ask' ? 'ask' : 'act';
+}
+
+function ComposerContextOrb({ model }: { model: string }) {
+  const t = useT();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const messages = useChatStore(state => state.messages);
+  const usage = useChatStore(state => state.usage);
+  const contextLedger = useChatStore(state => state.contextLedger);
+  const compactStatus = useChatStore(state => state.compactStatus);
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ mcp: false, memory: false });
+
+  const limit = contextLedger?.contextLimit || contextLimitForModel(model);
+  const used = contextLedger?.estimatedTotalTokens || estimateContextTokens(messages, usage);
+  const percent = contextWindowPercent(used, limit);
+  const level = orbLevel(percent);
+  const rows = contextRows(contextLedger, used, limit, messages.length);
+  const barRows = rows.filter(row => row.tokens > 0);
+  const footerText =
+    compactStatus?.error ||
+    compactStatus?.summaryPreview ||
+    (contextLedger
+      ? `${t('缓存命中')} ${formatContextPercent(contextLedger.cacheHitTokens || 0, Math.max(1, (contextLedger.cacheHitTokens || 0) + (contextLedger.cacheMissTokens || 0)))}`
+      : '');
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setExpanded({ mcp: false, memory: false });
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="composer-context-wrap" onPointerDown={event => event.stopPropagation()}>
+      <button
+        type="button"
+        className="composer-context-orb"
+        data-level={level}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={`${t('上下文窗口')} ${percent}%`}
+        onClick={() => setOpen(value => !value)}
+      >
+        <span className="composer-context-orb-core" />
+      </button>
+      {open && (
+        <div className="composer-context-popover" data-level={level} role="dialog" aria-label={t('上下文窗口')}>
+          <header>
+            <strong>{t('上下文窗口')}</strong>
+            <span>
+              {formatTokenCount(used)} / {formatTokenCount(limit)} ({percent}%)
+            </span>
+          </header>
+          <div className="composer-context-stack" aria-hidden="true">
+            {barRows.map((row, index) => (
+              <span
+                key={row.id}
+                data-free={row.id === 'free'}
+                style={{
+                  width: `${Math.max(row.id === 'free' ? 0 : 0.45, (row.tokens / Math.max(1, limit)) * 100)}%`,
+                  '--context-row-color': contextRowColor(level, index, row.id === 'free'),
+                } as CSSProperties}
+              />
+            ))}
+          </div>
+          <div className="composer-context-list">
+            {rows.map((row, index) => (
+              <div className="composer-context-row-wrap" key={row.id}>
+                <button
+                  type="button"
+                  className="composer-context-row"
+                  data-muted={row.id === 'free'}
+                  disabled={!row.details?.length}
+                  onClick={() => row.details?.length && setExpanded(current => ({ ...current, [row.id]: !current[row.id] }))}
+                >
+                  <span
+                    className="composer-context-swatch"
+                    style={{ '--context-row-color': contextRowColor(level, index, row.id === 'free') } as CSSProperties}
+                  />
+                  <strong>
+                    {row.details?.length ? (expanded[row.id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : null}
+                    {t(row.label)}
+                  </strong>
+                  <em>{formatTokenCount(row.tokens)}</em>
+                  <b>{row.countText || formatContextPercent(row.tokens, limit)}</b>
+                </button>
+                {row.details?.length && expanded[row.id] && (
+                  <div className="composer-context-children">
+                    {row.details.map(detail => (
+                      <div className="composer-context-child" key={`${row.id}:${detail.name}`}>
+                        <span title={detail.name}>{detail.name}</span>
+                        <em>{formatTokenCount(detail.tokens)}</em>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {footerText && <small className="composer-context-footer">{footerText}</small>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ContextDisplayRow = {
+  id: string;
+  label: string;
+  tokens: number;
+  countText?: string;
+  details?: ContextLedgerDetail[];
+};
+
+function contextRows(contextLedger: ContextLedger | null, used: number, limit: number, messageCount: number): ContextDisplayRow[] {
+  const system = contextLedger?.systemBreakdown;
+  const schema = contextLedger?.schemaBreakdown;
+  const details = contextLedger?.systemDetails;
+  const schemaDetails = contextLedger?.schemaDetails;
+  const free = Math.max(0, limit - used);
+  const history = contextLedger?.historyTokens || used;
+  const mcpDetails = visibleContextDetails(schemaDetails?.mcp || []);
+  const memoryDetails = visibleContextDetails(details?.memory || []);
+  return [
+    { id: 'messages', label: '消息', tokens: history, countText: contextLedger?.messageCount ? String(contextLedger.messageCount) : String(messageCount) },
+    { id: 'skills', label: '技能', tokens: system?.skills || 0 },
+    { id: 'mcp', label: 'MCP 工具', tokens: schema?.mcp || 0, countText: mcpDetails.length ? String(mcpDetails.length) : undefined, details: mcpDetails },
+    { id: 'system_prompt', label: '系统提示词', tokens: system?.systemPrompt || 0 },
+    { id: 'system_tools', label: '内置工具', tokens: schema?.builtin || 0, countText: schemaDetails?.builtin?.length ? String(schemaDetails.builtin.length) : undefined },
+    { id: 'memory', label: '记忆文件', tokens: system?.memory || 0, countText: memoryDetails.length ? String(memoryDetails.length) : undefined, details: memoryDetails },
+    { id: 'free', label: '剩余', tokens: free, countText: formatContextPercent(free, limit) },
+  ];
+}
+
+function visibleContextDetails(items: ContextLedgerDetail[]): ContextLedgerDetail[] {
+  return items.filter(item => {
+    const name = String(item.name || '').trim();
+    return Boolean(name && name !== '0' && item.tokens > 0);
+  });
+}
+
+function formatContextPercent(tokens: number, total: number): string {
+  if (!Number.isFinite(tokens) || !Number.isFinite(total) || total <= 0) return '0%';
+  const percent = (tokens / total) * 100;
+  if (percent > 0 && percent < 0.1) return '<0.1%';
+  return `${percent.toFixed(percent >= 10 ? 0 : 1)}%`;
+}
+
+function contextRowColor(level: 'green' | 'yellow' | 'orange' | 'red', index: number, muted = false): string {
+  if (muted) return 'color-mix(in srgb, var(--text-muted) 34%, transparent)';
+  const palettes: Record<typeof level, string[]> = {
+    green: ['#22c55e', '#34d399', '#6ee7b7', '#86efac', '#bbf7d0', '#d9f99d'],
+    yellow: ['#d6a91f', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef3c7'],
+    orange: ['#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5'],
+    red: ['#f43f5e', '#fb4778', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6'],
+  };
+  const palette = palettes[level];
+  return palette[index % palette.length];
+}
+
+function orbLevel(percent: number): 'green' | 'yellow' | 'orange' | 'red' {
+  if (percent >= 90) return 'red';
+  if (percent >= 70) return 'orange';
+  if (percent >= 45) return 'yellow';
+  return 'green';
 }

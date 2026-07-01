@@ -27,7 +27,12 @@ try:
         resolve_provider_for_config,
         validate_provider_config,
     )
-    from backend.runtime.llm_backends._common import _proxies_for_url, _should_retry_without_env_proxy, sanitize_for_log
+    from backend.runtime.llm_backends._common import (
+        _force_direct_connection,
+        _proxies_for_url,
+        _should_retry_without_env_proxy,
+        sanitize_for_log,
+    )
     from backend.runtime.llm_backends.ollama_helper import (
         check_ollama_running,
         list_ollama_models,
@@ -41,7 +46,12 @@ except ImportError:  # pragma: no cover - supports running from inside miro/
         resolve_provider_for_config,
         validate_provider_config,
     )
-    from backend.runtime.llm_backends._common import _proxies_for_url, _should_retry_without_env_proxy, sanitize_for_log
+    from backend.runtime.llm_backends._common import (
+        _force_direct_connection,
+        _proxies_for_url,
+        _should_retry_without_env_proxy,
+        sanitize_for_log,
+    )
     from backend.runtime.llm_backends.ollama_helper import (
         check_ollama_running,
         list_ollama_models,
@@ -951,18 +961,19 @@ def _provider_get_json(url: str, api_key: str, timeout: float = 12.0) -> Dict[st
         "Authorization": f"Bearer {api_key}",
         "Accept": "application/json",
     }
+    trust_env = not _force_direct_connection(url)
     session = requests.Session()
-    session.trust_env = True
+    session.trust_env = trust_env
     try:
         try:
             response = session.get(
                 url,
                 headers=headers,
                 timeout=timeout,
-                proxies=_proxies_for_url(url),
+                proxies=_proxies_for_url(url) if trust_env else None,
             )
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-            if not _should_retry_without_env_proxy(url, exc):
+            if not trust_env or not _should_retry_without_env_proxy(url, exc):
                 raise
             direct_session = requests.Session()
             direct_session.trust_env = False

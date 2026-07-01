@@ -10,10 +10,34 @@ import { remarkMetisLinks } from '../../lib/remarkMetisLinks';
 import {
   AlertTriangle,
   Atom,
+  Brush,
+  Calculator,
   CheckCircle2,
   ClipboardCheck,
+  Database,
+  FilePlus2,
+  FileText,
+  Folder,
+  FolderOpen,
+  GitBranch,
+  Globe2,
+  Image as ImageIcon,
+  Link2,
   LoaderCircle,
+  Mail,
+  Palette,
+  PencilLine,
+  Play,
+  Presentation,
+  Search,
+  SquareTerminal,
+  Table2,
+  Trash2,
+  Video,
+  Wrench,
+  X,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { createElement } from 'react';
 import type { ParsedFile } from '../../lib/types';
 
@@ -136,6 +160,44 @@ export function toolStatusIcon(toolName: string, status: string) {
 export function toolDisplayName(name: string): string {
   const normalized = name.replace(/^web_/, '').replace(/^browser_/, '').replace(/_/g, ' ').trim();
   return normalized ? sentenceCaseSummaryMeta(normalized) : name;
+}
+
+export function toolKindGlyph(name: string) {
+  const normalized = String(name || '').trim().toLowerCase();
+  if (!normalized) return toolKindIcon(Wrench);
+
+  if (/(^|_)(read_file|read_multiple_files|read_file_chunk|get_workspace_file|open_file)(_|$)/.test(normalized)) return toolKindIcon(FolderOpen);
+  if (/(^|_)(list_directory|glob_search)(_|$)/.test(normalized)) return toolKindIcon(Folder);
+  if (/(^|_)(write_file|append_to_file|create_file)(_|$)/.test(normalized)) return toolKindIcon(FilePlus2);
+  if (/(edit|replace|patch|rename|refactor|undo_edit)/.test(normalized)) return toolKindIcon(PencilLine);
+  if (/(delete_file|delete_directory|remove)/.test(normalized)) return toolKindIcon(Trash2);
+  if (/(execute|bash|shell|powershell|terminal|cmd)/.test(normalized)) return toolKindIcon(SquareTerminal);
+  if (/(run_|_run$|verify_compilation|test_runner|office_report_from_code_run|desktop_action)/.test(normalized)) return toolKindIcon(Play);
+  if (/(browse|open_url|web_fetch|preview_browser|browser_)/.test(normalized)) return toolKindIcon(Globe2);
+  if (/(web_search|research|search|grep_search|semantic_search)/.test(normalized)) return toolKindIcon(Search);
+  if (/(twitter|x_search)/.test(normalized)) return toolKindIcon(X);
+  if (/(screenshot|image_view|view_image|image_read)/.test(normalized)) return toolKindIcon(ImageIcon);
+  if (/(generate_image|image_generation|imagegen)/.test(normalized)) return toolKindIcon(Palette);
+  if (/(edit_image|image_edit)/.test(normalized)) return toolKindIcon(Brush);
+  if (/(video)/.test(normalized)) return toolKindIcon(Video);
+  if (/(pdf)/.test(normalized)) return toolKindIcon(FileText, 'PDF');
+  if (/(docx|word)/.test(normalized)) return toolKindIcon(FileText, 'DOC');
+  if (/(xlsx|excel|sheet|csv|tsv)/.test(normalized)) return toolKindIcon(Table2);
+  if (/(ppt|slides|presentation)/.test(normalized)) return toolKindIcon(Presentation);
+  if (/(git)/.test(normalized)) return toolKindIcon(GitBranch);
+  if (/(sql|database|db_query|sqlite|postgres|mysql)/.test(normalized)) return toolKindIcon(Database);
+  if (/(api|request|http)/.test(normalized)) return toolKindIcon(Link2);
+  if (/(math|calc|calculate)/.test(normalized)) return toolKindIcon(Calculator);
+  if (/(mail|email|gmail)/.test(normalized)) return toolKindIcon(Mail);
+  return toolKindIcon(Wrench);
+}
+
+function toolKindIcon(Icon: LucideIcon, badge = '') {
+  return createElement(
+    'span',
+    { className: 'tool-kind-mark', 'data-badge': badge || undefined },
+    createElement(Icon, { size: 12, strokeWidth: 1.9 }),
+  );
 }
 
 export function toolCommandPreview(toolName: string, args: unknown, result: unknown): string {

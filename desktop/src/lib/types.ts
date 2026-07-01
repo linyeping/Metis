@@ -28,7 +28,11 @@ export type ThemeName =
   | 'mistbound-jade'
   | 'crimson-reliquary';
 
-export type SectionId = 'chat' | 'skills' | 'mcp' | 'computer' | 'cron';
+export type SectionId = 'chat' | 'chat-list' | 'skills' | 'mcp' | 'computer' | 'cron' | 'store';
+
+// Top-level workspace mode, mirroring Claude Desktop's Chat / Cowork / Code split.
+// Each mode reframes the home screen and (Stage 2) the default agent behavior.
+export type AppMode = 'chat' | 'cowork' | 'code';
 
 export type SettingsSection =
   | 'appearance'
@@ -227,6 +231,65 @@ export interface BrowserActivityPayload {
   items: BrowserActivityItem[];
 }
 
+export type ResearchJobStatus = 'queued' | 'running' | 'complete' | 'partial' | 'error' | 'failed';
+
+export interface ResearchJobPhase {
+  id?: string;
+  label?: string;
+  status?: string;
+  count?: number;
+  failed?: number;
+  summary?: string;
+}
+
+export interface ResearchJobSource {
+  id?: string;
+  rank?: number;
+  title?: string;
+  url?: string;
+  domain?: string;
+  snippet?: string;
+  status?: string;
+  evidence_status?: string;
+  chars?: number;
+  error?: string;
+}
+
+export interface ResearchJobEvidence {
+  title?: string;
+  url?: string;
+  text?: string;
+  snippet?: string;
+  status?: string;
+  chars?: number;
+}
+
+export interface ResearchJob {
+  schema?: string;
+  id: string;
+  kind: string;
+  title: string;
+  query: string;
+  status: ResearchJobStatus | string;
+  providers: string[];
+  plan: ResearchJobPhase[];
+  queries: Array<Record<string, unknown>>;
+  sources: ResearchJobSource[];
+  attempts: Array<Record<string, unknown>>;
+  failures: Array<Record<string, unknown>>;
+  evidence: ResearchJobEvidence[];
+  report: string;
+  report_filename?: string;
+  report_path?: string;
+  stats: Record<string, number>;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ResearchJobsPayload {
+  jobs: ResearchJob[];
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -239,6 +302,7 @@ export interface SessionMeta {
   id: string;
   title: string;
   workspaceId: string;
+  mode: string;
   messageCount: number;
   createdAt: number;
   updatedAt: number;
@@ -1206,6 +1270,20 @@ export interface ContextLedger {
     mcp: number;
     builtin: number;
   };
+  systemDetails?: {
+    systemPrompt: ContextLedgerDetail[];
+    skills: ContextLedgerDetail[];
+    memory: ContextLedgerDetail[];
+  };
+  schemaDetails?: {
+    mcp: ContextLedgerDetail[];
+    builtin: ContextLedgerDetail[];
+  };
+}
+
+export interface ContextLedgerDetail {
+  name: string;
+  tokens: number;
 }
 
 export interface ChatStreamEvent {
@@ -1277,6 +1355,8 @@ export interface ConnectorServiceStatus {
   displayName: string;
   scopes: string[];
   tokenEnv: string;
+  secretEnvs?: string[];
+  optionalSecretEnvs?: string[];
   connected: boolean;
   encryptionAvailable: boolean;
 }
@@ -1322,10 +1402,18 @@ export interface SkillSummary {
   allowedTools: string[];
   disallowedTools: string[];
   preview: string;
+  files: SkillFileEntry[];
 }
 
 export interface SkillDetail extends SkillSummary {
   content: string;
+}
+
+export interface SkillFileEntry {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  children: SkillFileEntry[];
 }
 
 export interface McpToolSummary {
@@ -1401,6 +1489,7 @@ export interface SearchResult {
   snippet: string;
   ts: number;
   score: number;
+  mode?: AppMode;
   workspaceId?: string;
   workspaceName?: string;
 }
@@ -1429,12 +1518,13 @@ export interface WorkspaceTreeNode {
 }
 
 export interface WorkspaceFile {
-  type: 'text' | 'markdown' | 'image' | 'binary';
+  type: 'text' | 'markdown' | 'image' | 'pdf' | 'office' | 'binary';
   name: string;
   path: string;
   size: number;
   content?: string;
   language?: string;
   previewUrl?: string;
+  previewNote?: string;
   truncated?: boolean;
 }

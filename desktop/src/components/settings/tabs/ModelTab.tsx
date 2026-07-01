@@ -330,7 +330,7 @@ export const ModelTab = memo(function ModelTab({
             </div>
             {!capabilities.supportsVision && (
               <p className="section-desc section-desc-warning">
-                {t('当前模型不支持视觉，桌面操控需要切换到 Claude、GPT-4o、Gemini 或视觉模型。')}
+                {t('当前模型不支持视觉，桌面操控需要切换到支持视觉的模型。')}
               </p>
             )}
             {capabilities.tier >= 3 && (

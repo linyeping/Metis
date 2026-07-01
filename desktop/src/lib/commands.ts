@@ -32,7 +32,7 @@ export interface CommandContext {
   settings: RuntimeSettings | null;
   actions: {
     createSession: () => Promise<void>;
-    switchSession: (sessionId: string) => Promise<void>;
+    switchSession: (sessionId: string, mode?: SessionMeta['mode']) => Promise<void>;
     switchWorkspace: (workspaceId: string) => Promise<void>;
     openFolder: () => Promise<void>;
     setTheme: (theme: ThemeName) => void;
@@ -145,7 +145,7 @@ export function buildCommands(context: CommandContext): CommandItem[] {
     {
       id: 'session.new',
       title: zh ? '新建会话' : 'New chat',
-      subtitle: zh ? '在当前工作区创建一条新对话' : 'Create a chat in the current workspace',
+      subtitle: zh ? '打开空白对话，发送后创建记录' : 'Open a blank chat; create it when you send',
       keywords: ['new', 'chat', 'session', '新建', '会话'],
       group: zh ? '会话' : 'Session',
       run: context.actions.createSession,
@@ -260,7 +260,7 @@ export function buildCommands(context: CommandContext): CommandItem[] {
       subtitle: zh ? `${session.messageCount} 条消息` : `${session.messageCount} messages`,
       keywords: ['switch', 'session', 'chat', '切换', '会话', session.title],
       group: zh ? '最近会话' : 'Recent chats',
-      run: () => context.actions.switchSession(session.id),
+      run: () => context.actions.switchSession(session.id, session.mode),
     });
   }
 
@@ -308,6 +308,14 @@ function sectionCommands(language: Language): Array<CommandItem & { section: Sec
       keywords: ['mcp', 'connector', '连接器'],
       group: zh ? '导航' : 'Navigation',
       section: 'mcp',
+      run: () => undefined,
+    },
+    {
+      id: 'section.store',
+      title: zh ? '跳到 Store' : 'Go to Store',
+      keywords: ['store', 'marketplace', 'skill', 'mcp', '商店', '市场'],
+      group: zh ? '导航' : 'Navigation',
+      section: 'store',
       run: () => undefined,
     },
     {

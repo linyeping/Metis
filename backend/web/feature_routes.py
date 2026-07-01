@@ -15,6 +15,11 @@ from backend.runtime.skill_loader import (
     skill_directory_for_id,
     skill_to_payload,
 )
+from backend.tools.coding.network_external.web.research_jobs import (
+    export_research_job_markdown,
+    get_research_job,
+    list_research_jobs,
+)
 from backend.web.helpers import (
     active_workspace_root,
     get_state,
@@ -84,6 +89,39 @@ def metis_status() -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Research jobs
+# ---------------------------------------------------------------------------
+
+@feature_bp.route("/research/jobs", methods=["GET"])
+def research_jobs() -> Any:
+    try:
+        limit = int(request.args.get("limit") or 40)
+    except ValueError:
+        limit = 40
+    return jsonify({"ok": True, "jobs": list_research_jobs(limit=limit)})
+
+
+@feature_bp.route("/research/jobs/<path:job_id>", methods=["GET"])
+def research_job(job_id: str) -> Any:
+    job = get_research_job(job_id)
+    if not job:
+        abort(404, description="Research job not found")
+    return jsonify({"ok": True, "job": job})
+
+
+@feature_bp.route("/research/jobs/<path:job_id>/export", methods=["GET"])
+def research_job_export(job_id: str) -> Any:
+    job = get_research_job(job_id)
+    if not job:
+        abort(404, description="Research job not found")
+    fmt = str(request.args.get("format") or "markdown").lower()
+    if fmt == "json":
+        return jsonify(job)
+    markdown = export_research_job_markdown(job_id)
+    return markdown, 200, {"Content-Type": "text/markdown; charset=utf-8"}
+
+
+# ---------------------------------------------------------------------------
 # Memory routes
 # ---------------------------------------------------------------------------
 
@@ -124,7 +162,47 @@ def _skill_payload(sid: str, include_content: bool = False) -> Dict[str, Any]:
     skill = resolve_skill_by_id(sid, workspace_root=active_workspace_root())
     if skill is None:
         abort(404, description="Skill not found")
-    return skill_to_payload(skill, include_content=include_content)
+    payload = skill_to_payload(skill, include_content=include_content)
+    payload["files"] = _skill_file_tree(str(skill.directory))
+    return payload
+
+
+def _skill_file_tree(root: str, *, max_depth: int = 2, max_items: int = 80) -> List[Dict[str, Any]]:
+    root_path = os.path.realpath(root)
+    ignored = {".disabled", "__pycache__", ".git", ".DS_Store", "node_modules"}
+    count = 0
+
+    def walk(directory: str, depth: int) -> List[Dict[str, Any]]:
+        nonlocal count
+        try:
+            names = sorted(
+                (name for name in os.listdir(directory) if name not in ignored),
+                key=lambda name: (not os.path.isdir(os.path.join(directory, name)), name.lower()),
+            )
+        except OSError:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for name in names:
+            if count >= max_items:
+                break
+            path = os.path.realpath(os.path.join(directory, name))
+            if not path.startswith(root_path):
+                continue
+            rel = os.path.relpath(path, root_path).replace("\\", "/")
+            is_dir = os.path.isdir(path)
+            count += 1
+            item: Dict[str, Any] = {
+                "name": name,
+                "path": rel,
+                "kind": "directory" if is_dir else "file",
+            }
+            if is_dir and depth < max_depth:
+                item["children"] = walk(path, depth + 1)
+            rows.append(item)
+        return rows
+
+    return walk(root_path, 0)
 
 
 def _list_local_skills() -> List[Dict[str, Any]]:

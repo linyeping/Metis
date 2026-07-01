@@ -19,6 +19,10 @@ const {
   isAllowedAppNavigation,
   isSafeExternalUrl
 } = require('./security.cjs')
+const {
+  previewBoundsIntent,
+  previewOcclusionRestoreIntent
+} = require('./preview-state.cjs')
 
 let autoUpdater = null
 try {
@@ -459,8 +463,10 @@ function emitUpdateEvent(payload = {}) {
 
 function hidePreviewView() {
   if (!previewView) return
-  if (lastPreviewBoundsKey === 'hidden') return
   lastPreviewBoundsKey = 'hidden'
+  try {
+    previewView.setVisible?.(false)
+  } catch {}
   try {
     previewView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
   } catch {}
@@ -473,13 +479,13 @@ function setPreviewOccluded(value) {
   previewOccluded = next
   if (!previewView || previewView.webContents.isDestroyed()) return
   if (previewOccluded) {
-    try { previewView.setVisible?.(false) } catch {}
     hidePreviewView()
   } else {
-    try { previewView.setVisible?.(true) } catch {}
-    if (lastPreviewBounds && lastPreviewBounds.width > 4 && lastPreviewBounds.height > 4) {
-      lastPreviewBoundsKey = `${lastPreviewBounds.x},${lastPreviewBounds.y},${lastPreviewBounds.width},${lastPreviewBounds.height}`
-      try { previewView.setBounds(lastPreviewBounds) } catch {}
+    const restore = previewOcclusionRestoreIntent(lastPreviewBounds)
+    if (restore.visible) {
+      lastPreviewBoundsKey = restore.key
+      try { previewView.setBounds(restore.bounds) } catch {}
+      try { previewView.setVisible?.(true) } catch {}
     } else {
       // 渲染端最新意图是隐藏（遮挡期间关掉了预览）——保持隐藏，别用旧位置把网页恢复出来。
       hidePreviewView()
@@ -3301,6 +3307,11 @@ ipcMain.handle('metis:app-info', () => ({
   storage: resolveDataRootInfo()
 }))
 ipcMain.handle('metis:diagnostics', () => diagnosticsPayload())
+ipcMain.handle('metis:set-native-theme', (_event, mode) => {
+  const next = ['light', 'dark', 'system'].includes(mode) ? mode : 'system'
+  nativeTheme.themeSource = next
+  return { ok: true, themeSource: nativeTheme.themeSource, shouldUseDarkColors: nativeTheme.shouldUseDarkColors }
+})
 ipcMain.handle('metis:save-diagnostics-bundle', () => saveDiagnosticsBundle())
 ipcMain.handle('metis:dev-server-detect', (_event, payload = {}) => detectFrontendProject(payload))
 ipcMain.handle('metis:dev-server-start', (_event, payload = {}) => startDevServer(payload))
@@ -3310,25 +3321,20 @@ ipcMain.handle('metis:save-preview-evidence', (_event, payload = {}) => savePrev
 ipcMain.handle('metis:preview-set-bounds', (_event, payload = {}) => {
   // 有 DOM 浮层挡着时，不移动原生视图（否则 ResizeObserver 会把它又显示到弹窗上面），
   // 但仍要记录渲染端的最新意图——否则遮挡期间关掉预览，解除遮挡后会用旧位置把网页又恢复出来（残留）。
+  const intent = previewBoundsIntent(payload)
   if (previewOccluded) {
-    const wantVisible = Boolean(payload.visible)
-    const w = Math.max(0, Math.round(Number(payload.width) || 0))
-    const h = Math.max(0, Math.round(Number(payload.height) || 0))
-    if (!wantVisible || w <= 4 || h <= 4) {
-      lastPreviewBounds = null
-    } else {
-      lastPreviewBounds = {
-        x: Math.max(0, Math.round(Number(payload.x) || 0)),
-        y: Math.max(0, Math.round(Number(payload.y) || 0)),
-        width: w,
-        height: h
-      }
-    }
+    lastPreviewBounds = intent.bounds
+    if (!intent.visible) hidePreviewView()
     return { ok: true, occluded: true }
   }
-  const visible = Boolean(payload.visible)
-  if (!visible) {
+  if (!intent.visible) {
+    // Renderer explicitly closed/hidden Preview (tab/card/mode switch). Treat
+    // that as the latest visibility intent, otherwise previewSetOccluded(false)
+    // can resurrect the old BrowserView bounds after the app returns from the
+    // background or an overlay closes.
+    lastPreviewBounds = null
     hidePreviewView()
+    if (intent.hiddenBounds) return { ok: true, bounds: intent.hiddenBounds, hidden: true }
     return { ok: true }
   }
   const tabId = String(payload.tabId || '')
@@ -3337,24 +3343,16 @@ ipcMain.handle('metis:preview-set-bounds', (_event, payload = {}) => {
   }
   const view = ensurePreviewView()
   if (!view) return { ok: false, error: 'preview view unavailable' }
-  const bounds = {
-    x: Math.max(0, Math.round(Number(payload.x) || 0)),
-    y: Math.max(0, Math.round(Number(payload.y) || 0)),
-    width: Math.max(0, Math.round(Number(payload.width) || 0)),
-    height: Math.max(0, Math.round(Number(payload.height) || 0))
-  }
-  if (bounds.width <= 4 || bounds.height <= 4) {
-    hidePreviewView()
-    return { ok: true, bounds, hidden: true }
-  }
+  const bounds = intent.bounds
   // 去重：渲染端一次同步会连发多帧/定时器调用，位置没变就别重定位原生视图（消除闪烁）。
-  const key = `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`
+  const key = intent.key
   if (key === lastPreviewBoundsKey) {
     return { ok: true, bounds, deduped: true }
   }
   lastPreviewBoundsKey = key
   lastPreviewBounds = bounds
   view.setBounds(bounds)
+  try { view.setVisible?.(true) } catch {}
   return { ok: true, bounds }
 })
 ipcMain.handle('metis:preview-set-occluded', (_event, value) => {
@@ -3528,8 +3526,8 @@ ipcMain.handle('metis:open-path', async (_event, targetPath) => {
       const error = await shell.openPath(resolved)
       return { ok: !error, path: resolved, error: error || undefined }
     }
-    shell.showItemInFolder(resolved)
-    return { ok: true, path: resolved }
+    const error = await shell.openPath(resolved)
+    return { ok: !error, path: resolved, error: error || undefined }
   } catch (error) {
     return { ok: false, path: resolved, error: error?.message || String(error) }
   }

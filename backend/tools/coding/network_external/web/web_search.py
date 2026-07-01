@@ -3,7 +3,7 @@ from backend.tools.coding.network_external.web.search_broker import format_searc
 
 
 @trace_execution
-def web_search(query: str, max_results: int = 5, region: str = "", timelimit: str = "") -> str:
+def web_search(query: str, max_results: int = 5, region: str = "", timelimit: str = "", provider: str = "auto") -> str:
     return format_search_response(
-        metis_search_query(query=query, max_results=max_results, region=region, timelimit=timelimit)
+        metis_search_query(query=query, max_results=max_results, region=region, timelimit=timelimit, provider=provider)
     )

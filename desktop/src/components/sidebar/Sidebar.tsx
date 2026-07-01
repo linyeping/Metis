@@ -1,24 +1,25 @@
-import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
 import { createElement, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
 import { getActiveSessionRun } from '../../lib/api';
 import type { ChatRunStatus, SessionMeta, Workspace } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
-import { ContextWindowBar } from './ContextWindowBar';
+import { useUiStore } from '../../store/uiStore';
+import { ModeSwitcher } from './ModeSwitcher';
+import { SidebarNav } from './SidebarNav';
 import { SessionSearch } from './SessionSearch';
 import { useT } from '../../hooks/useT';
 
-interface SidebarProps {
-  model?: string;
-}
-
-export function Sidebar({ model = '' }: SidebarProps) {
+export function Sidebar() {
   const t = useT();
+  const setSettingsOpen = useUiStore(state => state.setSettingsOpen);
+  const appMode = useUiStore(state => state.appMode);
+  const setActiveSection = useUiStore(state => state.setActiveSection);
   const sessions = useSessionStore(state => state.sessions);
   const workspaces = useSessionStore(state => state.workspaces);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
   const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
-  const newSession = useSessionStore(state => state.newSession);
+  const startDraftSession = useSessionStore(state => state.startDraftSession);
   const selectSession = useSessionStore(state => state.selectSession);
   const selectWorkspace = useSessionStore(state => state.selectWorkspace);
   const deleteSessionById = useSessionStore(state => state.deleteSessionById);
@@ -27,17 +28,23 @@ export function Sidebar({ model = '' }: SidebarProps) {
   const clearWorkspace = useSessionStore(state => state.clearWorkspace);
   const removeWorkspaceById = useSessionStore(state => state.removeWorkspaceById);
   const loadChatSession = useChatStore(state => state.loadSession);
+  const clearChat = useChatStore(state => state.clearLocal);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<string | null>(null);
   const [runStatuses, setRunStatuses] = useState<Record<string, ChatRunStatus>>({});
 
   const grouped = useMemo(() => {
-    const fallback = workspaces.length ? workspaces : [{ id: activeWorkspaceId || '', name: '当前工作区', path: '', createdAt: 0, updatedAt: 0 }];
+    const filteredSessions = sessions.filter(s => s.mode === appMode);
+    const workspaceIds = new Set(filteredSessions.map(s => s.workspaceId).filter(Boolean));
+    if (activeWorkspaceId) workspaceIds.add(activeWorkspaceId);
+
+    const relevantWorkspaces = workspaces.filter(w => workspaceIds.has(w.id));
+    const fallback = relevantWorkspaces.length ? relevantWorkspaces : [{ id: activeWorkspaceId || '', name: '当前工作区', path: '', createdAt: 0, updatedAt: 0 }];
     return fallback.map(workspace => ({
       workspace,
-      sessions: sessions.filter(session => (session.workspaceId || '') === (workspace.id || '')),
+      sessions: filteredSessions.filter(session => (session.workspaceId || '') === (workspace.id || '')),
     }));
-  }, [activeWorkspaceId, sessions, workspaces]);
+  }, [activeWorkspaceId, appMode, sessions, workspaces]);
 
   const openFolder = async () => {
     const path = await window.metis.pickFolder();
@@ -51,8 +58,8 @@ export function Sidebar({ model = '' }: SidebarProps) {
     if (workspaceId && workspaceId !== activeWorkspaceId) {
       await selectWorkspace(workspaceId);
     }
-    const sessionId = await newSession();
-    await loadChatSession(sessionId);
+    startDraftSession();
+    clearChat();
   };
 
   useEffect(() => {
@@ -85,39 +92,73 @@ export function Sidebar({ model = '' }: SidebarProps) {
     };
   }, [sessions]);
 
+  const chatSessions = useMemo(() => sessions.filter(s => s.mode === 'chat' || !s.mode), [sessions]);
+
   return (
     <div className="sidebar">
-      <div className="sidebar-search-row">
-        <SessionSearch />
-        <button className="sidebar-folder-button" type="button" title={t('打开文件夹')} aria-label={t('打开文件夹')} onClick={openFolder}>
-          <FolderOpen size={17} />
-        </button>
-      </div>
+      <ModeSwitcher />
+      <div className="sidebar-mode-surface" key={appMode} data-mode={appMode}>
+        <SidebarNav />
+        <div className="sidebar-search-row" data-has-folder={appMode !== 'chat'}>
+          <SessionSearch />
+          {appMode !== 'chat' && (
+            <button className="sidebar-folder-button" type="button" title={t('打开文件夹')} aria-label={t('打开文件夹')} onClick={openFolder}>
+              <FolderOpen size={17} />
+            </button>
+          )}
+        </div>
 
-      <div className="workspace-list">
-        {grouped.map(group =>
-          createElement(WorkspaceGroup, {
-            key: group.workspace.id || 'default',
-            activeSessionId,
-            activeWorkspaceId,
-            clearWorkspace,
-            createChat,
-            deleteSessionById,
-            group,
-            loadChatSession,
-            menu,
-            open,
-            renameSessionById,
-            removeWorkspaceById,
-            runStatuses,
-            selectSession,
-            selectWorkspace,
-            setMenu,
-            setOpen,
-          }),
-        )}
+        <div className="workspace-list">
+          {appMode === 'chat' ? (
+            <div className="session-list" style={{ padding: '8px 12px' }}>
+              {chatSessions.length === 0 && <p className="empty-line">{t('暂无会话')}</p>}
+              {chatSessions.slice(0, 20).map(session =>
+                createElement(SessionRow, {
+                  key: session.id,
+                  active: session.id === activeSessionId,
+                  deleteSessionById,
+                  loadChatSession,
+                  renameSessionById,
+                  runStatus: runStatuses[session.id] || '',
+                  selectSession,
+                  session,
+                })
+              )}
+              {chatSessions.length > 20 && (
+                <button className="sidebar-view-all" type="button" onClick={() => setActiveSection('chat-list')}>
+                  {t('查看全部')} <ChevronRight size={14} />
+                </button>
+              )}
+            </div>
+          ) : (
+            grouped.map(group =>
+              createElement(WorkspaceGroup, {
+                key: group.workspace.id || 'default',
+                activeSessionId,
+                activeWorkspaceId,
+                clearWorkspace,
+                createChat,
+                deleteSessionById,
+                group,
+                loadChatSession,
+                menu,
+                open,
+                renameSessionById,
+                removeWorkspaceById,
+                runStatuses,
+                selectSession,
+                selectWorkspace,
+                setMenu,
+                setOpen,
+              }),
+            )
+          )}
+        </div>
       </div>
-      <ContextWindowBar model={model} />
+      <button className="sidebar-settings-button" type="button" onClick={() => setSettingsOpen(true)}>
+        <Settings size={15} />
+        <span>{t('设置')}</span>
+      </button>
     </div>
   );
 }
@@ -179,8 +220,8 @@ function WorkspaceGroup({
             }
           }}
         >
-          <ChevronRight className="workspace-chevron" data-open={isOpen} size={15} />
-          <Folder className="workspace-folder-icon" size={14} />
+          <ChevronRight className="workspace-chevron" data-open={isOpen} size={14} />
+          <Folder className="workspace-folder-icon" size={13} />
           <span>{t(workspace.name || '当前工作区')}</span>
           <em>{group.sessions.length}</em>
         </button>

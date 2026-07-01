@@ -5,12 +5,15 @@ import hashlib
 import json
 import mimetypes
 import os
+import shutil
 import subprocess
 import tempfile
 import time
 import uuid
+import zipfile
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+from xml.etree import ElementTree
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
@@ -24,6 +27,7 @@ _FILE_PREVIEW_TOKEN_TTL_SECONDS = 30 * 60
 _FILE_PREVIEW_ROOTS: Dict[str, Dict[str, Any]] = {}
 _FILE_PREVIEW_SAFE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico",
+    ".pdf",
     ".txt", ".log", ".csv", ".json", ".xml", ".yaml", ".yml",
     ".py", ".js", ".mjs", ".ts", ".jsx", ".tsx", ".html", ".htm", ".xhtml",
     ".css", ".scss", ".less", ".md", ".sh", ".bat", ".ps1",
@@ -161,6 +165,209 @@ def _write_text_file(path: str, content: str) -> None:
         os.makedirs(directory, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="") as handle:
         handle.write(content)
+
+
+def _office_preview_payload(abs_path: str, file_path: str, name: str, size: int, ext: str) -> Dict[str, Any]:
+    note = "Office 预览为本地提取式预览；排版以系统应用或 LibreOffice 转换预览为准。"
+    preview_url = ""
+    pdf_preview_path = _office_pdf_preview_path(abs_path, ext)
+    if pdf_preview_path:
+        preview_url = f"/file-preview?path={quote(pdf_preview_path, safe='')}"
+        note = "Office 已转换为 PDF 内置预览；复杂动画/宏仍以系统应用为准。"
+    try:
+        if ext in {".docx", ".docm"}:
+            content = _extract_docx_preview(abs_path)
+        elif ext in {".xlsx", ".xlsm"}:
+            content = _extract_xlsx_preview(abs_path)
+        elif ext in {".pptx", ".pptm"}:
+            content = _extract_pptx_preview(abs_path)
+        else:
+            content = ""
+            note = "旧版 Office 文件需要 LibreOffice/系统应用打开；当前 Files 先提供系统打开入口。"
+    except Exception as exc:
+        content = ""
+        note = f"Office 预览提取失败：{type(exc).__name__}: {exc}"
+
+    return {
+        "type": "office",
+        "name": name,
+        "path": file_path,
+        "size": size,
+        "content": _limit_preview_text(content),
+        "language": "text",
+        "preview_url": preview_url,
+        "preview_note": note,
+        "truncated": len(content) > _MAX_OFFICE_PREVIEW_CHARS,
+    }
+
+
+_MAX_OFFICE_PREVIEW_CHARS = 180_000
+
+
+def _office_pdf_preview_path(abs_path: str, ext: str) -> str:
+    try:
+        from backend.runtime.document_converters import soffice_path
+
+        soffice = soffice_path()
+    except Exception:
+        soffice = ""
+    if not soffice:
+        return ""
+
+    try:
+        stat = os.stat(abs_path)
+        key = hashlib.sha256(f"{abs_path}|{stat.st_mtime_ns}|{stat.st_size}".encode("utf-8")).hexdigest()[:24]
+        out_dir = os.path.join(tempfile.gettempdir(), "metis-office-previews", key)
+        os.makedirs(out_dir, exist_ok=True)
+        source_path = os.path.join(out_dir, f"source{ext}")
+        pdf_path = os.path.join(out_dir, "source.pdf")
+        if os.path.isfile(pdf_path):
+            return pdf_path
+        shutil.copy2(abs_path, source_path)
+        result = subprocess.run(
+            [soffice, "--headless", "--convert-to", "pdf", "--outdir", out_dir, source_path],
+            cwd=out_dir,
+            capture_output=True,
+            timeout=45,
+        )
+        if result.returncode == 0 and os.path.isfile(pdf_path):
+            return pdf_path
+    except Exception:
+        return ""
+    return ""
+
+
+def _limit_preview_text(value: str) -> str:
+    if len(value) <= _MAX_OFFICE_PREVIEW_CHARS:
+        return value
+    return value[:_MAX_OFFICE_PREVIEW_CHARS] + "\n\n[预览已截断]"
+
+
+def _extract_docx_preview(path: str) -> str:
+    with zipfile.ZipFile(path) as archive:
+        xml = archive.read("word/document.xml")
+    root = ElementTree.fromstring(xml)
+    paragraphs: List[str] = []
+    for paragraph in root.iter():
+        if _local_name(paragraph.tag) != "p":
+            continue
+        parts: List[str] = []
+        for node in paragraph.iter():
+            tag = _local_name(node.tag)
+            if tag == "t" and node.text:
+                parts.append(node.text)
+            elif tag == "tab":
+                parts.append("\t")
+            elif tag == "br":
+                parts.append("\n")
+        text = "".join(parts).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs) or "[空文档或未找到正文文本]"
+
+
+def _extract_pptx_preview(path: str) -> str:
+    with zipfile.ZipFile(path) as archive:
+        slide_names = sorted(
+            (name for name in archive.namelist() if name.startswith("ppt/slides/slide") and name.endswith(".xml")),
+            key=_slide_sort_key,
+        )
+        sections: List[str] = []
+        for index, name in enumerate(slide_names[:80], start=1):
+            root = ElementTree.fromstring(archive.read(name))
+            texts = [
+                node.text.strip()
+                for node in root.iter()
+                if _local_name(node.tag) == "t" and node.text and node.text.strip()
+            ]
+            if texts:
+                sections.append(f"Slide {index}\n" + "\n".join(texts))
+        if len(slide_names) > 80:
+            sections.append(f"[还有 {len(slide_names) - 80} 张幻灯片未显示]")
+    return "\n\n".join(sections) or "[未找到可提取的幻灯片文本]"
+
+
+def _extract_xlsx_preview(path: str) -> str:
+    with zipfile.ZipFile(path) as archive:
+        shared_strings = _xlsx_shared_strings(archive)
+        sheet_names = _xlsx_sheet_names(archive)
+        worksheet_names = sorted(
+            (name for name in archive.namelist() if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")),
+            key=_slide_sort_key,
+        )
+        sections: List[str] = []
+        for index, name in enumerate(worksheet_names[:8], start=1):
+            title = sheet_names[index - 1] if index - 1 < len(sheet_names) else f"Sheet {index}"
+            rows = _xlsx_rows_preview(archive.read(name), shared_strings)
+            if rows:
+                sections.append(f"{title}\n" + "\n".join(rows))
+        if len(worksheet_names) > 8:
+            sections.append(f"[还有 {len(worksheet_names) - 8} 个工作表未显示]")
+    return "\n\n".join(sections) or "[未找到可提取的表格文本]"
+
+
+def _xlsx_shared_strings(archive: zipfile.ZipFile) -> List[str]:
+    try:
+        root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
+    except KeyError:
+        return []
+    values: List[str] = []
+    for item in root.iter():
+        if _local_name(item.tag) != "si":
+            continue
+        parts = [node.text or "" for node in item.iter() if _local_name(node.tag) == "t"]
+        values.append("".join(parts))
+    return values
+
+
+def _xlsx_sheet_names(archive: zipfile.ZipFile) -> List[str]:
+    try:
+        root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+    except KeyError:
+        return []
+    names: List[str] = []
+    for node in root.iter():
+        if _local_name(node.tag) == "sheet":
+            value = node.attrib.get("name")
+            if value:
+                names.append(value)
+    return names
+
+
+def _xlsx_rows_preview(xml: bytes, shared_strings: List[str]) -> List[str]:
+    root = ElementTree.fromstring(xml)
+    rows: List[str] = []
+    for row in root.iter():
+        if _local_name(row.tag) != "row":
+            continue
+        cells = [_xlsx_cell_value(cell, shared_strings) for cell in row if _local_name(cell.tag) == "c"]
+        cells = [cell for cell in cells if cell]
+        if cells:
+            rows.append("\t".join(cells[:24]))
+        if len(rows) >= 120:
+            rows.append("[工作表预览已截断]")
+            break
+    return rows
+
+
+def _xlsx_cell_value(cell: ElementTree.Element, shared_strings: List[str]) -> str:
+    cell_type = cell.attrib.get("t", "")
+    values = [node.text or "" for node in cell.iter() if _local_name(node.tag) in {"v", "t"} and node.text]
+    raw = "".join(values).strip()
+    if cell_type == "s" and raw.isdigit():
+        index = int(raw)
+        return shared_strings[index] if 0 <= index < len(shared_strings) else raw
+    return raw
+
+
+def _slide_sort_key(name: str) -> tuple[int, str]:
+    stem = os.path.splitext(os.path.basename(name))[0]
+    digits = "".join(ch for ch in stem if ch.isdigit())
+    return (int(digits or 0), name)
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
 def _resolve_workspace_write_path(file_path: str, workspace_root: str) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -729,9 +936,11 @@ def workspace_file() -> Any:
     ext = os.path.splitext(abs_path)[1].lower()
     name = os.path.basename(abs_path)
     size = os.path.getsize(abs_path)
+    pdf_exts = {".pdf"}
     image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
+    office_exts = {".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm", ".doc", ".xls", ".ppt"}
     text_exts = {
-        ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h",
+        ".py", ".js", ".mjs", ".ts", ".jsx", ".tsx", ".java", ".c", ".cpp", ".h",
         ".rs", ".go", ".rb", ".php", ".sh", ".bat", ".ps1",
         ".html", ".css", ".scss", ".less", ".vue", ".svelte",
         ".json", ".yaml", ".yml", ".toml", ".xml", ".ini", ".cfg", ".conf",
@@ -740,6 +949,17 @@ def workspace_file() -> Any:
         ".gitignore", ".dockerignore", ".editorconfig",
     }
     is_dotfile = name.startswith(".") and ext == ""
+
+    if ext in pdf_exts:
+        return jsonify(
+            {
+                "type": "pdf",
+                "name": name,
+                "path": file_path,
+                "size": size,
+                "preview_url": f"/file-preview?path={quote(file_path, safe='')}",
+            }
+        )
 
     if ext in image_exts:
         return jsonify(
@@ -751,6 +971,9 @@ def workspace_file() -> Any:
                 "preview_url": f"/file-preview?path={quote(file_path, safe='')}",
             }
         )
+
+    if ext in office_exts:
+        return jsonify(_office_preview_payload(abs_path, file_path, name, size, ext))
 
     if ext in text_exts or is_dotfile:
         max_preview_size = 256 * 1024

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from backend.core.paths import legacy_miro_path, metis_dir
@@ -27,6 +26,7 @@ class SessionMeta:
     created_at: float
     updated_at: float
     workspace_id: str = ""
+    mode: str = "chat"
 
 
 @dataclass
@@ -57,11 +57,12 @@ class SessionManager:
         """
         return [self._meta_from_dict(item) for item in self._db.list_sessions(workspace_id=workspace_id)]
 
-    def create_session(self, title: str = "", workspace_id: str = "") -> Session:
+    def create_session(self, title: str = "", workspace_id: str = "", mode: str = "chat") -> Session:
         """Create a new empty session."""
         data = self._db.create_session(
             title=title or self._default_title(),
             workspace_id=workspace_id,
+            mode=mode,
         )
         return self._session_from_dict(data)
 
@@ -104,15 +105,16 @@ class SessionManager:
         return self._db.delete_sessions_for_workspace(workspace_id)
 
     def _default_title(self) -> str:
-        return datetime.now().strftime("Chat %Y-%m-%d %H:%M")
+        return "新会话"
 
     def _meta_from_dict(self, item: Dict[str, Any]) -> SessionMeta:
         return SessionMeta(
             id=str(item["id"]),
-            title=str(item.get("title") or "New chat"),
+            title=str(item.get("title") or "新会话"),
             created_at=float(item.get("created_at") or 0.0),
             updated_at=float(item.get("updated_at") or 0.0),
             workspace_id=str(item.get("workspace_id") or ""),
+            mode=str(item.get("mode") or "chat"),
         )
 
     def _session_from_dict(self, data: Dict[str, Any]) -> Session:
@@ -120,7 +122,7 @@ class SessionManager:
         compact_state = data.get("compact_state") if isinstance(data.get("compact_state"), dict) else {}
         return Session(
             id=str(data["id"]),
-            title=str(data.get("title") or "New chat"),
+            title=str(data.get("title") or "新会话"),
             history=history,
             compact_state=dict(compact_state),
             mode=str(data.get("mode") or "auto"),

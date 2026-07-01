@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AlertTriangle, Search } from 'lucide-react';
 import { searchSessions } from '../../lib/api';
-import type { SearchResult } from '../../lib/types';
-import { useChatStore } from '../../store/chatStore';
+import { navigateToSession } from '../../lib/modeNavigation';
+import type { AppMode, SearchResult } from '../../lib/types';
 import { useSessionStore } from '../../store/sessionStore';
+import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
 
 export function SessionSearch() {
@@ -15,8 +16,7 @@ export function SessionSearch() {
   const [error, setError] = useState('');
   const sessions = useSessionStore(state => state.sessions);
   const workspaces = useSessionStore(state => state.workspaces);
-  const selectSession = useSessionStore(state => state.selectSession);
-  const loadChatSession = useChatStore(state => state.loadSession);
+  const appMode = useUiStore(state => state.appMode);
 
   const enriched = useMemo(
     () => enrichSearchResults(results, sessions, workspaces),
@@ -44,9 +44,9 @@ export function SessionSearch() {
     return () => window.clearTimeout(handle);
   }, [query]);
 
-  const openResult = async (result: SearchResult) => {
-    await selectSession(result.sessionId);
-    await loadChatSession(result.sessionId);
+  const openResult = (result: SearchResult) => {
+    const targetMode = result.mode || appMode;
+    navigateToSession(result.sessionId, targetMode);
     setQuery('');
     setResults([]);
   };
@@ -77,7 +77,7 @@ export function SessionSearch() {
           {!loading &&
             !error &&
             enriched.map(result => (
-              <button key={result.sessionId} type="button" onClick={() => void openResult(result)}>
+              <button key={result.sessionId} type="button" onClick={() => openResult(result)}>
                 <strong>{result.title || 'Metis Chat'}</strong>
                 <span>{renderSnippet(result.snippet)}</span>
                 <small>
@@ -94,19 +94,29 @@ export function SessionSearch() {
 
 export function enrichSearchResults(
   results: SearchResult[],
-  sessions: Array<{ id: string; workspaceId: string }>,
+  sessions: Array<{ id: string; workspaceId: string; mode?: string }>,
   workspaces: Array<{ id: string; name: string }>,
 ): SearchResult[] {
   const sessionWorkspace = new Map(sessions.map(session => [session.id, session.workspaceId]));
+  const sessionModes = new Map<string, AppMode>();
+  for (const session of sessions) {
+    const mode = toAppMode(session.mode || '');
+    if (mode) sessionModes.set(session.id, mode);
+  }
   const workspaceNames = new Map(workspaces.map(workspace => [workspace.id, workspace.name]));
   return results.map(result => {
     const workspaceId = result.workspaceId || sessionWorkspace.get(result.sessionId) || '';
     return {
       ...result,
+      mode: result.mode || sessionModes.get(result.sessionId) || undefined,
       workspaceId,
       workspaceName: result.workspaceName || workspaceNames.get(workspaceId) || '',
     };
   });
+}
+
+function toAppMode(value: string): AppMode | null {
+  return value === 'chat' || value === 'cowork' || value === 'code' ? value : null;
 }
 
 export function renderSnippet(snippet: string) {

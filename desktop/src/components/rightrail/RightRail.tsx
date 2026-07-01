@@ -32,9 +32,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { apiBase, cancelChatRun, getAgentRuntimeProfile, getChatRuns, getProviderStatus, getWorkspaceFile, getWorkspaceTree } from '../../lib/api';
+import { apiBase, cancelChatRun, getAgentRuntimeProfile, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth } from '../../lib/api';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { AgentRuntimeProfilePayload, BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, ChatTodoItem, ContextLedger, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import type { AgentRuntimeProfilePayload, BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, ChatTodoItem, ContextLedger, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -56,18 +56,18 @@ const workspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: ty
   { id: 'files', label: 'Files', icon: Folder, shortcut: '⇧⌘F' },
   { id: 'activity', label: 'Background tasks', icon: Network },
   { id: 'plan', label: 'Plan', icon: StickyNote },
+  { id: 'research', label: 'Research', icon: ScanSearch },
   { id: 'tool', label: 'Tool output', icon: Wrench },
 ];
 
 const workspaceCardColumns: Array<{ id: WorkspaceCardColumnId; cards: WorkspaceCardId[] }> = [
   { id: 'left', cards: ['web', 'terminal'] },
   { id: 'middle', cards: ['files', 'diff'] },
-  { id: 'right', cards: ['activity', 'plan'] },
+  { id: 'right', cards: ['activity', 'plan', 'research'] },
 ];
 
 type PlanTodoStatus = 'done' | 'active' | 'pending' | 'blocked' | 'failed' | 'canceled';
 type PlanActionKind = 'retry' | 'strategy' | 'manual';
-
 function planTodoStatus(raw?: string): PlanTodoStatus {
   const value = String(raw || '').trim().toLowerCase();
   if (['done', 'completed', 'complete', 'finished'].includes(value)) return 'done';
@@ -149,6 +149,7 @@ function workspaceColumnWidth(
 }
 
 export function RightRail({ backendReady }: RightRailProps) {
+  const appMode = useUiStore(state => state.appMode);
   const t = useT();
   const previewPath = useUiStore(state => state.previewPath);
   const previewFrozenSrc = useUiStore(state => state.previewFrozenSrc);
@@ -185,11 +186,13 @@ export function RightRail({ backendReady }: RightRailProps) {
   const setRightRailWidth = useUiStore(state => state.setRightRailWidth);
   const setPreviewPath = useUiStore(state => state.setPreviewPath);
   const workspaceCardVisibility = useUiStore(state => state.workspaceCardVisibility);
+  const activeResearchJobId = useUiStore(state => state.activeResearchJobId);
   const workspaceCardColumnWidths = useUiStore(state => state.workspaceCardColumnWidths);
   const workspaceCardRowSplits = useUiStore(state => state.workspaceCardRowSplits);
   const setWorkspaceCardVisible = useUiStore(state => state.setWorkspaceCardVisible);
   const setWorkspaceCardColumnWidths = useUiStore(state => state.setWorkspaceCardColumnWidths);
   const setWorkspaceCardRowSplit = useUiStore(state => state.setWorkspaceCardRowSplit);
+  const setResearchReportView = useUiStore(state => state.setResearchReportView);
   const [tree, setTree] = useState<WorkspaceTreeNode[]>([]);
   const [file, setFile] = useState<WorkspaceFile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -207,14 +210,22 @@ export function RightRail({ backendReady }: RightRailProps) {
   const [devDetailsOpen, setDevDetailsOpen] = useState(false);
   const [workspaceSettling, setWorkspaceSettling] = useState(false);
   const [planActionBusy, setPlanActionBusy] = useState<PlanActionKind | 'rewind' | ''>('');
+  const [researchJobs, setResearchJobs] = useState<ResearchJob[]>([]);
+  const [researchJob, setResearchJob] = useState<ResearchJob | null>(null);
+  const [researchError, setResearchError] = useState('');
+  const [researchSourceFocusId, setResearchSourceFocusId] = useState('');
   const previewHostRef = useRef<HTMLDivElement | null>(null);
   const zoomFrameRef = useRef<number | null>(null);
   const workspaceDeckRef = useRef<HTMLDivElement | null>(null);
+  const researchSourceListRef = useRef<HTMLDivElement | null>(null);
+  const workspaceFilesScopeRef = useRef(activeWorkspaceId);
   const activeWorkspacePath = workspaces.find(workspace => workspace.id === activeWorkspaceId)?.path || '';
   const activeWebTab = useMemo(() => webPreviewTabs.find(tab => tab.id === activeWebPreviewId) || null, [activeWebPreviewId, webPreviewTabs]);
   const activeWebZoom = activeWebTab?.zoom || 1;
   const activeWebZoomPercent = Math.round(activeWebZoom * 100);
   const webCardVisible = workspaceCardVisibility.web;
+  const canShowWebPreview = appMode !== 'chat' && rightRailOpen && webCardVisible;
+  const researchCardVisible = workspaceCardVisibility.research;
   const activeDiffFile = useMemo(
     () => diffSummary?.files.find(file => file.preview.id === activeDiffFileId) || diffSummary?.files[0] || null,
     [activeDiffFileId, diffSummary],
@@ -227,7 +238,6 @@ export function RightRail({ backendReady }: RightRailProps) {
         : null,
     [activeDiffFile?.preview, activeDiffPreview, diffRevertItems, diffRevertSummaryId, diffSummary],
   );
-
   useEffect(() => {
     if (!backendReady || !activeSessionId) {
       setAgentRuntimeProfile(null);
@@ -274,6 +284,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   }, [planActionBusy, rewindLatest, streaming]);
 
   const loadTree = async () => {
+    const requestWorkspaceId = activeWorkspaceId;
     if (!backendReady) {
       setTree([]);
       setError(null);
@@ -281,26 +292,62 @@ export function RightRail({ backendReady }: RightRailProps) {
     }
     try {
       setError(null);
-      setTree(await getWorkspaceTree());
+      const nextTree = await getWorkspaceTree();
+      if (workspaceFilesScopeRef.current !== requestWorkspaceId) return;
+      setTree(nextTree);
     } catch (err) {
+      if (workspaceFilesScopeRef.current !== requestWorkspaceId) return;
       setError(err instanceof Error ? err.message : String(err));
     }
   };
 
   useEffect(() => {
+    if (workspaceFilesScopeRef.current === activeWorkspaceId) return;
+    workspaceFilesScopeRef.current = activeWorkspaceId;
+    setTree([]);
+    setFile(null);
+    setError(null);
+    if (previewPath) useUiStore.setState({ previewPath: null });
+  }, [activeWorkspaceId, previewPath]);
+
+  useEffect(() => {
     void loadTree();
-  }, [backendReady, workspaceRefreshNonce]);
+  }, [activeWorkspaceId, backendReady, workspaceRefreshNonce]);
 
   useEffect(() => {
     if (!backendReady || !previewPath) {
       setFile(null);
       return;
     }
+    const requestWorkspaceId = activeWorkspaceId;
+    const requestPath = previewPath;
+    let cancelled = false;
     setError(null);
     void getWorkspaceFile(previewPath)
-      .then(setFile)
-      .catch(err => setError(err instanceof Error ? err.message : String(err)));
-  }, [backendReady, previewPath, workspaceRefreshNonce]);
+      .then(nextFile => {
+        if (
+          cancelled ||
+          workspaceFilesScopeRef.current !== requestWorkspaceId ||
+          useUiStore.getState().previewPath !== requestPath
+        ) {
+          return;
+        }
+        setFile(nextFile);
+      })
+      .catch(err => {
+        if (
+          cancelled ||
+          workspaceFilesScopeRef.current !== requestWorkspaceId ||
+          useUiStore.getState().previewPath !== requestPath
+        ) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, backendReady, previewPath, workspaceRefreshNonce]);
 
   useEffect(() => {
     setWebInput(webPreviewUrl);
@@ -347,13 +394,63 @@ export function RightRail({ backendReady }: RightRailProps) {
     return () => window.clearInterval(timer);
   }, [refreshBrowserActivity, rightRailOpen, webCardVisible]);
 
+  const refreshResearchJobs = useCallback(async () => {
+    if (!backendReady) {
+      setResearchJobs([]);
+      setResearchJob(null);
+      setResearchError('');
+      return;
+    }
+    try {
+      const payload = await getResearchJobs(40);
+      setResearchJobs(payload.jobs);
+      const jobId = activeResearchJobId || payload.jobs[0]?.id || '';
+      if (jobId) {
+        setResearchJob(await getResearchJob(jobId));
+      } else {
+        setResearchJob(null);
+      }
+      setResearchError('');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/failed to fetch|networkerror|load failed/i.test(message)) {
+        const backendAlive = await pingHealth(1200);
+        setResearchError(
+          backendAlive
+            ? `${t('Research 接口没有响应。通常是当前窗口还连着旧后端，重启 Metis 后端/桌面端后再测。')} (${message})`
+            : `${t('Metis 后端暂时没有连上，Research 面板拿不到任务列表。等后端启动完成或重启桌面端。')} (${message})`,
+        );
+      } else {
+        setResearchError(message);
+      }
+    }
+  }, [activeResearchJobId, backendReady, t]);
+
+  useEffect(() => {
+    if (!rightRailOpen || !researchCardVisible) return;
+    void refreshResearchJobs();
+    const timer = window.setInterval(() => void refreshResearchJobs(), streaming ? 2200 : 6000);
+    return () => window.clearInterval(timer);
+  }, [refreshResearchJobs, researchCardVisible, rightRailOpen, streaming]);
+
+  useEffect(() => {
+    if (!researchJob?.id || !researchSourceFocusId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(researchSourceDomId(researchJob.id, researchSourceFocusId))?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [researchJob?.id, researchSourceFocusId]);
+
   const hidePreviewView = useCallback(() => {
     void window.metis?.previewSetBounds?.({ visible: false });
   }, []);
 
   const syncPreviewBounds = useCallback(() => {
     const node = previewHostRef.current;
-    const canShowPreview = rightRailOpen && webCardVisible && Boolean(webPreviewUrl && activeWebPreviewId);
+    const canShowPreview = canShowWebPreview && Boolean(webPreviewUrl && activeWebPreviewId);
     if (!window.metis?.previewSetBounds || !node || !canShowPreview) {
       hidePreviewView();
       return;
@@ -368,7 +465,7 @@ export function RightRail({ backendReady }: RightRailProps) {
       x: rect.left,
       y: rect.top,
     });
-  }, [activeWebPreviewId, hidePreviewView, rightRailOpen, webCardVisible, webPreviewUrl, workspaceSettling]);
+  }, [activeWebPreviewId, canShowWebPreview, hidePreviewView, webPreviewUrl, workspaceSettling]);
 
   const schedulePreviewBoundsSync = useCallback(() => {
     const frames: number[] = [];
@@ -393,7 +490,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   }, [syncPreviewBounds]);
 
   useEffect(() => {
-    if (!webPreviewUrl || !activeWebPreviewId) {
+    if (!canShowWebPreview || !webPreviewUrl || !activeWebPreviewId) {
       void window.metis?.previewSetBounds?.({ visible: false });
       return;
     }
@@ -412,6 +509,7 @@ export function RightRail({ backendReady }: RightRailProps) {
       const state = useUiStore.getState();
       const rect = node.getBoundingClientRect();
       const visible =
+        state.appMode !== 'chat' &&
         state.rightRailOpen &&
         state.workspaceCardVisibility.web &&
         state.activeWebPreviewId === tabId &&
@@ -440,15 +538,15 @@ export function RightRail({ backendReady }: RightRailProps) {
       frames.forEach(cancelAnimationFrame);
       timers.forEach(window.clearTimeout);
     };
-  }, [activeWebPreviewId, webPreviewUrl]);
+  }, [activeWebPreviewId, canShowWebPreview, webPreviewUrl]);
 
   useEffect(() => {
-    if (!rightRailOpen || !webCardVisible) hidePreviewView();
-  }, [hidePreviewView, rightRailOpen, webCardVisible]);
+    if (!canShowWebPreview) hidePreviewView();
+  }, [canShowWebPreview, hidePreviewView]);
 
   useEffect(() => {
     const node = previewHostRef.current;
-    if (!node || !webCardVisible || !rightRailOpen) {
+    if (!node || !canShowWebPreview) {
       hidePreviewView();
       return undefined;
     }
@@ -470,10 +568,10 @@ export function RightRail({ backendReady }: RightRailProps) {
       window.removeEventListener('scroll', schedule, true);
       hidePreviewView();
     };
-  }, [hidePreviewView, rightRailOpen, schedulePreviewBoundsSync, webCardVisible]);
+  }, [canShowWebPreview, hidePreviewView, schedulePreviewBoundsSync]);
 
   useEffect(() => {
-    if (!activeWebPreviewId || !webPreviewUrl || !webCardVisible || !rightRailOpen) {
+    if (!activeWebPreviewId || !webPreviewUrl || !canShowWebPreview) {
       hidePreviewView();
       return undefined;
     }
@@ -493,7 +591,7 @@ export function RightRail({ backendReady }: RightRailProps) {
       }
       cancelBoundsSync?.();
     };
-  }, [activeWebPreviewId, activeWebZoom, hidePreviewView, rightRailOpen, schedulePreviewBoundsSync, webCardVisible, webPreviewUrl]);
+  }, [activeWebPreviewId, activeWebZoom, canShowWebPreview, hidePreviewView, schedulePreviewBoundsSync, webPreviewUrl]);
 
   useEffect(() => {
     if (!window.metis || !activeWorkspacePath) {
@@ -707,6 +805,13 @@ export function RightRail({ backendReady }: RightRailProps) {
     setWebError(t('只支持 http://、https:// 或本工作区 HTML 文件'));
   };
 
+  const scrollResearchSources = (direction: -1 | 1) => {
+    researchSourceListRef.current?.scrollBy({
+      top: direction * 132,
+      behavior: 'smooth',
+    });
+  };
+
   const openActiveWebExternal = async () => {
     const url = activeWebTab?.url || webPreviewUrl;
     if (!url) return;
@@ -827,7 +932,11 @@ export function RightRail({ backendReady }: RightRailProps) {
   const visibleWorkspaceColumns = workspaceCardColumns
     .map(column => ({
       ...column,
-      visibleCards: column.cards.filter(cardId => workspaceCardVisibility[cardId] && (cardId !== 'tool' || Boolean(toolPreview))),
+      visibleCards: column.cards.filter(cardId => {
+        if (cardId === 'research' && appMode !== 'chat') return false;
+        if (appMode === 'chat' && cardId !== 'research') return false;
+        return workspaceCardVisibility[cardId] && (cardId !== 'tool' || Boolean(toolPreview));
+      }),
     }))
     .filter(column => column.visibleCards.length > 0);
   const visibleColumnTotal = visibleWorkspaceColumns.reduce((total, column) => total + workspaceColumnWidth(column.id, workspaceCardColumnWidths), 0);
@@ -848,16 +957,14 @@ export function RightRail({ backendReady }: RightRailProps) {
 
   const renderFilesPanel = () => (
     <div className="workspace-files-panel">
-      <div className="file-tree">
-        {tree.length === 0 && backendReady && !error && <p className="empty-preview">{t('当前工作区没有可预览文件。')}</p>}
-        {tree.map(node => createElement(TreeNode, { key: node.path || node.name, node, onPick: setPreviewPath, activePath: previewPath || '' }))}
-      </div>
       <div className="preview-pane">
         {error && <p className="error-text">{error}</p>}
         {!backendReady && !error && <p className="empty-preview">{t('后端连接后会自动加载工作区文件。')}</p>}
         {backendReady && !file && !error && <p className="empty-preview">{t('选择文件后在这里预览。')}</p>}
-        {file && <FileMeta file={file} />}
+        {file && <FileMeta file={file} workspacePath={activeWorkspacePath} />}
         {file?.type === 'image' && <ImagePreview file={file} />}
+        {file?.type === 'pdf' && <PdfPreview file={file} />}
+        {file?.type === 'office' && <OfficePreview file={file} />}
         {(file?.type === 'text' || file?.type === 'markdown') && (
           <>
             {file.truncated && <p className="rail-warning">{t('文件较大，已显示前半部分。')}</p>}
@@ -866,7 +973,7 @@ export function RightRail({ backendReady }: RightRailProps) {
                 <MarkdownText text={file.content} />
               </div>
             ) : (
-              <pre className="file-content">{file.content || (file.truncated ? t('文件过大，已省略内容。') : '')}</pre>
+              <CodePreview file={file} />
             )}
           </>
         )}
@@ -877,6 +984,10 @@ export function RightRail({ backendReady }: RightRailProps) {
             <span>{t('可以通过工具读取或在系统文件管理器中打开。')}</span>
           </div>
         )}
+      </div>
+      <div className="file-tree">
+        {tree.length === 0 && backendReady && !error && <p className="empty-preview">{t('当前工作区没有可预览文件。')}</p>}
+        {tree.map(node => createElement(TreeNode, { key: node.path || node.name, node, onPick: setPreviewPath, activePath: previewPath || '' }))}
       </div>
     </div>
   );
@@ -1432,12 +1543,86 @@ export function RightRail({ backendReady }: RightRailProps) {
     );
   };
 
+  const renderResearchPanel = () => {
+    const job = researchJob;
+    const stats = job?.stats || {};
+    const sources = job?.sources || [];
+    const opened = sources.filter(source => source.status === 'opened').length || stats.opened || 0;
+    const failures = sources.filter(source => source.status === 'failed').length || stats.failures || 0;
+    const sourceCount = stats.sources || sources.length;
+    return (
+      <div className="research-pane">
+        {researchError && (
+          <p className="rail-warning">
+            <AlertTriangle size={13} />
+            {researchError}
+          </p>
+        )}
+        {!job && researchJobs.length === 0 && !researchError && (
+          <div className="rail-empty-card">
+            <Globe size={18} />
+            <strong>{t('暂无来源')}</strong>
+            <span>{t('运行 web_search、web_research 或 fetch_content 后会显示来源。')}</span>
+          </div>
+        )}
+        {job && (
+          <div className="research-sources-card">
+            <div className="research-source-card-head">
+              <div>
+                <strong>{t('来源')}</strong>
+                <span>{job.title || job.query || researchKindLabel(job.kind, t)}</span>
+              </div>
+              <div className="research-source-card-head-actions">
+                {job.kind === 'research' && (
+                  <button type="button" onClick={() => setResearchReportView(job.id)}>
+                    <FileText size={11} />
+                    {t('报告')}
+                  </button>
+                )}
+                <em data-status={job.status}>
+                  {job.status === 'running' && <LoaderCircle className="spin" size={11} />}
+                  {sourceCount} {t('个')}
+                </em>
+              </div>
+            </div>
+            <div className="research-source-card-meta">
+              {stats.search_results ? <span>{stats.search_results} {t('搜索结果')}</span> : null}
+              <span>{opened} {t('已读取')}</span>
+              {failures > 0 && <span data-warn="true">{failures} {t('失败')}</span>}
+            </div>
+            <ResearchSourcesView
+              focusSourceId={researchSourceFocusId}
+              job={job}
+              listRef={researchSourceListRef}
+              onOpenSource={source => {
+                if (source.url) void window.metis?.openExternal?.(source.url);
+              }}
+              t={t}
+            />
+            <div className="research-source-card-nav">
+              <span>{sourceCount ? `${Math.min(sourceCount, sources.length || sourceCount)} / ${sourceCount}` : t('暂无来源')}</span>
+              <div>
+                <button type="button" title={t('上一个来源')} onClick={() => scrollResearchSources(-1)}>
+                  <ChevronDown size={12} />
+                </button>
+                <button type="button" title={t('下一个来源')} onClick={() => scrollResearchSources(1)}>
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderCardContent = (cardId: WorkspaceCardId) => {
     if (cardId === 'web') return renderWebPanel();
     if (cardId === 'terminal') return <TerminalPanel embedded onRequestClose={() => setWorkspaceCardVisible('terminal', false)} />;
     if (cardId === 'files') return renderFilesPanel();
     if (cardId === 'diff') return renderDiffPanel();
     if (cardId === 'activity') return renderActivityPanel();
+    if (cardId === 'research') return renderResearchPanel();
     if (cardId === 'tool') return renderToolPanel();
     return renderPlanPanel();
   };
@@ -1581,6 +1766,179 @@ function BrowserActivityPanel({ activity, t }: { activity: BrowserActivityPayloa
   );
 }
 
+function ResearchProcessView({ job, t }: { job: ResearchJob; t: (text: string) => string }) {
+  const phases = job.plan || [];
+  const queries = job.queries || [];
+  const attempts = job.attempts || [];
+  return (
+    <div className="research-process-view">
+      <div className="research-phase-list">
+        {phases.length > 0 ? phases.map((phase, index) => (
+          <ResearchPhaseRow key={`${phase.id || phase.label || 'phase'}-${index}`} phase={phase} t={t} />
+        )) : (
+          <p className="research-muted">{t('暂无过程记录')}</p>
+        )}
+      </div>
+      {queries.length > 0 && (
+        <div className="research-query-list">
+          <strong>{t('查询')}</strong>
+          {queries.slice(-6).reverse().map((query, index) => (
+            <code key={`${index}-${String(query.query || '')}`}>{String(query.query || '')}</code>
+          ))}
+        </div>
+      )}
+      {attempts.length > 0 && (
+        <div className="research-attempt-list">
+          <strong>{t('读取尝试')}</strong>
+          {attempts.map((attempt, index) => (
+            <span data-ok={attempt.ok !== false} key={`${index}-${String(attempt.provider || '')}`}>
+              {String(attempt.provider || 'provider')} · {String(attempt.status || '')}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResearchPhaseRow({ phase, t }: { phase: ResearchJobPhase; t: (text: string) => string }) {
+  const status = String(phase.status || 'complete');
+  return (
+    <div className="research-phase-row" data-status={status}>
+      <span>{researchPhaseIcon(status)}</span>
+      <div>
+        <strong>{phase.label || phase.id || t('阶段')}</strong>
+        <small>
+          {[phase.summary, typeof phase.count === 'number' ? `${phase.count} ${t('项')}` : '', typeof phase.failed === 'number' && phase.failed > 0 ? `${phase.failed} ${t('失败')}` : '']
+            .filter(Boolean)
+            .join(' · ')}
+        </small>
+      </div>
+    </div>
+  );
+}
+
+function ResearchSourcesView({
+  focusSourceId,
+  job,
+  listRef,
+  onOpenSource,
+  t,
+}: {
+  focusSourceId: string;
+  job: ResearchJob;
+  listRef: { current: HTMLDivElement | null };
+  onOpenSource: (source: ResearchJobSource) => void;
+  t: (text: string) => string;
+}) {
+  const sources = job.sources || [];
+  return (
+    <div className="research-source-list" ref={listRef}>
+      {sources.length > 0 ? sources.map((source, index) => {
+        const sourceId = researchSourceId(source, index);
+        const title = researchSourceTitle(source, t);
+        const statusLabel = researchSourceStatus(source, t);
+        return (
+          <button
+            type="button"
+            className="research-source-row"
+            data-highlight={focusSourceId === sourceId}
+            data-status={source.status || 'search_result'}
+            disabled={!source.url}
+            id={researchSourceDomId(job.id, sourceId)}
+            key={`${sourceId}-${source.url || source.title || ''}`}
+            onClick={() => onOpenSource(source)}
+          >
+            <ResearchSourceLogo source={source} />
+            <div>
+              <strong title={title}>{title}</strong>
+              {source.snippet && <p>{source.snippet}</p>}
+              {source.error && <code>{source.error}</code>}
+            </div>
+            {statusLabel && <em>{statusLabel}</em>}
+          </button>
+        );
+      }) : (
+        <p className="research-muted">{t('暂无来源')}</p>
+      )}
+    </div>
+  );
+}
+
+function ResearchSourceLogo({ source }: { source: ResearchJobSource }) {
+  const host = source.domain || researchHost(source.url || '');
+  const initial = host.replace(/^www\./i, '').charAt(0).toUpperCase();
+
+  return (
+    <span className="research-source-logo" aria-hidden="true">
+      <span>{initial || <Globe size={12} />}</span>
+    </span>
+  );
+}
+
+function ResearchReportView({
+  busy,
+  copied,
+  job,
+  onCopy,
+  onDownload,
+  onJumpSource,
+  t,
+}: {
+  busy: boolean;
+  copied: boolean;
+  job: ResearchJob;
+  onCopy: () => void;
+  onDownload: () => void;
+  onJumpSource: (sourceId: string) => void;
+  t: (text: string) => string;
+}) {
+  const report = job.report || fallbackResearchReport(job, t);
+  const citations = researchCitationSources(job, report);
+  return (
+    <div className="research-report-view">
+      <div className="research-report-actions">
+        <button type="button" disabled={busy} onClick={onCopy}>
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          {copied ? t('已复制') : t('复制')}
+        </button>
+        <button type="button" disabled={busy} onClick={onDownload}>
+          <FileText size={13} />
+          {t('导出')}
+        </button>
+      </div>
+      {citations.length > 0 && (
+        <div className="research-citation-strip" aria-label={t('来源引用')}>
+          <span>{t('引用')}</span>
+          {citations.map(row => (
+            <button
+              type="button"
+              data-status={row.source.status || 'search_result'}
+              key={`${row.id}-${row.source.url || row.source.title || ''}`}
+              onClick={() => onJumpSource(row.id)}
+              title={row.source.title || row.source.url || ''}
+            >
+              [{row.source.rank || row.index + 1}] {row.source.domain || researchHost(row.source.url || '') || row.source.title || t('来源')}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="research-report-markdown markdown-body">
+        <MarkdownText text={report} />
+      </div>
+    </div>
+  );
+}
+
+function researchPhaseIcon(status: string) {
+  if (status === 'running') return <LoaderCircle className="spin" size={13} />;
+  if (status === 'error' || status === 'failed') return <AlertTriangle size={13} />;
+  if (status === 'partial') return <Circle size={13} />;
+  if (status === 'queued') return <Circle size={13} />;
+  if (status === 'skipped') return <ChevronRight size={13} />;
+  return <CircleCheck size={13} />;
+}
+
 function browserActivityIcon(item: BrowserActivityItem) {
   if (!item.ok || item.blocked) return <AlertTriangle size={13} />;
   if (item.event === 'navigate') return <Globe size={13} />;
@@ -1618,6 +1976,79 @@ function relativeActivityTime(value: string, t: (text: string) => string): strin
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function researchKindLabel(kind: string, t: (text: string) => string): string {
+  if (kind === 'fetch_content') return t('读取');
+  if (kind === 'search') return t('搜索');
+  return t('研究');
+}
+
+function researchSourceStatus(source: ResearchJobSource, t: (text: string) => string): string {
+  const status = String(source.status || '');
+  if (status === 'opened') return source.evidence_status === 'partial' ? t('部分') : '';
+  if (status === 'failed') return t('失败');
+  return '';
+}
+
+function researchSourceTitle(source: ResearchJobSource, t: (text: string) => string): string {
+  const title = String(source.title || '').trim();
+  if (title && !/^\(?untitled\)?$/i.test(title) && !/r\.jina\.ai/i.test(title)) return title;
+  return source.domain || researchHost(source.url || '') || source.url || t('来源');
+}
+
+function researchHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function researchSourceId(source: ResearchJobSource, index: number): string {
+  return String(source.id || `s${index + 1}`);
+}
+
+function researchSourceDomId(jobId: string, sourceId: string): string {
+  return `research-source-${safeDomFragment(jobId)}-${safeDomFragment(sourceId)}`;
+}
+
+function safeDomFragment(value: string): string {
+  return String(value || '').replace(/[^A-Za-z0-9_-]+/g, '_');
+}
+
+function researchCitationSources(job: ResearchJob, report: string): Array<{ id: string; index: number; source: ResearchJobSource }> {
+  const rows = (job.sources || []).map((source, index) => ({ id: researchSourceId(source, index), index, source }));
+  const text = String(report || '');
+  const cited = rows.filter(row => {
+    const url = row.source.url || '';
+    const title = row.source.title || '';
+    return Boolean((url && text.includes(url)) || (title && text.includes(title)));
+  });
+  return (cited.length > 0 ? cited : rows.filter(row => Boolean(row.source.url))).slice(0, 12);
+}
+
+function fallbackResearchReport(job: ResearchJob, t: (text: string) => string): string {
+  const lines = [`# ${job.title || job.query || t('研究报告')}`, ''];
+  if (job.query) lines.push(`Query: ${job.query}`, '');
+  if (job.sources?.length) {
+    lines.push('## Sources', '');
+    for (const source of job.sources.slice(0, 20)) {
+      const label = source.title || source.domain || source.url || 'Source';
+      lines.push(source.url ? `- [${label}](${source.url})` : `- ${label}`);
+    }
+    lines.push('');
+  }
+  if (job.evidence?.length) {
+    lines.push('## Evidence', '');
+    for (const item of job.evidence.slice(0, 8)) {
+      lines.push(`### ${item.title || item.url || 'Evidence'}`);
+      const text = item.text || item.snippet || '';
+      if (text) lines.push('', text);
+      lines.push('');
+    }
+  }
+  return lines.join('\n').trim() || t('暂无报告内容');
 }
 
 function AgentRuntimeProfileCard({ profile, contextLedger }: { profile: AgentRuntimeProfilePayload | null; contextLedger: ContextLedger | null }) {
@@ -2163,8 +2594,229 @@ function devStateLabel(state: DevServerStatus['state'] | undefined): string {
   return '待识别';
 }
 
-function FileMeta({ file }: { file: WorkspaceFile }) {
-  const Icon = file.type === 'image' ? ImageIcon : file.type === 'binary' ? Binary : FileCode;
+type CodeHighlighter = {
+  codeToHtml: (code: string, options: { lang: string; theme: string }) => string;
+};
+
+let codeHighlighterPromise: Promise<CodeHighlighter> | null = null;
+
+function getCodeHighlighter(): Promise<CodeHighlighter> {
+  if (!codeHighlighterPromise) {
+    codeHighlighterPromise = Promise.all([
+      import('shiki/core'),
+      import('shiki/engine/javascript'),
+      import('@shikijs/themes/github-dark'),
+      import('@shikijs/themes/github-light'),
+      import('@shikijs/langs/bash'),
+      import('@shikijs/langs/batch'),
+      import('@shikijs/langs/c'),
+      import('@shikijs/langs/cpp'),
+      import('@shikijs/langs/csharp'),
+      import('@shikijs/langs/css'),
+      import('@shikijs/langs/csv'),
+      import('@shikijs/langs/dart'),
+      import('@shikijs/langs/dockerfile'),
+      import('@shikijs/langs/go'),
+      import('@shikijs/langs/html'),
+      import('@shikijs/langs/ini'),
+      import('@shikijs/langs/java'),
+      import('@shikijs/langs/javascript'),
+      import('@shikijs/langs/json'),
+      import('@shikijs/langs/jsx'),
+      import('@shikijs/langs/kotlin'),
+      import('@shikijs/langs/less'),
+      import('@shikijs/langs/log'),
+      import('@shikijs/langs/lua'),
+      import('@shikijs/langs/markdown'),
+      import('@shikijs/langs/php'),
+      import('@shikijs/langs/powershell'),
+      import('@shikijs/langs/python'),
+      import('@shikijs/langs/r'),
+      import('@shikijs/langs/ruby'),
+      import('@shikijs/langs/rust'),
+      import('@shikijs/langs/scss'),
+      import('@shikijs/langs/shellscript'),
+      import('@shikijs/langs/sql'),
+      import('@shikijs/langs/svelte'),
+      import('@shikijs/langs/swift'),
+      import('@shikijs/langs/toml'),
+      import('@shikijs/langs/tsx'),
+      import('@shikijs/langs/typescript'),
+      import('@shikijs/langs/vue'),
+      import('@shikijs/langs/xml'),
+      import('@shikijs/langs/yaml'),
+    ]).then(async ([core, engine, dark, light, ...langs]) => {
+      const highlighter = await core.createHighlighterCore({
+        themes: [dark.default, light.default],
+        langs: langs.map(lang => lang.default),
+        engine: engine.createJavaScriptRegexEngine(),
+      });
+      return highlighter as CodeHighlighter;
+    });
+  }
+  return codeHighlighterPromise;
+}
+
+function CodePreview({ file }: { file: WorkspaceFile }) {
+  const t = useT();
+  const appearanceMode = useUiStore(state => state.appearanceMode);
+  const content = file.content || (file.truncated ? t('文件过大，已省略内容。') : '');
+  const language = useMemo(() => codePreviewLanguage(file), [file]);
+  const [highlightHtml, setHighlightHtml] = useState('');
+  const [highlightError, setHighlightError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setHighlightHtml('');
+    setHighlightError('');
+    if (!content) return () => {
+      cancelled = true;
+    };
+    const theme = appearanceMode === 'light' ? 'github-light' : 'github-dark';
+    void getCodeHighlighter()
+      .then(highlighter => highlighter.codeToHtml(content, { lang: language, theme }))
+      .then(html => {
+        if (!cancelled) setHighlightHtml(html);
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setHighlightError(err instanceof Error ? err.message : String(err));
+          setHighlightHtml('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appearanceMode, content, language]);
+
+  return (
+    <div className="code-preview">
+      <div className="code-preview-header">
+        <div className="code-preview-language">
+          <strong>{languageLabel(language)}</strong>
+        </div>
+      </div>
+      {highlightError && <p className="rail-warning">{t('代码高亮失败，已显示纯文本。')}</p>}
+      {highlightHtml ? (
+        <div className="code-preview-html" dangerouslySetInnerHTML={{ __html: highlightHtml }} />
+      ) : (
+        <pre className="code-preview-plain">{content}</pre>
+      )}
+    </div>
+  );
+}
+
+function codePreviewLanguage(file: WorkspaceFile): string {
+  const ext = fileExtension(file.name || file.path);
+  const raw = String(file.language || '').toLowerCase();
+  const byLanguage: Record<string, string> = {
+    c: 'c',
+    cpp: 'cpp',
+    cplusplus: 'cpp',
+    csharp: 'csharp',
+    css: 'css',
+    dart: 'dart',
+    go: 'go',
+    html: 'html',
+    java: 'java',
+    javascript: 'javascript',
+    json: 'json',
+    jsx: 'jsx',
+    kotlin: 'kotlin',
+    less: 'less',
+    log: 'log',
+    lua: 'lua',
+    markdown: 'markdown',
+    php: 'php',
+    powershell: 'powershell',
+    python: 'python',
+    r: 'r',
+    ruby: 'ruby',
+    rust: 'rust',
+    scss: 'scss',
+    shell: 'shellscript',
+    bash: 'bash',
+    sql: 'sql',
+    svelte: 'svelte',
+    toml: 'toml',
+    tsx: 'tsx',
+    typescript: 'typescript',
+    vue: 'vue',
+    xml: 'xml',
+    yaml: 'yaml',
+  };
+  if (byLanguage[raw]) return byLanguage[raw];
+  const byExt: Record<string, string> = {
+    '.bat': 'batch',
+    '.c': 'c',
+    '.conf': 'ini',
+    '.cpp': 'cpp',
+    '.cs': 'csharp',
+    '.css': 'css',
+    '.csv': 'csv',
+    '.dart': 'dart',
+    '.dockerfile': 'dockerfile',
+    '.go': 'go',
+    '.h': 'c',
+    '.hpp': 'cpp',
+    '.htm': 'html',
+    '.html': 'html',
+    '.ini': 'ini',
+    '.java': 'java',
+    '.js': 'javascript',
+    '.json': 'json',
+    '.jsx': 'jsx',
+    '.kt': 'kotlin',
+    '.less': 'less',
+    '.log': 'log',
+    '.lua': 'lua',
+    '.mjs': 'javascript',
+    '.php': 'php',
+    '.ps1': 'powershell',
+    '.py': 'python',
+    '.r': 'r',
+    '.rb': 'ruby',
+    '.rs': 'rust',
+    '.scss': 'scss',
+    '.sh': 'bash',
+    '.sql': 'sql',
+    '.svelte': 'svelte',
+    '.swift': 'swift',
+    '.toml': 'toml',
+    '.ts': 'typescript',
+    '.tsx': 'tsx',
+    '.vue': 'vue',
+    '.xml': 'xml',
+    '.yaml': 'yaml',
+    '.yml': 'yaml',
+  };
+  return byExt[ext] || 'log';
+}
+
+function fileExtension(value: string): string {
+  const clean = String(value || '').split(/[?#]/, 1)[0] || '';
+  const dot = clean.lastIndexOf('.');
+  return dot >= 0 ? clean.slice(dot).toLowerCase() : '';
+}
+
+function languageLabel(language: string): string {
+  const labels: Record<string, string> = {
+    bash: 'Shell',
+    csharp: 'C#',
+    cpp: 'C++',
+    javascript: 'JavaScript',
+    powershell: 'PowerShell',
+    python: 'Python',
+    shellscript: 'Shell',
+    tsx: 'TSX',
+    typescript: 'TypeScript',
+  };
+  return labels[language] || language.toUpperCase();
+}
+
+function FileMeta({ file, workspacePath }: { file: WorkspaceFile; workspacePath: string }) {
+  const t = useT();
+  const Icon = file.type === 'image' ? ImageIcon : file.type === 'binary' ? Binary : file.type === 'pdf' || file.type === 'office' ? FileText : FileCode;
   return (
     <div className="file-meta">
       <Icon size={15} />
@@ -2174,8 +2826,36 @@ function FileMeta({ file }: { file: WorkspaceFile }) {
       </div>
       <em>{file.type}</em>
       <em>{formatBytes(file.size)}</em>
+      <button type="button" className="file-open-button" title={t('用默认浏览器或系统应用打开')} onClick={() => void openWorkspaceFile(file, workspacePath)}>
+        <ExternalLink size={12} />
+        <span>{t('打开')}</span>
+      </button>
     </div>
   );
+}
+
+async function openWorkspaceFile(file: WorkspaceFile, workspacePath: string): Promise<void> {
+  if (file.previewUrl) {
+    const base = await apiBase();
+    const result = await window.metis?.openExternal?.(`${base}${file.previewUrl}`);
+    if (result?.ok) return;
+  }
+  const targetPath = resolveWorkspaceFilePath(file.path, workspacePath);
+  const result = await window.metis?.openPath?.(targetPath);
+  if (!result?.ok && file.previewUrl) {
+    const base = await apiBase();
+    await window.metis?.openExternal?.(`${base}${file.previewUrl}`);
+  }
+}
+
+function resolveWorkspaceFilePath(filePath: string, workspacePath: string): string {
+  const value = String(filePath || '').trim();
+  if (!value) return '';
+  if (/^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\') || value.startsWith('/')) return value;
+  const root = String(workspacePath || '').replace(/[\\/]+$/, '');
+  if (!root) return value;
+  const separator = root.includes('\\') || /^[A-Za-z]:/.test(root) ? '\\' : '/';
+  return `${root}${separator}${value.replace(/^[\\/]+/, '').replace(/[\\/]/g, separator)}`;
 }
 
 function ImagePreview({ file }: { file: WorkspaceFile }) {
@@ -2185,6 +2865,83 @@ function ImagePreview({ file }: { file: WorkspaceFile }) {
     void apiBase().then(base => setSrc(`${base}${file.previewUrl}`));
   }, [file.previewUrl]);
   return src ? <img className="image-preview" src={src} alt={file.name} /> : null;
+}
+
+function PdfPreview({ file }: { file: WorkspaceFile }) {
+  const appearanceMode = useUiStore(state => state.appearanceMode);
+  const [src, setSrc] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    setSrc('');
+    setError('');
+    if (!file.previewUrl) {
+      setError('暂无 PDF 预览地址');
+      return () => {
+        cancelled = true;
+      };
+    }
+    void apiBase().then(async base => {
+      const nextSrc = `${base}${file.previewUrl}`;
+      try {
+        const response = await fetch(nextSrc, { method: 'HEAD' });
+        if (cancelled) return;
+        const type = response.headers.get('content-type') || '';
+        if (!response.ok || /json/i.test(type)) {
+          const detail = await fetch(nextSrc).then(item => item.text()).catch(() => '');
+          if (!cancelled) setError(previewErrorText(detail || `HTTP ${response.status}`));
+          return;
+        }
+        setSrc(nextSrc);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [appearanceMode, file.previewUrl]);
+  if (error) {
+    return (
+      <div className="rail-empty-card pdf-preview-error">
+        <FileText size={18} />
+        <strong>PDF 预览暂不可用</strong>
+        <span>{error}</span>
+      </div>
+    );
+  }
+  return src ? <iframe key={`${file.previewUrl}:${appearanceMode}`} className="pdf-preview-frame" src={src} title={file.name} /> : null;
+}
+
+function previewErrorText(value: string): string {
+  try {
+    const parsed = JSON.parse(value);
+    return String(parsed.error || parsed.detail || value);
+  } catch {
+    return value.trim().slice(0, 160) || '预览服务暂未返回 PDF 内容';
+  }
+}
+
+function OfficePreview({ file }: { file: WorkspaceFile }) {
+  const t = useT();
+  const content = file.content || '';
+  return (
+    <div className="office-preview">
+      {file.previewNote && <p className="rail-warning">{t(file.previewNote)}</p>}
+      {file.truncated && <p className="rail-warning">{t('文件较大，已显示前半部分。')}</p>}
+      {file.previewUrl ? (
+        <PdfPreview file={file} />
+      ) : content ? (
+        <pre className="file-content office-preview-content">{content}</pre>
+      ) : (
+        <div className="rail-empty-card">
+          <FileText size={18} />
+          <strong>{t('无法生成内置预览')}</strong>
+          <span>{t('可以用系统默认应用打开，或安装/配置 LibreOffice 启用 PDF 预览。')}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function previewStats(content: string): { lines: number; chars: number } {

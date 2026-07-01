@@ -3,13 +3,19 @@ from __future__ import annotations
 import json
 import re
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import pytest
 
 from backend.runtime.cancellation import OperationCancelled, current_cancel_event
-from backend.runtime.agent_loop import AgentConfig, run_stream as real_run_stream
+from backend.runtime.agent_loop import (
+    AgentConfig,
+    _chat_surface_blocked_tool_result,
+    _chat_surface_blocks_tool,
+    run_stream as real_run_stream,
+)
 from backend.runtime.llm_backends import LLMBackend, LLMResponse, ToolCall
 from backend.runtime.tool_registry import ToolDefinition, ToolRegistry
 from backend.web import app as web_app
@@ -327,6 +333,37 @@ def test_file_preview_html_serves_relative_assets_with_token_root(isolated_flask
         assert traversal.status_code == 403
 
 
+def test_workspace_file_previews_pdf_and_docx(isolated_flask_app: Any) -> None:
+    app, _session_manager = isolated_flask_app
+    workspace_root = Path(web_workspace_routes.active_workspace_root())
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    pdf = workspace_root / "sample.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n%metis smoke\n")
+    docx = workspace_root / "sample.docx"
+    with zipfile.ZipFile(docx, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            (
+                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                "<w:body><w:p><w:r><w:t>Metis DOCX preview</w:t></w:r></w:p></w:body>"
+                "</w:document>"
+            ),
+        )
+
+    with app.test_client() as client:
+        pdf_response = client.get("/workspace/file", query_string={"path": str(pdf)})
+        assert pdf_response.status_code == 200
+        pdf_payload = pdf_response.get_json()
+        assert pdf_payload["type"] == "pdf"
+        assert pdf_payload["preview_url"].startswith("/file-preview?path=")
+
+        docx_response = client.get("/workspace/file", query_string={"path": str(docx)})
+        assert docx_response.status_code == 200
+        docx_payload = docx_response.get_json()
+        assert docx_payload["type"] == "office"
+        assert "Metis DOCX preview" in docx_payload["content"]
+
+
 def test_run_registry_streams_replayable_events_to_target_session(isolated_flask_app: Any) -> None:
     app, session_manager = isolated_flask_app
     workspace_id = web_app._runtime_state.active_workspace_id
@@ -380,6 +417,50 @@ def test_run_registry_cancel_endpoint_marks_active_run_canceling(isolated_flask_
     assert payload["ok"] is True
     assert payload["run_id"] == run_id
     assert payload["status"] in {"canceling", "canceled", "done"}
+
+
+def test_run_registry_preserves_chat_surface_mode_for_active_session(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    session = session_manager.create_session(title="Chat research", workspace_id=workspace_id, mode="chat")
+    web_app._runtime_state.activate_session(session.id, history=[], compact_state={}, mode="chat")
+    # Simulate the permission mode being changed after the chat session became active.
+    # The run mode must still come from the session.mode, not this permission value.
+    web_app._runtime_state.execution_mode = "auto_guard"
+    monkeypatch.setattr(web_app, "_start_run_thread", lambda run: None)
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={
+                "message": "research should stay on chat surface",
+                "session_id": session.id,
+                "assistant_id": "assistant-chat-surface",
+                "deep_research": True,
+            },
+        )
+
+    assert created.status_code == 200
+    run_id = created.get_json()["run_id"]
+    run = web_app._get_run(run_id)
+    assert run is not None
+    assert run["mode"] == "chat"
+    assert run["deep_research"] is True
+
+
+def test_chat_surface_blocks_workspace_tool_calls() -> None:
+    registry = ToolRegistry()
+    registry.register(ToolDefinition(name="todo_write", description="", parameters={}, execute_fn=lambda **_: ""))
+    call = ToolCall(id="call-1", name="todo_write", arguments={})
+    config = AgentConfig(surface_mode="chat")
+
+    assert _chat_surface_blocks_tool(call, registry, config) is True
+    result = _chat_surface_blocked_tool_result(call, registry)
+    assert "not available in Chat or Research" in result
+    assert "web_research" in result
 
 
 def test_run_registry_rejects_second_active_run_for_same_session(isolated_flask_app: Any) -> None:
@@ -451,7 +532,13 @@ def test_run_registry_cancel_releases_blocking_tool_execution(
         return "slow tool unexpectedly completed"
 
     monkeypatch.setattr(web_app, "run_stream", patched_run_stream)
-    app, registry = isolated_flask_app[0], web_app.get_registry()
+    app, session_manager = isolated_flask_app
+    registry = web_app.get_registry()
+    code_session = session_manager.create_session(
+        title="Cancel blocking tool",
+        workspace_id=web_app._runtime_state.active_workspace_id,
+        mode="code",
+    )
     registry.register(
         ToolDefinition(
             name="slow_cancel_tool",
@@ -464,7 +551,10 @@ def test_run_registry_cancel_releases_blocking_tool_execution(
     )
 
     with app.test_client() as client:
-        created = client.post("/runs", json={"message": "cancel blocking tool"})
+        created = client.post(
+            "/runs",
+            json={"message": "cancel blocking tool", "session_id": code_session.id},
+        )
         assert created.status_code == 200
         run_id = created.get_json()["run_id"]
         # 慢机器(CI)上后台线程要更久才发出事件；阻塞操作有 5s 余量，等久一点再取消，避免 race。

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../lib/types';
-import { messagesFromSession } from '../messageOps';
+import { messagesFromSession, toolResultStatus } from '../messageOps';
 
 // FABLEADV-16: transcript-only tool records (metis_kind=tool) must rebuild into
 // tool cards on the following assistant message, not render as empty bubbles.
@@ -83,5 +83,14 @@ describe('messagesFromSession tool records', () => {
 
     const messages = messagesFromSession(session);
     expect(messages[1].tools?.[0].status).toBe('error');
+  });
+
+  it('keeps partial research payloads successful when only individual sources failed', () => {
+    const result = [
+      '<!-- METIS_RESEARCH_JSON {"schema":"metis.research_activity.v1","kind":"research","job_id":"research_1","job_status":"partial","sources":[{"status":"failed","error":"HTTP 403"}]} -->',
+      '=== Web Research ===',
+    ].join('\n');
+
+    expect(toolResultStatus(result)).toBe('success');
   });
 });

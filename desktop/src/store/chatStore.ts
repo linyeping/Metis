@@ -103,6 +103,7 @@ interface ChatState {
   compacting: boolean;
   subagents: ChatSubagentEvent[];
   controller: AbortController | null;
+  loadedSessionId: string | null;
   runSessionId: string | null;
   pendingSendSessionId: string | null;
   usage: ChatTokenUsage | null;
@@ -149,6 +150,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   compacting: false,
   subagents: [],
   controller: null,
+  loadedSessionId: null,
   runSessionId: null,
   pendingSendSessionId: null,
   usage: null,
@@ -285,7 +287,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   clearSubagents: () => set({ subagents: [] }),
   loadSession: async (sessionId, options = {}) => {
-    useUiStore.getState().clearExpandedToolCards();
     if (!sessionId) {
       set({
         attachments: [],
@@ -302,6 +303,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         subagents: [],
         usage: null,
         contextLedger: null,
+        streaming: false,
+        controller: null,
+        loadedSessionId: null,
+        runSessionId: null,
+        pendingSendSessionId: null,
       });
       return;
     }
@@ -355,6 +361,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       runtimeStatus: null,
       subagents: [],
       streaming: Boolean(activeRunInfo),
+      loadedSessionId: sessionId,
       runSessionId: activeRunInfo ? sessionId : null,
       controller: activeRunInfo ? getActiveRunController(sessionId)?.controller || null : null,
     });
@@ -425,6 +432,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       controller,
       error: null,
       pendingSendSessionId: null,
+      loadedSessionId: sessionId,
       runSessionId: sessionId,
       runtimeStatus: null,
       streaming: true,
@@ -529,6 +537,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contextLedger: null,
       runtimeStatus: null,
       error: null,
+      streaming: false,
+      controller: null,
+      loadedSessionId: null,
+      runSessionId: null,
       pendingSendSessionId: null,
     }),
 }));

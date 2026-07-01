@@ -10,22 +10,24 @@ import {
 } from '@assistant-ui/react';
 import {
   Activity,
+  BookOpenText,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
   FileDiff,
   FileText,
+  Search,
   PackageCheck,
 } from 'lucide-react';
 import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
-import { apiBase } from '../../lib/api';
+import { apiBase, getResearchJob, getResearchJobs } from '../../lib/api';
 import { buildFileChangePreview, countDiffLines } from '../../lib/diffPreview';
 import type { FileChangePreview } from '../../lib/diffPreview';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
-import type { ChatToolEvent } from '../../lib/types';
+import type { ChatToolEvent, ResearchJob } from '../../lib/types';
 import {
   ChangeCount,
   compact,
@@ -35,6 +37,7 @@ import {
   isToolError,
   toolCommandPreview,
   toolDisplayName,
+  toolKindGlyph,
   toolProgressText,
   toolStatusIcon,
 } from './threadUtils';
@@ -98,6 +101,27 @@ type ArtifactActivityCardSummary = {
   items: ArtifactActivityItem[];
 };
 
+type ResearchActivityCardSummary = {
+  errors: number;
+  fileName: string;
+  jobId: string;
+  last: string;
+  opened: number;
+  reportPath: string;
+  searchResults: number;
+  sources: number;
+  summary: string;
+  title: string;
+};
+
+export type CompletedResearchReportSummary = {
+  fileName?: string;
+  jobId: string;
+  reportPath?: string;
+  summary: string;
+  title: string;
+};
+
 type ArtifactActivityItem = {
   at?: string;
   command?: string;
@@ -128,7 +152,20 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
   const messageRunning = useAuiState(state => state.message.status?.type === 'running' && state.thread.isRunning);
   const activitySnapshot = useAuiState(state => toolActivitySnapshot(state.message.content, startIndex, endIndex));
   const activity = useMemo(() => summarizeToolActivity(activitySnapshot, t), [activitySnapshot, t]);
+  const searchActivity = useMemo(() => summarizeSearchToolActivity(activitySnapshot, t), [activitySnapshot, t]);
+  const completedResearchReport = useMemo(() => completedResearchReportFromSnapshot(activitySnapshot, t), [activitySnapshot, t]);
   const longList = steps > 12;
+
+  if (searchActivity?.allSearchTools) {
+    if (completedResearchReport && searchActivity.running === 0) {
+      return <CompletedResearchReportEntry report={completedResearchReport} />;
+    }
+    if (searchActivity.running === 0 && searchActivity.errors === 0) {
+      if (messageRunning) return <SearchActivityStrip activity={searchActivity} />;
+      return completedResearchReport ? <CompletedResearchReportEntry report={completedResearchReport} /> : null;
+    }
+    return <SearchActivityStrip activity={searchActivity} />;
+  }
 
   useEffect(() => {
     // 只在用户尚未手动操作、且步数不多时，才因报错自动展开；长列表(>12)不自动撑开。
@@ -182,6 +219,160 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
   );
 }
 
+export function CompletedResearchReportEntry({ report }: { report: CompletedResearchReportSummary }) {
+  const t = useT();
+  const setResearchReportView = useUiStore(state => state.setResearchReportView);
+  const [resolvedReport, setResolvedReport] = useState(report);
+  useEffect(() => {
+    let disposed = false;
+    setResolvedReport(report);
+    if (!report.jobId || (report.fileName && report.reportPath)) return undefined;
+    void getResearchJob(report.jobId)
+      .then(job => {
+        if (disposed) return;
+        setResolvedReport({
+          fileName: job.report_filename || report.fileName,
+          jobId: job.id || report.jobId,
+          reportPath: job.report_path || report.reportPath,
+          summary: report.summary || researchJobEntrySummary(job, t),
+          title: job.title || job.query || report.title,
+        });
+      })
+      .catch(() => {
+        if (!disposed) setResolvedReport(report);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [report.fileName, report.jobId, report.reportPath, report.summary, report.title, t]);
+  const fileName = resolvedReport.fileName || researchReportFileName(resolvedReport.title || resolvedReport.summary || t('研究报告'));
+  return (
+    <div className="research-report-entry">
+      <span className="research-report-entry-icon">
+        <FileText size={15} />
+      </span>
+      <div>
+        <strong title={fileName}>{fileName}</strong>
+        <small>{resolvedReport.summary || t('研究报告已生成')}</small>
+      </div>
+      <button type="button" disabled={!resolvedReport.jobId} onClick={() => resolvedReport.jobId && setResearchReportView(resolvedReport.jobId)}>
+        <BookOpenText size={12} />
+        {t('打开')}
+      </button>
+    </div>
+  );
+}
+
+function researchJobEntrySummary(job: ResearchJob, t: (zh: string) => string): string {
+  const sourceCount = job.stats?.sources || job.sources?.length || 0;
+  return sourceCount > 0 ? `${t('Markdown 报告')} · ${sourceCount} ${t('个来源')}` : t('Markdown 报告已生成');
+}
+
+type SearchToolActivitySummary = {
+  allSearchTools: boolean;
+  domains: string[];
+  errors: number;
+  kind: string;
+  label: string;
+  query: string;
+  running: number;
+  sources: number;
+};
+
+function SearchActivityStrip({ activity }: { activity: SearchToolActivitySummary }) {
+  const t = useT();
+  const liveDomains = useLiveResearchDomains(activity);
+  const domains = useMemo(
+    () => uniqueDomains([...liveDomains, ...activity.domains]).slice(0, 5),
+    [activity.domains, liveDomains],
+  );
+  const activeDomainIndex = useRotatingIndex(domains.length, activity.errors === 0 && (activity.running > 0 || domains.length > 1));
+  const activeDomain = domains[activeDomainIndex] || '';
+  const visibleDomains = useMemo(() => rotateDomains(domains, activeDomainIndex), [activeDomainIndex, domains]);
+  return (
+    <div
+      className="search-activity-strip"
+      data-errors={activity.errors > 0}
+      data-has-domains={domains.length > 0}
+      data-live={activity.errors === 0 && (activity.running > 0 || domains.length > 1)}
+    >
+      <Search size={13} />
+      <span>{searchActivityLabel(activity, t, activeDomain)}</span>
+      <em>{activity.query || t('整理来源')}</em>
+      <div className="search-domain-stream" aria-label={t('正在访问的来源')}>
+        {visibleDomains.length > 0 ? (
+          visibleDomains.map((domain, index) => (
+            <b className="search-domain-chip" data-active={index === 0} key={domain} title={domain}>
+              <i aria-hidden="true">{domainInitial(domain)}</i>
+              <span>{domain}</span>
+            </b>
+          ))
+        ) : (
+          <b className="search-domain-chip search-domain-chip-placeholder" aria-label={t('检索来源中')}>
+            <i aria-hidden="true" />
+            <span>{t('检索来源中')}</span>
+          </b>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function useRotatingIndex(length: number, enabled: boolean): number {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (!enabled || length <= 1) {
+      setIndex(0);
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      setIndex(value => (value + 1) % length);
+    }, 1050);
+    return () => window.clearInterval(timer);
+  }, [enabled, length]);
+  return length > 0 ? index % length : 0;
+}
+
+function useLiveResearchDomains(activity: SearchToolActivitySummary): string[] {
+  const [domains, setDomains] = useState<string[]>([]);
+  const lastDomainsRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (activity.running <= 0 || activity.errors > 0) {
+      setDomains([]);
+      lastDomainsRef.current = [];
+      return undefined;
+    }
+
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const jobs = (await getResearchJobs(10)).jobs;
+        const match = pickLiveResearchJob(jobs, activity);
+        if (!match?.id) return;
+        const job = await getResearchJob(match.id);
+        if (disposed) return;
+        const next = researchDomainsFromJob(job);
+        if (next.length > 0) {
+          lastDomainsRef.current = next;
+          setDomains(next);
+        } else {
+          setDomains(lastDomainsRef.current);
+        }
+      } catch {
+        if (!disposed) setDomains(current => current);
+      }
+    };
+
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1600);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [activity.errors, activity.kind, activity.query, activity.running]);
+  return domains;
+}
+
 // ---------------------------------------------------------------------------
 // ToolCard — 单个工具调用卡片
 // ---------------------------------------------------------------------------
@@ -202,6 +393,9 @@ export function ToolCard({
   const setToolPreview = useUiStore(state => state.setToolPreview);
   const setDiffPreview = useUiStore(state => state.setDiffPreview);
   const setWebPreviewUrl = useUiStore(state => state.setWebPreviewUrl);
+  const setResearchJobPreview = useUiStore(state => state.setResearchJobPreview);
+  const setResearchReportView = useUiStore(state => state.setResearchReportView);
+  const appMode = useUiStore(state => state.appMode);
   const status = metisStatus || (result === undefined ? 'running' : isToolError(result) ? 'error' : 'success');
   const commandPreview = useMemo(() => toolCommandPreview(toolName, args, result), [args, result, toolName]);
   const artifactActivity = useMemo(() => artifactActivitySummaryFromResult(result, t), [result, t]);
@@ -212,12 +406,14 @@ export function ToolCard({
   const fileChangePreview = useMemo(() => buildFileChangePreview(toolName, args, result), [args, result, toolName]);
   const fileChangeCounts = useMemo(() => (fileChangePreview ? countDiffLines(fileChangePreview) : null), [fileChangePreview]);
   const browserActivity = useMemo(() => browserActivitySummaryFromResult(result, t), [result, t]);
+  const researchActivity = useMemo(() => researchActivitySummaryFromResult(result, t), [result, t]);
   const evidenceChain = useMemo(() => evidenceChainSummaryFromResult(result, t), [result, t]);
   const autoOpenedDiffRef = useRef('');
   const autoOpenedWebRef = useRef('');
+  const autoOpenedResearchRef = useRef('');
   const elapsed = elapsedText(metisStartedAt, metisFinishedAt);
   const statusText = status === 'waiting_approval' ? t('待确认') : status === 'running' ? t('运行中') : status === 'error' ? t('错误') : t('完成');
-  const details = formatTool(result ?? args);
+  const details = stripResearchPayloadText(formatTool(result ?? args));
   const cardId = useMemo(() => stableToolCardId(toolCallId, toolName, args), [args, toolCallId, toolName]);
   const open = useUiStore(state => state.expandedToolCards.has(cardId));
   const setToolCardExpanded = useUiStore(state => state.setToolCardExpanded);
@@ -259,11 +455,78 @@ export function ToolCard({
     setDiffPreview(fileChangePreview);
   }, [fileChangePreview, setDiffPreview, setWebPreviewUrl, status]);
 
+  useEffect(() => {
+    if (appMode === 'chat' || !isResearchActivityTool(toolName) || status !== 'running') return;
+    const marker = `running:${toolName}:${toolCallId || cardId}`;
+    if (autoOpenedResearchRef.current === marker) return;
+    autoOpenedResearchRef.current = marker;
+    setResearchJobPreview();
+  }, [appMode, cardId, setResearchJobPreview, status, toolCallId, toolName]);
+
+  useEffect(() => {
+    const jobId = researchActivity?.jobId || '';
+    if (appMode === 'chat' || !jobId || status === 'running' || status === 'waiting_approval') return;
+    if (autoOpenedResearchRef.current === jobId) return;
+    autoOpenedResearchRef.current = jobId;
+    setResearchJobPreview(jobId);
+  }, [appMode, researchActivity?.jobId, setResearchJobPreview, status]);
+
+  if (isResearchActivityTool(toolName)) {
+    const failedResearchActivity = status === 'error' && researchActivityIsFailedResult(result);
+    if (status === 'running' || status === 'waiting_approval' || failedResearchActivity) {
+      return (
+        <SearchActivityStrip
+          activity={{
+            allSearchTools: true,
+            domains: researchDomainsFromTool(args, result),
+            errors: status === 'error' ? 1 : 0,
+            kind: toolName,
+            label: researchRunningLabel(toolName, t),
+            query: firstToolString(args, ['query', 'question', 'url', 'prompt']).slice(0, 120),
+            running: status === 'running' || status === 'waiting_approval' ? 1 : 0,
+            sources: researchSourceCountFromTool(result),
+          }}
+        />
+      );
+    }
+    if (toolNameToResearchKind(toolName) === 'research' && researchActivity?.jobId) {
+      return (
+        <CompletedResearchReportEntry
+          report={{
+            fileName: researchActivity.fileName,
+            jobId: researchActivity.jobId,
+            reportPath: researchActivity.reportPath,
+            summary: researchActivity.summary,
+            title: researchActivity.title,
+          }}
+        />
+      );
+    }
+    if (status === 'error') {
+      return (
+        <SearchActivityStrip
+          activity={{
+            allSearchTools: true,
+            domains: researchDomainsFromTool(args, result),
+            errors: 1,
+            kind: toolName,
+            label: researchRunningLabel(toolName, t),
+            query: firstToolString(args, ['query', 'question', 'url', 'prompt']).slice(0, 120),
+            running: 0,
+            sources: researchSourceCountFromTool(result),
+          }}
+        />
+      );
+    }
+    return null;
+  }
+
   return (
     <div className="tool-card tool-activity-row" data-open={open} data-status={status} data-call-id={toolCallId || cardId}>
       <button className="tool-card-head tool-activity-head" type="button" onClick={() => setToolCardExpanded(cardId, !open)}>
         <span className="tool-activity-caret">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
         <span className="tool-activity-status">{toolStatusIcon(toolName, status)}</span>
+        <span className="tool-kind-logo" aria-hidden="true">{toolKindGlyph(toolName)}</span>
         <span className="tool-title">{toolDisplayName(toolName)}</span>
         <small>{summary}</small>
         <span className="tool-activity-meta">
@@ -285,6 +548,13 @@ export function ToolCard({
           <Activity size={12} />
           <span>{browserActivity.summary}</span>
           {browserActivity.last && <code>{browserActivity.last}</code>}
+        </div>
+      )}
+      {researchActivity && (
+        <div className="tool-browser-activity-summary tool-research-activity-summary" data-blocked={false} data-errors={researchActivity.errors > 0}>
+          <Search size={12} />
+          <span>{researchActivity.summary}</span>
+          {researchActivity.last && <code>{researchActivity.last}</code>}
         </div>
       )}
       {evidenceChain && (
@@ -318,6 +588,16 @@ export function ToolCard({
           >
             <FileDiff size={12} />
             {t('变更')}
+          </button>
+        )}
+        {researchActivity?.jobId && (
+          <button
+            className="tool-card-research"
+            type="button"
+            onClick={() => setResearchJobPreview(researchActivity.jobId)}
+          >
+            <Search size={12} />
+            {t('研究')}
           </button>
         )}
       </div>
@@ -412,6 +692,215 @@ function stableToolCardId(toolCallId: unknown, toolName: string, args: unknown):
   return `${toolName || 'tool'}:${hashToolCardSeed(formatTool(args).slice(0, 800))}`;
 }
 
+function isResearchActivityTool(toolName: string): boolean {
+  return ['web_search', 'web_research', 'fetch_content'].includes(String(toolName || '').trim());
+}
+
+function summarizeSearchToolActivity(snapshot: string, t: (zh: string) => string = (s) => s): SearchToolActivitySummary | null {
+  const tools = toolPartsFromSnapshot(snapshot);
+  if (tools.length === 0 || !tools.every(tool => isResearchActivityTool(tool.toolName))) return null;
+  const running = tools.filter(tool => tool.metisStatus === 'running' || tool.metisStatus === 'waiting_approval');
+  const errors = tools.filter(tool => tool.metisStatus === 'error');
+  const focus = running.at(-1) || errors.at(-1) || tools.at(-1);
+  return {
+    allSearchTools: true,
+    domains: Array.from(new Set(tools.flatMap(tool => researchDomainsFromTool(tool.args, tool.result)))).slice(0, 6),
+    errors: errors.length,
+    kind: focus?.toolName || '',
+    label: focus ? researchRunningLabel(focus.toolName, t) : t('正在搜索'),
+    query: focus ? firstToolString(focus.args, ['query', 'question', 'url', 'prompt']).slice(0, 120) : '',
+    running: running.length,
+    sources: tools.reduce((total, tool) => total + researchSourceCountFromTool(tool.result), 0),
+  };
+}
+
+export function completedResearchReportFromContent(content: unknown, t: (zh: string) => string = (s) => s): CompletedResearchReportSummary | null {
+  return completedResearchReportFromTools(toolPartsFromContent(content), t);
+}
+
+function completedResearchReportFromSnapshot(snapshot: string, t: (zh: string) => string = (s) => s): CompletedResearchReportSummary | null {
+  return completedResearchReportFromTools(toolPartsFromSnapshot(snapshot), t);
+}
+
+function completedResearchReportFromTools(tools: ToolActivityPart[], t: (zh: string) => string): CompletedResearchReportSummary | null {
+  for (const tool of [...tools].reverse()) {
+    if (toolNameToResearchKind(tool.toolName) !== 'research') continue;
+    if (tool.metisStatus === 'running' || tool.metisStatus === 'waiting_approval') continue;
+    const activity = researchActivitySummaryFromResult(tool.result, t);
+    if (!activity?.jobId) continue;
+    if (tool.metisStatus === 'error' && researchActivityIsFailedResult(tool.result)) continue;
+    return {
+      fileName: activity.fileName,
+      jobId: activity.jobId,
+      reportPath: activity.reportPath,
+      summary: activity.summary,
+      title: activity.title,
+    };
+  }
+  return null;
+}
+
+function pickLiveResearchJob(jobs: ResearchJob[], activity: SearchToolActivitySummary): ResearchJob | null {
+  if (!jobs.length) return null;
+  const kind = toolNameToResearchKind(activity.kind);
+  const query = normalizeSearchText(activity.query);
+  const now = Date.now();
+  const candidates = jobs.filter(job => {
+    const status = String(job.status || '').toLowerCase();
+    if (!['running', 'queued', 'partial', 'complete'].includes(status)) return false;
+    if (status === 'complete' && now - Number(job.updated_at || 0) > 15_000) return false;
+    if (kind && toolNameToResearchKind(String(job.kind || '')) !== kind) return false;
+    if (!query) return status === 'running' || status === 'queued';
+    const jobQuery = normalizeSearchText(`${job.query || ''} ${job.title || ''}`);
+    return jobQuery.includes(query) || query.includes(jobQuery);
+  });
+  if (!candidates.length) return null;
+  return [...candidates]
+    .sort((left, right) => Number(right.updated_at || 0) - Number(left.updated_at || 0))[0] || null;
+}
+
+function toolNameToResearchKind(value: string): string {
+  const name = String(value || '').toLowerCase();
+  if (name.includes('fetch_content') || name === 'fetch') return 'fetch';
+  if (name.includes('web_research') || name === 'research') return 'research';
+  if (name.includes('web_search') || name === 'search') return 'search';
+  return '';
+}
+
+function normalizeSearchText(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
+function researchRunningLabel(toolName: string, t: (zh: string) => string): string {
+  const name = String(toolName || '').toLowerCase();
+  if (name === 'web_research') return t('正在深度研究');
+  if (name === 'fetch_content') return t('正在读取来源');
+  return t('正在搜索');
+}
+
+function searchActivityLabel(activity: SearchToolActivitySummary, t: (zh: string) => string, activeDomain = ''): string {
+  if (activity.errors > 0) return t('搜索遇到问题');
+  const domain = activeDomain ? ` ${activeDomain}` : '';
+  const count = activity.sources > 0 ? ` · ${activity.sources} ${t('个来源')}` : '';
+  const kind = toolNameToResearchKind(activity.kind);
+  if (activity.running > 0) {
+    if (kind === 'research') return `${t('正在研究')}${domain}`;
+    if (kind === 'fetch') return `${t('正在读取')}${domain}`;
+    return `${t('正在搜索')}${domain}`;
+  }
+  if (kind === 'research') return `${t('已完成研究')}${count}`;
+  if (kind === 'fetch') return `${t('来源已读取')}${count}`;
+  return `${t('已检索')}${count}`;
+}
+
+function researchDomainsFromTool(args: unknown, result: unknown): string[] {
+  const domains: string[] = [];
+  const payload = resultObject(result);
+  const activity = payload?.research_activity || payload;
+  const sources = activity && typeof activity === 'object' && Array.isArray((activity as Record<string, unknown>).sources)
+    ? (activity as Record<string, unknown>).sources as unknown[]
+    : [];
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    const row = source as Record<string, unknown>;
+    const domain = String(row.domain || safeHost(String(row.url || '')) || '').trim();
+    if (domain) domains.push(domain.replace(/^www\./i, ''));
+  }
+  for (const key of ['url', 'href', 'source_url']) {
+    const value = firstToolString(args, [key]);
+    const domain = safeHost(value);
+    if (domain) domains.push(domain.replace(/^www\./i, ''));
+  }
+  return uniqueDomains(domains);
+}
+
+function researchSourceCountFromTool(result: unknown): number {
+  const payload = resultObject(result);
+  const activity = payload?.research_activity || payload;
+  if (!activity || typeof activity !== 'object') return 0;
+  const row = activity as Record<string, unknown>;
+  const stats = row.stats && typeof row.stats === 'object' ? row.stats as Record<string, unknown> : null;
+  const statsSources = stats ? Number(stats.sources || stats.search_results || 0) : 0;
+  if (Number.isFinite(statsSources) && statsSources > 0) return statsSources;
+  return Array.isArray(row.sources) ? row.sources.length : 0;
+}
+
+function researchDomainsFromJob(job: ResearchJob): string[] {
+  const domains: string[] = [];
+  for (const source of job.sources || []) {
+    domains.push(domainFromRecord(source));
+  }
+  for (const evidence of job.evidence || []) {
+    domains.push(domainFromRecord(evidence));
+  }
+  for (const failure of job.failures || []) {
+    domains.push(domainFromRecord(failure));
+  }
+  for (const attempt of job.attempts || []) {
+    domains.push(domainFromRecord(attempt));
+  }
+  return uniqueDomains(domains).slice(0, 8);
+}
+
+function rotateDomains(domains: string[], activeIndex: number): string[] {
+  if (domains.length <= 1) return domains;
+  const index = Math.max(0, Math.min(activeIndex, domains.length - 1));
+  return [...domains.slice(index), ...domains.slice(0, index)];
+}
+
+function domainFromRecord(row: object | null | undefined): string {
+  const data = (row || {}) as Record<string, unknown>;
+  const explicit = String(data.domain || data.host || data.source || '').trim();
+  if (explicit && !/^https?:\/\//i.test(explicit)) return explicit.replace(/^www\./i, '');
+  for (const key of ['url', 'href', 'source_url', 'final_url']) {
+    const domain = safeHost(String(data[key] || ''));
+    if (domain) return domain.replace(/^www\./i, '');
+  }
+  return '';
+}
+
+function uniqueDomains(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = normalizeDomain(value);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function normalizeDomain(value: string): string {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const host = safeHost(text) || text;
+  return host
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\/.*$/, '')
+    .toLowerCase();
+}
+
+function domainInitial(domain: string): string {
+  const value = domain.replace(/^www\./i, '').trim();
+  return (value[0] || 'w').toUpperCase();
+}
+
+function safeHost(value: string): string {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return '';
+  }
+}
+
 function hashToolCardSeed(value: string): string {
   let hash = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -448,6 +937,69 @@ function browserActivitySummaryFromResult(result: unknown, t: (text: string) => 
     last: String(lastItem?.summary || lastItem?.error || '').slice(0, 160),
     summary: `${t('浏览器活动')} · ${parts.length > 0 ? parts.join(' · ') : t('暂无记录')}`,
   };
+}
+
+function researchActivitySummaryFromResult(result: unknown, t: (text: string) => string): ResearchActivityCardSummary | null {
+  const payload = resultObject(result);
+  const activity = payload?.research_activity || payload;
+  if (!activity || typeof activity !== 'object') return null;
+  const row = activity as { kind?: unknown; schema?: unknown; sources?: unknown[]; stats?: Record<string, unknown> };
+  if (String(row.schema || '') !== 'metis.research_activity.v1' && !row.sources && !row.stats) return null;
+  const stats = row.stats || {};
+  const sources = Array.isArray(row.sources) ? row.sources : [];
+  const title = String((activity as Record<string, unknown>).title || (activity as Record<string, unknown>).query || '').trim();
+  const opened = numberField(stats.opened);
+  const searchResults = numberField(stats.search_results);
+  const failures = numberField(stats.failures);
+  const sourceCount = numberField(stats.sources) || sources.length;
+  const lastSource = sources.find(item => item && typeof item === 'object' && String((item as Record<string, unknown>).status || '') === 'opened')
+    || sources.find(item => item && typeof item === 'object')
+    || null;
+  const last = lastSource && typeof lastSource === 'object'
+    ? String((lastSource as Record<string, unknown>).domain || (lastSource as Record<string, unknown>).title || '').slice(0, 180)
+    : '';
+  const kind = String(row.kind || '');
+  const parts = [
+    searchResults > 0 ? `${searchResults} ${t('条搜索')}` : '',
+    sourceCount > 0 ? `${sourceCount} ${t('个来源')}` : '',
+    opened > 0 ? `${opened} ${t('已读取')}` : '',
+    failures > 0 ? `${failures} ${t('失败')}` : '',
+  ].filter(Boolean);
+  return {
+    errors: failures,
+    fileName: String((row as Record<string, unknown>).report_filename || (row as Record<string, unknown>).reportFilename || ''),
+    jobId: String((row as Record<string, unknown>).job_id || (row as Record<string, unknown>).jobId || ''),
+    last,
+    opened,
+    reportPath: String((row as Record<string, unknown>).report_path || (row as Record<string, unknown>).reportPath || ''),
+    searchResults,
+    sources: sourceCount,
+    summary: `${kind === 'fetch_content' ? t('来源读取') : t('研究活动')} · ${parts.length > 0 ? parts.join(' · ') : t('暂无来源')}`,
+    title,
+  };
+}
+
+function researchActivityIsFailedResult(result: unknown): boolean {
+  const payload = resultObject(result);
+  const activity = payload?.research_activity || payload;
+  if (!activity || typeof activity !== 'object') return false;
+  const row = activity as Record<string, unknown>;
+  const schema = String(row.schema || '');
+  const kind = String(row.kind || '').toLowerCase();
+  if (schema !== 'metis.research_activity.v1' && !['search', 'research', 'fetch', 'fetch_content'].includes(kind)) {
+    return false;
+  }
+  const status = String(row.job_status || row.status || '').toLowerCase();
+  return status === 'error' || status === 'failed' || payload?.ok === false;
+}
+
+function researchReportFileName(value: string): string {
+  const base = String(value || '研究报告')
+    .replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 72) || '研究报告';
+  return /\.md$/i.test(base) ? base : `${base}.md`;
 }
 
 function evidenceChainSummaryFromResult(result: unknown, t: (text: string) => string): EvidenceChainCardSummary | null {
@@ -530,12 +1082,29 @@ function evidenceSummaryText(item: Record<string, unknown> | null): string {
 function resultObject(result: unknown): Record<string, unknown> | null {
   if (result && typeof result === 'object') return result as Record<string, unknown>;
   if (typeof result !== 'string') return null;
+  const embedded = researchPayloadFromText(result);
+  if (embedded) return embedded;
   try {
     const parsed = JSON.parse(result) as unknown;
     return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
+
+function researchPayloadFromText(text: string): Record<string, unknown> | null {
+  const match = String(text || '').match(/<!--\s*METIS_RESEARCH_JSON\s+([\s\S]*?)\s*-->/);
+  if (!match?.[1]) return null;
+  try {
+    const parsed = JSON.parse(match[1]) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function stripResearchPayloadText(text: string): string {
+  return String(text || '').replace(/<!--\s*METIS_RESEARCH_JSON\s+[\s\S]*?\s*-->\s*/g, '').trim();
 }
 
 function numberField(value: unknown): number {

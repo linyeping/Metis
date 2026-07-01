@@ -31,6 +31,7 @@ declare global {
       openLog: () => Promise<{ ok: boolean; path: string; error?: string }>;
       appInfo: () => Promise<{ name: string; version: string; packaged: boolean; updateUrl: string; githubHome?: string; fakeBackend?: boolean; storage?: StoragePayload }>;
       diagnostics: () => Promise<DiagnosticsPayload>;
+      setNativeTheme: (mode: 'light' | 'dark' | 'system') => Promise<{ ok: boolean; themeSource?: string; shouldUseDarkColors?: boolean }>;
       saveDiagnosticsBundle: () => Promise<DiagnosticsBundleResult>;
       checkUpdates: () => Promise<{ ok: boolean; status: string; message: string; url?: string }>;
       installUpdate: () => Promise<{ ok: boolean; message?: string }>;
@@ -68,7 +69,7 @@ declare global {
       safeStorageAvailable: () => Promise<boolean>;
       safeStorageEncrypt: (plaintext: string) => Promise<string | null>;
       safeStorageDecrypt: (encrypted: string) => Promise<string | null>;
-      connectorAuthorize: (service: string, options?: { token?: string; clientId?: string; scope?: string }) => Promise<ConnectorAuthorizeResult>;
+      connectorAuthorize: (service: string, options?: { token?: string; clientId?: string; scope?: string; secrets?: Record<string, string> }) => Promise<ConnectorAuthorizeResult>;
       connectorStatus: () => Promise<ConnectorStatusPayload>;
       connectorDisconnect: (service: string) => Promise<{ ok: boolean; service?: string; error?: string }>;
       window: (action: 'minimize' | 'toggle-maximize' | 'hide' | 'quit') => Promise<{ ok: boolean }>;

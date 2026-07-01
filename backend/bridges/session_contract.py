@@ -19,6 +19,7 @@ class SessionRecord:
     created_at: datetime
     updated_at: datetime
     message_count: int = 0
+    mode: str = "chat"
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

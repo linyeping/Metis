@@ -1,53 +1,72 @@
 import {
   AlertTriangle,
   Bot,
+  Calendar,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   Cpu,
+  Database,
   FileText,
   FolderOpen,
+  GitBranch,
+  Globe2,
+  HardDrive,
+  KeyRound,
+  Mail,
   Network,
+  PackagePlus,
   PauseCircle,
+  PencilLine,
   PlayCircle,
   PlugZap,
   Power,
   RefreshCw,
   Save,
+  Search,
   Shield,
+  Store,
   Trash2,
   Unplug,
   UploadCloud,
   Wrench,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
+  connectConnector,
   deleteSkill,
-  disconnectMcpServer,
+  disconnectConnector,
   getDeskGoalLog,
   getModelCapabilities,
   getDeskStatus,
-  getMcpStatus,
   getSettings,
   getSkill,
   getSkills,
   importSkill,
+  listBackendConnectors,
   openSkillFolder,
   pauseDeskAutomation,
-  reconnectMcpServer,
-  reloadMcpServers,
   resumeDeskAutomation,
   saveSkill,
   setDeskEnabled,
   setSkillEnabled,
+  testConnector,
 } from '../../lib/api';
-import type { DeskGoalLogEntry, DeskStatusPayload, McpStatusPayload, ModelCapabilities, SectionId, SkillDetail, SkillSummary } from '../../lib/types';
+import type { BackendConnector } from '../../lib/api';
+import type { DeskGoalLogEntry, DeskStatusPayload, ModelCapabilities, SectionId, SkillDetail, SkillFileEntry, SkillSummary } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
+import { MarkdownText } from '../chat/threadUtils';
+
+import { ChatListPanel } from './ChatListPanel';
 
 type ZoneSection = Exclude<SectionId, 'chat' | 'cron'>;
 
 export function SectionMain({ section }: { section: ZoneSection }) {
+  if (section === 'chat-list') return <ChatListPanel />;
   if (section === 'skills') return <SkillsPanel />;
   if (section === 'mcp') return <McpPanel />;
+  if (section === 'store') return <StorePanel />;
   return <ComputerPanel />;
 }
 
@@ -59,6 +78,9 @@ function SkillsPanel() {
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [draft, setDraft] = useState('');
   const [importPath, setImportPath] = useState('');
+  const [skillQuery, setSkillQuery] = useState('');
+  const [expandedSkillIds, setExpandedSkillIds] = useState<string[]>([]);
+  const [skillViewMode, setSkillViewMode] = useState<'preview' | 'edit'>('preview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deletingSkill, setDeletingSkill] = useState('');
@@ -97,6 +119,8 @@ function SkillsPanel() {
       setSelectedSkillId(next.id);
       setDetail(next);
       setDraft(next.content);
+      setSkillViewMode('preview');
+      setExpandedSkillIds(current => (current.includes(skillId) ? current : [...current, skillId]));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -147,6 +171,7 @@ function SkillsPanel() {
       setSelectedSkillId(next.id);
       setDetail(next);
       setDraft(next.content);
+      setSkillViewMode('preview');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -198,6 +223,7 @@ function SkillsPanel() {
         setSelectedSkillId('');
         setDetail(null);
         setDraft('');
+        setSkillViewMode('preview');
       }
       await load();
     } catch (err) {
@@ -207,14 +233,37 @@ function SkillsPanel() {
     }
   };
 
+  const toggleSkillExpanded = (skillId: string) => {
+    setExpandedSkillIds(current => (current.includes(skillId) ? current.filter(id => id !== skillId) : [...current, skillId]));
+  };
+
   const enabledCount = skills.filter(skill => skill.enabled).length;
+  const hasUnsavedChanges = Boolean(detail && draft !== detail.content);
+  const normalizedSkillQuery = skillQuery.trim().toLowerCase();
+  const visibleSkills = useMemo(() => {
+    if (!normalizedSkillQuery) return skills;
+    return skills.filter(skill =>
+      [
+        skill.name,
+        skill.skillName,
+        skill.description,
+        skill.whenToUse,
+        skill.preview,
+        skill.path,
+        skill.source,
+        ...skill.paths,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSkillQuery),
+    );
+  }, [normalizedSkillQuery, skills]);
   const groupedSkills = useMemo(
     () => [
-      { source: 'builtin', title: t('内置技能'), items: skills.filter(skill => skill.source === 'builtin') },
-      { source: 'global', title: t('全局技能'), items: skills.filter(skill => skill.source === 'global') },
-      { source: 'project', title: t('项目技能'), items: skills.filter(skill => skill.source === 'project') },
+      { source: 'personal', title: t('个人技能'), items: visibleSkills.filter(skill => skill.source !== 'builtin') },
+      { source: 'builtin', title: t('内置技能'), items: visibleSkills.filter(skill => skill.source === 'builtin') },
     ],
-    [skills, t],
+    [visibleSkills, t],
   );
   const skillsDirectory = useMemo(() => {
     const samplePath = detail?.path || skills[0]?.path || '';
@@ -230,170 +279,306 @@ function SkillsPanel() {
     }
     return samplePath.replace(/[\\/]SKILL\.md$/i, '');
   }, [detail?.path, skills]);
+  const sourceLabel = (source: string) => {
+    if (source === 'project') return t('项目技能');
+    if (source === 'builtin') return t('内置技能');
+    if (source === 'global') return t('全局技能');
+    return source || t('个人技能');
+  };
 
   return (
-    <section className="zone-panel" data-zone="skills">
+    <section className="zone-panel skills-panel" data-zone="skills">
       <ZoneHeader
-        icon={Bot}
+        icon={Wrench}
         title={t('技能')}
-        eyebrow="Skills"
+        eyebrow="Customize"
         status={loading ? t('加载中') : error ? t('读取失败') : `${skills.length} ${t('个技能')}`}
         ok={!error}
         onRefresh={load}
       />
       {error && <InlineError message={error} onRetry={load} />}
-      <div className="learning-strip">
-        <div>
-          <strong>{t('自学习')}</strong>
-          <span>{t('复杂任务完成后，Metis 会把可复用经验沉淀到本地记忆和技能。')}</span>
-        </div>
-        <div className="learning-strip-pills">
-          <StatusPill ok={Boolean(learning?.autoMemory)} text={learning?.autoMemory ? t('自动记忆开') : t('自动记忆关')} />
-          <StatusPill ok={Boolean(learning?.autoSkills)} text={learning?.autoSkills ? t('自动技能开') : t('自动技能关')} />
-        </div>
-      </div>
-      <div className="zone-metrics">
-        <Metric label={t('内置')} value={String(groupedSkills[0].items.length)} />
-        <Metric label={t('全局')} value={String(groupedSkills[1].items.length)} />
-        <Metric label={t('项目')} value={String(groupedSkills[2].items.length)} />
-        <Metric label={t('已启用')} value={String(enabledCount)} />
-      </div>
-      <div className="skill-directory-note">{skillsDirectory}</div>
-      <div className="skill-import-row">
-        <input
-          className="skill-import-input"
-          value={importPath}
-          placeholder={t('粘贴包含 SKILL.md 的目录路径')}
-          onChange={event => setImportPath(event.target.value)}
-        />
-        <button
-          className="skill-import-button"
-          type="button"
-          disabled={busy === 'import' || !importPath.trim()}
-          onClick={() => void importFromPath(importPath)}
-        >
-          <UploadCloud size={13} />
-          {t('导入')}
-        </button>
-        <button type="button" disabled={busy === 'import'} onClick={() => void pickAndImport()}>
-          <FolderOpen size={13} />
-          {t('选择目录')}
-        </button>
-      </div>
-      <div className="skills-workbench">
-        <div className="zone-list skill-list-live">
-          {!loading && skills.length === 0 && (
-            <article className="zone-empty">
-              <FileText size={18} />
-              <span>{t('暂无本地技能')}</span>
-              <small>{t('完成复杂任务后可沉淀为 SKILL.md。')}</small>
-            </article>
-          )}
-          {groupedSkills.map(group => (
-            group.items.length > 0 && (
-              <div className="skill-group" data-source={group.source} key={group.source}>
-                <span className="skill-group-label">{group.title}</span>
-                {group.items.map(skill => (
-                  <article className="zone-row skill-row" data-active={selectedSkillId === skill.id} data-source={skill.source} key={skill.id || skill.path || skill.name}>
-                    <div>
-                      <strong>{skill.name || 'Unnamed skill'}</strong>
-                      <span>{skill.path}</span>
-                      <div className="skill-badges">
-                        <em>{skill.source === 'project' ? t('项目覆盖') : skill.source === 'builtin' ? t('内置') : t('全局')}</em>
-                        <em>{skill.disableModelInvocation ? t('仅手动') : t('模型可触发')}</em>
-                        <em>{skill.userInvocable ? `/${skill.skillName || skill.id}` : t('后台技能')}</em>
-                        {skill.paths.length > 0 && <em>{skill.paths.slice(0, 2).join(', ')}</em>}
-                      </div>
-                      {(skill.description || skill.preview) && <p>{skill.description || skill.preview}</p>}
-                    </div>
-                    <div className="row-actions skill-actions">
-                      <button
-                        className="skill-detail-button"
-                        type="button"
-                        disabled={!skill.id || busy === `detail:${skill.id}`}
-                        onClick={() => void openSkill(skill.id)}
-                      >
-                        {t('查看')}
-                      </button>
-                      <StatusPill ok={skill.enabled} text={skill.enabled ? t('启用') : t('停用')} />
-                      <button
-                        className="danger-action skill-delete-button"
-                        type="button"
-                        disabled={!skill.id || deletingSkill === skill.id}
-                        onClick={() => void removeSkill(skill)}
-                      >
-                        <Trash2 size={13} />
-                        {deletingSkill === skill.id ? t('删除中') : t('删除')}
-                      </button>
-                    </div>
-                  </article>
-                ))}
+      <div className="skills-manager">
+        <div className="skills-workbench">
+          <section className="skills-browser" aria-label={t('技能列表')}>
+            <header className="skills-browser-header">
+              <div>
+                <strong>{t('技能')}</strong>
+                <span>
+                  {enabledCount}/{skills.length} {t('已启用')}
+                  {' · '}
+                  {t('自学习')}: {learning?.autoSkills ? t('自动技能开') : t('自动技能关')}
+                </span>
               </div>
-            )
-          ))}
-        </div>
-        <aside className="skill-detail-panel">
-          {!detail ? (
-            <div className="zone-empty">
-              <FileText size={18} />
-              <span>{t('选择一个技能')}</span>
-              <small>{t('查看、编辑或停用自动沉淀的 SKILL.md。')}</small>
-            </div>
-          ) : (
-            <>
-              <header>
-                <div>
-                  <strong>{detail.name || detail.id}</strong>
-                  <span>{detail.path}</span>
-                  <small>
-                    {detail.source === 'project' ? t('项目技能') : detail.source === 'builtin' ? t('内置技能') : t('全局技能')}
-                    {' · '}
-                    {detail.disableModelInvocation ? t('仅手动触发') : t('模型可自动触发')}
-                    {detail.userInvocable ? ` · /${detail.skillName || detail.id}` : ` · ${t('后台技能')}`}
-                  </small>
-                </div>
-                <StatusPill ok={detail.enabled} text={detail.enabled ? t('启用') : t('停用')} />
-              </header>
-              <div className="skill-detail-actions">
-                <button className="skill-toggle-button" type="button" disabled={busy === 'toggle'} onClick={() => void toggleCurrentSkill()}>
-                  {detail.enabled ? t('停用') : t('启用')}
-                </button>
-                <button className="skill-open-folder-button" type="button" disabled={busy === 'open-folder'} onClick={() => void openCurrentFolder()}>
-                  <FolderOpen size={13} />
-                  {t('打开目录')}
-                </button>
-                <button className="skill-save-button" type="button" disabled={busy === 'save' || draft === detail.content} onClick={() => void saveCurrentSkill()}>
-                  <Save size={13} />
-                  {busy === 'save' ? t('保存中') : t('保存')}
-                </button>
-              </div>
-              <textarea
-                className="skill-editor"
-                value={draft}
-                spellCheck={false}
-                onChange={event => setDraft(event.target.value)}
+              <button type="button" disabled={busy === 'import'} onClick={() => void pickAndImport()}>
+                <UploadCloud size={14} />
+                <span>{t('导入')}</span>
+              </button>
+            </header>
+            <label className="skills-search">
+              <span>{t('搜索')}</span>
+              <input value={skillQuery} placeholder={t('搜索技能、路径或触发方式')} onChange={event => setSkillQuery(event.target.value)} />
+            </label>
+            <div className="skill-import-row">
+              <input
+                className="skill-import-input"
+                value={importPath}
+                placeholder={t('粘贴包含 SKILL.md 的目录路径')}
+                onChange={event => setImportPath(event.target.value)}
               />
-            </>
-          )}
-        </aside>
+              <button
+                className="skill-import-button"
+                type="button"
+                disabled={busy === 'import' || !importPath.trim()}
+                onClick={() => void importFromPath(importPath)}
+              >
+                {busy === 'import' ? t('导入中') : t('添加')}
+              </button>
+            </div>
+            <div className="skill-directory-note">{skillsDirectory}</div>
+            <div className="zone-list skill-list-live">
+              {!loading && visibleSkills.length === 0 && (
+                <article className="zone-empty">
+                  <FileText size={18} />
+                  <span>{skills.length === 0 ? t('暂无本地技能') : t('没有匹配的技能')}</span>
+                  <small>{skills.length === 0 ? t('完成复杂任务后可沉淀为 SKILL.md。') : t('换个关键词再试。')}</small>
+                </article>
+              )}
+              {groupedSkills.map(group => (
+                group.items.length > 0 && (
+                  <div className="skill-group" data-source={group.source} key={group.source}>
+                    <span className="skill-group-label">{group.title}</span>
+                    {group.items.map(skill => (
+                      <article className="skill-tree-item" data-active={selectedSkillId === skill.id} data-source={skill.source} key={skill.id || skill.path || skill.name}>
+                        <div className="zone-row skill-row">
+                          <SkillLogo skill={skill} />
+                          <button
+                            className="skill-detail-button skill-row-main"
+                            type="button"
+                            disabled={!skill.id || busy === `detail:${skill.id}`}
+                            onClick={() => void openSkill(skill.id)}
+                          >
+                            <strong>{skill.name || 'Unnamed skill'}</strong>
+                            <small>
+                              {sourceLabel(skill.source)}
+                              {' · '}
+                              {skill.userInvocable ? `/${skill.skillName || skill.id}` : t('后台技能')}
+                              {' · '}
+                              {skill.disableModelInvocation ? t('仅手动') : t('自动触发')}
+                            </small>
+                          </button>
+                          <div className="row-actions skill-actions">
+                            <span className="skill-state-dot" data-ok={skill.enabled} title={skill.enabled ? t('启用') : t('停用')} />
+                            <button
+                              className="danger-action skill-delete-button"
+                              type="button"
+                              disabled={!skill.id || deletingSkill === skill.id}
+                              onClick={() => void removeSkill(skill)}
+                            >
+                              <Trash2 size={13} />
+                              <span>{deletingSkill === skill.id ? t('删除中') : t('删除')}</span>
+                            </button>
+                          </div>
+                          <button
+                            className="skill-expand-button"
+                            type="button"
+                            aria-expanded={expandedSkillIds.includes(skill.id)}
+                            onClick={() => toggleSkillExpanded(skill.id)}
+                          >
+                            {expandedSkillIds.includes(skill.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          </button>
+                        </div>
+                        {expandedSkillIds.includes(skill.id) && (
+                          <SkillFileTree files={skill.files} skillId={skill.id} onOpenSkill={openSkill} />
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )
+              ))}
+            </div>
+          </section>
+
+          <aside className="skill-detail-panel">
+            {!detail ? (
+              <div className="zone-empty">
+                <FileText size={18} />
+                <span>{t('选择一个技能')}</span>
+                <small>{t('查看、编辑或停用自动沉淀的 SKILL.md。')}</small>
+              </div>
+            ) : (
+              <>
+                <header>
+                  <div>
+                    <strong>{detail.name || detail.id}</strong>
+                    <span>{detail.path}</span>
+                  </div>
+                  <button
+                    className="skill-toggle-switch skill-toggle-button"
+                    type="button"
+                    data-on={detail.enabled}
+                    disabled={busy === 'toggle'}
+                    onClick={() => void toggleCurrentSkill()}
+                  >
+                    <span>{detail.enabled ? t('已启用') : t('已停用')}</span>
+                  </button>
+                </header>
+                <div className="skill-detail-meta">
+                  <p>
+                    <span>{t('来源')}</span>
+                    <strong>{sourceLabel(detail.source)}</strong>
+                  </p>
+                  <p>
+                    <span>{t('触发')}</span>
+                    <strong>
+                      {detail.userInvocable ? `/${detail.skillName || detail.id}` : t('后台技能')}
+                      {detail.disableModelInvocation ? ` · ${t('仅手动')}` : ` · ${t('自动')}`}
+                    </strong>
+                  </p>
+                </div>
+                <div className="skill-detail-toolbar">
+                  <div className="skill-mode-switch" role="tablist" aria-label={t('SKILL.md 视图')}>
+                    <button type="button" role="tab" aria-selected={skillViewMode === 'preview'} data-active={skillViewMode === 'preview'} onClick={() => setSkillViewMode('preview')}>
+                      <FileText size={13} />
+                      <span>{t('预览')}</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected={skillViewMode === 'edit'} data-active={skillViewMode === 'edit'} onClick={() => setSkillViewMode('edit')}>
+                      <PencilLine size={13} />
+                      <span>{t('编辑')}</span>
+                    </button>
+                  </div>
+                  <div className="skill-detail-actions">
+                    <button className="skill-open-folder-button" type="button" disabled={busy === 'open-folder'} onClick={() => void openCurrentFolder()}>
+                      <FolderOpen size={13} />
+                      {t('打开目录')}
+                    </button>
+                    <button className="skill-save-button" type="button" disabled={busy === 'save' || !hasUnsavedChanges} onClick={() => void saveCurrentSkill()}>
+                      <Save size={13} />
+                      {busy === 'save' ? t('保存中') : t('保存')}
+                    </button>
+                  </div>
+                </div>
+                <div className="skill-detail-body" data-mode={skillViewMode}>
+                  {skillViewMode === 'preview' ? (
+                    <div className="skill-rendered-preview markdown-body">
+                      <MarkdownText text={draft} />
+                    </div>
+                  ) : (
+                    <div className="skill-editor-shell">
+                      <div className="skill-file-tab">
+                        <span className="skill-file-tab-label">
+                          <FileText size={13} />
+                          <span>SKILL.md</span>
+                        </span>
+                        {hasUnsavedChanges && <em>{t('未保存')}</em>}
+                      </div>
+                      <textarea
+                        className="skill-editor"
+                        value={draft}
+                        spellCheck={false}
+                        onChange={event => setDraft(event.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
       </div>
     </section>
   );
 }
 
+function SkillLogo({ skill }: { skill: SkillSummary }) {
+  const Icon = skillIconFor(skill);
+  return (
+    <span className="skill-logo" data-source={skill.source} data-skill={skill.skillName || skill.id}>
+      <Icon size={15} />
+    </span>
+  );
+}
+
+function skillIconFor(skill: SkillSummary): typeof Bot {
+  const key = `${skill.skillName} ${skill.name} ${skill.id}`.toLowerCase();
+  if (key.includes('browser') || key.includes('web')) return Globe2;
+  if (key.includes('review') || key.includes('checklist')) return Shield;
+  if (key.includes('coding') || key.includes('frontend') || key.includes('app')) return GitBranch;
+  if (key.includes('computer') || key.includes('desktop')) return Cpu;
+  if (key.includes('debug')) return Wrench;
+  if (key.includes('document') || key.includes('docx') || key.includes('pdf')) return FileText;
+  if (key.includes('git')) return GitBranch;
+  if (key.includes('schedule') || key.includes('cron')) return Calendar;
+  if (key.includes('data')) return Database;
+  if (skill.source === 'builtin') return Store;
+  return FileText;
+}
+
+function SkillFileTree({
+  files,
+  skillId,
+  onOpenSkill,
+}: {
+  files: SkillFileEntry[];
+  skillId: string;
+  onOpenSkill: (skillId: string) => Promise<void>;
+}) {
+  const t = useT();
+  const rows = files.length > 0 ? files : [{ name: 'SKILL.md', path: 'SKILL.md', kind: 'file' as const, children: [] }];
+  return (
+    <div className="skill-file-tree">
+      {rows.map(file => (
+        <SkillFileNode key={file.path || file.name} file={file} skillId={skillId} depth={0} onOpenSkill={onOpenSkill} />
+      ))}
+      {rows.length === 0 && <span>{t('暂无文件')}</span>}
+    </div>
+  );
+}
+
+function SkillFileNode({
+  file,
+  skillId,
+  depth,
+  onOpenSkill,
+}: {
+  file: SkillFileEntry;
+  skillId: string;
+  depth: number;
+  onOpenSkill: (skillId: string) => Promise<void>;
+}) {
+  const isSkillFile = file.name.toLowerCase() === 'skill.md';
+  return (
+    <div className="skill-file-node" data-kind={file.kind} style={{ '--skill-file-depth': String(depth) } as CSSProperties}>
+      <button type="button" disabled={!isSkillFile && file.kind !== 'directory'} onClick={() => (isSkillFile ? void onOpenSkill(skillId) : undefined)}>
+        {file.kind === 'directory' ? <FolderOpen size={13} /> : <FileText size={13} />}
+        <span>{file.name}</span>
+      </button>
+      {file.children.length > 0 && (
+        <div>
+          {file.children.map(child => (
+            <SkillFileNode key={child.path || child.name} file={child} skillId={skillId} depth={depth + 1} onOpenSkill={onOpenSkill} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function McpPanel() {
   const t = useT();
-  const [status, setStatus] = useState<McpStatusPayload | null>(null);
+  const [connectors, setConnectors] = useState<BackendConnector[]>([]);
+  const [selectedConnectorId, setSelectedConnectorId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [busyServer, setBusyServer] = useState('');
-  const [reloadingMcp, setReloadingMcp] = useState(false);
+  const [actionNotice, setActionNotice] = useState('');
+  const [busyConnector, setBusyConnector] = useState('');
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
-      setStatus(await getMcpStatus());
+      const next = await listBackendConnectors();
+      setConnectors(next);
+      setSelectedConnectorId(current => (current && next.some(connector => connector.serviceId === current) ? current : next[0]?.serviceId || ''));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -405,104 +590,278 @@ function McpPanel() {
     void load();
   }, []);
 
-  const connected = status?.servers.filter(server => server.connected).length ?? 0;
-  const toolCount = status?.servers.reduce((sum, server) => sum + server.toolsCount, 0) ?? 0;
-
-  const runServerAction = async (serverName: string, action: 'reconnect' | 'disconnect') => {
-    setBusyServer(serverName);
+  const runConnectorAction = async (connector: BackendConnector, action: 'connect' | 'disconnect' | 'test') => {
+    setBusyConnector(`${action}:${connector.serviceId}`);
     setError('');
+    setActionNotice(`${connector.displayName} · ${action === 'connect' ? t('正在连接') : action === 'disconnect' ? t('正在断开') : t('正在测试')}`);
     try {
-      const result = action === 'reconnect' ? await reconnectMcpServer(serverName) : await disconnectMcpServer(serverName);
-      if (result.error) setError(result.error);
+      const result =
+        action === 'connect'
+          ? await connectConnector(connector.serviceId)
+          : action === 'disconnect'
+            ? await disconnectConnector(connector.serviceId)
+            : await testConnector(connector.serviceId);
+      if (result.error) {
+        setError(result.error);
+        setActionNotice(`${connector.displayName} · ${t('操作失败')}`);
+      } else {
+        const resultTools = (result as { tools?: unknown }).tools;
+        const resultToolsCount = (result as { toolsCount?: unknown }).toolsCount;
+        const detail =
+          action === 'connect' && Array.isArray(resultTools)
+            ? `${resultTools.length} ${t('个工具')}`
+            : action === 'test' && typeof resultToolsCount === 'number'
+              ? `${resultToolsCount} ${t('个工具')}`
+              : '';
+        setActionNotice(`${connector.displayName} · ${action === 'disconnect' ? t('已断开') : action === 'connect' ? t('已连接') : t('连通正常')}${detail ? ` · ${detail}` : ''}`);
+      }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setActionNotice(`${connector.displayName} · ${t('操作失败')}`);
     } finally {
-      setBusyServer('');
+      setBusyConnector('');
     }
   };
 
-  const reloadMcp = async () => {
-    setReloadingMcp(true);
-    setError('');
-    try {
-      const result = await reloadMcpServers();
-      if (!result.ok) setError(result.error || 'MCP reload failed');
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setReloadingMcp(false);
-    }
-  };
+  const selected = connectors.find(connector => connector.serviceId === selectedConnectorId) || connectors[0] || null;
+  const activeCount = connectors.filter(connector => connector.active).length;
+  const grouped = connectorGroups(connectors, t);
+  const selectedTools = selected?.tools.length ? selected.tools : connectorFallbackTools(selected);
 
   return (
-    <section className="zone-panel" data-zone="mcp">
+    <section className="zone-panel connectors-panel" data-zone="mcp">
       <ZoneHeader
         icon={Network}
         title={t('连接器')}
-        eyebrow="MCP"
-        status={loading ? t('加载中') : error ? t('读取失败') : status?.enabled ? `${connected}/${status.servers.length} ${t('已连接')}` : t('已禁用')}
-        ok={!error && Boolean(status?.enabled)}
+        eyebrow="Customize"
+        status={loading ? t('加载中') : error ? t('读取失败') : `${activeCount}/${connectors.length} ${t('已连接')}`}
+        ok={!error}
         onRefresh={load}
       />
       {error && <InlineError message={error} onRetry={load} />}
-      <div className="zone-metrics">
-        <Metric label={t('MCP 可用')} value={status?.available ? t('是') : t('否')} />
-        <Metric label={t('已连接')} value={`${connected}/${status?.servers.length ?? 0}`} />
-        <Metric label={t('工具')} value={String(toolCount)} />
-      </div>
-      <div className="settings-action-row">
-        <button type="button" disabled={reloadingMcp} onClick={() => void reloadMcp()}>
-          <RefreshCw size={13} />
-          {reloadingMcp ? t('重载中...') : t('热重载 MCP')}
-        </button>
-      </div>
-      <div className="zone-split">
-        <div className="zone-list">
-          {!loading && status?.servers.length === 0 && (
+      {actionNotice && <p className="connector-action-notice">{actionNotice}</p>}
+      <div className="connectors-manager">
+        <section className="connectors-browser" aria-label={t('连接器列表')}>
+          <header className="connectors-browser-header">
+            <div>
+              <strong>{t('连接器')}</strong>
+              <span>{t('按服务类型管理 MCP 连接')}</span>
+            </div>
+            <Search size={15} />
+          </header>
+          <div className="connector-group-list">
+            {!loading && connectors.length === 0 && (
+              <article className="zone-empty">
+                <PlugZap size={18} />
+                <span>{t('暂无连接器')}</span>
+              </article>
+            )}
+            {grouped.map(group => (
+              group.items.length > 0 && (
+                <div className="connector-group" key={group.id}>
+                  <span className="connector-group-label">{group.title}</span>
+                  {group.items.map(connector => (
+                    <button
+                      type="button"
+                      className="connector-catalog-row"
+                      data-active={selected?.serviceId === connector.serviceId}
+                      key={connector.serviceId}
+                      onClick={() => setSelectedConnectorId(connector.serviceId)}
+                    >
+                      <ConnectorGlyph connector={connector} />
+                      <span>
+                        <strong>{connector.displayName}</strong>
+                        <small>{connector.active ? t('已连接') : connector.hasToken || connector.authKind === 'none' ? t('可连接') : t('待授权')}</small>
+                      </span>
+                      <em>{connector.active ? t('断开') : t('连接')}</em>
+                    </button>
+                  ))}
+                </div>
+              )
+            ))}
+          </div>
+        </section>
+
+        <aside className="connector-detail-panel">
+          {!selected ? (
             <article className="zone-empty">
               <PlugZap size={18} />
-              <span>{t('暂无 MCP server')}</span>
-              <small>{t('检测到配置后会显示连接状态。')}</small>
+              <span>{t('选择一个连接器')}</span>
             </article>
+          ) : (
+            <>
+              <header>
+                <div>
+                  <ConnectorGlyph connector={selected} />
+                  <span>
+                    <strong>{selected.displayName}</strong>
+                    <em>{selected.authKind === 'none' ? t('无需授权') : selected.hasToken ? t('已授权') : t('待授权')}</em>
+                  </span>
+                </div>
+                <div className="connector-detail-actions">
+                  <button
+                    type="button"
+                    disabled={busyConnector === `connect:${selected.serviceId}` || selected.active}
+                    onClick={() => void runConnectorAction(selected, 'connect')}
+                  >
+                    {busyConnector === `connect:${selected.serviceId}` ? t('连接中') : t('连接')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyConnector === `disconnect:${selected.serviceId}` || !selected.active}
+                    onClick={() => void runConnectorAction(selected, 'disconnect')}
+                  >
+                    {busyConnector === `disconnect:${selected.serviceId}` ? t('断开中') : t('断开')}
+                  </button>
+                </div>
+              </header>
+              <p className="connector-detail-copy">{connectorSummary(selected)}</p>
+              <div className="connector-detail-meta">
+                <p>
+                  <span>{t('认证')}</span>
+                  <strong>{selected.authKind === 'none' ? t('无需授权') : selected.tokenEnv || selected.credentialsEnvs.join(', ') || selected.secretEnvs.join(', ') || t('环境变量')}</strong>
+                </p>
+                <p>
+                  <span>{t('工具')}</span>
+                  <strong>{selected.active ? `${selected.toolsCount} ${t('个')}` : t('未连接')}</strong>
+                </p>
+              </div>
+              <div className="connector-notes">
+                {selected.notes.slice(0, 3).map(note => (
+                  <p key={note}>{note}</p>
+                ))}
+              </div>
+              <section className="connector-usage">
+                <span>{t('怎么使用')}</span>
+                <p>{connectorUsageHint(selected, t)}</p>
+              </section>
+              <section className="connector-permissions">
+                <header>
+                  <span>{t('工具权限')}</span>
+                  <button type="button" disabled={busyConnector === `test:${selected.serviceId}`} onClick={() => void runConnectorAction(selected, 'test')}>
+                    <RefreshCw size={13} />
+                    {busyConnector === `test:${selected.serviceId}` ? t('测试中') : t('测试')}
+                  </button>
+                </header>
+                <div>
+                  {selectedTools.map(tool => (
+                    <p key={tool.name}>
+                      <span>{tool.name}</span>
+                      <em>{tool.description || t('按需审批')}</em>
+                    </p>
+                  ))}
+                </div>
+              </section>
+              <section className="connector-command">
+                <span>{t('启动命令')}</span>
+                <code>{[selected.command, ...selected.args].filter(Boolean).join(' ') || selected.url || selected.serviceId}</code>
+              </section>
+            </>
           )}
-          {status?.servers.map(server => (
-            <article className="zone-row connector-row" key={server.name}>
-              <div>
-                <strong>{server.name}</strong>
-                <span>{server.url || [server.command, ...server.args].filter(Boolean).join(' ') || t('未配置启动方式')}</span>
-                {server.tools.length > 0 && <p>{server.tools.slice(0, 4).map(tool => tool.name).join(' · ')}</p>}
-                <small>
-                  {server.transport || 'stdio'} · resources {server.resourcesCount}
-                  {server.lastError ? ` · ${server.lastError}` : ''}
-                </small>
-              </div>
-              <div className="row-actions">
-                <StatusPill ok={server.connected && server.healthy} text={server.connected ? (server.healthy ? t('健康') : t('异常')) : t('未连接')} />
-                <button type="button" disabled={busyServer === server.name} onClick={() => void runServerAction(server.name, 'reconnect')}>
-                  <RefreshCw size={13} />
-                  {t('重连')}
-                </button>
-                <button type="button" disabled={busyServer === server.name || !server.connected} onClick={() => void runServerAction(server.name, 'disconnect')}>
-                  <Unplug size={13} />
-                  {t('断开')}
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
-        <aside className="zone-side">
-          <strong>{t('配置来源')}</strong>
-          {(status?.configSources ?? []).length === 0 && <span>{t('未发现配置文件')}</span>}
-          {status?.configSources.map(source => (
-            <p key={`${source.label}-${source.path}`}>
-              <StatusDot ok={source.exists} />
-              <span>{source.label || 'config'}</span>
-              <small>{source.path}</small>
-            </p>
-          ))}
         </aside>
+      </div>
+    </section>
+  );
+}
+
+function ConnectorGlyph({ connector }: { connector: BackendConnector }) {
+  const Icon = connectorIcon(connector.serviceId);
+  return (
+    <span className="connector-glyph" data-active={connector.active}>
+      <Icon size={15} />
+    </span>
+  );
+}
+
+function connectorIcon(serviceId: string) {
+  if (serviceId.startsWith('x_')) return Globe2;
+  if (serviceId.includes('github')) return GitBranch;
+  if (serviceId.includes('gmail')) return Mail;
+  if (serviceId.includes('calendar')) return Calendar;
+  if (serviceId.includes('drive')) return HardDrive;
+  if (serviceId.includes('postgres')) return Database;
+  if (serviceId.includes('filesystem')) return FolderOpen;
+  if (serviceId.includes('slack') || serviceId.includes('notion')) return Globe2;
+  return PlugZap;
+}
+
+function connectorGroups(connectors: BackendConnector[], t: (value: string) => string) {
+  return [
+    { id: 'popular', title: t('常用'), items: connectors.filter(connector => ['slack', 'google_calendar', 'notion'].includes(connector.serviceId)) },
+    { id: 'web', title: 'Web', items: connectors.filter(connector => ['github', 'gmail', 'google_drive', 'x_docs', 'x_api'].includes(connector.serviceId)) },
+    { id: 'desktop', title: t('桌面'), items: connectors.filter(connector => connector.serviceId === 'filesystem') },
+    { id: 'data', title: t('数据'), items: connectors.filter(connector => connector.serviceId === 'postgres') },
+  ];
+}
+
+function connectorFallbackTools(connector: BackendConnector | null): Array<{ name: string; description: string }> {
+  if (!connector) return [];
+  const base = connector.scopes.length > 0 ? connector.scopes : connector.notes.slice(0, 4);
+  return base.slice(0, 12).map((item, index) => ({
+    name: item.replace(/^https?:\/\/[^/]+\//, '').replace(/[^\w:.-]+/g, ' ').trim() || `${connector.serviceId}_${index + 1}`,
+    description: connector.active ? '' : 'Connect to inspect live tools',
+  }));
+}
+
+function connectorSummary(connector: BackendConnector): string {
+  if (connector.notes[0]) return connector.notes[0];
+  if (connector.scopes.length > 0) return connector.scopes.join(', ');
+  return `${connector.displayName} MCP connector`;
+}
+
+function connectorUsageHint(connector: BackendConnector, t: (value: string) => string): string {
+  if (connector.serviceId === 'x_docs') {
+    return t('连接后直接在 Chat / Research 里问 X 官方文档相关问题，模型会自动调用 X Docs 的搜索和文档读取工具。');
+  }
+  if (connector.serviceId === 'x_api') {
+    return t('先到设置 → 连接器保存 X Developer App 的 CLIENT_ID / CLIENT_SECRET，重启后端后再连接；连接成功后，模型可按需使用 X API MCP 工具。');
+  }
+  if (connector.authKind === 'none') {
+    return t('点击连接后，该连接器的 MCP 工具会加入当前工具池，后续任务需要时模型会自动调用。');
+  }
+  return t('先完成授权或保存配置，再点击连接；连接成功后，该服务的 MCP 工具会加入当前工具池，后续任务需要时模型会自动调用。');
+}
+
+function StorePanel() {
+  const t = useT();
+  return (
+    <section className="zone-panel store-panel" data-zone="store">
+      <ZoneHeader icon={Store} title="Store" eyebrow="Beta" status="Beta" ok onRefresh={async () => undefined} />
+      <div className="store-workbench">
+        <section className="store-install-panel">
+          <header>
+            <PackagePlus size={18} />
+            <span>
+              <strong>{t('安装扩展')}</strong>
+              <em>{t('暂支持 GitHub 链接，官方市场后续接入。')}</em>
+            </span>
+          </header>
+          <div className="store-url-row">
+            <input placeholder="https://github.com/org/repo/tree/main/skill-or-mcp" />
+            <button type="button" disabled>{t('安装')}</button>
+          </div>
+        </section>
+        <section className="store-category-grid">
+          <article>
+            <FileText size={18} />
+            <strong>Skills</strong>
+            <span>{t('从官方市场或 GitHub 安装可复用工作流。')}</span>
+            <em>Beta</em>
+          </article>
+          <article>
+            <Network size={18} />
+            <strong>MCP</strong>
+            <span>{t('安装 MCP server 并接入连接器权限。')}</span>
+            <em>Beta</em>
+          </article>
+          <article>
+            <KeyRound size={18} />
+            <strong>{t('授权')}</strong>
+            <span>{t('安装后在连接器页面完成本机授权。')}</span>
+            <em>Beta</em>
+          </article>
+        </section>
       </div>
     </section>
   );

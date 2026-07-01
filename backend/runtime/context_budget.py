@@ -12,11 +12,11 @@ IMAGE_BLOCK_TOKEN_ESTIMATE = 1600
 _SYSTEM_BREAKDOWN_KEYS = ("system_prompt", "skills", "memory")
 _SCHEMA_BREAKDOWN_KEYS = ("mcp", "builtin")
 _SYSTEM_MARKER_CATEGORIES = {
-    "[可用技能 / Available Skills]": "skills",
-    "[Desktop Automation Skill Reference]": "skills",
-    "[User METIS.md]": "memory",
-    "[Project Memory — from previous sessions]": "memory",
-    "[Metis Project Profile]": "memory",
+    "[可用技能 / Available Skills]": ("skills", "Available Skills"),
+    "[Desktop Automation Skill Reference]": ("skills", "Desktop Automation Skill Reference"),
+    "[User METIS.md]": ("memory", "User METIS.md"),
+    "[Project Memory — from previous sessions]": ("memory", "Project Memory"),
+    "[Metis Project Profile]": ("memory", "Metis Project Profile"),
 }
 _MODEL_CONTEXT_LIMITS: Dict[str, int] = {
     "deepseek-v4-flash": 1_000_000,
@@ -118,7 +118,7 @@ def _system_content_breakdown(content: Any) -> Dict[str, int]:
         return breakdown
 
     markers: List[tuple[int, str]] = []
-    for marker, category in _SYSTEM_MARKER_CATEGORIES.items():
+    for marker, (category, _label) in _SYSTEM_MARKER_CATEGORIES.items():
         start = 0
         while True:
             index = content.find(marker, start)
@@ -165,12 +165,93 @@ def _system_breakdown(messages: List[Mapping[str, Any]]) -> Dict[str, int]:
     return breakdown
 
 
+def _add_detail(details: Dict[str, List[Dict[str, Any]]], category: str, name: str, tokens: int) -> None:
+    if tokens <= 0:
+        return
+    label = name.strip() or category
+    rows = details.setdefault(category, [])
+    for row in rows:
+        if row.get("name") == label:
+            row["tokens"] = int(row.get("tokens") or 0) + tokens
+            return
+    rows.append({"name": label, "tokens": tokens})
+
+
+def _system_content_details(content: Any) -> Dict[str, List[Dict[str, Any]]]:
+    details: Dict[str, List[Dict[str, Any]]] = {key: [] for key in _SYSTEM_BREAKDOWN_KEYS}
+    if not isinstance(content, str):
+        tokens = estimate_tokens(content)
+        if tokens:
+            _add_detail(details, "system_prompt", "System prompt", tokens)
+        return details
+    if not content:
+        return details
+
+    markers: List[tuple[int, str, str]] = []
+    for marker, (category, label) in _SYSTEM_MARKER_CATEGORIES.items():
+        start = 0
+        while True:
+            index = content.find(marker, start)
+            if index < 0:
+                break
+            markers.append((index, category, label))
+            start = index + len(marker)
+    if not markers:
+        _add_detail(details, "system_prompt", "System prompt", estimate_tokens(content))
+        return details
+
+    markers.sort(key=lambda item: item[0])
+    cursor = 0
+    current_category = "system_prompt"
+    current_label = "System prompt"
+    for position, next_category, next_label in markers:
+        if position > cursor:
+            _add_detail(details, current_category, current_label, estimate_tokens(content[cursor:position]))
+        current_category = next_category
+        current_label = next_label
+        cursor = position
+    if cursor < len(content):
+        _add_detail(details, current_category, current_label, estimate_tokens(content[cursor:]))
+    return details
+
+
+def _system_details(messages: List[Mapping[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    details: Dict[str, List[Dict[str, Any]]] = {key: [] for key in _SYSTEM_BREAKDOWN_KEYS}
+    for message in messages:
+        if str(message.get("role") or "") != "system":
+            continue
+        for key, rows in _system_content_details(message.get("content")).items():
+            for row in rows:
+                _add_detail(details, key, str(row.get("name") or key), int(row.get("tokens") or 0))
+        if message.get("tool_calls"):
+            _add_detail(details, "system_prompt", "System tool calls", estimate_tokens(message.get("tool_calls")))
+        if message.get("name"):
+            _add_detail(details, "system_prompt", "System message name", estimate_tokens(message.get("name")))
+    return details
+
+
 def _schema_breakdown(tools: Optional[List[Mapping[str, Any]]]) -> Dict[str, int]:
     breakdown = _empty_breakdown(_SCHEMA_BREAKDOWN_KEYS)
     for tool in tools or []:
         category = "mcp" if _is_mcp_tool_schema(tool) else "builtin"
         breakdown[category] += estimate_tokens(tool)
     return breakdown
+
+
+def _tool_schema_name(tool: Mapping[str, Any]) -> str:
+    function = tool.get("function") if isinstance(tool.get("function"), MappingABC) else {}
+    return str(tool.get("name") or function.get("name") or "unnamed_tool").strip() or "unnamed_tool"
+
+
+def _schema_details(tools: Optional[List[Mapping[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    details: Dict[str, List[Dict[str, Any]]] = {key: [] for key in _SCHEMA_BREAKDOWN_KEYS}
+    for tool in tools or []:
+        category = "mcp" if _is_mcp_tool_schema(tool) else "builtin"
+        _add_detail(details, category, _tool_schema_name(tool), estimate_tokens(tool))
+    for key, rows in details.items():
+        rows.sort(key=lambda row: int(row.get("tokens") or 0), reverse=True)
+        details[key] = rows[:120]
+    return details
 
 
 def _is_mcp_tool_schema(tool: Mapping[str, Any]) -> bool:
@@ -205,6 +286,8 @@ def context_ledger(
     schema_tokens = estimate_tokens(tools or [])
     system_parts = _system_breakdown(messages)
     schema_parts = _schema_breakdown(tools)
+    system_detail_parts = _system_details(messages)
+    schema_detail_parts = _schema_details(tools)
     estimated_total = system_tokens + schema_tokens + history_tokens
     limit = context_limit_for_model(model)
     cache_hit = int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0)
@@ -228,4 +311,6 @@ def context_ledger(
         "tool_count": len(tools or []),
         "system_breakdown": system_parts,
         "schema_breakdown": schema_parts,
+        "system_details": system_detail_parts,
+        "schema_details": schema_detail_parts,
     }

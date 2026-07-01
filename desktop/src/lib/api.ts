@@ -2,6 +2,7 @@ import type {
   AgentEventContract,
   AgentRuntimeProfilePayload,
   ActiveChatRunPayload,
+  AppMode,
   AutoTitlePayload,
   AwaySummaryPayload,
   ChatRunPayload,
@@ -36,6 +37,8 @@ import type {
   ProviderStatusPayload,
   ProviderUsagePayload,
   ProviderValidation,
+  ResearchJob,
+  ResearchJobsPayload,
   RewindResult,
   RuntimeManagerAction,
   RuntimeManagerCommandResult,
@@ -76,6 +79,10 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(item => stringValue(item)).filter(Boolean) : [];
+}
+
+function toAppMode(value: string): AppMode | null {
+  return value === 'chat' || value === 'cowork' || value === 'code' ? value : null;
 }
 
 function providerProfileFromRecord(row: Record<string, unknown>): ProviderProfile {
@@ -223,6 +230,32 @@ function providerUsageFromRecord(row: Record<string, unknown>): ProviderUsagePay
     },
     message: stringValue(row.message),
     hint: stringValue(row.hint),
+  };
+}
+
+function researchJobFromRecord(row: Record<string, unknown>): ResearchJob {
+  const listOfRecords = (value: unknown): Array<Record<string, unknown>> =>
+    Array.isArray(value) ? value.map(item => recordValue(item)).filter(item => Object.keys(item).length > 0) : [];
+  return {
+    schema: stringValue(row.schema),
+    id: stringValue(row.id),
+    kind: stringValue(row.kind) || 'research',
+    title: stringValue(row.title),
+    query: stringValue(row.query),
+    status: stringValue(row.status) || 'complete',
+    providers: stringArray(row.providers),
+    plan: listOfRecords(row.plan),
+    queries: listOfRecords(row.queries),
+    sources: listOfRecords(row.sources),
+    attempts: listOfRecords(row.attempts),
+    failures: listOfRecords(row.failures),
+    evidence: listOfRecords(row.evidence),
+    report: stringValue(row.report),
+    report_filename: stringValue(row.report_filename ?? row.reportFilename),
+    report_path: stringValue(row.report_path ?? row.reportPath),
+    stats: Object.fromEntries(Object.entries(recordValue(row.stats)).map(([key, value]) => [key, numberValue(value)])),
+    created_at: numberValue(row.created_at ?? row.createdAt),
+    updated_at: numberValue(row.updated_at ?? row.updatedAt),
   };
 }
 
@@ -481,6 +514,7 @@ export async function getSessions(): Promise<SessionsPayload> {
         id: stringValue(row.id),
         title: stringValue(row.title) || 'Metis Chat',
         workspaceId: stringValue(row.workspace_id),
+        mode: stringValue(row.mode) || 'chat',
         messageCount: numberValue(row.message_count),
         createdAt: numberValue(row.created_at),
         updatedAt: numberValue(row.updated_at),
@@ -489,10 +523,10 @@ export async function getSessions(): Promise<SessionsPayload> {
   };
 }
 
-export async function createSession(): Promise<{ id: string; workspaceId: string }> {
+export async function createSession(mode: string = 'chat'): Promise<{ id: string; workspaceId: string }> {
   const data = await requestJson<Record<string, unknown>>('/sessions', {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ mode }),
   });
   return { id: stringValue(data.id), workspaceId: stringValue(data.workspace_id) };
 }
@@ -1413,6 +1447,24 @@ export async function getProviderUsage(payload: {
   return providerUsageFromRecord(data);
 }
 
+export async function getResearchJobs(limit = 40): Promise<ResearchJobsPayload> {
+  const data = await requestJson<Record<string, unknown>>(`/research/jobs?limit=${encodeURIComponent(String(limit))}`);
+  const jobs = Array.isArray(data.jobs) ? data.jobs.map(item => researchJobFromRecord(recordValue(item))) : [];
+  return { jobs };
+}
+
+export async function getResearchJob(jobId: string): Promise<ResearchJob> {
+  const data = await requestJson<Record<string, unknown>>(`/research/jobs/${encodeURIComponent(jobId)}`);
+  return researchJobFromRecord(recordValue(data.job));
+}
+
+export async function exportResearchJob(jobId: string, format: 'markdown' | 'json' = 'markdown'): Promise<string> {
+  const base = await apiBase();
+  const response = await fetch(`${base}/research/jobs/${encodeURIComponent(jobId)}/export?format=${format}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
+
 export async function getModelCapabilities(settings?: Pick<RuntimeSettings, 'backend' | 'providerId' | 'baseUrl' | 'model'>): Promise<ModelCapabilities> {
   const query = new URLSearchParams();
   if (settings) {
@@ -1510,7 +1562,22 @@ function skillSummaryFromRecord(row: Record<string, unknown>): SkillSummary {
     allowedTools: stringArray(row.allowed_tools ?? row.allowedTools),
     disallowedTools: stringArray(row.disallowed_tools ?? row.disallowedTools),
     preview: stringValue(row.preview),
+    files: skillFilesFromValue(row.files),
   };
+}
+
+function skillFilesFromValue(value: unknown): SkillSummary['files'] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => {
+    const row = recordValue(item);
+    const kind = stringValue(row.kind) === 'directory' ? 'directory' : 'file';
+    return {
+      name: stringValue(row.name),
+      path: stringValue(row.path),
+      kind,
+      children: kind === 'directory' ? skillFilesFromValue(row.children) : [],
+    };
+  });
 }
 
 function skillDetailFromRecord(row: Record<string, unknown>): SkillDetail {
@@ -1605,6 +1672,94 @@ export async function reloadMcpServers(): Promise<{ ok: boolean; error: string; 
     removed: numberValue(data.removed),
     registered: numberValue(data.registered),
   };
+}
+
+export interface BackendConnector {
+  serviceId: string;
+  displayName: string;
+  scopes: string[];
+  tokenEnv: string;
+  authKind: string;
+  credentialsEnvs: string[];
+  secretEnvs: string[];
+  optionalSecretEnvs: string[];
+  notes: string[];
+  command: string;
+  args: string[];
+  url: string;
+  hasToken: boolean;
+  active: boolean;
+  toolsCount: number;
+  tools: { name: string; description: string }[];
+  lastError: string;
+}
+
+function mapBackendConnector(row: Record<string, unknown>): BackendConnector {
+  const mcp = recordValue(row.mcp);
+  const tools = Array.isArray(row.tools) ? row.tools : [];
+  return {
+    serviceId: stringValue(row.service_id ?? row.serviceId),
+    displayName: stringValue(row.display_name ?? row.displayName),
+    scopes: stringArray(row.scopes),
+    tokenEnv: stringValue(row.token_env ?? row.tokenEnv),
+    authKind: stringValue(row.auth_kind ?? row.authKind),
+    credentialsEnvs: stringArray(row.credentials_envs ?? row.credentialsEnvs),
+    secretEnvs: stringArray(row.secret_envs ?? row.secretEnvs),
+    optionalSecretEnvs: stringArray(row.optional_secret_envs ?? row.optionalSecretEnvs),
+    notes: stringArray(row.notes),
+    command: stringValue(mcp.command),
+    args: stringArray(mcp.args),
+    url: stringValue(mcp.url),
+    hasToken: Boolean(row.has_token ?? row.hasToken),
+    active: Boolean(row.active),
+    toolsCount: numberValue(row.tools_count ?? row.toolsCount),
+    tools: tools.map(item => {
+      const tool = recordValue(item);
+      return {
+        name: stringValue(tool.name),
+        description: stringValue(tool.description),
+      };
+    }),
+    lastError: stringValue(row.last_error ?? row.lastError),
+  };
+}
+
+export async function listBackendConnectors(): Promise<BackendConnector[]> {
+  const data = await requestJson<Record<string, unknown>>('/connectors');
+  const rows = Array.isArray(data.connectors) ? data.connectors : [];
+  return rows.map(row => mapBackendConnector(recordValue(row)));
+}
+
+export async function connectConnector(serviceId: string): Promise<{ ok: boolean; error: string; tools: string[] }> {
+  const data = await requestJson<Record<string, unknown>>('/connectors/connect', {
+    method: 'POST',
+    body: JSON.stringify({ service_id: serviceId }),
+  });
+  return {
+    ok: Boolean(data.ok),
+    error: stringValue(data.error),
+    tools: Array.isArray(data.tools) ? data.tools.map(item => stringValue(item)) : [],
+  };
+}
+
+export async function testConnector(serviceId: string): Promise<{ ok: boolean; error: string; toolsCount: number }> {
+  const data = await requestJson<Record<string, unknown>>('/connectors/test', {
+    method: 'POST',
+    body: JSON.stringify({ service_id: serviceId }),
+  });
+  return {
+    ok: Boolean(data.ok),
+    error: stringValue(data.error),
+    toolsCount: numberValue(data.tools_count ?? data.toolsCount),
+  };
+}
+
+export async function disconnectConnector(serviceId: string): Promise<{ ok: boolean; error: string }> {
+  const data = await requestJson<Record<string, unknown>>('/connectors/disconnect', {
+    method: 'POST',
+    body: JSON.stringify({ service_id: serviceId }),
+  });
+  return { ok: Boolean(data.ok), error: stringValue(data.error) };
 }
 
 export async function disconnectMcpServer(serverName: string): Promise<{ success: boolean; error: string }> {
@@ -1709,6 +1864,7 @@ export async function searchSessions(query: string): Promise<SearchResult[]> {
       snippet: stringValue(row.snippet),
       ts: numberValue(row.ts),
       score: numberValue(row.score),
+      mode: toAppMode(stringValue(row.mode)) || undefined,
       workspaceId: stringValue(row.workspace_id ?? row.workspaceId) || undefined,
       workspaceName: stringValue(row.workspace_name ?? row.workspaceName) || undefined,
     };
@@ -2083,16 +2239,38 @@ export async function getWorkspaceTree(): Promise<WorkspaceTreeNode[]> {
 
 export async function getWorkspaceFile(path: string): Promise<WorkspaceFile> {
   const data = await requestJson<Record<string, unknown>>(`/workspace/file?path=${encodeURIComponent(path)}`);
+  const resolvedPath = stringValue(data.path) || path;
+  const name = stringValue(data.name);
+  const ext = workspaceFileExt(name || resolvedPath);
+  let type = (stringValue(data.type) || 'binary') as WorkspaceFile['type'];
+  let previewUrl = stringValue(data.preview_url);
+  if (type === 'binary' && ext === '.pdf') {
+    type = 'pdf';
+    previewUrl = previewUrl || `/file-preview?path=${encodeURIComponent(resolvedPath)}`;
+  } else if (type === 'binary' && isOfficePreviewExt(ext)) {
+    type = 'office';
+  }
   return {
-    type: (stringValue(data.type) || 'binary') as WorkspaceFile['type'],
-    name: stringValue(data.name),
-    path: stringValue(data.path),
+    type,
+    name,
+    path: resolvedPath,
     size: numberValue(data.size),
     content: stringValue(data.content),
     language: stringValue(data.language),
-    previewUrl: stringValue(data.preview_url),
+    previewUrl,
+    previewNote: stringValue(data.preview_note),
     truncated: Boolean(data.truncated),
   };
+}
+
+function workspaceFileExt(value: string): string {
+  const clean = String(value || '').split(/[?#]/, 1)[0] || '';
+  const dot = clean.lastIndexOf('.');
+  return dot >= 0 ? clean.slice(dot).toLowerCase() : '';
+}
+
+function isOfficePreviewExt(ext: string): boolean {
+  return ['.docx', '.docm', '.xlsx', '.xlsm', '.pptx', '.pptm', '.doc', '.xls', '.ppt'].includes(ext);
 }
 
 export async function revertFileChanges(summary: FileChangeSummary): Promise<FileChangeRevertResult> {

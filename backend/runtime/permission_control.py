@@ -50,6 +50,7 @@ READ_ONLY_TOOL_PREFIXES = (
     "check_git_status",
     "web_search",
     "web_research",
+    "fetch_content",
     "web_fetch",
 )
 

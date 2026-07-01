@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metis Cowork Dot Matrix</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        html, body {
+            width: 100%; height: 100%; overflow: hidden; background:#0a0a0a;
+        }
+        #container { position: absolute; top:0; left:0; width:100%; height:100%; z-index:1; }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+
+<script>
+    const container = document.getElementById('container');
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') === 'light' ? 'light' : 'dark';
+
+    function normalizeHex(value, fallback) {
+        const text = String(value || '').trim();
+        if (/^#[0-9a-f]{6}$/i.test(text)) return text;
+        if (/^#[0-9a-f]{3}$/i.test(text)) {
+            return `#${text[1]}${text[1]}${text[2]}${text[2]}${text[3]}${text[3]}`;
+        }
+        return fallback;
+    }
+
+    function hexToRgb(hex) {
+        const normalized = normalizeHex(hex, '#ffffff').slice(1);
+        return {
+            r: parseInt(normalized.slice(0, 2), 16),
+            g: parseInt(normalized.slice(2, 4), 16),
+            b: parseInt(normalized.slice(4, 6), 16),
+        };
+    }
+
+    function mixRgb(left, right, amount) {
+        return {
+            r: Math.round(left.r + (right.r - left.r) * amount),
+            g: Math.round(left.g + (right.g - left.g) * amount),
+            b: Math.round(left.b + (right.b - left.b) * amount),
+        };
+    }
+
+    const fallback = mode === 'light'
+        ? { bg: '#f5f3ef', text: '#2c2a26', accent: '#4a6b5a', border: '#c9c4b8' }
+        : { bg: '#0a0a0e', text: '#e8e6ec', accent: '#e8b96a', border: '#2a2a33' };
+    const palette = {
+        bg: normalizeHex(params.get('bg'), fallback.bg),
+        text: normalizeHex(params.get('text'), fallback.text),
+        accent: normalizeHex(params.get('accent'), fallback.accent),
+        border: normalizeHex(params.get('border'), fallback.border),
+    };
+    const textRgb = hexToRgb(palette.text);
+    const accentRgb = hexToRgb(palette.accent);
+    const borderRgb = hexToRgb(palette.border);
+    const dotRgb = mode === 'light'
+        ? mixRgb(textRgb, accentRgb, 0.28)
+        : mixRgb(textRgb, accentRgb, 0.2);
+    const ghostRgb = mixRgb(dotRgb, borderRgb, mode === 'light' ? 0.28 : 0.18);
+
+    document.documentElement.style.background = palette.bg;
+    document.body.style.background = palette.bg;
+
+    const CONFIG = {
+        dotSpacing: 13.5,
+        speed: 0.92,
+        noiseScale: 0.0026,
+        contrastPower: 5.6,
+        brightnessGain: mode === 'light' ? 1.12 : 1.35,
+        maxAlpha: mode === 'light' ? 0.34 : 0.72,
+        minAlpha: mode === 'light' ? 0.018 : 0.026
+    };
+
+    let canvas = null;
+    let context = null;
+    let points = [];
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+
+    function buildCanvas() {
+        if (!canvas) {
+            canvas = document.createElement('canvas');
+            canvas.style.position = 'absolute';
+            canvas.style.inset = '0';
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            container.appendChild(canvas);
+            context = canvas.getContext('2d');
+        }
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(width * pixelRatio);
+        canvas.height = Math.round(height * pixelRatio);
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    }
+
+    function buildPoints() {
+        points = [];
+        for (let y = -CONFIG.dotSpacing * 2; y <= height + CONFIG.dotSpacing * 2; y += CONFIG.dotSpacing) {
+            let colIndex = 0;
+            for (let x = -CONFIG.dotSpacing * 2; x <= width + CONFIG.dotSpacing * 2; x += CONFIG.dotSpacing) {
+                points.push({ x, y, colIndex });
+                colIndex += 1;
+            }
+        }
+    }
+
+    function draw(timestamp) {
+        requestAnimationFrame(draw);
+        const t = timestamp * 0.00105 * CONFIG.speed;
+        context.clearRect(0, 0, width, height);
+
+        for (const point of points) {
+            const px = (point.x - width / 2) * CONFIG.noiseScale * 4.2;
+            const py = (point.y - height / 2) * CONFIG.noiseScale * 4.2;
+            const warpX = Math.sin(py * 0.92 + t * 0.54) * 0.42 + Math.cos(px * 0.58 - t * 0.38) * 0.26;
+            const warpY = Math.cos(px * 0.84 - t * 0.46) * 0.34 - Math.sin(py * 0.62 + t * 0.42) * 0.24;
+            const sx = px + warpX;
+            const sy = py + warpY;
+            let wave = 0;
+            wave += Math.sin(sx * 1.08 + t * 1.14) * Math.cos(sy * 0.98 - t * 0.88) * 0.72;
+            wave += Math.cos((sx + sy) * 1.42 - t * 0.86) * 0.22;
+            wave += Math.sin(sx * 2.46 - sy * 1.74 + t * 1.36) * 0.18;
+            const radial = Math.max(0.22, 1 - Math.hypot((point.x - width / 2) / width, (point.y - height / 2) / height) * 1.06);
+            const shimmer = 0.94 + Math.sin(point.colIndex * 0.11 + t * 0.3) * 0.03;
+            const brightness = Math.max(0, (wave + 1.0) * 0.5) * (0.42 + radial * 0.68) * shimmer;
+            const alpha = Math.min(CONFIG.maxAlpha, Math.pow(brightness, CONFIG.contrastPower) * CONFIG.brightnessGain);
+            if (alpha < CONFIG.minAlpha) continue;
+
+            context.beginPath();
+            const rgb = alpha > CONFIG.maxAlpha * 0.56 ? dotRgb : ghostRgb;
+            context.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+            context.arc(point.x + warpX * 5.4, point.y + warpY * 5.0, 1.16 + alpha * 0.12, 0, Math.PI * 2);
+            context.fill();
+        }
+    }
+
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        buildCanvas();
+        buildPoints();
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+    requestAnimationFrame(draw);
+</script>
+</body>
+</html>

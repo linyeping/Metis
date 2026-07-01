@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('metis', {
   openLog: () => ipcRenderer.invoke('metis:open-log'),
   appInfo: () => ipcRenderer.invoke('metis:app-info'),
   diagnostics: () => ipcRenderer.invoke('metis:diagnostics'),
+  setNativeTheme: mode => ipcRenderer.invoke('metis:set-native-theme', mode),
   saveDiagnosticsBundle: () => ipcRenderer.invoke('metis:save-diagnostics-bundle'),
   checkUpdates: () => ipcRenderer.invoke('metis:check-updates'),
   installUpdate: () => ipcRenderer.invoke('metis:install-update'),

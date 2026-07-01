@@ -180,6 +180,7 @@ def list_sessions() -> Any:
                 "created_at": session.created_at,
                 "updated_at": session.updated_at,
                 "workspace_id": session.workspace_id,
+                "mode": getattr(session, "mode", "chat"),
                 "message_count": len(full_session.history) if full_session is not None else 0,
             }
         )
@@ -211,7 +212,9 @@ def create_session() -> Any:
 
     state = get_state()
     save_active_session()
-    session = get_session_manager().create_session(workspace_id=state.active_workspace_id or "")
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "chat")
+    session = get_session_manager().create_session(workspace_id=state.active_workspace_id or "", mode=mode)
     state.activate_session(session.id, history=[], compact_state=dict(session.compact_state), mode=session.mode)
     clear_read_tracking()
     return jsonify(

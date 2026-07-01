@@ -32,6 +32,7 @@ import type { CommandItem } from '../../lib/commands';
 import type {
   ChatRunPayload,
   ChatMessage,
+  AppMode,
   DeskGoalLogEntry,
   DeskStatusPayload,
   DiagnosticsPayload,
@@ -60,6 +61,8 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
   const setLanguage = useUiStore(state => state.setLanguage);
   const theme = useUiStore(state => state.theme);
   const setTheme = useUiStore(state => state.setTheme);
+  const appMode = useUiStore(state => state.appMode);
+  const setAppMode = useUiStore(state => state.setAppMode);
   const setActiveSection = useUiStore(state => state.setActiveSection);
   const sidebarOpen = useUiStore(state => state.sidebarOpen);
   const setSidebarOpen = useUiStore(state => state.setSidebarOpen);
@@ -69,12 +72,14 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
   const workspaces = useSessionStore(state => state.workspaces);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
   const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
-  const newSession = useSessionStore(state => state.newSession);
+  const startDraftSession = useSessionStore(state => state.startDraftSession);
+  const rememberModeState = useSessionStore(state => state.rememberModeState);
   const selectSession = useSessionStore(state => state.selectSession);
   const selectWorkspace = useSessionStore(state => state.selectWorkspace);
   const openWorkspacePath = useSessionStore(state => state.openWorkspacePath);
   const loadSessions = useSessionStore(state => state.load);
   const loadChatSession = useChatStore(state => state.loadSession);
+  const clearChat = useChatStore(state => state.clearLocal);
   const rewindConversation = useChatStore(state => state.rewindLatest);
   const messages = useChatStore(state => state.messages);
   const runtimeStatus = useChatStore(state => state.runtimeStatus);
@@ -185,6 +190,22 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
     return () => window.clearTimeout(handle);
   }, [open, query]);
 
+  const openSession = useCallback(
+    async (sessionId: string, mode?: AppMode | string) => {
+      const targetMode = toAppMode(mode || '') || toAppMode(sessions.find(session => session.id === sessionId)?.mode || '') || appMode;
+      if (targetMode !== appMode) {
+        rememberModeState(appMode);
+        useSessionStore.setState({ activeSessionId: null });
+        clearChat();
+        setAppMode(targetMode);
+      }
+      setActiveSection('chat');
+      await selectSession(sessionId);
+      await loadChatSession(sessionId, { force: true });
+    },
+    [appMode, clearChat, loadChatSession, rememberModeState, selectSession, sessions, setActiveSection, setAppMode],
+  );
+
   const commands = useMemo(
     () =>
       buildCommands({
@@ -199,13 +220,10 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
         settings,
         actions: {
           createSession: async () => {
-            const sessionId = await newSession();
-            await loadChatSession(sessionId);
+            startDraftSession();
+            clearChat();
           },
-          switchSession: async sessionId => {
-            await selectSession(sessionId);
-            await loadChatSession(sessionId);
-          },
+          switchSession: openSession,
           switchWorkspace: async workspaceId => {
             await selectWorkspace(workspaceId);
             await loadChatSession(useSessionStore.getState().activeSessionId);
@@ -241,10 +259,11 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
       activeSessionId,
       activeWorkspaceId,
       language,
+      clearChat,
       loadChatSession,
       loadSessions,
-      newSession,
       openWorkspacePath,
+      openSession,
       rewindConversation,
       selectSession,
       selectWorkspace,
@@ -257,6 +276,7 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
       setSettingsOpen,
       setSidebarOpen,
       setTheme,
+      startDraftSession,
       rightRailOpen,
       sidebarOpen,
       theme,
@@ -266,23 +286,22 @@ export function CommandPalette({ settings, settingsChanged }: CommandPaletteProp
 
   const searchCommands = useMemo(() => {
     const sessionWorkspace = new Map(sessions.map(session => [session.id, session.workspaceId]));
+    const sessionModes = new Map(sessions.map(session => [session.id, session.mode]));
     const workspaceNames = new Map(workspaces.map(workspace => [workspace.id, workspace.name]));
     return searchHits.slice(0, 6).map<CommandItem>(result => {
       const workspaceId = result.workspaceId || sessionWorkspace.get(result.sessionId) || '';
       const workspaceName = result.workspaceName || workspaceNames.get(workspaceId) || (language === 'zh' ? '当前工作区' : 'Current workspace');
+      const targetMode = result.mode || sessionModes.get(result.sessionId);
       return {
         id: `search.${result.sessionId}`,
         title: result.title || (language === 'zh' ? '未命名会话' : 'Untitled chat'),
         subtitle: `${workspaceName} · ${snippetText(result.snippet) || (language === 'zh' ? '全文命中' : 'Full-text match')}`,
         keywords: [query, result.title, result.snippet, workspaceName],
         group: language === 'zh' ? '全文搜索' : 'Search',
-        run: async () => {
-          await selectSession(result.sessionId);
-          await loadChatSession(result.sessionId);
-        },
+        run: () => openSession(result.sessionId, targetMode),
       };
     });
-  }, [language, loadChatSession, query, searchHits, selectSession, sessions, workspaces]);
+  }, [language, openSession, query, searchHits, sessions, workspaces]);
 
   const filtered = useMemo(() => {
     const commandMatches = commands
@@ -734,6 +753,10 @@ function downloadText(content: string, filename: string) {
 
 function snippetText(snippet: string): string {
   return snippet.replace(/<\/?mark>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function toAppMode(value: string): AppMode | null {
+  return value === 'chat' || value === 'cowork' || value === 'code' ? value : null;
 }
 
 function formatTimestamp(seconds: number): string {

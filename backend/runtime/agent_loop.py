@@ -225,6 +225,7 @@ class AgentConfig:
     session_id: str = ""
     permission_checker: Optional[Callable[[str, Dict[str, Any]], Optional[str]]] = None
     tool_boundary_overrides: Optional[Callable[[str, Dict[str, Any]], Dict[str, bool]]] = None
+    surface_mode: str = ""
     routing_task_type: str = ""
     routing_model_role: str = ""
     routing_reason: str = ""
@@ -841,6 +842,7 @@ _SAFE_TOOLS: set[str] = {
     "generate_repo_map",
     "web_search",
     "web_research",
+    "fetch_content",
     "web_fetch",
     "desktop_screenshot",
     "desktop_inventory",
@@ -863,6 +865,7 @@ _PARALLEL_READONLY_TOOLS: set[str] = {
     "generate_repo_map",
     "web_search",
     "web_research",
+    "fetch_content",
     "web_fetch",
 }
 _EDIT_TOOLS: set[str] = {
@@ -1254,6 +1257,9 @@ def run(
                     )
             else:
                 for tool_call in response.tool_calls:
+                    if _chat_surface_blocks_tool(tool_call, registry, config):
+                        results.append((tool_call, _chat_surface_blocked_tool_result(tool_call, registry)))
+                        continue
                     yield ToolCallEvent(
                         tool_name=tool_call.name,
                         arguments=tool_call.arguments,
@@ -1386,7 +1392,10 @@ def run(
                 image_message = _build_vision_message(results)
                 if image_message:
                     working_messages.append(image_message)
-            if _apply_deferred_activation(results, registry, activated_deferred):
+            if _should_close_deep_research_tool_loop(config, results):
+                tools = []
+                working_messages.append({"role": "user", "content": _deep_research_final_answer_hint(results)})
+            elif _apply_deferred_activation(results, registry, activated_deferred):
                 tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
             _audit_tool_results(results, config, turn_count)
             working_messages = _evict_tool_results_for_budget(working_messages, tools, config)
@@ -1913,6 +1922,9 @@ def run_stream(
                     )
 
             for tool_call in ([] if parallel_results is not None else response.tool_calls):
+                if _chat_surface_blocks_tool(tool_call, registry, config):
+                    results.append((tool_call, _chat_surface_blocked_tool_result(tool_call, registry)))
+                    continue
                 # --- 记录到 tracker ---
                 tracker.record(tool_call.name, tool_call.arguments or {})
 
@@ -2118,7 +2130,10 @@ def run_stream(
                 image_message = _build_vision_message(results)
                 if image_message:
                     working_messages.append(image_message)
-            if _apply_deferred_activation(results, registry, activated_deferred):
+            if _should_close_deep_research_tool_loop(config, results):
+                tools = []
+                working_messages.append({"role": "user", "content": _deep_research_final_answer_hint(results)})
+            elif _apply_deferred_activation(results, registry, activated_deferred):
                 tools = _tool_schemas_for_config(registry, config, activated=activated_deferred)
             _audit_tool_results(results, config, turn_count)
             working_messages = _evict_tool_results_for_budget(working_messages, tools, config)
@@ -2287,8 +2302,10 @@ def _tool_schemas_for_config(
         tools = registry.get_schemas_for_profile(profile, format="openai", activated=activated)
 
     tools = _include_preferred_tool_schemas(registry, tools, config.routing_preferred_tools)
+    tools = _filter_tools_for_surface(tools, config)
     tools = _filter_desktop_control_tools_for_route(tools, config)
     tools = _filter_document_tools_for_route(tools, config)
+    tools = _filter_deep_research_tools_for_route(tools, config)
 
     capabilities = detect_from_model_name(config.llm_model)
     forced_tier = os.environ.get("METIS_TOOL_TIER", "").strip()
@@ -2359,6 +2376,131 @@ def _tool_schemas_for_config(
     return tools
 
 
+CHAT_SURFACE_TOOLS = frozenset(
+    {
+        "web_search",
+        "web_research",
+        "fetch_content",
+    }
+)
+
+
+def _surface_mode_for_config(config: AgentConfig) -> str:
+    value = str(config.surface_mode or "").strip().lower()
+    if value:
+        return value
+    execution_mode = str(config.execution_mode or "").strip().lower()
+    return execution_mode if execution_mode in {"chat", "cowork", "code"} else ""
+
+
+def _filter_tools_for_surface(
+    tools: List[Dict[str, Any]],
+    config: AgentConfig,
+) -> List[Dict[str, Any]]:
+    if config.enabled_tools:
+        return tools
+    surface_mode = _surface_mode_for_config(config)
+    if surface_mode != "chat":
+        return tools
+    filtered = [
+        tool
+        for tool in tools
+        if _tool_name_from_openai_schema(tool) in CHAT_SURFACE_TOOLS
+    ]
+    if len(filtered) != len(tools):
+        logger.info(
+            "chat surface tool guard tools_before=%s tools_after=%s removed=%s",
+            len(tools),
+            len(filtered),
+            sorted({_tool_name_from_openai_schema(tool) for tool in tools} - CHAT_SURFACE_TOOLS),
+        )
+    return filtered
+
+
+def _chat_surface_blocks_tool(
+    tool_call: ToolCall,
+    registry: ToolRegistry,
+    config: AgentConfig,
+) -> bool:
+    if _surface_mode_for_config(config) != "chat":
+        return False
+    canonical = registry.resolve_name(str(tool_call.name or "").strip())
+    return canonical not in CHAT_SURFACE_TOOLS
+
+
+def _chat_surface_blocked_tool_result(tool_call: ToolCall, registry: ToolRegistry) -> str:
+    canonical = registry.resolve_name(str(tool_call.name or "").strip()) or str(tool_call.name or "")
+    return (
+        f"[Tool unavailable] '{canonical}' is not available in Chat or Research. "
+        "Use web_search for quick lookup, web_research for multi-source research, "
+        "or fetch_content for a known URL. Do not call workspace tools in this surface."
+    )
+
+
+def _should_close_deep_research_tool_loop(
+    config: AgentConfig,
+    results: List[Tuple[ToolCall, str]],
+) -> bool:
+    if not config.deep_research:
+        return False
+    if _surface_mode_for_config(config) not in {"chat", ""}:
+        return False
+    for tool_call, result in results:
+        if str(tool_call.name or "").strip() != "web_research":
+            continue
+        activity = _research_activity_from_tool_result(result)
+        if not activity:
+            continue
+        status = str(activity.get("job_status") or activity.get("status") or "").strip().lower()
+        if status in {"error", "failed"}:
+            continue
+        if str(activity.get("job_id") or activity.get("jobId") or "").strip():
+            return True
+    return False
+
+
+def _deep_research_final_answer_hint(results: List[Tuple[ToolCall, str]]) -> str:
+    activity: Dict[str, Any] = {}
+    for tool_call, result in results:
+        if str(tool_call.name or "").strip() == "web_research":
+            activity = _research_activity_from_tool_result(result)
+            if activity:
+                break
+    title = str(activity.get("title") or activity.get("query") or "Research report").strip()
+    job_id = str(activity.get("job_id") or activity.get("jobId") or "").strip()
+    report_filename = str(activity.get("report_filename") or activity.get("reportFilename") or "").strip()
+    stats = activity.get("stats") if isinstance(activity.get("stats"), dict) else {}
+    sources = int(stats.get("sources") or stats.get("search_results") or 0) if isinstance(stats, dict) else 0
+    return (
+        "[System hint] Deep Research has already produced a durable research job. "
+        "Do not call any more tools in this turn. Write a concise final answer now. "
+        "Mention that the full Markdown report is available through the report entry, "
+        "summarize the key conclusion in 3-6 bullets, and do not paste long source excerpts. "
+        f"Research title: {title}. Job id: {job_id}. Report file: {report_filename or '(pending)'}. Sources: {sources}."
+    )
+
+
+def _research_activity_from_tool_result(result: str) -> Dict[str, Any]:
+    marker = "<!-- METIS_RESEARCH_JSON"
+    text = str(result or "")
+    if marker not in text:
+        return {}
+    try:
+        start = text.index(marker) + len(marker)
+        end = text.index("-->", start)
+        payload = json.loads(text[start:end].strip())
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    activity = payload.get("research_activity") if isinstance(payload.get("research_activity"), dict) else payload
+    if not isinstance(activity, dict):
+        return {}
+    if str(activity.get("schema") or "") != "metis.research_activity.v1":
+        return {}
+    return activity
+
+
 def _filter_desktop_control_tools_for_route(
     tools: List[Dict[str, Any]],
     config: AgentConfig,
@@ -2400,6 +2542,26 @@ def _filter_document_tools_for_route(
             "document tool route guard removed=%s route=%s",
             sorted({_tool_name_from_openai_schema(tool) for tool in tools} & blocked),
             config.routing_task_type,
+        )
+    return filtered
+
+
+def _filter_deep_research_tools_for_route(
+    tools: List[Dict[str, Any]],
+    config: AgentConfig,
+) -> List[Dict[str, Any]]:
+    if config.enabled_tools or not config.deep_research:
+        return tools
+    blocked = {"browse_and_extract", "browse_web", "web_fetch"}
+    filtered = [
+        tool
+        for tool in tools
+        if _tool_name_from_openai_schema(tool) not in blocked
+    ]
+    if len(filtered) != len(tools):
+        logger.info(
+            "deep research route guard removed legacy browser tools=%s",
+            sorted({_tool_name_from_openai_schema(tool) for tool in tools} & blocked),
         )
     return filtered
 
@@ -2976,7 +3138,7 @@ _SEARCH_TOOLS = {"search_in_file", "search_in_codebase", "find_files"}
 _SHELL_TOOLS = {"execute_bash_command", "execute_command"}
 _LIST_TOOLS = {"list_directory"}
 _BROWSER_TOOLS = {"browser_navigate", "browser_get_text", "browser_extract_text",
-                  "browser_read_page", "web_search", "web_research"}
+                  "browser_read_page", "web_search", "web_research", "fetch_content"}
 
 _MAX_RESULT_CHARS = 24_000  # ~6K tokens
 

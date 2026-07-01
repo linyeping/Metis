@@ -1,5 +1,7 @@
 import { Check, ChevronDown, Pencil, Play, Plus, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { Terminal as XtermTerminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
@@ -65,6 +67,10 @@ export function TerminalPanel({ embedded = false, onRequestClose }: TerminalPane
   const [renameDraft, setRenameDraft] = useState('');
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const outputRef = useRef<HTMLDivElement | null>(null);
+  const xtermHostRef = useRef<HTMLDivElement | null>(null);
+  const xtermRef = useRef<XtermTerminal | null>(null);
+  const xtermRenderedTerminalIdRef = useRef('');
+  const xtermRenderedOutputRef = useRef('');
   const commandInputRef = useRef<HTMLInputElement | null>(null);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   const terminalsRef = useRef(terminals);
@@ -121,6 +127,13 @@ export function TerminalPanel({ embedded = false, onRequestClose }: TerminalPane
       rows: Math.max(8, Math.floor(height / 18)),
     };
   }, []);
+
+  const resizeXterm = useCallback(() => {
+    const xterm = xtermRef.current;
+    if (!xterm) return;
+    const size = terminalSize();
+    xterm.resize(size.cols, size.rows);
+  }, [terminalSize]);
 
   const startTerminal = useCallback(
     async (localId: string, options: { clear?: boolean; restart?: boolean } = {}) => {
@@ -216,16 +229,78 @@ export function TerminalPanel({ embedded = false, onRequestClose }: TerminalPane
   }, [activeTerminal, panelOpen, settingsLoaded, startTerminal]);
 
   useEffect(() => {
-    const outputEl = outputRef.current;
-    if (!outputEl) return;
-    outputEl.scrollTop = outputEl.scrollHeight;
-  }, [activeTerminal?.output, panelOpen, activeTerminalId]);
+    const host = xtermHostRef.current;
+    if (!host || xtermRef.current) return;
+    const xterm = new XtermTerminal({
+      allowTransparency: true,
+      convertEol: true,
+      cursorBlink: false,
+      cursorStyle: 'block',
+      disableStdin: true,
+      fontFamily: 'Cascadia Code, Consolas, Microsoft YaHei UI, ui-monospace, monospace',
+      fontSize: 12,
+      lineHeight: 1.5,
+      scrollback: 6000,
+      theme: {
+        background: '#00000000',
+        foreground: '#e8e6ec',
+        black: '#0a0a0e',
+        red: '#e5534b',
+        green: '#34b87a',
+        yellow: '#e8b96a',
+        blue: '#6aa9ff',
+        magenta: '#c98bff',
+        cyan: '#5ed7d4',
+        white: '#e8e6ec',
+        brightBlack: '#6a6878',
+        brightRed: '#ff756e',
+        brightGreen: '#58d99a',
+        brightYellow: '#f0ca82',
+        brightBlue: '#8fc0ff',
+        brightMagenta: '#dda8ff',
+        brightCyan: '#82e5e2',
+        brightWhite: '#ffffff',
+      },
+    });
+    xterm.open(host);
+    xtermRef.current = xterm;
+    resizeXterm();
+    return () => {
+      xtermRef.current = null;
+      xtermRenderedTerminalIdRef.current = '';
+      xtermRenderedOutputRef.current = '';
+      xterm.dispose();
+    };
+  }, [resizeXterm]);
+
+  useEffect(() => {
+    const xterm = xtermRef.current;
+    if (!xterm) return;
+    const nextOutput = activeTerminal?.output || '';
+    const terminalId = activeTerminal?.localId || '';
+    const renderedTerminalId = xtermRenderedTerminalIdRef.current;
+    const renderedOutput = xtermRenderedOutputRef.current;
+    const canAppend = terminalId === renderedTerminalId && nextOutput.startsWith(renderedOutput);
+
+    if (!canAppend) {
+      xterm.reset();
+      xtermRenderedOutputRef.current = '';
+      if (nextOutput) xterm.write(nextOutput);
+    } else if (nextOutput.length > renderedOutput.length) {
+      xterm.write(nextOutput.slice(renderedOutput.length));
+    }
+
+    xtermRenderedTerminalIdRef.current = terminalId;
+    xtermRenderedOutputRef.current = nextOutput;
+    xterm.scrollToBottom();
+  }, [activeTerminal?.localId, activeTerminal?.output, panelOpen]);
 
   useEffect(() => {
     if (!activeSessionId) return;
     const size = terminalSize();
+    resizeXterm();
     void window.metis.terminalResize(activeSessionId, size.cols, size.rows);
-  }, [activeSessionId, terminalHeight, terminalSize]);
+  }, [activeSessionId, terminalHeight, terminalSize, resizeXterm]);
 
   const createTerminal = (shell = defaultShell) => {
     const next = createLocalTerminal(nextTerminalIndex.current, shell);
@@ -460,7 +535,8 @@ export function TerminalPanel({ embedded = false, onRequestClose }: TerminalPane
         </div>
       </header>
       <div className="terminal-output terminal-live-output" ref={outputRef} onClick={focusCommandInput}>
-        {output ? <pre>{output}</pre> : <p>终端启动中...</p>}
+        <div className="terminal-xterm-host" ref={xtermHostRef} />
+        {!output && activeStatus !== 'ready' && <p className="terminal-empty-state">终端启动中...</p>}
       </div>
       <div className="terminal-input-row">
         <span>{prompt}</span>

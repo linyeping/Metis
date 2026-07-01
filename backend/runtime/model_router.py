@@ -139,7 +139,8 @@ _ARTIFACT_WORKFLOW_TOOLS = [
     "generate_repo_map",
     "todo_write",
 ]
-_EXTERNAL_WEB_TOOLS = ["web_search", "web_fetch", "web_research", "browse_web", "browse_and_extract"]
+_EXTERNAL_WEB_TOOLS = ["web_search", "fetch_content", "web_fetch", "web_research", "browse_web", "browse_and_extract"]
+_DEEP_RESEARCH_WEB_TOOLS = ["web_research", "web_search", "fetch_content"]
 _LONG_CONTEXT_TOOLS = [
     "read_file_chunk",
     "semantic_search",
@@ -602,12 +603,12 @@ def _preferred_tools_for_task(task_type: str, *, deep_research: bool = False) ->
     if task_type == "desktop":
         return list(_DESKTOP_TOOLS)
     if task_type == "browser":
-        return list(_PREVIEW_BROWSER_TOOLS) + ["browse_web", "browse_and_extract", "web_fetch"]
+        return list(_PREVIEW_BROWSER_TOOLS) + ["browse_web", "browse_and_extract", "fetch_content", "web_fetch"]
     if task_type == "code":
         return list(_CODE_TOOLS)
     if task_type == "external_lookup":
         if deep_research:
-            return ["web_research"] + [tool for tool in _EXTERNAL_WEB_TOOLS if tool != "web_research"]
+            return list(_DEEP_RESEARCH_WEB_TOOLS)
         return list(_EXTERNAL_WEB_TOOLS)
     if task_type == "long_context":
         return list(_LONG_CONTEXT_TOOLS)
@@ -632,11 +633,12 @@ def _tool_guidance_for_task(task_type: str, *, deep_research: bool = False) -> s
     if task_type == "external_lookup":
         if deep_research:
             return (
-                "Deep research is explicitly enabled for this turn. Prefer web_research first for multi-source evidence, then use web_fetch for known URLs. "
-                "Use web_search only for a cheap supplementary query, and escalate to browse_web only for dynamic or interactive pages."
+                "Deep research is explicitly enabled for this turn. Call web_research first and treat its saved research job/report as the primary artifact. "
+                "After web_research returns a usable job, stop searching and write a concise final answer; do not chain extra web_search/fetch_content calls unless the user explicitly asks to verify a specific URL or missing source. "
+                "Do not use web_fetch, browse_web, or browse_and_extract in deep research unless the user explicitly asks for an interactive browser task."
             )
         return (
-            "Use web_search/web_fetch for cheap fresh facts. Use web_research when the user asks to check multiple sources or prove claims. "
+            "Use web_search/fetch_content for cheap fresh facts and known URLs. Use web_research when the user asks to check multiple sources or prove claims. "
             "If cheap search results are thin or contradictory, you may escalate from web_search to web_research once this turn and pass a concise reason argument for the diagnostic audit. "
             "Escalate to browse_web only for dynamic or interactive pages."
         )

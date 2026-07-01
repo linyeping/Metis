@@ -81,7 +81,7 @@ def test_router_default_web_search_guidance_allows_audited_single_escalation() -
     )
 
     assert route.task_type == "external_lookup"
-    assert route.preferred_tools[:3] == ["web_search", "web_fetch", "web_research"]
+    assert route.preferred_tools[:4] == ["web_search", "fetch_content", "web_fetch", "web_research"]
     assert "once this turn" in route.tool_guidance
     assert "reason argument" in route.tool_guidance
 
@@ -149,7 +149,7 @@ def test_explicit_search_command_forces_external_lookup_even_over_code_keywords(
     )
 
     assert route.task_type == "external_lookup"
-    assert route.preferred_tools[:3] == ["web_search", "web_fetch", "web_research"]
+    assert route.preferred_tools[:4] == ["web_search", "fetch_content", "web_fetch", "web_research"]
 
 
 def test_explicit_search_command_chinese_alias() -> None:

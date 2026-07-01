@@ -26,7 +26,7 @@ _FILE_READ_TOOLS = {"read_file", "read_multiple_files"}
 _SHELL_TOOLS = {"execute_bash_command", "run_tests", "metis_runtime_run"}
 _SEARCH_TOOLS = {"grep_search", "glob_search", "semantic_search", "web_search"}
 _LIST_TOOLS = {"list_directory"}
-_BROWSER_TOOLS = {"browse_web", "browse_and_extract", "browser_read_page", "web_search", "web_research"}
+_BROWSER_TOOLS = {"browse_web", "browse_and_extract", "browser_read_page", "web_search", "web_research", "fetch_content"}
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,8 @@ _STRATEGY_MAP: Dict[str, str] = {
     "browse_and_extract": "browser_cap",
     "browser_read_page": "browser_cap",
     "web_search": "dedup_lines",
-    "web_research": "browser_cap",
+    "web_research": "web_research_summary",
+    "fetch_content": "web_content_summary",
 }
 
 
@@ -313,6 +314,51 @@ class ResultCompactor:
             + f"\n\n[... page text truncated, {len(result) - 5500} chars omitted ...]"
         )
 
+    def _strategy_web_research_summary(self, result: str) -> str:
+        """Deep research: keep the durable job payload and a compact evidence digest."""
+        if len(result) <= 2_800:
+            return result
+        head, body = _split_research_payload(result)
+        lines = [line for line in body.splitlines() if line.strip()]
+        keep: list[str] = []
+        for line in lines:
+            if (
+                line.startswith(("===", "Provider:", "Report status:", "Chat output policy:", "Search results:", "Evidence pages opened:", "Read failures:", "Partial evidence:"))
+                or line.startswith("[")
+                or line.startswith("URL:")
+            ):
+                keep.append(line[:220])
+            if len("\n".join(keep)) > 1_800:
+                break
+        compact = "\n".join(keep).strip() or body[:1_800].strip()
+        suffix = f"\n\n[Research evidence compacted for speed; full report is in the saved research job. Original result {len(result)} chars.]"
+        return "\n".join(part for part in [head, compact + suffix] if part)
+
+    def _strategy_web_content_summary(self, result: str) -> str:
+        """Fetched pages can be very large; keep metadata plus the first useful excerpt."""
+        if len(result) <= 3_200:
+            return result
+        head, body = _split_research_payload(result)
+        lines = body.splitlines()
+        meta: list[str] = []
+        text_lines: list[str] = []
+        in_text = False
+        for line in lines:
+            if not in_text and (
+                line.startswith(("===", "Provider:", "Source type:", "Final URL:", "Content type:", "Status:", "Length:", "Attempts:"))
+                or not line.strip()
+            ):
+                meta.append(line[:240])
+                continue
+            in_text = True
+            if line.strip():
+                text_lines.append(line[:260])
+            if len("\n".join(text_lines)) > 1_600:
+                break
+        compact = "\n".join(meta + ["", *text_lines]).strip()
+        suffix = f"\n\n[Fetched content compacted for speed; source text/report is persisted separately. Original result {len(result)} chars.]"
+        return "\n".join(part for part in [head, compact + suffix] if part)
+
     def _strategy_skill_keep(self, result: str) -> str:
         """Skills are loaded as durable run instructions; keep them intact."""
         return result
@@ -341,3 +387,11 @@ class ResultCompactor:
         if len(result) <= self._max_chars:
             return result
         return self._strategy_head_tail(result)
+
+
+def _split_research_payload(result: str) -> tuple[str, str]:
+    marker = "-->"
+    if result.lstrip().startswith("<!-- METIS_RESEARCH_JSON") and marker in result:
+        before, after = result.split(marker, 1)
+        return before + marker, after.strip()
+    return "", result

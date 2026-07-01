@@ -1125,26 +1125,40 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
             "max_results": _integer("条数上限，默认 5"),
             "region": _string("可选 ddgs 区域，如 us-en / cn-zh"),
             "timelimit": _string("可选时间过滤，如 d/w/m/y"),
+            "provider": _string("搜索 provider，默认 auto/ddgs；后续可接 Brave、Tavily、Exa 等"),
         },
         ["query"],
     ),
     (
         "web_research",
         """【WebResearch】免费深度网页研究：先用 ddgs 搜索，再读取少量 HTTPS 证据页并返回可引用证据。
-适合“查清楚/对比多个来源/需要证据链”的问题；普通实时事实先用 web_search，已知 URL 先用 web_fetch。不会处理登录、点击或 JS 动态页面，遇到这类页面再升级 browse_web。""",
+适合“查清楚/对比多个来源/需要证据链”的问题；普通实时事实先用 web_search，已知 URL 先用 fetch_content。
+调用成功后会保存 Markdown research job/report；拿到可用 job 后应直接总结，不要继续连环调用 web_search/fetch_content，除非用户明确要求补某个来源。不会处理登录、点击或 JS 动态页面，遇到这类页面再升级 browse_web。""",
         {
             "question": _string("研究问题，应具体到实体、年份、版本或判断标准"),
             "max_results": _integer("搜索结果上限，默认 5，最大 10"),
-            "max_pages": _integer("读取证据页数量，默认 3，最大 5"),
-            "max_chars_per_page": _integer("每个证据页返回字符数，默认 3000"),
+            "max_pages": _integer("读取证据页数量，默认 3，最大 5；为了速度优先用 2-3"),
+            "max_chars_per_page": _integer("每个证据页返回字符数，默认 1800，最大 2500；完整内容以报告/job 为准"),
             "reason": _string("可选；从普通搜索自升级到深度研究时写明简短原因，供本地诊断审计"),
+            "provider": _string("搜索 provider，默认 auto/ddgs"),
         },
         ["question"],
     ),
     (
+        "fetch_content",
+        """【FetchContent】统一内容读取入口：识别普通网页/GitHub blob/repo/tree/commit，读取内容并返回结构化来源 payload。
+优先用于已知 URL；普通网页会抽取 Markdown，GitHub blob 会走 raw 内容，GitHub repo/tree/commit 会 clone 到本地研究缓存并返回文件概览；正文过短或受阻时可尝试 Jina Reader fallback。旧 web_fetch 保留为兼容入口。""",
+        {
+            "url": _string("完整 https URL；GitHub blob URL 会自动转 raw"),
+            "max_chars": _integer("最大返回字符，默认 8000"),
+            "prefer_jina": _boolean("内容过短/受阻时是否尝试 Jina Reader fallback，默认 true"),
+        },
+        ["url"],
+    ),
+    (
         "web_fetch",
-        """【WebFetch】首选网页读取工具：抓取 HTTPS 静态页面并默认提取干净 Markdown 正文；禁止内网/localhost（SSRF 防护以实现为准）。
-适合标题、正文、新闻、文档页。页面明显是 SPA 空壳、需要点击/登录/JS 渲染时，再升级 browse_web。raw=true 才返回原始 HTML。""",
+        """【WebFetch】兼容网页读取工具：抓取 HTTPS 静态页面并默认提取干净 Markdown 正文；禁止内网/localhost（SSRF 防护以实现为准）。
+新任务优先用 fetch_content；只有需要旧参数兼容或 raw=true 原始 HTML 时再用 web_fetch。页面明显是 SPA 空壳、需要点击/登录/JS 渲染时，再升级 browse_web。""",
         {
             "url": _string("完整 https URL"),
             "limit": _integer("兼容旧参数；等价于 max_chars，默认 8000"),

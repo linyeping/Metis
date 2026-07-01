@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import type { FileChangePreview, FileChangeSummary } from '../lib/diffPreview';
-import type { FileChangeRevertItem, FontFamily, Language, SectionId, SettingsSection, ThemeName } from '../lib/types';
+import type { AppMode, FileChangeRevertItem, FontFamily, Language, SectionId, SettingsSection, ThemeName } from '../lib/types';
 import { themeMode } from '../lib/themes';
 
 type AppearanceMode = 'light' | 'dark';
 
-type RightRailMode = 'files' | 'tool' | 'web' | 'diff' | 'activity';
+type RightRailMode = 'files' | 'tool' | 'web' | 'diff' | 'activity' | 'research';
 
-export type WorkspaceCardId = 'web' | 'terminal' | 'files' | 'diff' | 'activity' | 'plan' | 'tool';
+export type WorkspaceCardId = 'web' | 'terminal' | 'files' | 'diff' | 'activity' | 'plan' | 'tool' | 'research';
 export type WorkspaceCardColumnId = 'left' | 'middle' | 'right';
 export type WorkspaceCardVisibility = Record<WorkspaceCardId, boolean>;
 
@@ -98,6 +98,7 @@ type AppDialogInput = Omit<AppDialogRequest, 'id' | 'tone' | 'icon'> & {
 };
 
 interface UiState {
+  appMode: AppMode;
   activeSection: SectionId;
   codeFontSize: number;
   fontFamily: FontFamily;
@@ -138,8 +139,11 @@ interface UiState {
   webPreviewTabs: WebPreviewTab[];
   activeWebPreviewId: string;
   webPreviewUrl: string;
+  activeResearchJobId: string;
+  activeResearchReportJobId: string;
   toasts: ToastNotice[];
   appDialog: AppDialogRequest | null;
+  setAppMode: (mode: AppMode) => void;
   setActiveSection: (section: SectionId) => void;
   setCodeFontSize: (size: number) => void;
   setFontFamily: (fontFamily: FontFamily) => void;
@@ -184,6 +188,8 @@ interface UiState {
   closeWebPreviewTab: (id: string) => void;
   updateWebPreviewTab: (id: string, patch: Partial<Omit<WebPreviewTab, 'id'>>) => void;
   setWebPreviewZoom: (id: string, zoom: number) => void;
+  setResearchJobPreview: (jobId?: string) => void;
+  setResearchReportView: (jobId?: string) => void;
   pushToast: (toast: ToastInput) => string;
   dismissToast: (id: string) => void;
   clearToastsForSession: (sessionId: string | null) => void;
@@ -227,6 +233,11 @@ function storedLanguage(): Language {
   return value || 'zh';
 }
 
+function storedAppMode(): AppMode {
+  const value = localStorage.getItem('metis.appMode') as AppMode | null;
+  return value === 'cowork' || value === 'code' ? value : 'chat';
+}
+
 function storedFontFamily(): FontFamily {
   const value = localStorage.getItem('metis.fontFamily') as FontFamily | null;
   return value || 'official-sans';
@@ -246,6 +257,7 @@ const defaultWorkspaceCardVisibility: WorkspaceCardVisibility = {
   activity: true,
   plan: true,
   tool: false,
+  research: false,
 };
 
 const defaultWorkspaceCardColumnWidths: WorkspaceCardColumnWidths = {
@@ -377,12 +389,14 @@ function cardForRightRailMode(mode: RightRailMode): WorkspaceCardId {
   if (mode === 'diff') return 'diff';
   if (mode === 'activity') return 'activity';
   if (mode === 'tool') return 'tool';
+  if (mode === 'research') return 'research';
   return 'files';
 }
 
 const initialWorkspaceCardVisibility = storedWorkspaceCardVisibility();
 
 export const useUiStore = create<UiState>(set => ({
+  appMode: storedAppMode(),
   activeSection: 'chat',
   codeFontSize: storedNumber('metis.codeFontSize', 12, 11, 16),
   fontFamily: storedFontFamily(),
@@ -403,7 +417,7 @@ export const useUiStore = create<UiState>(set => ({
   rightRailWidth: 780,
   rightRailMode: 'files',
   sidebarOpen: true,
-  sidebarWidth: storedNumber('metis.sidebarWidth', 284, 220, 520),
+  sidebarWidth: storedNumber('metis.sidebarWidth', 280, 220, 380),
   sideChatOpen: false,
   sideChatWidth: storedNumber('metis.sideChatWidth', 320, 286, 320),
   terminalOpen: false,
@@ -424,8 +438,14 @@ export const useUiStore = create<UiState>(set => ({
   webPreviewTabs: [],
   activeWebPreviewId: '',
   webPreviewUrl: '',
+  activeResearchJobId: '',
+  activeResearchReportJobId: '',
   toasts: [],
   appDialog: null,
+  setAppMode: appMode => {
+    localStorage.setItem('metis.appMode', appMode);
+    set({ appMode });
+  },
   setActiveSection: activeSection => set({ activeSection }),
   setCodeFontSize: size => {
     const codeFontSize = clampNumber(Math.round(size), 11, 16);
@@ -491,7 +511,7 @@ export const useUiStore = create<UiState>(set => ({
     }),
   setSidebarOpen: sidebarOpen => set({ sidebarOpen }),
   setSidebarWidth: width => {
-    const sidebarWidth = clampNumber(Math.round(width), 220, 520);
+    const sidebarWidth = clampNumber(Math.round(width), 220, 380);
     localStorage.setItem('metis.sidebarWidth', String(sidebarWidth));
     set({ sidebarWidth });
   },
@@ -734,6 +754,17 @@ export const useUiStore = create<UiState>(set => ({
     set(state => ({
       webPreviewTabs: state.webPreviewTabs.map(tab => (tab.id === id ? { ...tab, zoom: normalizeWebZoom(zoom) } : tab)),
     })),
+  setResearchJobPreview: (jobId = '') =>
+    set(state => ({
+      activeResearchJobId: jobId,
+      rightRailMode: 'research',
+      rightRailOpen: true,
+      workspaceCardVisibility: persistWorkspaceCardVisibility({
+        ...state.workspaceCardVisibility,
+        research: true,
+      }),
+    })),
+  setResearchReportView: (jobId = '') => set({ activeResearchReportJobId: jobId }),
   pushToast: toast => {
     const id = `toast-${Date.now()}-${++toastCounter}`;
     set(state => ({

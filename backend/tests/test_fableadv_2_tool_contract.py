@@ -68,6 +68,45 @@ def test_full_profile_restores_hidden_tools(monkeypatch) -> None:
     assert "read_file_chunk" in names
 
 
+def test_chat_surface_exposes_only_research_tools_even_when_router_prefers_workspace_tools(monkeypatch) -> None:
+    monkeypatch.setenv("METIS_TOOL_TIER", "1")
+    monkeypatch.delenv("METIS_TOOL_PROFILE", raising=False)
+    registry = _schema_registry(
+        set(LEAN_PROFILE)
+        | {
+            "fetch_content",
+            "preview_browser_observe",
+            "web_research",
+            "web_search",
+        }
+    )
+
+    schemas = _tool_schemas_for_config(
+        registry,
+        AgentConfig(
+            llm_backend="fake",
+            llm_model="fake",
+            deep_research=True,
+            surface_mode="chat",
+            routing_preferred_tools=[
+                "todo_write",
+                "read_file",
+                "execute_bash_command",
+                "preview_browser_observe",
+                "web_research",
+            ],
+        ),
+    )
+    names = _schema_names(schemas)
+
+    assert {"web_search", "web_research", "fetch_content"}.issubset(names)
+    assert "todo_write" not in names
+    assert "read_file" not in names
+    assert "write_file" not in names
+    assert "execute_bash_command" not in names
+    assert "preview_browser_observe" not in names
+
+
 def test_read_file_returns_line_numbers_and_offset_limit(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"

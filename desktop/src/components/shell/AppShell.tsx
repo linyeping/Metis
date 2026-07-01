@@ -2,15 +2,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useUiStore } from '../../store/uiStore';
-import { NavRail } from './NavRail';
 import { ChatSkeleton, SidebarSkeleton } from './Skeleton';
-import { Statusbar } from './Statusbar';
 import { Titlebar } from './Titlebar';
 
 interface AppShellProps {
   backendReady: boolean;
   reconnect?: { attempt: number; limit: number } | null;
-  model: string;
   pythonPath?: string;
   sidebar: ReactNode;
   main: ReactNode;
@@ -19,9 +16,13 @@ interface AppShellProps {
   overlays?: ReactNode;
 }
 
-export function AppShell({ backendReady, reconnect, model, pythonPath, sidebar, main, sideChat, rightRail, overlays }: AppShellProps) {
+export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, sideChat, rightRail, overlays }: AppShellProps) {
+  const appMode = useUiStore(state => state.appMode);
   const rightRailOpen = useUiStore(state => state.rightRailOpen);
   const rightRailWidth = useUiStore(state => state.rightRailWidth);
+  const workspaceCardVisibility = useUiStore(state => state.workspaceCardVisibility);
+  const toolPreview = useUiStore(state => state.toolPreview);
+  const setWorkspaceCardVisible = useUiStore(state => state.setWorkspaceCardVisible);
   const sidebarOpen = useUiStore(state => state.sidebarOpen);
   const sidebarWidth = useUiStore(state => state.sidebarWidth);
   const setSidebarWidth = useUiStore(state => state.setSidebarWidth);
@@ -33,13 +34,31 @@ export function AppShell({ backendReady, reconnect, model, pythonPath, sidebar, 
   const [sidebarLayoutHold, setSidebarLayoutHold] = useState(sidebarOpen);
   const sidebarLayoutOpen = sidebarOpen || sidebarLayoutHold;
   const sideChatLayoutOpen = sideChatOpen;
-  const rightRailLayoutOpen = rightRailOpen;
+  const visibleWorkspaceCards = Object.entries(workspaceCardVisibility)
+    .filter(([cardId, visible]) => visible && (cardId !== 'tool' || Boolean(toolPreview)))
+    .map(([cardId]) => cardId);
+  const effectiveVisibleWorkspaceCards = appMode === 'chat'
+    ? visibleWorkspaceCards.filter(cardId => cardId === 'research')
+    : visibleWorkspaceCards.filter(cardId => cardId !== 'research');
+  const rightRailEffectiveOpen = rightRailOpen && effectiveVisibleWorkspaceCards.length > 0;
+  const researchPopoverOpen = rightRailEffectiveOpen && effectiveVisibleWorkspaceCards.length === 1 && effectiveVisibleWorkspaceCards[0] === 'research';
+  const rightRailLayoutOpen = rightRailEffectiveOpen && !researchPopoverOpen;
   const panelSpring = { type: 'spring' as const, stiffness: 320, damping: 28 };
   const panelExit = { duration: 0.18, ease: [0.16, 1, 0.3, 1] as const };
 
   useEffect(() => {
     if (sidebarOpen) setSidebarLayoutHold(true);
   }, [sidebarOpen]);
+
+  useEffect(() => {
+    if (appMode === 'chat' || !workspaceCardVisibility.research) return;
+    setWorkspaceCardVisible('research', false);
+  }, [appMode, setWorkspaceCardVisible, workspaceCardVisibility.research]);
+
+  useEffect(() => {
+    if (appMode !== 'chat') return;
+    void window.metis?.previewSetBounds?.({ visible: false });
+  }, [appMode]);
 
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -114,8 +133,10 @@ export function AppShell({ backendReady, reconnect, model, pythonPath, sidebar, 
   return (
     <div
       className="app-shell"
-      data-right-rail={rightRailOpen}
+      data-app-mode={appMode}
+      data-right-rail={rightRailEffectiveOpen}
       data-right-rail-layout={rightRailLayoutOpen}
+      data-right-rail-popover={researchPopoverOpen}
       data-sidebar={sidebarOpen}
       data-sidebar-layout={sidebarLayoutOpen}
       data-side-chat={sideChatOpen}
@@ -128,9 +149,8 @@ export function AppShell({ backendReady, reconnect, model, pythonPath, sidebar, 
         } as CSSProperties
       }
     >
-      <Titlebar model={model} />
+      <Titlebar />
       <div className="shell-body">
-        <NavRail />
         <AnimatePresence initial={false}>
           <motion.aside
             className="secondary-panel"
@@ -193,21 +213,20 @@ export function AppShell({ backendReady, reconnect, model, pythonPath, sidebar, 
         <AnimatePresence initial={false}>
           <motion.aside
             className="right-rail"
-            data-open={rightRailOpen}
-            aria-hidden={!rightRailOpen}
+            data-open={rightRailEffectiveOpen}
+            aria-hidden={!rightRailEffectiveOpen}
             initial={false}
             animate={
-              rightRailOpen
+              rightRailEffectiveOpen
                 ? { x: 0, opacity: 1, visibility: 'visible' }
                 : { x: 16, opacity: 0, transition: panelExit, transitionEnd: { visibility: 'hidden' } }
             }
-            transition={rightRailOpen ? panelSpring : panelExit}
+            transition={rightRailEffectiveOpen ? panelSpring : panelExit}
           >
             {rightRail}
           </motion.aside>
         </AnimatePresence>
       </div>
-      <Statusbar backendReady={backendReady} reconnect={reconnect} model={model} pythonPath={pythonPath} />
       {overlays}
     </div>
   );

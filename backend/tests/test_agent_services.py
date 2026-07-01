@@ -12,6 +12,7 @@ from backend.runtime.agent_services import (
     generate_prompt_suggestions,
     generate_session_title,
     generate_tool_label,
+    should_auto_title,
     verification_command_policy,
 )
 from backend.runtime.context_control import build_compact_state_v2, model_context_for_history
@@ -80,6 +81,13 @@ def test_tool_label_title_summary_suggestions_and_verifier_report() -> None:
     )
     assert report["mode"] == "verification_only"
     assert report["verdict"] == "PASS"
+
+
+def test_session_title_placeholders_are_auto_titled() -> None:
+    assert should_auto_title("新会话") is True
+    assert should_auto_title("Chat 2026-06-30 01:23") is True
+    assert should_auto_title("Metis Chat") is True
+    assert should_auto_title("修复登录按钮") is False
 
 
 def test_verification_command_policy_blocks_write_like_commands() -> None:

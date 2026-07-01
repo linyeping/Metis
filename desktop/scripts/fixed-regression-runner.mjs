@@ -95,7 +95,7 @@ const suites = [
     id: 'desktop-contracts',
     title: '桌面 wiring contract / UI integration',
     command: 'node',
-    args: ['--test', 'scripts/desktop-contract-tests.mjs'],
+    args: ['--test', 'scripts/desktop-contract-tests.mjs', 'electron/preview-state.test.cjs'],
     cwd: desktopRoot,
   },
 ];

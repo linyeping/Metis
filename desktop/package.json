@@ -19,7 +19,7 @@
     "dist:win": "npm run test:fixed-regression && npm run build-backend && npm run build && electron-builder --win nsis",
     "perf:desktop": "node scripts/desktop-perf-runner.mjs",
     "smoke:desktop": "node scripts/desktop-smoke-runner.mjs",
-    "test:contracts": "node --test scripts/desktop-contract-tests.mjs electron/security.test.cjs electron/data-root.test.cjs electron/backend.test.cjs",
+    "test:contracts": "node --test scripts/desktop-contract-tests.mjs electron/security.test.cjs electron/data-root.test.cjs electron/backend.test.cjs electron/preview-state.test.cjs",
     "test:fixed-regression": "node scripts/fixed-regression-runner.mjs",
     "test:fixed-regression:list": "node scripts/fixed-regression-runner.mjs --list",
     "test": "vitest run",
@@ -29,6 +29,7 @@
   "dependencies": {
     "@assistant-ui/react": "^0.14.14",
     "@assistant-ui/react-markdown": "^0.14.1",
+    "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.9",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.17.0",
@@ -37,6 +38,7 @@
     "react-markdown": "^10.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
+    "shiki": "^4.3.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

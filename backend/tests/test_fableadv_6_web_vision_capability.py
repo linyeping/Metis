@@ -105,9 +105,10 @@ def test_openai_tool_call_parser_obeys_parallel_capability() -> None:
 def test_lean_profile_restores_browser_path_and_prompt_guides_web_strategy() -> None:
     prompt = compile_prompt_runtime("Base", include_repo_map_hint=False).final_system_prompt
 
+    assert "fetch_content" in LEAN_PROFILE
     assert "web_fetch" in LEAN_PROFILE
     assert "browse_web" in LEAN_PROFILE
-    assert "Use web_fetch first" in prompt
+    assert "Use fetch_content first" in prompt
     assert "Use browse_web only" in prompt
 
 

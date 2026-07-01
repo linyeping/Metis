@@ -18,12 +18,14 @@ export function useTheme(): void {
 
   useEffect(() => {
     const values = themes[theme];
+    const mode = themeMode[theme] ?? 'dark';
     const root = document.documentElement;
     root.dataset.theme = theme;
-    root.dataset.mode = themeMode[theme] ?? 'dark';
+    root.dataset.mode = mode;
     for (const [key, value] of Object.entries(values)) {
       root.style.setProperty(key, value);
     }
+    void window.metis?.setNativeTheme?.(mode);
   }, [theme]);
 
   useEffect(() => {

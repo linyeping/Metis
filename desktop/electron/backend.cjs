@@ -40,6 +40,27 @@ function decryptApiKeyFromConfig() {
   }
   return ''
 }
+
+/**
+ * Decrypt stored connector tokens via Electron safeStorage and write them into
+ * the backend env (under each connector's token_env), without overwriting any
+ * value already present. Mirrors how the LLM api key becomes METIS_LLM_API_KEY.
+ * Best-effort: any failure leaves the env untouched.
+ */
+async function injectConnectorTokens(backendEnv) {
+  try {
+    const { app, safeStorage } = require('electron')
+    const { decryptStoredConnectorTokens } = require('./oauth.cjs')
+    const tokens = await decryptStoredConnectorTokens({ app, safeStorage })
+    for (const [envVar, token] of Object.entries(tokens)) {
+      if (envVar && token && !backendEnv[envVar]) {
+        backendEnv[envVar] = token
+      }
+    }
+  } catch {
+    // best-effort; connectors simply stay unconnected from the backend's view
+  }
+}
 let fakeServer = null
 let fakeServerPort = null
 let fakeDeskEnabled = true
@@ -3617,6 +3638,10 @@ async function startBackend(emit = () => {}) {
   if (decryptedKey && !backendEnv.METIS_LLM_API_KEY) {
     backendEnv.METIS_LLM_API_KEY = decryptedKey
   }
+
+  // Inject connector tokens so backend/runtime/connectors/token_store.py can
+  // read them. Desktop owns safeStorage; the backend can't decrypt blobs itself.
+  await injectConnectorTokens(backendEnv)
 
   child = spawn(exe, args, {
     cwd,

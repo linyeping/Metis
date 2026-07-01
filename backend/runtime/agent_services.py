@@ -279,6 +279,8 @@ def should_auto_title(current_title: str) -> bool:
     value = str(current_title or "").strip()
     if not value:
         return True
+    if value in {"新会话", "新的会话", "未命名会话", "Untitled", "Untitled chat"}:
+        return True
     return bool(
         re.match(r"^(Chat|New chat|Metis Chat)(\s+\d{4}-\d{2}-\d{2}.*)?$", value, re.I)
         or re.match(r"^Chat\s+\d{4}[/.-]\d{1,2}[/.-]\d{1,2}", value, re.I)

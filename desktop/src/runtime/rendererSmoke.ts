@@ -780,25 +780,27 @@ async function verifyTrueSessionResume(checks: SmokeCheck[]): Promise<void> {
 }
 
 async function verifyContextWindowQuota(checks: SmokeCheck[]): Promise<void> {
-  useUiStore.getState().setSidebarOpen(true);
-  await waitForCondition(() => Boolean(document.querySelector('.context-window-card')), 'context window card visible');
-  const card = document.querySelector<HTMLElement>('.context-window-card');
+  await waitForCondition(() => Boolean(document.querySelector('.composer-context-orb')), 'context orb visible');
+  const orb = document.querySelector<HTMLButtonElement>('.composer-context-orb');
+  orb?.click();
+  await waitForCondition(() => Boolean(document.querySelector('.composer-context-popover')), 'context popover visible');
+  const popover = document.querySelector<HTMLElement>('.composer-context-popover');
   record(
     checks,
-    'new67-context-window-meter-visible',
-    Boolean(card?.textContent?.includes('Context window') && card.textContent.includes('1.0M')),
-    card?.textContent || '',
+    'new67-context-orb-meter-visible',
+    Boolean(popover?.textContent?.includes('1.0M')),
+    popover?.textContent || '',
   );
-  useChatStore.setState({ usage: { promptTokens: 920000, completionTokens: 10000, totalTokens: 930000 } });
+  useChatStore.setState({ contextLedger: null, usage: { promptTokens: 920000, completionTokens: 10000, totalTokens: 930000 } });
   await waitForCondition(
-    () => document.querySelector('.context-window-card')?.getAttribute('data-level') === 'danger',
-    'context window danger threshold',
+    () => document.querySelector('.composer-context-orb')?.getAttribute('data-level') === 'red',
+    'context orb danger threshold',
   );
   record(
     checks,
-    'new67-context-window-danger-threshold',
-    document.querySelector('.context-window-card')?.getAttribute('data-level') === 'danger',
-    document.querySelector('.context-window-card')?.textContent || '',
+    'new67-context-orb-danger-threshold',
+    document.querySelector('.composer-context-orb')?.getAttribute('data-level') === 'red',
+    document.querySelector('.composer-context-popover')?.textContent || '',
   );
 }
 
@@ -817,17 +819,14 @@ async function verifyContextCompactionControl(checks: SmokeCheck[]): Promise<voi
             createdAt: now + index,
           })),
   }));
-  await waitForCondition(() => Boolean(document.querySelector('.context-window-card')), 'context compact card visible');
-  await waitForCondition(
-    () => document.querySelector<HTMLButtonElement>('.context-compact-button')?.disabled === false,
-    'context compact button enabled',
-  );
-  const button = document.querySelector<HTMLButtonElement>('.context-compact-button');
+  await waitForCondition(() => Boolean(document.querySelector('.composer-context-orb')), 'context compact orb visible');
+  document.querySelector<HTMLButtonElement>('.composer-context-orb')?.click();
+  await waitForCondition(() => Boolean(document.querySelector('.composer-context-popover')), 'context compact popover visible');
   record(
     checks,
-    'new69-context-compact-button-visible',
-    Boolean(button && button.textContent?.includes('压缩上下文')),
-    document.querySelector('.context-window-card')?.textContent || '',
+    'new69-context-compact-button-removed',
+    !document.querySelector('.composer-context-compact') && !(document.querySelector('.composer-context-popover')?.textContent || '').includes('压缩上下文'),
+    document.querySelector('.composer-context-popover')?.textContent || '',
   );
   const messagesBeforeInlineAnimation = useChatStore.getState().messages.length;
   useChatStore.setState({ compacting: true });
@@ -871,18 +870,20 @@ async function verifyContextCompactionControl(checks: SmokeCheck[]): Promise<voi
   );
   useChatStore.setState({ compacting: false });
   await waitForCondition(() => !document.querySelector('.inline-compaction-row'), 'inline compacting visual clears');
-  button?.click();
+  const compactPromise = useChatStore.getState().compactContext('');
   await waitForCondition(
-    () => (document.querySelector('.context-compact-status')?.textContent || '').includes('已压缩'),
+    () => Boolean(useChatStore.getState().compactStatus?.ok),
     'context compact status done',
   );
-  const statusText = document.querySelector('.context-compact-status')?.textContent || '';
+  const status = useChatStore.getState().compactStatus;
+  const statusText = `${status?.beforeCount || 0} -> ${status?.afterCount || 0} ${status?.summaryPreview || ''}`;
   record(
     checks,
     'new69-context-compact-status-visible',
     statusText.includes('8 -> 5') && statusText.includes('NEW-69 smoke'),
     statusText,
   );
+  await compactPromise;
   await waitForCondition(
     () => useChatStore.getState().messages.some(message => message.role === 'system' && message.content.includes('Context Summary')),
     'compacted system summary loaded',
@@ -1468,7 +1469,7 @@ async function verifyComposerPermissionAccess(checks: SmokeCheck[]): Promise<voi
   record(
     checks,
     'new80-composer-circular-send-button',
-    Boolean(sendRect && Math.abs(sendRect.width - sendRect.height) <= 2 && sendRect.width >= 34),
+    Boolean(sendRect && Math.abs(sendRect.width - sendRect.height) <= 2 && sendRect.width >= 22),
     sendRect ? `${sendRect.width}x${sendRect.height}` : 'missing send button',
   );
   record(
@@ -1479,9 +1480,8 @@ async function verifyComposerPermissionAccess(checks: SmokeCheck[]): Promise<voi
   );
   record(
     checks,
-    'new81-sidebar-folder-icon-in-search-row',
-    Boolean(document.querySelector('.sidebar-search-row .sidebar-folder-button')) &&
-      !(document.querySelector('.sidebar-search-row .sidebar-folder-button')?.textContent || '').trim(),
+    'new81-chat-sidebar-folder-icon-removed',
+    useUiStore.getState().appMode !== 'chat' || !document.querySelector('.sidebar-search-row .sidebar-folder-button'),
     document.querySelector('.sidebar-search-row')?.innerHTML || 'missing sidebar search row',
   );
   record(
@@ -1809,7 +1809,7 @@ async function verifyDeveloperWorkflowPolish(checks: SmokeCheck[]): Promise<void
     useUiStore.getState().webPreviewUrl,
   );
 
-  const assistantBubble = document.querySelector<HTMLElement>('.assistant-bubble');
+  const assistantBubble = document.querySelector<HTMLElement>('.assistant-message-stack');
   const markdownBody = document.querySelector<HTMLElement>('.markdown-body');
   const bubbleStyle = assistantBubble ? getComputedStyle(assistantBubble) : null;
   const markdownStyle = markdownBody ? getComputedStyle(markdownBody) : null;
@@ -2298,9 +2298,9 @@ async function verifyIndependentSideChat(checks: SmokeCheck[]): Promise<void> {
   );
 
   ui.setSideChatOpen(false);
-  await waitForCondition(() => Boolean(document.querySelector('.side-chat-rail[data-open="false"]')), 'NEW-98 side chat closes before titlebar toggle test');
+  await waitForCondition(() => Boolean(document.querySelector('.side-chat-rail[data-open="false"]')), 'NEW-98 side chat closes before titlebar removal test');
   const titlebarChatButton = document.querySelector<HTMLButtonElement>('.titlebar-chat-toggle');
-  record(checks, 'new98-titlebar-chat-toggle-visible', Boolean(titlebarChatButton), document.querySelector('.titlebar-actions')?.innerHTML || '');
+  record(checks, 'new98-titlebar-chat-toggle-removed', !titlebarChatButton, document.querySelector('.titlebar-actions')?.innerHTML || '');
   record(
     checks,
     'new98-titlebar-settings-button-removed',
@@ -2313,11 +2313,11 @@ async function verifyIndependentSideChat(checks: SmokeCheck[]): Promise<void> {
     !document.querySelector('.status-chat-launcher'),
     document.querySelector('.statusbar')?.textContent || '',
   );
-  titlebarChatButton?.click();
+  ui.setSideChatOpen(true);
   await waitForCondition(() => Boolean(document.querySelector('.side-chat-rail[data-open="true"] .side-chat-pane')), 'NEW-98 side chat rail opens');
   record(
     checks,
-    'new98-side-chat-rail-opens-from-titlebar',
+    'new98-side-chat-rail-opens-without-titlebar',
     Boolean(document.querySelector('.side-chat-rail[data-open="true"] .side-chat-history')),
     document.querySelector('.side-chat-rail')?.textContent || 'missing side chat rail',
   );

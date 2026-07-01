@@ -314,6 +314,8 @@ function booleanValue(value: unknown, fallback = false): boolean {
 function contextLedgerValue(payload: UnknownRecord): ContextLedger {
   const systemBreakdown = recordValue(value(payload, {}, 'system_breakdown', 'systemBreakdown'));
   const schemaBreakdown = recordValue(value(payload, {}, 'schema_breakdown', 'schemaBreakdown'));
+  const systemDetails = recordValue(value(payload, {}, 'system_details', 'systemDetails'));
+  const schemaDetails = recordValue(value(payload, {}, 'schema_details', 'schemaDetails'));
   return {
     systemTokens: numberValue(value(payload, {}, 'system_tokens', 'systemTokens')),
     schemaTokens: numberValue(value(payload, {}, 'schema_tokens', 'schemaTokens')),
@@ -338,7 +340,29 @@ function contextLedgerValue(payload: UnknownRecord): ContextLedger {
       mcp: numberValue(value(schemaBreakdown, {}, 'mcp')),
       builtin: numberValue(value(schemaBreakdown, {}, 'builtin')),
     },
+    systemDetails: {
+      systemPrompt: ledgerDetailsValue(value(systemDetails, {}, 'system_prompt', 'systemPrompt')),
+      skills: ledgerDetailsValue(value(systemDetails, {}, 'skills')),
+      memory: ledgerDetailsValue(value(systemDetails, {}, 'memory')),
+    },
+    schemaDetails: {
+      mcp: ledgerDetailsValue(value(schemaDetails, {}, 'mcp')),
+      builtin: ledgerDetailsValue(value(schemaDetails, {}, 'builtin')),
+    },
   };
+}
+
+function ledgerDetailsValue(input: unknown): Array<{ name: string; tokens: number }> {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map(item => {
+      const row = recordValue(item);
+      return {
+        name: stringValue(value(row, {}, 'name')),
+        tokens: numberValue(value(row, {}, 'tokens')),
+      };
+    })
+    .filter(item => item.name && item.name !== '0' && item.tokens > 0);
 }
 
 function isDoneTodoStatus(status: unknown): boolean {

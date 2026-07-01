@@ -85,7 +85,7 @@ describe('buildCommands', () => {
   it('includes session quick-switch commands', () => {
     const commands = buildCommands(makeContext({
       sessions: [
-        { id: 's1', title: 'Chat 1', workspaceId: 'w1', messageCount: 3, createdAt: 1, updatedAt: 2 },
+        { id: 's1', title: 'Chat 1', workspaceId: 'w1', mode: 'chat', messageCount: 3, createdAt: 1, updatedAt: 2 },
       ],
     }));
     const sessionCmd = commands.find(c => c.id === 'session.s1');
@@ -116,6 +116,7 @@ describe('buildCommands', () => {
       id: `s${i}`,
       title: `Session ${i}`,
       workspaceId: 'w1',
+      mode: 'chat',
       messageCount: i,
       createdAt: i,
       updatedAt: i,
