@@ -560,7 +560,12 @@ def _looks_like_artifact_workflow_task(text: str) -> bool:
         return False
     if _has_any(text, {"实验报告", "课程报告", "docx", "pdf", "word", "wps", "作业", "图表"}):
         return True
-    return _has_any(text, {"跑代码", "运行代码", "写代码", "matlab", "python", "仿真", "数据分析"})
+    if _has_any(text, {"跑代码", "运行代码", "写代码", "matlab", "仿真", "数据分析"}):
+        return True
+    # "python" 单独出现不触发；需同时包含运行/执行意图或报告类关键词
+    if "python" in text and _has_any(text, {"运行", "跑", "执行", "生成图表", "报告", "数据分析"}):
+        return True
+    return False
 
 
 def _requires_desktop_control(text: str) -> bool:

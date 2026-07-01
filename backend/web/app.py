@@ -182,6 +182,7 @@ def _is_local_origin(origin: str) -> bool:
 _FRONTEND_INDEX = os.path.join(_REPO_ROOT, "desktop", "dist", "index.html")
 _ASSETS_DIR = os.path.join(_BACKEND_ROOT, "assets")
 _runtime_state = RuntimeState()
+_audit_write_lock = threading.Lock()
 
 from backend.web import helpers as _helpers  # noqa: E402
 _helpers.init_shared_state(_runtime_state)
@@ -801,8 +802,9 @@ def _append_permission_audit(entry: Dict[str, Any], workspace_root: str = "") ->
         "mode": str(entry.get("mode") or _runtime_state.execution_mode or "auto"),
     }
     os.makedirs(os.path.dirname(paths["audit"]), exist_ok=True)
-    with open(paths["audit"], "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(audit, ensure_ascii=False, sort_keys=True) + "\n")
+    with _audit_write_lock:
+        with open(paths["audit"], "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(audit, ensure_ascii=False, sort_keys=True) + "\n")
     return audit
 
 

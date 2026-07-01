@@ -29,10 +29,17 @@ export function toThreadMessage(message: ChatMessage): ThreadMessage {
   const createdAt = new Date(message.createdAt || Date.now());
 
   if (message.role === 'user') {
+    // content 可能是数组（含附件时由 buildUserDisplayContent 构建）
+    const textContent = Array.isArray(message.content)
+      ? message.content
+          .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+          .map(part => part.text)
+          .join('')
+      : String(message.content || '');
     return {
       id: message.id,
       role: 'user',
-      content: [{ type: 'text', text: message.content }],
+      content: [{ type: 'text', text: textContent }],
       attachments: [],
       createdAt,
       metadata: { custom: { attachments: message.attachments ?? [] } },

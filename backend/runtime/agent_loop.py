@@ -1366,6 +1366,7 @@ def run(
                         edit_guard=edit_guard,
                     )
                     logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
+                    tool_repair_attempts = 0
                     tool_call_count += 1
                     _record_tool_progress(registry, tool_call, result, verification_tracker)
                     results.append((tool_call, result))
@@ -2083,6 +2084,7 @@ def run_stream(
                     yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
                     return
                 tool_call_count += 1
+                tool_repair_attempts = 0
                 logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
                 _record_tool_progress(registry, tool_call, result, verification_tracker)
                 results.append((tool_call, result))

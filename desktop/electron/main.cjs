@@ -106,8 +106,15 @@ app.commandLine.appendSwitch('disable-gpu-compositing')
 app.commandLine.appendSwitch('use-gl', 'swiftshader')
 app.commandLine.appendSwitch('enable-unsafe-swiftshader')
 app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor')
-// P0 修复：本机/目标机用 swiftshader 软件渲染，沙箱开启时渲染器会崩(0x80000003→黑屏)。
-// dev 脚本一直带 --no-sandbox 所以 dev 正常；打包版必须同样关闭沙箱，否则双击黑屏。
+// --no-sandbox is required: swiftshader soft-rendering crashes the renderer
+// with sandbox enabled (exit code 0x80000003 → black screen on packaged builds).
+// Security posture with --no-sandbox:
+//   KEPT:   contextIsolation:true  → JS context between renderer and preload is isolated
+//   KEPT:   nodeIntegration:false  → renderer cannot directly access Node.js APIs
+//   KEPT:   webSecurity:true       → same-origin policy enforced
+//   LOST:   OS-level process sandbox (ChromeSandbox) → renderer runs without OS-level jail
+// Practical risk: an XSS in renderer JS still cannot reach Node.js (contextIsolation blocks it).
+// Tracking: remove --no-sandbox once Electron adds targeted swiftshader sandbox exemption.
 app.commandLine.appendSwitch('no-sandbox')
 app.commandLine.appendSwitch('disable-gpu-sandbox')
 
