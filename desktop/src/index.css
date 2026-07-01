@@ -1955,6 +1955,56 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   display: none;
 }
 
+/* ── Chat Aurora 极光背景 ─────────────────────────────────────────────────── */
+.chat-aurora-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+.chat-aurora-backdrop iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 1;
+  background: var(--bg);
+}
+.chat-aurora-backdrop[data-visible='false'] {
+  visibility: hidden;
+  opacity: 0;
+}
+.chat-aurora-backdrop[data-visible='false'] iframe {
+  display: none;
+}
+
+/* ── Code Grid 数据网格背景 ──────────────────────────────────────────────── */
+.code-grid-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+.code-grid-backdrop iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 1;
+  background: var(--bg);
+}
+.code-grid-backdrop[data-visible='false'] {
+  visibility: hidden;
+  opacity: 0;
+}
+.code-grid-backdrop[data-visible='false'] iframe {
+  display: none;
+}
+
 /* FABLEADV-33: 底部 dock 悬浮叠在消息流上方 → composer 磨砂玻璃后能透出滚动内容。
    dock 本身点击穿透，只有内部的 composer/状态条接收点击（侧边留白让消息可点/可滚）。 */
 .thread-dock {
@@ -1969,7 +2019,9 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   background: var(--bg);
 }
 
-.thread-shell[data-mode='cowork'] .thread-dock {
+.thread-shell[data-mode='chat'] .thread-dock,
+.thread-shell[data-mode='cowork'] .thread-dock,
+.thread-shell[data-mode='code'] .thread-dock {
   background: transparent;
 }
 

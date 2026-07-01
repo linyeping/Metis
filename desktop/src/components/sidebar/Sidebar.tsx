@@ -1,6 +1,7 @@
 import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
 import { createElement, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
 import { getActiveSessionRun } from '../../lib/api';
+import { navigateToSession } from '../../lib/modeNavigation';
 import type { ChatRunStatus, SessionMeta, Workspace } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
@@ -117,10 +118,8 @@ export function Sidebar() {
                   key: session.id,
                   active: session.id === activeSessionId,
                   deleteSessionById,
-                  loadChatSession,
                   renameSessionById,
                   runStatus: runStatuses[session.id] || '',
-                  selectSession,
                   session,
                 })
               )}
@@ -146,7 +145,6 @@ export function Sidebar() {
                 renameSessionById,
                 removeWorkspaceById,
                 runStatuses,
-                selectSession,
                 selectWorkspace,
                 setMenu,
                 setOpen,
@@ -173,7 +171,6 @@ interface WorkspaceGroupProps {
   setMenu: Dispatch<SetStateAction<string | null>>;
   createChat: (workspaceId?: string) => Promise<void>;
   selectWorkspace: (workspaceId: string) => Promise<void>;
-  selectSession: (sessionId: string) => Promise<void>;
   deleteSessionById: (sessionId: string) => Promise<void>;
   renameSessionById: (sessionId: string, title: string) => Promise<void>;
   clearWorkspace: (workspaceId: string) => Promise<void>;
@@ -195,7 +192,6 @@ function WorkspaceGroup({
   renameSessionById,
   removeWorkspaceById,
   runStatuses,
-  selectSession,
   selectWorkspace,
   setMenu,
   setOpen,
@@ -214,7 +210,8 @@ function WorkspaceGroup({
           type="button"
           onClick={async () => {
             setOpen(state => ({ ...state, [id]: !isOpen }));
-            if (workspace.id) {
+            // 只在工作区尚未激活时才切换，避免每次展开/折叠都触发 selectWorkspace
+            if (workspace.id && !isActive) {
               await selectWorkspace(workspace.id);
               await loadChatSession(useSessionStore.getState().activeSessionId);
             }
@@ -262,10 +259,8 @@ function WorkspaceGroup({
               key: session.id,
               active: session.id === activeSessionId,
               deleteSessionById,
-              loadChatSession,
               renameSessionById,
               runStatus: runStatuses[session.id] || '',
-              selectSession,
               session,
             }),
           )}
@@ -278,21 +273,19 @@ function WorkspaceGroup({
 function SessionRow({
   active,
   deleteSessionById,
-  loadChatSession,
   renameSessionById,
   runStatus,
-  selectSession,
   session,
 }: {
   active: boolean;
   session: SessionMeta;
   runStatus: ChatRunStatus;
-  selectSession: (sessionId: string) => Promise<void>;
   deleteSessionById: (sessionId: string) => Promise<void>;
   renameSessionById: (sessionId: string, title: string) => Promise<void>;
-  loadChatSession: (sessionId: string | null, options?: { force?: boolean }) => Promise<void>;
 }) {
   const t = useT();
+  const appMode = useUiStore(state => state.appMode);
+  const loadChatSession = useChatStore(state => state.loadSession);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState(session.title || 'Metis Chat');
 
@@ -347,9 +340,9 @@ function SessionRow({
           className="session-main"
           type="button"
           title={`${session.messageCount} ${t('条消息')}`}
-          onClick={async () => {
-            await selectSession(session.id);
-            await loadChatSession(session.id);
+          onClick={() => {
+            const targetMode = (session.mode as import('../../lib/types').AppMode) || appMode;
+            navigateToSession(session.id, targetMode);
           }}
         >
           <span

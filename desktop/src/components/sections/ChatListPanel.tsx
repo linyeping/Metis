@@ -1,5 +1,6 @@
 import { Clock, MessageSquare, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { navigateToSession } from '../../lib/modeNavigation';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
 import { useChatStore } from '../../store/chatStore';
@@ -30,8 +31,8 @@ export function ChatListPanel() {
 
   const selectedSession = useMemo(() => chatSessions.find(s => s.id === selectedId), [chatSessions, selectedId]);
 
-  const openSession = async (id: string) => {
-    await loadChatSession(id);
+  const openSession = (id: string) => {
+    navigateToSession(id, 'chat');
     setActiveSection('chat');
   };
 

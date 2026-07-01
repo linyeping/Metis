@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metis Chat Dot Wave</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background:#0a0a0a; }
+        #container { position: absolute; top:0; left:0; width:100%; height:100%; z-index:1; }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<script>
+    // ── Chat 水面干涉：多波源同心圆叠加干涉 ─────────────────────────────────
+    // 基于 cowork-dotwave-b.html，全部参数完全相同，只改 wave 函数。
+    // 5个缓慢漂移的波源各自发出同心圆，相互叠加产生有机水面干涉图样。
+
+    const container = document.getElementById('container');
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') === 'light' ? 'light' : 'dark';
+
+    function normalizeHex(value, fallback) {
+        const text = String(value || '').trim();
+        if (/^#[0-9a-f]{6}$/i.test(text)) return text;
+        if (/^#[0-9a-f]{3}$/i.test(text))
+            return `#${text[1]}${text[1]}${text[2]}${text[2]}${text[3]}${text[3]}`;
+        return fallback;
+    }
+    function hexToRgb(hex) {
+        const n = normalizeHex(hex, '#ffffff').slice(1);
+        return { r: parseInt(n.slice(0,2),16), g: parseInt(n.slice(2,4),16), b: parseInt(n.slice(4,6),16) };
+    }
+    function mixRgb(a, b, t) {
+        return { r:Math.round(a.r+(b.r-a.r)*t), g:Math.round(a.g+(b.g-a.g)*t), b:Math.round(a.b+(b.b-a.b)*t) };
+    }
+
+    const fallback = mode === 'light'
+        ? { bg:'#f5f3ef', text:'#2c2a26', accent:'#4a6b5a', border:'#c9c4b8' }
+        : { bg:'#0a0a0e', text:'#e8e6ec', accent:'#e8b96a', border:'#2a2a33' };
+    const palette = {
+        bg:     normalizeHex(params.get('bg'),     fallback.bg),
+        text:   normalizeHex(params.get('text'),   fallback.text),
+        accent: normalizeHex(params.get('accent'), fallback.accent),
+        border: normalizeHex(params.get('border'), fallback.border),
+    };
+
+    document.documentElement.style.background = palette.bg;
+    document.body.style.background = palette.bg;
+
+    const textRgb   = hexToRgb(palette.text);
+    const accentRgb = hexToRgb(palette.accent);
+    const borderRgb = hexToRgb(palette.border);
+    const dotRgb    = mode === 'light' ? mixRgb(textRgb, accentRgb, 0.28) : mixRgb(textRgb, accentRgb, 0.2);
+    const ghostRgb  = mixRgb(dotRgb, borderRgb, mode === 'light' ? 0.28 : 0.18);
+
+    // ── CONFIG：与 Cowork 完全相同 ──────────────────────────────────────────
+    const CONFIG = {
+        dotSpacing:     13.5,
+        speed:          0.92,
+        noiseScale:     0.0026,
+        contrastPower:  5.6,
+        brightnessGain: mode === 'light' ? 1.12 : 1.35,
+        maxAlpha:       mode === 'light' ? 0.34 : 0.72,
+        minAlpha:       mode === 'light' ? 0.018 : 0.026,
+    };
+
+    // ── 5个缓慢漂移的波源 ────────────────────────────────────────────────────
+    // bx/by: 基础位置（0~1）, ax/ay: 漂移幅度, px/py: 初始相位
+    // sp: 漂移速度, freq: 空间频率, amp: 振幅
+    const SOURCES = [
+        { bx:0.22, by:0.30, ax:0.10, ay:0.08, px:0.0, py:1.2, sp:0.000095, freq:7.2, amp:0.52 },
+        { bx:0.78, by:0.25, ax:0.08, ay:0.10, px:2.1, py:0.4, sp:0.000075, freq:6.5, amp:0.48 },
+        { bx:0.50, by:0.72, ax:0.12, ay:0.07, px:1.0, py:2.8, sp:0.000110, freq:7.8, amp:0.55 },
+        { bx:0.18, by:0.70, ax:0.07, ay:0.09, px:3.3, py:0.9, sp:0.000085, freq:6.0, amp:0.40 },
+        { bx:0.82, by:0.68, ax:0.09, ay:0.06, px:0.7, py:3.1, sp:0.000100, freq:7.5, amp:0.44 },
+    ];
+
+    let canvas = null, context = null, points = [];
+    let width = window.innerWidth, height = window.innerHeight;
+
+    function buildCanvas() {
+        if (!canvas) {
+            canvas = document.createElement('canvas');
+            canvas.style.position = 'absolute';
+            canvas.style.inset = '0';
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            container.appendChild(canvas);
+            context = canvas.getContext('2d');
+        }
+        const pr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width  = Math.round(width  * pr);
+        canvas.height = Math.round(height * pr);
+        context.setTransform(pr, 0, 0, pr, 0, 0);
+    }
+
+    function buildPoints() {
+        points = [];
+        for (let y = -CONFIG.dotSpacing*2; y <= height+CONFIG.dotSpacing*2; y += CONFIG.dotSpacing) {
+            let colIndex = 0;
+            for (let x = -CONFIG.dotSpacing*2; x <= width+CONFIG.dotSpacing*2; x += CONFIG.dotSpacing) {
+                points.push({ x, y, colIndex });
+                colIndex++;
+            }
+        }
+    }
+
+    function draw(timestamp) {
+        requestAnimationFrame(draw);
+        const t = timestamp * 0.00105 * CONFIG.speed;
+        context.clearRect(0, 0, width, height);
+
+        for (const point of points) {
+            const px = (point.x - width  / 2) * CONFIG.noiseScale * 4.2;
+            const py = (point.y - height / 2) * CONFIG.noiseScale * 4.2;
+
+            // warp：与 Cowork 完全相同
+            const warpX = Math.sin(py*0.92+t*0.54)*0.42 + Math.cos(px*0.58-t*0.38)*0.26;
+            const warpY = Math.cos(px*0.84-t*0.46)*0.34 - Math.sin(py*0.62+t*0.42)*0.24;
+
+            // ── wave：多波源水面干涉（唯一与 Cowork 不同的地方）─────────────
+            let wave = 0;
+            for (const src of SOURCES) {
+                const st = timestamp * src.sp;
+                // 波源在 Cowork 同款归一化坐标空间里的位置（与 px/py 同比例）
+                const cx = (src.bx + Math.sin(st + src.px) * src.ax - 0.5) * (width  * CONFIG.noiseScale * 4.2);
+                const cy = (src.by + Math.cos(st*0.73 + src.py) * src.ay - 0.5) * (height * CONFIG.noiseScale * 4.2);
+                const dx = px + warpX - cx;
+                const dy = py + warpY - cy;
+                const dist = Math.hypot(dx, dy);
+                // 同心圆：cos(dist*freq - t*speed)，向外扩散
+                wave += Math.cos(dist * src.freq - t * 2.6 + src.px) * src.amp;
+            }
+            wave /= 2.2;   // 缩放到~[-1, 1]：峰值~1.1与Cowork相当，能达到最亮白
+            // ────────────────────────────────────────────────────────────────
+
+            const radial  = Math.max(0.22, 1 - Math.hypot((point.x-width/2)/width,(point.y-height/2)/height)*1.06);
+            const shimmer = 0.94 + Math.sin(point.colIndex*0.11 + t*0.3)*0.03;
+            const brightness = Math.max(0,(wave+1.0)*0.5)*(0.42+radial*0.68)*shimmer;
+            const alpha = Math.min(CONFIG.maxAlpha, Math.pow(brightness,CONFIG.contrastPower)*CONFIG.brightnessGain);
+            if (alpha < CONFIG.minAlpha) continue;
+
+            const rgb = alpha > CONFIG.maxAlpha*0.56 ? dotRgb : ghostRgb;
+            context.beginPath();
+            context.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+            context.arc(point.x+warpX*5.4, point.y+warpY*5.0, 1.16+alpha*0.12, 0, Math.PI*2);
+            context.fill();
+        }
+    }
+
+    function resize() {
+        width = window.innerWidth; height = window.innerHeight;
+        buildCanvas(); buildPoints();
+    }
+    window.addEventListener('resize', resize);
+    resize();
+    requestAnimationFrame(draw);
+</script>
+</body>
+</html>
