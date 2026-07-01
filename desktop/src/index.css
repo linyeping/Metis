@@ -17222,13 +17222,13 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   content: '';
   display: block;
   height: 2px;
-  background: color-mix(in srgb, #f59e0b 42%, transparent);
+  background: color-mix(in srgb, #6b8fa8 50%, transparent);
 }
 .perm-warning-dialog[data-tone='danger']::before {
   content: '';
   display: block;
   height: 2px;
-  background: color-mix(in srgb, #ef4444 38%, transparent);
+  background: color-mix(in srgb, #e05a5a 36%, transparent);
 }
 
 @keyframes perm-warn-slide-in {
@@ -17256,14 +17256,14 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   border: 1px solid;
 }
 .perm-warn-icon-wrap[data-tone='warning'] {
-  border-color: color-mix(in srgb, #f59e0b 28%, var(--border));
-  background: color-mix(in srgb, #f59e0b 6%, var(--bg-elevated));
-  color: color-mix(in srgb, #f59e0b 82%, var(--text));
+  border-color: color-mix(in srgb, #6b8fa8 30%, var(--border));
+  background: color-mix(in srgb, #6b8fa8 7%, var(--bg-elevated));
+  color: color-mix(in srgb, #6b8fa8 90%, var(--text));
 }
 .perm-warn-icon-wrap[data-tone='danger'] {
-  border-color: color-mix(in srgb, #ef4444 26%, var(--border));
-  background: color-mix(in srgb, #ef4444 5%, var(--bg-elevated));
-  color: color-mix(in srgb, #ef4444 78%, var(--text));
+  border-color: color-mix(in srgb, #e05a5a 26%, var(--border));
+  background: color-mix(in srgb, #e05a5a 5%, var(--bg-elevated));
+  color: color-mix(in srgb, #e05a5a 78%, var(--text));
 }
 
 .perm-warn-header h2 {
@@ -17349,21 +17349,22 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   cursor: pointer;
   transition: background 120ms, filter 120ms;
 }
+/* 确认按钮：倒置配色（深底+亮文字），两个 tone 统一风格避免色调联想 */
 .perm-warn-btn-confirm[data-tone='warning'] {
-  background: color-mix(in srgb, #f59e0b 10%, var(--bg-elevated));
-  color: color-mix(in srgb, #f59e0b 90%, var(--text));
-  border-color: color-mix(in srgb, #f59e0b 32%, var(--border));
+  background: color-mix(in srgb, var(--text) 88%, var(--bg-elevated));
+  color: var(--bg);
+  border-color: transparent;
 }
 .perm-warn-btn-confirm[data-tone='warning']:hover {
-  background: color-mix(in srgb, #f59e0b 16%, var(--bg-elevated));
+  background: var(--text);
 }
 .perm-warn-btn-confirm[data-tone='danger'] {
-  background: color-mix(in srgb, #ef4444 9%, var(--bg-elevated));
-  color: color-mix(in srgb, #ef4444 85%, var(--text));
-  border-color: color-mix(in srgb, #ef4444 28%, var(--border));
+  background: color-mix(in srgb, #e05a5a 18%, var(--bg-elevated));
+  color: color-mix(in srgb, #e05a5a 90%, var(--text));
+  border-color: color-mix(in srgb, #e05a5a 32%, var(--border));
 }
 .perm-warn-btn-confirm[data-tone='danger']:hover {
-  background: color-mix(in srgb, #ef4444 15%, var(--bg-elevated));
+  background: color-mix(in srgb, #e05a5a 26%, var(--bg-elevated));
 }
 
 /* 亮色模式下阴影更轻 */
