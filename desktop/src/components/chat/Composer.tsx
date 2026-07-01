@@ -54,6 +54,7 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
 import { effortLevelsFor, effortLabel } from '../../lib/reasoningTiers';
 import { useT } from '../../hooks/useT';
+import { PermissionWarningDialog, modeNeedsWarning } from './PermissionWarningDialog';
 
 function shortModelName(model: string): string {
   if (!model) return '模型';
@@ -936,6 +937,8 @@ function ComposerAccessMenu() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // 待确认的高风险模式——非 null 时显示警告弹窗
+  const [pendingMode, setPendingMode] = useState<PermissionAccessMode | null>(null);
   const active = accessOptions.find(option => option.mode === mode) ?? accessOptions[1];
   const coworkState = coworkModeState(mode);
   const coworkActive = coworkAccessOptions.find(option => option.state === coworkState) ?? coworkAccessOptions[1];
@@ -966,7 +969,7 @@ function ComposerAccessMenu() {
     return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, [open]);
 
-  const chooseMode = async (nextMode: PermissionAccessMode) => {
+  const applyMode = async (nextMode: PermissionAccessMode) => {
     setSaving(true);
     setError('');
     try {
@@ -978,6 +981,15 @@ function ComposerAccessMenu() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const chooseMode = (nextMode: PermissionAccessMode) => {
+    if (modeNeedsWarning(nextMode, appMode)) {
+      setOpen(false);
+      setPendingMode(nextMode);
+      return;
+    }
+    void applyMode(nextMode);
   };
 
   const preventComposerFocus = (event: ReactPointerEvent) => {
@@ -1048,6 +1060,13 @@ function ComposerAccessMenu() {
               ))}
           {error && <p className="composer-access-error">{error}</p>}
         </div>
+      )}
+      {pendingMode && (
+        <PermissionWarningDialog
+          config={{ mode: pendingMode, surface: appMode }}
+          onConfirm={() => { void applyMode(pendingMode); setPendingMode(null); }}
+          onCancel={() => setPendingMode(null)}
+        />
       )}
     </div>
   );
