@@ -1,13 +1,14 @@
 import { LayoutGroup, motion } from 'framer-motion';
-import { Code2, Handshake, MessageCircleMore } from 'lucide-react';
+import { Code2 } from 'lucide-react';
+import { ChatBubbleIcon, CoworkTaskIcon } from '../icons/MetisIcons';
 import { navigateAppMode } from '../../lib/modeNavigation';
 import type { AppMode } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
 
-const MODES: Array<{ id: AppMode; icon: typeof MessageCircleMore; zh: string; en: string }> = [
-  { id: 'chat', icon: MessageCircleMore, zh: '对话', en: 'Chat' },
-  { id: 'cowork', icon: Handshake, zh: '协作', en: 'Cowork' },
-  { id: 'code', icon: Code2, zh: '编码', en: 'Code' },
+const MODES: Array<{ id: AppMode; icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>; zh: string; en: string }> = [
+  { id: 'chat',   icon: ChatBubbleIcon,  zh: '对话', en: 'Chat'   },
+  { id: 'cowork', icon: CoworkTaskIcon,  zh: '协作', en: 'Cowork' },
+  { id: 'code',   icon: Code2,           zh: '编码', en: 'Code'   },
 ];
 
 /**

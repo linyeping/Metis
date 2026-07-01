@@ -9,7 +9,8 @@ import {
   ThreadPrimitive,
   useAuiState,
 } from '@assistant-ui/react';
-import { ChevronDown, Code2, Handshake, MessageCircleMore } from 'lucide-react';
+import { ChevronDown, Code2 } from 'lucide-react';
+import { ChatBubbleIcon, CoworkTaskIcon } from '../icons/MetisIcons';
 import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentProps, RefObject } from 'react';
 import { themes } from '../../lib/themes';
@@ -273,11 +274,13 @@ const WELCOME_COPY: Record<AppMode, { zh: [string, string]; en: [string, string]
   },
 };
 
-const WELCOME_ICONS = {
-  chat: MessageCircleMore,
-  cowork: Handshake,
-  code: Code2,
-} satisfies Record<AppMode, typeof MessageCircleMore>;
+type WelcomeIconComponent = React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+
+const WELCOME_ICONS: Record<AppMode, WelcomeIconComponent> = {
+  chat:   ChatBubbleIcon,
+  cowork: CoworkTaskIcon,
+  code:   Code2,
+};
 
 function WelcomeHome() {
   const appMode = useUiStore(state => state.appMode);
