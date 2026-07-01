@@ -12,8 +12,16 @@ describe('threadUtils tool progress', () => {
   });
 
   it('maps common tools to the expected glyphs', () => {
-    expect(toolKindGlyph('read_file')).toBe('📂');
-    expect(toolKindGlyph('execute_bash_command')).toBe('💻');
-    expect(toolKindGlyph('docx_create')).toBe('📘');
+    const fileIcon = toolKindGlyph('read_file');
+    const terminalIcon = toolKindGlyph('execute_bash_command');
+    const docxIcon = toolKindGlyph('docx_create');
+
+    expect(isValidElement(fileIcon)).toBe(true);
+    expect((fileIcon as { props: { className?: string } }).props.className).toBe('tool-kind-mark');
+    expect(isValidElement(terminalIcon)).toBe(true);
+    expect((terminalIcon as { props: { className?: string } }).props.className).toBe('tool-kind-mark');
+    expect(isValidElement(docxIcon)).toBe(true);
+    expect((docxIcon as { props: { className?: string; 'data-badge'?: string } }).props.className).toBe('tool-kind-mark');
+    expect((docxIcon as { props: { 'data-badge'?: string } }).props['data-badge']).toBe('DOC');
   });
 });
