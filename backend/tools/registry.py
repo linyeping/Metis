@@ -63,6 +63,7 @@ from backend.tools.coding.network_external.media.generate_image import generate_
 from backend.tools.coding.network_external.web.fetch_content import fetch_content
 from backend.tools.coding.network_external.web.web_fetch import web_fetch
 from backend.tools.coding.network_external.web.web_research import web_research
+from backend.tools.coding.network_external.web.deep_research import deep_research_plan, deep_research_run
 from backend.tools.coding.network_external.web.web_search import web_search
 from backend.tools.browser_automation.tools import browse_and_extract, browse_web
 from backend.tools.coding.read_search.read_analyze.generate_repo_map import generate_repo_map
@@ -277,6 +278,8 @@ AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
     "verify_compilation": verify_compilation,
     "web_search": web_search,
     "web_research": web_research,
+    "deep_research_plan": deep_research_plan,
+    "deep_research_run": deep_research_run,
     "fetch_content": fetch_content,
     "web_fetch": web_fetch,
     "browse_web": browse_web,
@@ -440,6 +443,15 @@ def normalize_tool_kwargs(canonical: str, raw: Dict[str, Any]) -> Dict[str, Any]
             kw["question"] = kw.pop("query")
         if "search_term" in kw and "question" not in kw:
             kw["question"] = kw.pop("search_term")
+
+    elif canonical in {"deep_research_plan", "deep_research_run"}:
+        if "query" in kw and "question" not in kw:
+            kw["question"] = kw.pop("query")
+        if "search_term" in kw and "question" not in kw:
+            kw["question"] = kw.pop("search_term")
+        if canonical == "deep_research_run" and "plan" in kw and "plan_json" not in kw:
+            plan_value = kw.pop("plan")
+            kw["plan_json"] = plan_value if isinstance(plan_value, str) else json.dumps(plan_value, ensure_ascii=False)
 
     elif canonical == "generate_image":
         if "description" in kw and "prompt" not in kw:

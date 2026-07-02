@@ -2621,6 +2621,19 @@ def _normalize_builtin_kwargs(canonical: str, raw: Dict[str, Any]) -> Dict[str, 
         if "search_term" in kwargs and "question" not in kwargs:
             kwargs["question"] = kwargs.pop("search_term")
 
+    elif canonical in {"deep_research_plan", "deep_research_run"}:
+        if "query" in kwargs and "question" not in kwargs:
+            kwargs["question"] = kwargs.pop("query")
+        if "search_term" in kwargs and "question" not in kwargs:
+            kwargs["question"] = kwargs.pop("search_term")
+        if canonical == "deep_research_run":
+            plan = kwargs.get("plan_json")
+            if plan is not None and not isinstance(plan, str):
+                try:
+                    kwargs["plan_json"] = json.dumps(plan, ensure_ascii=False)
+                except Exception:
+                    kwargs["plan_json"] = ""
+
     elif canonical == "generate_image":
         if "description" in kwargs and "prompt" not in kwargs:
             kwargs["prompt"] = kwargs.pop("description")

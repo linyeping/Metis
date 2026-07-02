@@ -1145,6 +1145,36 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
         ["question"],
     ),
     (
+        "deep_research_plan",
+        """【DeepResearchPlan】深度研究第一步：为复杂研究问题生成研究计划（研究目标 + 3~5 个独立子问题）。
+适合需要多维度、系统性调研的问题（如"全面分析 X"、"深入研究 Y 的现状与趋势"、"对比多个方案并给出研究报告"）。
+返回计划后，应把计划用自然语言呈现给用户确认或修改；用户确认后再调用 deep_research_run 执行。
+简单实时事实用 web_search；单一证据链核查用 web_research；只有需要系统性研究报告时才用这套两步流程。""",
+        {
+            "question": _string("研究问题，应具体到实体、年份、版本或判断标准"),
+            "reason": _string("可选；简短说明为何需要深度研究，供本地诊断审计"),
+        },
+        ["question"],
+    ),
+    (
+        "deep_research_run",
+        """【DeepResearchRun】深度研究第二步：执行完整 6 阶段流水线（计划→查询扩展→并行搜索抓取→证据分级→大纲→撰写报告）。
+子问题并行研究，报告一次性生成并绑定 [n] 引用，落地为 Markdown research job/report。
+优先传入 deep_research_plan 返回并经用户确认的 plan_json；不传则即时自动规划。
+任何阶段的 LLM 不可用时会自动降级到 web_research，保证不劣化。
+调用成功后应直接给用户简短总结，引导其到 Research 报告视图查看完整报告，不要在聊天里粘贴整篇报告。""",
+        {
+            "question": _string("研究问题，应与 plan 一致"),
+            "plan_json": _string("可选；deep_research_plan 返回并经用户确认的计划 JSON（含 brief 和 subquestions）"),
+            "max_results": _integer("每条子查询搜索结果上限，默认 5，最大 10"),
+            "max_pages": _integer("每个子问题读取证据页数量，默认 3，最大 5"),
+            "max_chars_per_page": _integer("每个证据页返回字符数，默认 1800"),
+            "reason": _string("可选；简短原因，供本地诊断审计"),
+            "provider": _string("搜索 provider，默认 auto/ddgs"),
+        },
+        ["question"],
+    ),
+    (
         "fetch_content",
         """【FetchContent】统一内容读取入口：识别普通网页/GitHub blob/repo/tree/commit，读取内容并返回结构化来源 payload。
 优先用于已知 URL；普通网页会抽取 Markdown，GitHub blob 会走 raw 内容，GitHub repo/tree/commit 会 clone 到本地研究缓存并返回文件概览；正文过短或受阻时可尝试 Jina Reader fallback。旧 web_fetch 保留为兼容入口。""",
