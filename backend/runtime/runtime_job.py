@@ -60,21 +60,23 @@ def metis_runtime_job(
     session_id = ""
 
     try:
-        created = _loads(
-            metis_runtime_create(
-                task=task_text,
-                root=root,
-                mode=mode,
-                backend=backend,
-                max_files=max(1, int(max_files or 2000)),
-                max_bytes=max(1024, int(max_bytes or 1)),
-                allow_network=bool(allow_network),
-                allow_cross_drive=get_effective_sub_allow("allow_paths_outside_workspace"),
-                allow_project_write=False,
-                allow_desktop_write=False,
-                strict_sandbox=bool(strict_sandbox),
+        creation_context_root = str(_job_root(root))
+        with workspace_root_override(creation_context_root):
+            created = _loads(
+                metis_runtime_create(
+                    task=task_text,
+                    root=creation_context_root,
+                    mode=mode,
+                    backend=backend,
+                    max_files=max(1, int(max_files or 2000)),
+                    max_bytes=max(1024, int(max_bytes or 1)),
+                    allow_network=bool(allow_network),
+                    allow_cross_drive=get_effective_sub_allow("allow_paths_outside_workspace"),
+                    allow_project_write=False,
+                    allow_desktop_write=False,
+                    strict_sandbox=bool(strict_sandbox),
+                )
             )
-        )
         session_id = str(created.get("session_id") or "")
         if not created.get("ok") or not session_id:
             payload = _job_payload(

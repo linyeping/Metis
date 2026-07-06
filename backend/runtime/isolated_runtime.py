@@ -76,6 +76,7 @@ EXCLUDED_DIRS = {
     ".miro",
     ".pytest_cache",
     ".ruff_cache",
+    ".mypy_cache",
     "__pycache__",
     "node_modules",
     "dist",
@@ -10356,9 +10357,8 @@ def _run_wsl_command(
     artifacts_wsl = _windows_path_to_wsl(manifest.paths.artifacts_dir)
     workspace_wsl = _windows_path_to_wsl(manifest.paths.workspace_dir)
     source_wsl = _windows_path_to_wsl(manifest.paths.source_root)
-    env_prefix = " ".join(
-        f"{key}={shlex.quote(value)}"
-        for key, value in {
+    env_exports = _shell_export_lines(
+        {
             **{str(k): str(v) for k, v in env_map.items() if str(k).startswith("METIS_")},
             "METIS_RUNTIME_SESSION_ID": manifest.session_id,
             "METIS_RUNTIME_WORKSPACE": workspace_wsl,
@@ -10366,13 +10366,18 @@ def _run_wsl_command(
             "METIS_RUNTIME_SOURCE_ROOT": source_wsl,
             "METIS_RUNTIME_BACKEND": "wsl",
             "METIS_RUNTIME_NETWORK_ALLOWED": "1" if network_allowed else "0",
-        }.items()
+        }
     )
-    script = f"cd {shlex.quote(work_dir_wsl)} && {env_prefix} {command_text}"
+    script_path = _write_wsl_command_script(
+        manifest,
+        backend="wsl",
+        script=f"{env_exports}\ncd {shlex.quote(work_dir_wsl)}\n{command_text}\n",
+    )
+    script_wsl = _windows_path_to_wsl(script_path)
     args = [executable]
     if distro:
         args.extend(["-d", distro])
-    args.extend(["--", "bash", "-lc", script])
+    args.extend(["--", "bash", script_wsl])
     return _run_args(args, timeout=timeout, backend="wsl", executed_command=" ".join(args))
 
 
@@ -10397,9 +10402,8 @@ def _run_metis_wsl_command(
     artifacts_wsl = _windows_path_to_wsl(manifest.paths.artifacts_dir)
     workspace_wsl = _windows_path_to_wsl(manifest.paths.workspace_dir)
     source_wsl = _windows_path_to_wsl(manifest.paths.source_root)
-    env_prefix = " ".join(
-        f"{key}={shlex.quote(value)}"
-        for key, value in {
+    env_exports = _shell_export_lines(
+        {
             **{str(k): str(v) for k, v in env_map.items() if str(k).startswith("METIS_")},
             "METIS_RUNTIME_SESSION_ID": manifest.session_id,
             "METIS_RUNTIME_WORKSPACE": workspace_wsl,
@@ -10407,11 +10411,34 @@ def _run_metis_wsl_command(
             "METIS_RUNTIME_SOURCE_ROOT": source_wsl,
             "METIS_RUNTIME_BACKEND": "metis_wsl",
             "METIS_RUNTIME_NETWORK_ALLOWED": "1" if network_allowed else "0",
-        }.items()
+        }
     )
-    script = f"cd {shlex.quote(work_dir_wsl)} && {env_prefix} {command_text}"
-    args = [executable, "-d", distro, "--", "bash", "-lc", script]
+    script_path = _write_wsl_command_script(
+        manifest,
+        backend="metis_wsl",
+        script=f"{env_exports}\ncd {shlex.quote(work_dir_wsl)}\n{command_text}\n",
+    )
+    script_wsl = _windows_path_to_wsl(script_path)
+    args = [executable, "-d", distro, "--", "bash", script_wsl]
     return _run_args(args, timeout=timeout, backend="metis_wsl", executed_command=" ".join(args))
+
+
+def _shell_export_lines(values: Dict[str, str]) -> str:
+    lines: List[str] = []
+    for key, value in values.items():
+        key_text = str(key or "").strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_text):
+            continue
+        lines.append(f"export {key_text}={shlex.quote(str(value))}")
+    return "\n".join(lines)
+
+
+def _write_wsl_command_script(manifest: RuntimeManifest, *, backend: str, script: str) -> Path:
+    safe_backend = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(backend or "wsl")).strip("-") or "wsl"
+    path = manifest.paths.diagnostics_dir / f"run_{int(time.time() * 1000)}_{safe_backend}.sh"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\n" + script, encoding="utf-8", newline="\n")
+    return path
 
 
 def _run_docker_command(

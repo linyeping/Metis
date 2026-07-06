@@ -838,8 +838,9 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(realBackend, /def _create_run_state/);
   assert.match(realBackend, /def _run_registry_worker/);
   assert.match(realBackend, /LOCAL_VM/);
+  assert.match(realBackend, /iter_local_cowork_events/);
   assert.match(realBackend, /create_code_worktree = normalized_surface == "code" and execution_profile_result\.profile == LOCAL_VM/);
-  assert.match(realBackend, /create_run_worktree = execution_profile_result\.profile == LOCAL_WORKTREE or create_code_worktree/);
+  assert.match(realBackend, /create_run_worktree = normalized_surface != "cowork" and \(execution_profile_result\.profile == LOCAL_WORKTREE or create_code_worktree\)/);
   assert.match(realBackend, /@app\.route\("\/runs", methods=\["POST"\]\)/);
   assert.match(realBackend, /@app\.route\("\/runs\/<run_id>\/events"/);
   assert.match(realBackend, /@app\.route\("\/sessions\/<session_id>\/runs\/active"/);
@@ -848,6 +849,8 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(flaskSmoke, /test_run_registry_cancel_endpoint_marks_active_run_canceling/);
   assert.match(flaskSmoke, /test_run_registry_rejects_second_active_run_for_same_session/);
   assert.match(flaskSmoke, /test_code_run_local_vm_profile_still_creates_worktree/);
+  assert.match(flaskSmoke, /test_cowork_run_streams_subruns_diff_and_summary_artifact/);
+  assert.match(flaskSmoke, /test_cowork_local_vm_subruns_use_metis_wsl_runner/);
   assert.match(types, /interface ChatRunPayload/);
   assert.match(types, /interface ActiveChatRunPayload/);
   assert.match(types, /run_id\?: string/);

@@ -75,6 +75,7 @@ NEWUPDATE.md
 .metis/runtime/
 .metis/runtime-jobs/
 .metis/runtime-pack/
+.metis/worktrees/
 .metis/wsl/
 .metis/tool-permissions.jsonl
 

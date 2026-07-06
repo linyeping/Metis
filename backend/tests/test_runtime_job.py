@@ -176,3 +176,36 @@ def test_metis_runtime_job_preserves_workspace_context_for_non_default_root(tmp_
     assert result["created"]["source_root"] == str(workspace)
     assert result["run"]["cwd"].startswith(str(workspace / ".metis" / "runtime"))
     assert any(item.get("relative_path") == "app.txt" for item in result["changed_files"])
+
+
+def test_metis_runtime_job_rebinds_workspace_context_for_external_worktree_root(tmp_path: Path, monkeypatch) -> None:
+    source_workspace = tmp_path / "source" / "repo"
+    external_worktree = tmp_path / "managed-worktrees" / "repo-run"
+    source_workspace.mkdir(parents=True)
+    external_worktree.mkdir(parents=True)
+    (external_worktree / "app.txt").write_text("before\n", encoding="utf-8")
+    monkeypatch.setenv("METIS_PYTHON", sys.executable)
+
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; '
+        "Path('app.txt').write_text('after\\n', encoding='utf-8'); "
+        "print('EXTERNAL_WORKTREE_OK')\""
+    )
+    with workspace_root_override(str(source_workspace)):
+        result = json.loads(
+            runtime_job.metis_runtime_job(
+                task="external worktree smoke",
+                command=command,
+                root=str(external_worktree),
+                backend="local",
+                mode="copy",
+                timeout=30,
+                expected_stdout_contains="EXTERNAL_WORKTREE_OK",
+            )
+        )
+
+    assert result["ok"] is True
+    assert result["status"] == "done"
+    assert result["created"]["source_root"] == str(external_worktree)
+    assert result["run"]["cwd"].startswith(str(external_worktree / ".metis" / "runtime"))
+    assert any(item.get("relative_path") == "app.txt" for item in result["changed_files"])

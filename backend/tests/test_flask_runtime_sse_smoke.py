@@ -9,16 +9,20 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import pytest
 
+from backend.core.paths import clear_metis_home_cache
 from backend.runtime.cancellation import OperationCancelled, current_cancel_event
+from backend.runtime import cowork_coordinator
 from backend.runtime.agent_loop import (
     AgentConfig,
     _chat_surface_blocked_tool_result,
     _chat_surface_blocks_tool,
     run_stream as real_run_stream,
 )
+from backend.runtime.worktree_manager import WorktreeRecord
 from backend.runtime.llm_backends import LLMBackend, LLMResponse, ToolCall
 from backend.runtime.tool_registry import ToolDefinition, ToolRegistry
 from backend.web import app as web_app
+from backend.web import helpers as web_helpers
 from backend.web import session_routes as web_session_routes
 from backend.web import workspace_routes as web_workspace_routes
 from backend.web.session_db import MetisSessionDB
@@ -119,6 +123,8 @@ class ToolCallingBackend(CrashingStreamBackend):
 
 @pytest.fixture
 def isolated_flask_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("METIS_HOME", str(tmp_path / ".metis-home"))
+    clear_metis_home_cache()
     db = MetisSessionDB(data_root=str(tmp_path / ".metis"))
     session_manager = SessionManager(db=db)
     workspace_manager = WorkspaceManager(db=db)
@@ -127,6 +133,7 @@ def isolated_flask_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     monkeypatch.setattr(web_app, "get_session_manager", lambda: session_manager)
     monkeypatch.setattr(web_app, "get_workspace_manager", lambda: workspace_manager)
+    monkeypatch.setattr(web_helpers, "get_workspace_manager", lambda: workspace_manager)
     monkeypatch.setattr(web_session_routes, "get_session_manager", lambda: session_manager)
     monkeypatch.setattr(web_session_routes, "get_workspace_manager", lambda: workspace_manager)
     monkeypatch.setattr(web_workspace_routes, "get_session_manager", lambda: session_manager)
@@ -144,6 +151,7 @@ def isolated_flask_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(web_app, "_maybe_record_learning", lambda *args, **kwargs: None)
     with web_app._runs_lock:
         web_app._runs.clear()
+    clear_metis_home_cache()
     monkeypatch.setattr(
         web_app,
         "_load_config",
@@ -221,6 +229,22 @@ def _phases(events: List[Dict[str, Any]]) -> List[str]:
         for event in events
         if event.get("kind") == "runtime_status"
     ]
+
+
+def _fake_worktree_record(source_root: str, worktree_root: Path, *, run_id: str, session_id: str, index: int) -> WorktreeRecord:
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    return WorktreeRecord(
+        worktree_id=f"wt_cowork_{index}",
+        workspace_root=source_root,
+        repo_root=source_root,
+        worktree_path=str(worktree_root),
+        worktree_workspace_root=str(worktree_root),
+        branch=f"metis/run/cowork-{index}",
+        base_ref="HEAD",
+        run_id=run_id,
+        session_id=session_id,
+        label=f"cowork-{index}",
+    )
 
 
 def test_chat_sse_fake_provider_emits_runtime_status_done_and_done_marker(isolated_flask_app: Any) -> None:
@@ -579,6 +603,180 @@ def test_code_run_local_vm_profile_still_creates_worktree(
     assert payload["worktree_workspace_root"] == str(fake_worktree)
     assert started_runs and started_runs[0]["execution_profile"] == "local_vm"
     assert started_runs[0]["workspace_root"] == str(fake_worktree)
+
+
+def test_cowork_run_streams_subruns_diff_and_summary_artifact(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    target = session_manager.create_session(title="Target cowork run", workspace_id=workspace_id)
+    source_root = web_app._active_workspace_root()
+    records: List[WorktreeRecord] = []
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == target.id
+        assert label.startswith("cowork-")
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / f"cowork-worktree-{len(records) + 1}",
+            run_id=run_id,
+            session_id=session_id,
+            index=len(records) + 1,
+        )
+        records.append(record)
+        return record
+
+    def fake_diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = 200000) -> Dict[str, Any]:
+        assert workspace_root == source_root
+        record = next(item for item in records if item.worktree_id == worktree_id)
+        return {
+            "schema": "metis.worktree_diff.v1",
+            "worktree": record.to_dict(),
+            "status": " M app.py\n",
+            "stat": "app.py | 1 +\n",
+            "patch": "diff --git a/app.py b/app.py\n+print('cowork')\n",
+            "truncated": False,
+            "base_ref": "HEAD",
+        }
+
+    monkeypatch.setattr(cowork_coordinator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(cowork_coordinator, "diff_worktree", fake_diff_worktree)
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={
+                "message": "Inspect current implementation\nValidate and summarize diffs",
+                "session_id": target.id,
+                "assistant_id": "assistant-run-cowork",
+                "surface_mode": "cowork",
+                "execution_profile": "local_worktree",
+            },
+        )
+        assert created.status_code == 200
+        payload = created.get_json()
+        run_id = payload["run_id"]
+        events, saw_done_marker = _run_events(client, run_id)
+        status = client.get(f"/runs/{run_id}").get_json()
+
+    assert payload["surface_mode"] == "cowork"
+    assert payload["execution_profile"] == "local_worktree"
+    assert payload["workspace_root"] == source_root
+    assert payload["worktree_id"] == ""
+    assert saw_done_marker is True
+    assert status["status"] == "done"
+    assert [event["kind"] for event in events].count("subagent_start") == 2
+    assert [event["kind"] for event in events].count("subagent_done") == 2
+    assert any(event["kind"] == "artifact_created" for event in events)
+    assert events[-1]["kind"] == "done"
+    summary_event = next(event for event in events if event["kind"] == "artifact_created")
+    artifact = summary_event["payload"]["artifact"]
+    assert artifact["kind"] == "report"
+    summary_path = Path(artifact["path"])
+    assert summary_path.is_file()
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["schema"] == cowork_coordinator.COWORK_SUMMARY_SCHEMA
+    assert summary["subrun_count"] == 2
+    assert len(summary["artifacts"]) == 2
+    assert len(summary["diffs"]) == 2
+    saved_target = session_manager.get_session(target.id)
+    assert saved_target is not None
+    assert [item.get("role") for item in saved_target.history] == ["user", "assistant"]
+
+
+def test_cowork_local_vm_subruns_use_metis_wsl_runner(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    target = session_manager.create_session(title="Target cowork vm run", workspace_id=workspace_id)
+    source_root = web_app._active_workspace_root()
+    records: List[WorktreeRecord] = []
+    vm_roots: List[str] = []
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / f"cowork-vm-worktree-{len(records) + 1}",
+            run_id=run_id,
+            session_id=session_id,
+            index=len(records) + 1,
+        )
+        records.append(record)
+        return record
+
+    def fake_run_local_vm_command(request: Any) -> Dict[str, Any]:
+        vm_roots.append(str(request.workspace_root))
+        assert request.collect_artifacts is False
+        assert request.export_patch is True
+        assert request.export_diagnostics == "on_failure"
+        return {
+            "ok": True,
+            "runner": "local_vm",
+            "backend": "metis_wsl",
+            "run_id": "vmcmd_test",
+            "job": {
+                "job_id": "job_test",
+                "status": "done",
+                "returncode": 0,
+                "timed_out": False,
+                "stdout": "METIS_COWORK_VM_OK\n",
+                "stderr": "",
+                "artifacts_dir": str(tmp_path / "vm-artifacts"),
+                "patch_path": str(tmp_path / "vm-artifacts" / "changes.patch"),
+                "changed_files": [{"path": "vm-output.txt", "status": "A"}],
+                "artifacts": [{"path": str(tmp_path / "vm-artifacts" / "report.json"), "relative_path": "report.json", "size": 12}],
+            },
+        }
+
+    def fake_diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = 200000) -> Dict[str, Any]:
+        record = next(item for item in records if item.worktree_id == worktree_id)
+        return {
+            "schema": "metis.worktree_diff.v1",
+            "worktree": record.to_dict(),
+            "status": "",
+            "stat": "",
+            "patch": "",
+            "truncated": False,
+            "base_ref": "HEAD",
+        }
+
+    monkeypatch.setattr(cowork_coordinator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(cowork_coordinator, "run_local_vm_command", fake_run_local_vm_command)
+    monkeypatch.setattr(cowork_coordinator, "diff_worktree", fake_diff_worktree)
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={
+                "message": "Run VM check\nCollect VM result",
+                "session_id": target.id,
+                "assistant_id": "assistant-run-cowork-vm",
+                "surface_mode": "cowork",
+                "execution_profile": "local_vm",
+            },
+        )
+        assert created.status_code == 200
+        payload = created.get_json()
+        run_id = payload["run_id"]
+        events, saw_done_marker = _run_events(client, run_id)
+
+    assert payload["worktree_id"] == ""
+    assert saw_done_marker is True
+    assert len(vm_roots) == 2
+    assert vm_roots == [record.worktree_workspace_root for record in records]
+    done_events = [event for event in events if event["kind"] == "subagent_done"]
+    assert len(done_events) == 2
+    assert all(event["payload"]["result"]["local_vm"]["backend"] == "metis_wsl" for event in done_events)
+    assert all("hcs" not in json.dumps(event["payload"]["result"]["local_vm"]).lower() for event in done_events)
 
 
 def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(isolated_flask_app: Any, monkeypatch: pytest.MonkeyPatch) -> None:

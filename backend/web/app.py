@@ -36,6 +36,7 @@ from backend.runtime.agent_loop import (  # noqa: E402
     run_stream,
 )
 from backend.runtime.cancellation import OperationCancelled  # noqa: E402
+from backend.runtime.cowork_coordinator import iter_local_cowork_events  # noqa: E402
 from backend.runtime.execution_profile import (  # noqa: E402
     LOCAL_DIRECT,
     LOCAL_VM,
@@ -2826,6 +2827,9 @@ def _run_registry_worker(run_id: str) -> None:
 
     saw_done = False
     try:
+        if str(run.get("surface_mode") or "") == "cowork":
+            _run_cowork_registry_worker(run)
+            return
         with workspace_root_override(config.workspace_root):
             generator = _stream_agent_response(
                 list(run.get("model_context") or run["history"]),
@@ -2882,6 +2886,76 @@ def _run_registry_worker(run_id: str) -> None:
         _set_run_status(run, "failed", phase="failed")
     else:
         _set_run_status(run, "done", phase="completed" if saw_done else str(run.get("phase") or "done"))
+
+
+def _run_cowork_registry_worker(run: Dict[str, Any]) -> None:
+    history = list(run.get("history") or [])
+    mode = str(run.get("mode") or "auto")
+    session_id = str(run.get("session_id") or "")
+    assistant_text = ""
+    saw_done = False
+    checkpoint = run.get("checkpoint") if isinstance(run.get("checkpoint"), CheckpointRecorder) else None
+    _set_run_status(run, "running", phase="planning")
+    try:
+        goal = _last_user_message_text(history)
+        source_root = str(run.get("source_workspace_root") or run.get("workspace_root") or "")
+        with workspace_root_override(source_root):
+            for payload in iter_local_cowork_events(
+                goal,
+                workspace_root=source_root,
+                source_workspace_root=source_root,
+                run_id=str(run.get("id") or ""),
+                session_id=session_id,
+                execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
+                cancelled=lambda: bool(run.get("cancel_requested")),
+            ):
+                if run.get("cancel_requested"):
+                    raise OperationCancelled("Cowork run cancelled")
+                event = _event_payload(payload)
+                _append_run_event(run, event)
+                kind = str(event.get("kind") or "")
+                if kind == "runtime_status":
+                    phase = str(event.get("payload", {}).get("phase") or event.get("phase") or "")
+                    if phase:
+                        _set_run_status(run, "running", phase=phase)
+                elif kind == "content":
+                    assistant_text = str(event.get("text") or event.get("payload", {}).get("text") or "")
+                elif kind == "done":
+                    saw_done = True
+    except OperationCancelled:
+        _append_run_event(run, _run_cancel_event())
+        _set_run_status(run, "canceled", phase="canceled")
+        if checkpoint is not None:
+            checkpoint.finalize("aborted")
+        return
+    except Exception as exc:
+        logger.error("Cowork run worker failed: %s", sanitize_for_log(exc))
+        _append_run_event(run, _event_payload(_error_event_from_exception(exc, recoverable=False)))
+        _set_run_status(run, "failed", phase="failed", error=str(exc))
+        if checkpoint is not None:
+            checkpoint.finalize("failed")
+        return
+
+    if assistant_text:
+        history.append(_new_message("assistant", assistant_text))
+        _sync_active_runtime_history(session_id, history, mode)
+        _save_session_history(session_id, history=history, mode=mode)
+    if checkpoint is not None:
+        checkpoint.finalize("done")
+    if run.get("cancel_requested"):
+        _append_run_event(run, _run_cancel_event())
+        _set_run_status(run, "canceled", phase="canceled")
+    elif run.get("error"):
+        _set_run_status(run, "failed", phase="failed")
+    else:
+        _set_run_status(run, "done", phase="completed" if saw_done else str(run.get("phase") or "done"))
+
+
+def _last_user_message_text(history: List[Dict[str, Any]]) -> str:
+    for item in reversed(history):
+        if isinstance(item, dict) and str(item.get("role") or "") == "user":
+            return _message_text(item.get("content") or item.get("text") or "")
+    return ""
 
 
 def _start_run_thread(run: Dict[str, Any]) -> None:
@@ -3050,7 +3124,7 @@ def create_run() -> Any:
     workspace_root = source_workspace_root
     worktree_payload: Dict[str, Any] = {}
     create_code_worktree = normalized_surface == "code" and execution_profile_result.profile == LOCAL_VM
-    create_run_worktree = execution_profile_result.profile == LOCAL_WORKTREE or create_code_worktree
+    create_run_worktree = normalized_surface != "cowork" and (execution_profile_result.profile == LOCAL_WORKTREE or create_code_worktree)
     if create_run_worktree:
         try:
             worktree_record = create_worktree(

@@ -21,6 +21,7 @@ class LocalVmCommand:
     allow_network: bool = False
     collect_artifacts: bool = False
     export_patch: bool = True
+    export_diagnostics: str = "on_failure"
 
 
 def run_local_vm_command(request: LocalVmCommand) -> Dict[str, Any]:
@@ -67,7 +68,7 @@ def run_local_vm_command(request: LocalVmCommand) -> Dict[str, Any]:
             allow_network=bool(request.allow_network),
             collect_artifacts=bool(request.collect_artifacts),
             export_patch=bool(request.export_patch),
-            export_diagnostics="on_failure",
+            export_diagnostics=str(request.export_diagnostics or "on_failure"),
             strict_sandbox=True,
         )
         payload = json.loads(raw) if raw else {}
