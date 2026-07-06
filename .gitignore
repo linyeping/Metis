@@ -72,6 +72,7 @@ NEWUPDATE.md
 .metis/diagnostics/
 .metis/memory.json
 .metis/project-profile.json
+.metis/permissions.json
 .metis/runtime/
 .metis/runtime-jobs/
 .metis/runtime-pack/
