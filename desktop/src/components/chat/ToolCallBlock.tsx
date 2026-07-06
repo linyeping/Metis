@@ -21,7 +21,7 @@ import {
   PencilLine,
   Play,
 } from 'lucide-react';
-import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Children, createContext, isValidElement, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
 import { apiBase, getResearchJob, getResearchJobs, setComposerDeepResearchEnabled } from '../../lib/api';
 import { buildFileChangePreview, countDiffLines } from '../../lib/diffPreview';
@@ -153,6 +153,7 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
   const childItems = Children.toArray(children);
   const steps = Math.max(1, childItems.length || endIndex - startIndex + 1);
   const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [expandSignal, setExpandSignal] = useState(0);
   const [collapseSignal, setCollapseSignal] = useState(0);
   // 用户一旦手动开/收过这一组，就不再自动展开——否则有报错时整组会被反复强制
@@ -163,6 +164,7 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
   const activity = useMemo(() => summarizeToolActivity(activitySnapshot, t), [activitySnapshot, t]);
   const searchActivity = useMemo(() => summarizeSearchToolActivity(activitySnapshot, t), [activitySnapshot, t]);
   const deepResearchPlan = useMemo(() => deepResearchPlanFromSnapshot(activitySnapshot), [activitySnapshot]);
+  const groupedChildren = useMemo(() => groupToolActivityChildren(childItems), [childItems]);
   const longList = steps > 12;
 
   if (searchActivity?.allSearchTools) {
@@ -193,14 +195,14 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
           <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
           <Activity size={13} />
           <span>{t('工具活动')}</span>
-          <small>{steps}{t(' 步')}</small>
+          <small>{groupedChildren.primary.length || steps}{t(' 项')}</small>
           <em>{activity.summary}</em>
         </button>
         <div className="tool-activity-group-actions">
-          <button type="button" onClick={() => { setOpen(true); setExpandSignal(value => value + 1); }}>
+          <button type="button" onClick={() => { setOpen(true); setInternalOpen(true); setExpandSignal(value => value + 1); }}>
             {t('全部展开')}
           </button>
-          <button type="button" onClick={() => setCollapseSignal(value => value + 1)}>
+          <button type="button" onClick={() => { setInternalOpen(false); setCollapseSignal(value => value + 1); }}>
             {t('全部收起')}
           </button>
         </div>
@@ -221,11 +223,62 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
       </div>
       <div className="tool-activity-group-body" aria-hidden={!open} data-long={longList}>
         <ToolActivityContext.Provider value={{ collapseSignal, expandSignal }}>
-          {childItems as ReactNode[]}
+          {groupedChildren.primary as ReactNode[]}
+          {groupedChildren.internal.length > 0 && (
+            <div className="tool-activity-internal" data-open={internalOpen}>
+              <button className="tool-activity-internal-toggle" type="button" onClick={() => setInternalOpen(value => !value)}>
+                <ChevronRight className="disclosure-chevron" data-open={internalOpen} size={12} />
+                <span>{t('内部步骤')}</span>
+                <small>{groupedChildren.internal.length}</small>
+              </button>
+              {internalOpen && <div className="tool-activity-internal-body">{groupedChildren.internal as ReactNode[]}</div>}
+            </div>
+          )}
         </ToolActivityContext.Provider>
       </div>
     </section>
   );
+}
+
+function groupToolActivityChildren(items: ReactNode[]): { primary: ReactNode[]; internal: ReactNode[] } {
+  const primary: ReactNode[] = [];
+  const internal: ReactNode[] = [];
+  for (const item of items) {
+    const info = toolChildInfo(item);
+    if (info.internal && info.status !== 'running' && info.status !== 'waiting_approval' && info.status !== 'error') {
+      internal.push(item);
+    } else {
+      primary.push(item);
+    }
+  }
+  return { primary, internal };
+}
+
+function toolChildInfo(item: ReactNode): { internal: boolean; status: string } {
+  if (!isValidElement(item)) return { internal: false, status: '' };
+  const props = item.props as { metisStatus?: unknown; toolName?: unknown };
+  const toolName = typeof props.toolName === 'string' ? props.toolName : '';
+  const status = typeof props.metisStatus === 'string' ? props.metisStatus : '';
+  return { internal: isLowSignalTool(toolName), status };
+}
+
+function isLowSignalTool(toolName: string): boolean {
+  const name = String(toolName || '').trim().toLowerCase();
+  if (!name) return false;
+  return (
+    name === 'load_skill' ||
+    name === 'todo_write' ||
+    name === 'metis_runtime_job_status' ||
+    name === 'check_git_status' ||
+    name === 'git_status' ||
+    name === 'glob_search' ||
+    name === 'list_directory'
+  );
+}
+
+function isRuntimeJobTool(toolName: string): boolean {
+  const name = String(toolName || '').trim().toLowerCase();
+  return name === 'metis_runtime_job' || name === 'runtime_job' || name === 'local_vm_run';
 }
 
 export function CompletedResearchReportEntry({ report }: { report: CompletedResearchReportSummary }) {
@@ -508,6 +561,7 @@ export function ToolCard({
   const toolProgress = fileChangePreview && fileChangeCounts
     ? `${compactPath(fileChangePreview.path || fileChangePreview.title)} `
     : desktopExpertProgressText(toolName, status, args, result, t) || toolProgressText(toolName, status);
+  const showProgressLine = Boolean(toolProgress) && !isRuntimeJobTool(toolName);
 
   useEffect(() => {
     if (status === 'error') setToolCardExpanded(cardId, true);
@@ -627,15 +681,17 @@ export function ToolCard({
           <em>{statusText}</em>
         </span>
       </button>
-      <p className="tool-progress-line">
-        <span>{toolProgress}</span>
-        {fileChangeCounts && (
-          <span className="tool-activity-diff-count">
-            <ChangeCount type="add" value={fileChangeCounts.additions} />
-            <ChangeCount type="remove" value={fileChangeCounts.removals} />
-          </span>
-        )}
-      </p>
+      {showProgressLine && (
+        <p className="tool-progress-line">
+          <span>{toolProgress}</span>
+          {fileChangeCounts && (
+            <span className="tool-activity-diff-count">
+              <ChangeCount type="add" value={fileChangeCounts.additions} />
+              <ChangeCount type="remove" value={fileChangeCounts.removals} />
+            </span>
+          )}
+        </p>
+      )}
       {browserActivity && (
         <div className="tool-browser-activity-summary" data-blocked={browserActivity.blocked > 0} data-errors={browserActivity.errors > 0}>
           <Activity size={12} />

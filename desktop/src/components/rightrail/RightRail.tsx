@@ -1584,7 +1584,7 @@ export function RightRail({ backendReady }: RightRailProps) {
       );
     };
     return (
-    <div className="plan-card-pane">
+    <div className="plan-card-pane" data-agent-tasks={agentTasks.length > 0}>
       {total > 0 ? (
         <div className="plan-card-todos">
           <div className="plan-card-todos-head">
@@ -1623,11 +1623,11 @@ export function RightRail({ backendReady }: RightRailProps) {
         </div>
       ) : (
         <div className="plan-card-empty">
-          <StickyNote size={18} />
           <strong>Plan</strong>
           <span>{t('智能体规划任务后，这里显示整体进度和每个步骤状态。')}</span>
         </div>
       )}
+      {agentTasks.length > 0 && (
       <section className="plan-agent-panel" aria-label={t('智能体任务')}>
         <div className="plan-agent-head">
           <div>
@@ -1653,8 +1653,7 @@ export function RightRail({ backendReady }: RightRailProps) {
             agentTasks.length > 0 && <em>{agentProgress}%</em>
           )}
         </div>
-        {agentTasks.length > 0 ? (
-          <div className="plan-agent-list">
+        <div className="plan-agent-list">
             {activeAgentTasks.length > 0 && (
               <section className="plan-agent-section" data-layer="active" aria-label={t('进行中或待开始的智能体任务')}>
                 <div className="plan-agent-section-title">
@@ -1673,14 +1672,9 @@ export function RightRail({ backendReady }: RightRailProps) {
                 {finishedAgentTasks.map(renderAgentTask)}
               </section>
             )}
-          </div>
-        ) : (
-          <div className="plan-agent-empty">
-            <Network size={16} />
-            <span>{t('启动 Cowork 或并行 subrun 后，这里显示每个智能体任务。')}</span>
-          </div>
-        )}
+        </div>
       </section>
+      )}
     </div>
     );
   };

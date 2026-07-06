@@ -4412,6 +4412,51 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   max-height: min(58vh, 720px);
 }
 
+.tool-activity-internal {
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 34%, transparent);
+}
+
+.tool-activity-internal-toggle {
+  display: inline-grid;
+  width: fit-content;
+  max-width: 100%;
+  grid-template-columns: 12px auto auto;
+  align-items: center;
+  gap: 6px;
+  margin-left: 1px;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.tool-activity-internal-toggle:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-muted);
+}
+
+.tool-activity-internal-toggle small {
+  color: inherit;
+  font-size: inherit;
+}
+
+.tool-activity-internal-body {
+  display: grid;
+  gap: 2px;
+  opacity: 0.72;
+}
+
+.tool-activity-internal-body .tool-card-head {
+  min-height: 24px;
+}
+
 .tool-activity-status,
 .tool-activity-caret {
   display: grid;
@@ -9246,6 +9291,10 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   overflow: hidden;
 }
 
+.plan-card-pane[data-agent-tasks='false'] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .plan-card-empty {
   display: grid;
   min-height: 0;
@@ -9693,17 +9742,6 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   background: color-mix(in srgb, var(--bg-tertiary) 76%, transparent);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.plan-agent-empty {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 92px;
-  color: var(--text-faint);
-  font-size: var(--ui-font-size-xs);
 }
 
 .file-tree,
