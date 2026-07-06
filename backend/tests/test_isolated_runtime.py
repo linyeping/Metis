@@ -1808,7 +1808,10 @@ def test_metis_wsl_backend_selected_for_vm_and_builds_wsl_command(tmp_path: Path
     assert "metis wsl ok" in run["stdout"]
     wsl_args = next(args for args in captured if args and args[0] == "wsl.exe")
     assert wsl_args[:4] == ["wsl.exe", "-d", "MetisRuntime", "--"]
-    assert wsl_args[4:6] == ["bash", "-lc"]
+    assert wsl_args[4] == "bash"
+    assert len(wsl_args) == 6
+    assert "/.metis/diagnostics/" in wsl_args[5].replace("\\", "/")
+    assert wsl_args[5].endswith("_metis_wsl.sh")
 
 
 def test_docker_backend_runs_with_network_disabled_and_artifact_mount(
