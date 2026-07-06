@@ -113,17 +113,28 @@ button {
 }
 
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
   display: none;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
-  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--text-muted) 34%, transparent);
+  border: 1px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
 }
@@ -2572,7 +2583,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   scroll-behavior: smooth;
 }
 
-/* 聊天区滚动条比全局(9px)稍宽一点点，更好抓（可见 thumb 受全局 2px 透明边影响，约 8px）。 */
+/* 聊天区保留稍宽滚动条，更容易拖拽长对话。 */
 .thread-viewport::-webkit-scrollbar {
   width: 12px;
 }
@@ -8238,6 +8249,49 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 34%, transparent) transparent;
+}
+
+.research-phase-list::-webkit-scrollbar,
+.research-source-list::-webkit-scrollbar,
+.research-report-markdown::-webkit-scrollbar,
+.session-workspace-pane::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.research-phase-list::-webkit-scrollbar-button,
+.research-source-list::-webkit-scrollbar-button,
+.research-report-markdown::-webkit-scrollbar-button,
+.session-workspace-pane::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
+}
+
+.research-phase-list::-webkit-scrollbar-track,
+.research-source-list::-webkit-scrollbar-track,
+.research-report-markdown::-webkit-scrollbar-track,
+.session-workspace-pane::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.research-phase-list::-webkit-scrollbar-corner,
+.research-source-list::-webkit-scrollbar-corner,
+.research-report-markdown::-webkit-scrollbar-corner,
+.session-workspace-pane::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.research-phase-list::-webkit-scrollbar-thumb,
+.research-source-list::-webkit-scrollbar-thumb,
+.research-report-markdown::-webkit-scrollbar-thumb,
+.session-workspace-pane::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 34%, transparent);
+  background-clip: content-box;
 }
 
 .research-phase-list {
@@ -8507,6 +8561,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   overflow-y: auto;
   padding: 8px;
   scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 34%, transparent) transparent;
 }
 
 .session-workspace-head {
@@ -9124,8 +9179,17 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 .research-report-document::-webkit-scrollbar,
 .research-report-source-list::-webkit-scrollbar,
 .research-report-outline nav::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
+}
+
+.research-report-document::-webkit-scrollbar-button,
+.research-report-source-list::-webkit-scrollbar-button,
+.research-report-outline nav::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+  background: transparent;
 }
 
 .research-report-document::-webkit-scrollbar-track,
@@ -9134,12 +9198,18 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   background: transparent;
 }
 
+.research-report-document::-webkit-scrollbar-corner,
+.research-report-source-list::-webkit-scrollbar-corner,
+.research-report-outline nav::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 .research-report-document::-webkit-scrollbar-thumb,
 .research-report-source-list::-webkit-scrollbar-thumb,
 .research-report-outline nav::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-muted) 44%, transparent);
+  background: color-mix(in srgb, var(--text-muted) 34%, transparent);
   background-clip: content-box;
 }
 
