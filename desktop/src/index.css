@@ -9473,13 +9473,59 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   white-space: nowrap;
 }
 
+.plan-agent-clear {
+  height: 25px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-tertiary) 76%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--ui-font-size-xs);
+  white-space: nowrap;
+}
+
+.plan-agent-clear:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 .plan-agent-list {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 9px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
+}
+
+.plan-agent-section {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.plan-agent-section + .plan-agent-section {
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+}
+
+.plan-agent-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-agent-section-title strong,
+.plan-agent-section-title span {
+  color: inherit;
+  font-size: inherit;
+  font-weight: 520;
 }
 
 .plan-agent-task {

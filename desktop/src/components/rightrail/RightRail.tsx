@@ -291,6 +291,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const streaming = useChatStore(state => state.streaming);
   const runtimeStatus = useChatStore(state => state.runtimeStatus);
   const stopChatRun = useChatStore(state => state.stop);
+  const clearSubagents = useChatStore(state => state.clearSubagents);
   const loadChatSession = useChatStore(state => state.loadSession);
   const activateWebPreviewTab = useUiStore(state => state.activateWebPreviewTab);
   const closeWebPreviewTab = useUiStore(state => state.closeWebPreviewTab);
@@ -1532,6 +1533,56 @@ export function RightRail({ backendReady }: RightRailProps) {
     const agentProgress = agentTasks.length
       ? Math.round(agentTasks.reduce((sum, task) => sum + task.progress, 0) / agentTasks.length)
       : 0;
+    const activeAgentTasks = agentTasks.filter(task => task.status === 'running' || task.status === 'planned');
+    const finishedAgentTasks = agentTasks.filter(task => task.status === 'done' || task.status === 'error');
+    const canClearAgentTasks = agentTasks.length > 0 && activeAgentTasks.length === 0;
+    const renderAgentTask = (task: PlanAgentTask) => {
+      const open = openPlanAgentTasks[task.id] ?? task.status === 'error';
+      const elapsed = planAgentElapsed(task.startedAt, task.finishedAt);
+      const detailText = task.resultText || task.prompt || task.summary;
+      return (
+        <article className="plan-agent-task" data-status={task.status} data-open={open} key={task.id}>
+          <div className="plan-agent-task-row">
+            <button className="plan-agent-task-main" type="button" onClick={() => togglePlanAgentTask(task.id)}>
+              <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
+              <span className="plan-agent-dot" data-status={task.status} />
+              <span>
+                <strong>{task.title}</strong>
+                <small>{task.summary || t(planAgentStatusLabel(task.status))}</small>
+              </span>
+              <em>{t(planAgentStatusLabel(task.status))}</em>
+            </button>
+            {task.status === 'running' && (
+              <button
+                className="plan-agent-stop"
+                type="button"
+                disabled={!streaming}
+                title={t('停止当前运行')}
+                onClick={event => {
+                  event.stopPropagation();
+                  stopChatRun();
+                }}
+              >
+                <Square size={12} />
+                <span>{t('停止')}</span>
+              </button>
+            )}
+          </div>
+          {open && (
+            <div className="plan-agent-task-detail">
+              <div className="plan-agent-progress" aria-label={`${task.title} ${task.progress}%`}>
+                <span style={{ width: `${task.progress}%` }} />
+              </div>
+              <div className="plan-agent-meta">
+                <span>{task.progress}%</span>
+                {elapsed && <span>{elapsed}</span>}
+              </div>
+              {detailText ? <pre>{detailText}</pre> : <p>{t('等待智能体输出详情。')}</p>}
+            </div>
+          )}
+        </article>
+      );
+    };
     return (
     <div className="plan-card-pane">
       {total > 0 ? (
@@ -1587,57 +1638,41 @@ export function RightRail({ backendReady }: RightRailProps) {
                 : t('等待 subrun 启动')}
             </span>
           </div>
-          {agentTasks.length > 0 && <em>{agentProgress}%</em>}
+          {canClearAgentTasks ? (
+            <button
+              className="plan-agent-clear"
+              type="button"
+              onClick={() => {
+                clearSubagents();
+                setOpenPlanAgentTasks({});
+              }}
+            >
+              {t('清理')}
+            </button>
+          ) : (
+            agentTasks.length > 0 && <em>{agentProgress}%</em>
+          )}
         </div>
         {agentTasks.length > 0 ? (
           <div className="plan-agent-list">
-            {agentTasks.map(task => {
-              const open = openPlanAgentTasks[task.id] ?? task.status === 'error';
-              const elapsed = planAgentElapsed(task.startedAt, task.finishedAt);
-              const detailText = task.resultText || task.prompt || task.summary;
-              return (
-                <article className="plan-agent-task" data-status={task.status} data-open={open} key={task.id}>
-                  <div className="plan-agent-task-row">
-                    <button className="plan-agent-task-main" type="button" onClick={() => togglePlanAgentTask(task.id)}>
-                      <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
-                      <span className="plan-agent-dot" data-status={task.status} />
-                      <span>
-                        <strong>{task.title}</strong>
-                        <small>{task.summary || t(planAgentStatusLabel(task.status))}</small>
-                      </span>
-                      <em>{t(planAgentStatusLabel(task.status))}</em>
-                    </button>
-                    {task.status === 'running' && (
-                      <button
-                        className="plan-agent-stop"
-                        type="button"
-                        disabled={!streaming}
-                        title={t('停止当前运行')}
-                        onClick={event => {
-                          event.stopPropagation();
-                          stopChatRun();
-                        }}
-                      >
-                        <Square size={12} />
-                        <span>{t('停止')}</span>
-                      </button>
-                    )}
-                  </div>
-                  {open && (
-                    <div className="plan-agent-task-detail">
-                      <div className="plan-agent-progress" aria-label={`${task.title} ${task.progress}%`}>
-                        <span style={{ width: `${task.progress}%` }} />
-                      </div>
-                      <div className="plan-agent-meta">
-                        <span>{task.progress}%</span>
-                        {elapsed && <span>{elapsed}</span>}
-                      </div>
-                      {detailText ? <pre>{detailText}</pre> : <p>{t('等待智能体输出详情。')}</p>}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
+            {activeAgentTasks.length > 0 && (
+              <section className="plan-agent-section" data-layer="active" aria-label={t('进行中或待开始的智能体任务')}>
+                <div className="plan-agent-section-title">
+                  <strong>{t('进行中 / 待开始')}</strong>
+                  <span>{activeAgentTasks.length}</span>
+                </div>
+                {activeAgentTasks.map(renderAgentTask)}
+              </section>
+            )}
+            {finishedAgentTasks.length > 0 && (
+              <section className="plan-agent-section" data-layer="finished" aria-label={t('已完成或失败的智能体任务')}>
+                <div className="plan-agent-section-title">
+                  <strong>{t('已结束')}</strong>
+                  <span>{finishedAgentTasks.length}</span>
+                </div>
+                {finishedAgentTasks.map(renderAgentTask)}
+              </section>
+            )}
           </div>
         ) : (
           <div className="plan-agent-empty">
