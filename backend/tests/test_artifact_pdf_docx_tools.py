@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from backend.runtime.tool_registry import ToolRegistry, register_builtin_tools
 from backend.tools.artifacts.docx_tools import (
     docx_create,
@@ -13,6 +12,12 @@ from backend.tools.artifacts.docx_tools import (
     docx_inspect_layout,
     docx_render_pages,
     docx_to_pdf,
+)
+from backend.tools.artifacts.office_tools import (
+    pptx_create,
+    pptx_inspect,
+    xlsx_create,
+    xlsx_inspect,
 )
 from backend.tools.artifacts.pdf_tools import (
     pdf_create,
@@ -152,6 +157,10 @@ def test_artifact_tools_are_registered_and_exposed_in_lean_profile() -> None:
         "docx_to_pdf",
         "docx_render_pages",
         "docx_inspect_layout",
+        "xlsx_create",
+        "xlsx_inspect",
+        "pptx_create",
+        "pptx_inspect",
         "office_report_from_code_run",
     }
     assert expected.issubset(names)
@@ -167,6 +176,45 @@ def test_artifact_tools_are_registered_and_exposed_in_lean_profile() -> None:
     assert pdf_create_profile is not None
     assert pdf_create_profile.toolset == "artifact"
     assert pdf_create_profile.destructive is True
+    assert registry.get_tool_profile("xlsx_inspect").destructive is False  # type: ignore[union-attr]
+    assert registry.get_tool_profile("pptx_create").destructive is True  # type: ignore[union-attr]
+
+
+def test_xlsx_and_pptx_tools_create_and_inspect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "workspace"
+    backend_cwd = tmp_path / "backend"
+    workspace.mkdir()
+    backend_cwd.mkdir()
+    monkeypatch.chdir(backend_cwd)
+
+    with workspace_root_override(str(workspace)):
+        xlsx = _json(
+            xlsx_create(
+                "output/office/results.xlsx",
+                title="Results",
+                rows=[["metric", "value"], ["period", 12.5]],
+            )
+        )
+        if not xlsx.get("ok"):
+            assert xlsx.get("dependency") == "openpyxl"
+            pytest.skip("openpyxl is not installed in this environment")
+        xlsx_info = _json(xlsx_inspect("output/office/results.xlsx"))
+        assert xlsx_info["ok"] is True
+        assert xlsx_info["sheets"][0]["max_row"] >= 2
+
+        pptx = _json(
+            pptx_create(
+                "output/office/summary.pptx",
+                title="Summary",
+                slides=[{"title": "Result", "bullets": ["period=12.5", "stable"]}],
+            )
+        )
+        if not pptx.get("ok"):
+            assert pptx.get("dependency") == "python-pptx"
+            pytest.skip("python-pptx is not installed in this environment")
+        pptx_info = _json(pptx_inspect("output/office/summary.pptx"))
+        assert pptx_info["ok"] is True
+        assert pptx_info["slides"] >= 1
 
 
 def test_office_report_from_code_run_creates_docx_and_activity_payload(

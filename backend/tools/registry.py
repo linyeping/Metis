@@ -9,9 +9,6 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from backend.tools.coding.foundation.core_mechanisms.log_config import logger
-from backend.tools.schema_definitions import build_tools_schema
-
 # --- 业务实现导入 ---
 from backend.tools.coding.diagnosis.code_quality.analyze_complexity import analyze_complexity
 from backend.tools.coding.diagnosis.errors.read_lints import read_lints
@@ -23,6 +20,7 @@ from backend.tools.coding.execution.runtime_manager import (
     install_dev_runtime,
     setup_workspace,
 )
+from backend.tools.coding.execution.test_runner import run_tests
 from backend.tools.coding.execution.version_control.check_git_status import check_git_status
 from backend.tools.coding.execution.version_control.git_commit_pr import git_commit_pr
 from backend.tools.coding.execution.version_control.git_workflow import (
@@ -31,7 +29,6 @@ from backend.tools.coding.execution.version_control.git_workflow import (
     git_log,
     git_stage,
 )
-from backend.tools.coding.execution.test_runner import run_tests
 from backend.tools.coding.file_system.append.append_to_file import append_to_file
 from backend.tools.coding.file_system.create_overwrite.write_file import write_file
 from backend.tools.coding.file_system.delete.delete_directory import delete_directory
@@ -45,6 +42,9 @@ from backend.tools.coding.foundation.cli.manage_long_running import (
     start_long_running_process,
     stop_long_running_process,
 )
+from backend.tools.coding.foundation.core_mechanisms.log_config import logger
+from backend.tools.schema_definitions import build_tools_schema
+
 try:
     from backend.tools.coding.modify_refactor.modify_ast.edit_code_ast import editCode
 except Exception as exc:  # pragma: no cover
@@ -52,6 +52,64 @@ except Exception as exc:  # pragma: no cover
 
     def editCode(*_args: Any, **_kwargs: Any) -> str:
         return f"❌ editCode unavailable: {_edit_code_error_message}"
+from backend.runtime.isolated_runtime import (
+    metis_rootfs_asset_download,
+    metis_rootfs_asset_register,
+    metis_rootfs_asset_status,
+    metis_rootfs_build,
+    metis_rootfs_builder_status,
+    metis_rootfs_image_build,
+    metis_rootfs_image_builder_status,
+    metis_rootfs_source_status,
+    metis_runtime_bundle_package,
+    metis_runtime_bundle_package_v2,
+    metis_runtime_bundle_prepare,
+    metis_runtime_collect_artifacts,
+    metis_runtime_create,
+    metis_runtime_export_diagnostics,
+    metis_runtime_export_patch,
+    metis_runtime_run,
+    metis_runtime_status,
+    metis_sandbox_status,
+    metis_vm_bundle_status,
+    metis_vm_direct_assets_prepare,
+    metis_vm_direct_runner_prepare,
+    metis_vm_direct_runner_smoke,
+    metis_vm_guest_handshake_prepare,
+    metis_vm_guest_handshake_verify,
+    metis_vm_hcs_starter_prepare,
+    metis_vm_hcs_starter_start,
+    metis_vm_pack_adopt_reference,
+    metis_vm_pack_scaffold,
+    metis_vm_rootfs_boot_verifier_prepare,
+    metis_vm_rootfs_boot_verify,
+    metis_wsl_runtime_import,
+    metis_wsl_runtime_status,
+)
+from backend.runtime.runtime_job import metis_runtime_job, metis_runtime_job_status
+from backend.tools.artifacts.docx_tools import (
+    docx_create,
+    docx_edit,
+    docx_inspect_layout,
+    docx_render_pages,
+    docx_to_pdf,
+)
+from backend.tools.artifacts.office_tools import (
+    pptx_create,
+    pptx_inspect,
+    xlsx_create,
+    xlsx_inspect,
+)
+from backend.tools.artifacts.pdf_tools import (
+    pdf_create,
+    pdf_extract_text,
+    pdf_info,
+    pdf_merge_split,
+    pdf_render_pages,
+    pdf_screenshot_page,
+)
+from backend.tools.artifacts.report_tools import office_report_from_code_run
+from backend.tools.browser_automation.tools import browse_and_extract, browse_web
 from backend.tools.coding.modify_refactor.modify_special.edit_notebook import edit_notebook
 from backend.tools.coding.modify_refactor.modify_text.apply_patch import apply_patch
 from backend.tools.coding.modify_refactor.modify_text.diff_preview import diff_preview
@@ -60,12 +118,11 @@ from backend.tools.coding.modify_refactor.modify_text.undo_edit import undo_edit
 from backend.tools.coding.modify_refactor.refactor.extract_method import extract_method
 from backend.tools.coding.modify_refactor.refactor.rename_symbol import rename_symbol
 from backend.tools.coding.network_external.media.generate_image import generate_image
+from backend.tools.coding.network_external.web.deep_research import deep_research_plan, deep_research_run
 from backend.tools.coding.network_external.web.fetch_content import fetch_content
 from backend.tools.coding.network_external.web.web_fetch import web_fetch
 from backend.tools.coding.network_external.web.web_research import web_research
-from backend.tools.coding.network_external.web.deep_research import deep_research_plan, deep_research_run
 from backend.tools.coding.network_external.web.web_search import web_search
-from backend.tools.browser_automation.tools import browse_and_extract, browse_web
 from backend.tools.coding.read_search.read_analyze.generate_repo_map import generate_repo_map
 from backend.tools.coding.read_search.read_analyze.read_terminal_state import read_terminal_state
 from backend.tools.coding.read_search.read_multiple.read_multiple_files import read_multiple_files
@@ -91,61 +148,10 @@ from backend.tools.coding.workflow_features.subagents.delegate_best_of_n import 
 from backend.tools.coding.workflow_features.subagents.delegate_browser import delegate_browser
 from backend.tools.coding.workflow_features.subagents.delegate_explore import delegate_explore
 from backend.tools.coding.workflow_features.subagents.delegate_shell import delegate_shell
-from backend.tools.coding.workflow_features.subagents.summon_context_gatherer import summon_context_gatherer
-from backend.tools.coding.workflow_features.subagents.task_dispatch import task_dispatch
 from backend.tools.coding.workflow_features.subagents.run_parallel_tasks import run_parallel_tasks
 from backend.tools.coding.workflow_features.subagents.run_task_graph import run_task_graph
-from backend.tools.artifacts.docx_tools import (
-    docx_create,
-    docx_edit,
-    docx_inspect_layout,
-    docx_render_pages,
-    docx_to_pdf,
-)
-from backend.tools.artifacts.pdf_tools import (
-    pdf_create,
-    pdf_extract_text,
-    pdf_info,
-    pdf_merge_split,
-    pdf_render_pages,
-    pdf_screenshot_page,
-)
-from backend.tools.artifacts.report_tools import office_report_from_code_run
-from backend.runtime.isolated_runtime import (
-    metis_rootfs_asset_download,
-    metis_rootfs_asset_register,
-    metis_rootfs_asset_status,
-    metis_rootfs_build,
-    metis_rootfs_builder_status,
-    metis_rootfs_image_build,
-    metis_rootfs_image_builder_status,
-    metis_rootfs_source_status,
-    metis_runtime_bundle_package,
-    metis_runtime_bundle_package_v2,
-    metis_runtime_bundle_prepare,
-    metis_vm_direct_assets_prepare,
-    metis_vm_direct_runner_prepare,
-    metis_vm_direct_runner_smoke,
-    metis_vm_hcs_starter_prepare,
-    metis_vm_hcs_starter_start,
-    metis_vm_guest_handshake_prepare,
-    metis_vm_guest_handshake_verify,
-    metis_vm_rootfs_boot_verifier_prepare,
-    metis_vm_rootfs_boot_verify,
-    metis_vm_bundle_status,
-    metis_vm_pack_adopt_reference,
-    metis_vm_pack_scaffold,
-    metis_wsl_runtime_import,
-    metis_wsl_runtime_status,
-    metis_sandbox_status,
-    metis_runtime_collect_artifacts,
-    metis_runtime_create,
-    metis_runtime_export_diagnostics,
-    metis_runtime_export_patch,
-    metis_runtime_run,
-    metis_runtime_status,
-)
-from backend.runtime.runtime_job import metis_runtime_job, metis_runtime_job_status
+from backend.tools.coding.workflow_features.subagents.summon_context_gatherer import summon_context_gatherer
+from backend.tools.coding.workflow_features.subagents.task_dispatch import task_dispatch
 
 try:
     from backend.tools.coding.workflow_features.hooks.post_tool_hook import post_tool_hook
@@ -203,6 +209,8 @@ WRITE_LIKE_TOOLS: Set[str] = {
     "docx_render_pages",
     "pdf_render_pages",
     "pdf_screenshot_page",
+    "xlsx_create",
+    "pptx_create",
     "office_report_from_code_run",
     "metis_rootfs_asset_download",
     "metis_rootfs_build",
@@ -315,6 +323,10 @@ AVAILABLE_TOOLS: Dict[str, Callable[..., str]] = {
     "docx_to_pdf": docx_to_pdf,
     "docx_render_pages": docx_render_pages,
     "docx_inspect_layout": docx_inspect_layout,
+    "xlsx_create": xlsx_create,
+    "xlsx_inspect": xlsx_inspect,
+    "pptx_create": pptx_create,
+    "pptx_inspect": pptx_inspect,
     "office_report_from_code_run": office_report_from_code_run,
     "metis_rootfs_asset_status": metis_rootfs_asset_status,
     "metis_rootfs_asset_register": metis_rootfs_asset_register,

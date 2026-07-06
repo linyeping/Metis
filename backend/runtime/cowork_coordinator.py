@@ -19,6 +19,8 @@ from backend.runtime.agent_loop import (
     TextDeltaEvent,
     ToolCallEvent,
     ToolResultEvent,
+)
+from backend.runtime.agent_loop import (
     run as run_agent_loop,
 )
 from backend.runtime.artifact_registry import ArtifactFilters, list_artifacts, register_artifact
@@ -59,6 +61,10 @@ COWORK_ARTIFACT_TOOLS = [
     "docx_to_pdf",
     "docx_render_pages",
     "docx_inspect_layout",
+    "xlsx_create",
+    "xlsx_inspect",
+    "pptx_create",
+    "pptx_inspect",
     "office_report_from_code_run",
 ]
 DOCUMENT_ARTIFACT_EXTENSIONS = {".md", ".markdown", ".txt", ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv"}
@@ -263,6 +269,8 @@ def iter_local_cowork_events(
                     subrun=subrun,
                     record=record,
                     source_root=source_root,
+                    run_id=run_id,
+                    session_id=session_id,
                     base_config=base_config,
                     execution_profile=subrun_profile,
                     enabled_tools=enabled_tools,
@@ -307,7 +315,8 @@ def iter_local_cowork_events(
                 goal=str(plan.get("goal") or ""),
                 vm_result=vm_result,
             )
-            subrun["artifacts"] = [artifact, *document_artifacts]
+            agent_artifacts = agent_result.get("registered_artifacts") if isinstance(agent_result.get("registered_artifacts"), list) else []
+            subrun["artifacts"] = _dedupe_artifacts([artifact, *agent_artifacts, *document_artifacts])
             diff = _safe_diff(source_root, record)
             subrun["diff"] = diff
             failed = (bool(agent_result) and not bool(agent_result.get("ok"))) or (bool(vm_result) and not bool(vm_result.get("ok")))
@@ -462,6 +471,8 @@ def _run_subrun_agent(
     subrun: Dict[str, Any],
     record: WorktreeRecord,
     source_root: Path,
+    run_id: str,
+    session_id: str,
     base_config: AgentConfig,
     execution_profile: str,
     enabled_tools: List[str],
@@ -504,6 +515,8 @@ def _run_subrun_agent(
     tool_rows: List[Dict[str, Any]] = []
     statuses: List[Dict[str, Any]] = []
     errors: List[str] = []
+    registered_artifacts: List[Dict[str, Any]] = []
+    artifact_registration_errors: List[Dict[str, str]] = []
     done_payload: Dict[str, Any] = {}
     permission_denials = 0
     generator = run_agent_loop(messages, config)
@@ -531,6 +544,15 @@ def _run_subrun_agent(
                 )
             elif isinstance(event, ToolResultEvent):
                 _merge_tool_result(tool_rows, event)
+                created, registration_errors = _register_tool_result_artifacts(
+                    event=event,
+                    record=record,
+                    run_id=run_id,
+                    session_id=session_id,
+                    subrun_id=subrun_id,
+                )
+                registered_artifacts.extend(created)
+                artifact_registration_errors.extend(registration_errors)
             elif isinstance(event, RuntimeStatusEvent):
                 statuses.append(
                     {
@@ -575,6 +597,8 @@ def _run_subrun_agent(
         "tools": tool_rows,
         "statuses": statuses[-20:],
         "errors": errors,
+        "registered_artifacts": registered_artifacts,
+        "artifact_registration_errors": artifact_registration_errors,
         "permission_denials": permission_denials,
         **done_payload,
     }
@@ -630,6 +654,120 @@ def _merge_tool_result(tool_rows: List[Dict[str, Any]], event: ToolResultEvent) 
             "result_preview": _truncate(str(event.result or ""), 1600),
         }
     )
+
+
+def _register_tool_result_artifacts(
+    *,
+    event: ToolResultEvent,
+    record: WorktreeRecord,
+    run_id: str,
+    session_id: str,
+    subrun_id: str,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    if event.tool_name not in COWORK_ARTIFACT_TOOLS:
+        return [], []
+    payload = _parse_tool_json_result(event.result)
+    if not isinstance(payload, dict) or not payload.get("ok"):
+        return [], []
+    root = Path(record.worktree_workspace_root).expanduser().resolve()
+    paths = _artifact_paths_from_tool_payload(payload)
+    created: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for path_text in paths:
+        path = Path(path_text).expanduser()
+        if not path.is_absolute():
+            path = root / path
+        resolved = path.resolve(strict=False)
+        key = str(resolved)
+        if key in seen or not resolved.exists() or not resolved.is_file():
+            continue
+        seen.add(key)
+        try:
+            rel = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rel = resolved.name
+        try:
+            artifact = register_artifact(
+                kind=_artifact_kind_for_path(resolved),
+                title=_artifact_title_for_path(resolved, event.tool_name, payload),
+                path=str(resolved),
+                run_id=run_id,
+                session_id=session_id,
+                source_tool_call_id=event.call_id,
+                metadata={
+                    "source": "cowork_tool_result",
+                    "tool_name": event.tool_name,
+                    "subrun_id": subrun_id,
+                    "worktree_id": record.worktree_id,
+                    "relative_path": rel,
+                    "tool_payload_schema": str(payload.get("schema") or ""),
+                },
+                workspace_root=str(root),
+            )
+            created.append(artifact)
+        except Exception as exc:
+            errors.append({"path": key, "error": f"{type(exc).__name__}: {exc}"})
+    return created, errors
+
+
+def _parse_tool_json_result(value: str) -> Dict[str, Any]:
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _artifact_paths_from_tool_payload(payload: Dict[str, Any]) -> List[str]:
+    paths: List[str] = []
+    for key in ("output_path", "pdf_path", "image", "path"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            paths.append(value.strip())
+    images = payload.get("images")
+    if isinstance(images, list):
+        paths.extend(str(item).strip() for item in images if str(item or "").strip())
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, list):
+        for item in artifacts:
+            if isinstance(item, dict) and str(item.get("path") or "").strip():
+                paths.append(str(item.get("path") or "").strip())
+    activity = payload.get("artifact_activity") if isinstance(payload.get("artifact_activity"), dict) else {}
+    output = activity.get("output_path") if isinstance(activity, dict) else ""
+    if isinstance(output, str) and output.strip():
+        paths.append(output.strip())
+    activity_artifacts = activity.get("artifacts") if isinstance(activity, dict) else []
+    if isinstance(activity_artifacts, list):
+        for item in activity_artifacts:
+            if isinstance(item, dict) and str(item.get("path") or "").strip():
+                paths.append(str(item.get("path") or "").strip())
+    out: List[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        if path not in seen:
+            out.append(path)
+            seen.add(path)
+    return out
+
+
+def _artifact_kind_for_path(path: Path) -> str:
+    ext = path.suffix.lower()
+    if ext in {".md", ".markdown", ".txt", ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv"}:
+        return "document" if ext not in {".md", ".markdown"} else "report"
+    if ext in {".diff", ".patch"}:
+        return "diff"
+    return "workspace_file"
+
+
+def _artifact_title_for_path(path: Path, tool_name: str, payload: Dict[str, Any]) -> str:
+    title = str(payload.get("title") or "").strip()
+    if title:
+        return title[:200]
+    return f"{tool_name} - {path.name}"
 
 
 def _json_preview(value: Any) -> str:
@@ -880,6 +1018,22 @@ def _compact_artifacts(value: Any) -> List[Dict[str, Any]]:
                 "size": item.get("size", 0),
             }
         )
+    return out
+
+
+def _dedupe_artifacts(items: List[Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("artifact_id") or item.get("path") or item.get("url") or "")
+        if not key:
+            key = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
     return out
 
 

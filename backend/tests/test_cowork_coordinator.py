@@ -4,12 +4,21 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
-
-from backend.runtime.cancellation import OperationCancelled
+from backend.core.paths import clear_metis_home_cache
 from backend.runtime import cowork_coordinator
-from backend.runtime.agent_loop import AgentConfig, ContentEvent, DoneEvent
+from backend.runtime.agent_loop import AgentConfig, ContentEvent, DoneEvent, ToolResultEvent
+from backend.runtime.artifact_registry import ArtifactFilters, list_artifacts
+from backend.runtime.cancellation import OperationCancelled
 from backend.runtime.cowork_coordinator import iter_local_cowork_events
 from backend.runtime.worktree_manager import WorktreeRecord
+
+
+@pytest.fixture(autouse=True)
+def isolated_metis_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("METIS_HOME", str(tmp_path / "metis-home"))
+    clear_metis_home_cache()
+    yield
+    clear_metis_home_cache()
 
 
 def test_local_cowork_propagates_cancel_before_subrun(tmp_path: Path) -> None:
@@ -107,3 +116,79 @@ def test_local_cowork_runs_restricted_agent_inside_subrun_worktree(
     assert agent["ok"] is True
     assert agent["final_text"] == "agent subrun complete"
     assert agent["workspace_root"] == str(worktree)
+    assert "xlsx_create" in seen["enabled_tools"]
+    assert "pptx_create" in seen["enabled_tools"]
+
+
+def test_local_cowork_registers_artifact_tool_outputs_from_agent_subrun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    worktree = tmp_path / "worktree"
+    source.mkdir()
+    worktree.mkdir()
+    output = worktree / "output" / "office" / "results.xlsx"
+    output.parent.mkdir(parents=True)
+    output.write_bytes(b"fake xlsx payload")
+
+    record = WorktreeRecord(
+        worktree_id="wt_artifact",
+        workspace_root=str(source),
+        repo_root=str(source),
+        worktree_path=str(worktree),
+        worktree_workspace_root=str(worktree),
+        branch="metis/run/cowork-artifact",
+        base_ref="HEAD",
+        run_id="run_artifact",
+        session_id="session_artifact",
+        label="cowork-1",
+    )
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == str(source)
+        return record
+
+    def fake_diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = 200000) -> Dict[str, Any]:
+        return {
+            "schema": "metis.worktree_diff.v1",
+            "worktree": record.to_dict(),
+            "status": "?? output/office/results.xlsx\n",
+            "stat": " output/office/results.xlsx | Bin 0 -> 17 bytes\n",
+            "patch": "",
+            "truncated": False,
+            "base_ref": "HEAD",
+        }
+
+    def fake_run_agent_loop(messages: List[Dict[str, Any]], config: AgentConfig):
+        yield ToolResultEvent(
+            tool_name="xlsx_create",
+            call_id="call_xlsx",
+            result='{"ok": true, "output_path": "output/office/results.xlsx", "title": "Results"}',
+        )
+        yield DoneEvent(total_turns=1, total_tool_calls=1, total_tokens=3)
+
+    monkeypatch.setattr(cowork_coordinator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(cowork_coordinator, "diff_worktree", fake_diff_worktree)
+    monkeypatch.setattr(cowork_coordinator, "run_agent_loop", fake_run_agent_loop)
+
+    events = list(
+        iter_local_cowork_events(
+            "Create an xlsx report",
+            workspace_root=str(source),
+            run_id="run_artifact",
+            session_id="session_artifact",
+            max_subruns=1,
+            base_config=AgentConfig(llm_backend="fake", llm_model="fake", max_turns=4),
+        )
+    )
+
+    done = next(event for event in events if event["kind"] == "subagent_done")
+    artifacts = done["payload"]["result"]["artifacts"]
+    registered = [item for item in artifacts if item.get("source_tool_call_id") == "call_xlsx"]
+    assert registered
+    assert registered[0]["kind"] == "document"
+    assert registered[0]["metadata"]["source"] == "cowork_tool_result"
+    assert registered[0]["metadata"]["relative_path"] == "output/office/results.xlsx"
+    listed = list_artifacts(ArtifactFilters(run_id="run_artifact", session_id="session_artifact"))
+    assert any(item.get("source_tool_call_id") == "call_xlsx" for item in listed)

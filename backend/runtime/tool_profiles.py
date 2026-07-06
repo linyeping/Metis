@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-
 LEAN_PROFILE = frozenset(
     {
         "read_file",
@@ -46,6 +45,10 @@ LEAN_PROFILE = frozenset(
         "docx_to_pdf",
         "docx_render_pages",
         "docx_inspect_layout",
+        "xlsx_create",
+        "xlsx_inspect",
+        "pptx_create",
+        "pptx_inspect",
         "metis_rootfs_asset_status",
         "metis_rootfs_asset_register",
         "metis_rootfs_source_status",

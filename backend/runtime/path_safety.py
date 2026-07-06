@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-
 READ_TOOLS = {
     "read_file",
     "read_multiple_files",
@@ -23,6 +22,8 @@ READ_TOOLS = {
     "docx_to_pdf",
     "docx_render_pages",
     "docx_inspect_layout",
+    "xlsx_inspect",
+    "pptx_inspect",
     "metis_rootfs_asset_status",
     "metis_rootfs_source_status",
     "metis_rootfs_builder_status",
@@ -46,6 +47,8 @@ WRITE_TOOLS = {
     "pdf_merge_split",
     "docx_create",
     "docx_edit",
+    "xlsx_create",
+    "pptx_create",
     "office_report_from_code_run",
     "metis_rootfs_asset_download",
     "metis_rootfs_build",

@@ -335,7 +335,7 @@ def _tool_paths(tool_name: str, arguments: Dict[str, Any]) -> Iterable[str]:
     if tool_name in {"delete_file", "delete_directory"}:
         value = str(arguments.get("path") or arguments.get("file_path") or "").strip()
         return [value] if value else []
-    if tool_name in {"pdf_create", "pdf_merge_split", "docx_create"}:
+    if tool_name in {"pdf_create", "pdf_merge_split", "docx_create", "xlsx_create", "pptx_create"}:
         value = str(arguments.get("output_path") or "").strip()
         return [value] if value else []
     if tool_name == "office_report_from_code_run":

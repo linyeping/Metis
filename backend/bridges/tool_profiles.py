@@ -37,6 +37,8 @@ SAFE_TOOLS: frozenset[str] = frozenset(
         "pdf_info",
         "pdf_extract_text",
         "docx_inspect_layout",
+        "xlsx_inspect",
+        "pptx_inspect",
         "metis_rootfs_asset_status",
         "metis_rootfs_source_status",
         "metis_rootfs_builder_status",
@@ -83,6 +85,8 @@ DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
         "docx_edit",
         "docx_to_pdf",
         "docx_render_pages",
+        "xlsx_create",
+        "pptx_create",
         "office_report_from_code_run",
         "metis_rootfs_asset_download",
         "metis_rootfs_build",
@@ -209,7 +213,7 @@ def infer_toolset(name: str, source: str = "", description: str = "") -> str:
         "metis_sandbox_status",
     } or tool.startswith("metis_runtime_"):
         return "runtime"
-    if tool.startswith("pdf_") or tool.startswith("docx_") or tool.startswith("office_report_"):
+    if tool.startswith("pdf_") or tool.startswith("docx_") or tool.startswith("xlsx_") or tool.startswith("pptx_") or tool.startswith("office_report_"):
         return "artifact"
     if tool.startswith("web_") or tool.startswith("browse_") or "web" in text:
         return "web"

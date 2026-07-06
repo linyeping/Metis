@@ -39,6 +39,10 @@ def _array_of_object(desc: str) -> Prop:
     return {"type": "array", "items": {"type": "object"}, "description": desc}
 
 
+def _array_of_array(desc: str) -> Prop:
+    return {"type": "array", "items": {"type": "array", "items": {}}, "description": desc}
+
+
 # (name, description, properties, required)
 _TOOL_SPECS: List[Entry] = [
     (
@@ -301,6 +305,44 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
             "path": _string("输入 DOCX 路径"),
             "render": _boolean("是否同时调用 docx_render_pages"),
             "output_dir": _string("渲染输出目录，默认 output/docx"),
+        },
+        ["path"],
+    ),
+    (
+        "xlsx_create",
+        "创建 XLSX 工作簿，适合数据表、实验结果表、清单和简单多 sheet 交付物。完成后应 xlsx_inspect 验收。",
+        {
+            "output_path": _string("输出 XLSX 路径，例如 output/office/results.xlsx"),
+            "title": _string("可选标题；单 sheet 时会写入 A1"),
+            "rows": _array_of_array("可选二维数组行数据；简单表格可直接传 rows"),
+            "sheets": _array_of_object("可选 sheet 数组：name/rows，rows 为二维数组"),
+        },
+        ["output_path"],
+    ),
+    (
+        "xlsx_inspect",
+        "检查 XLSX 工作簿结构和前几行数据，用于确认 sheet、行列数量和内容预览。",
+        {
+            "path": _string("输入 XLSX 文件路径"),
+            "max_rows": _integer("每个 sheet 预览最大行数，默认 20"),
+        },
+        ["path"],
+    ),
+    (
+        "pptx_create",
+        "创建简单 PPTX 演示文稿，适合报告提纲、汇报草稿和多页摘要。完成后应 pptx_inspect 验收。",
+        {
+            "output_path": _string("输出 PPTX 路径，例如 output/office/summary.pptx"),
+            "title": _string("可选标题"),
+            "slides": _array_of_object("slide 数组：title/body/bullets"),
+        },
+        ["output_path"],
+    ),
+    (
+        "pptx_inspect",
+        "检查 PPTX 页数和每页文本内容，用于确认演示文稿是否写入预期标题和要点。",
+        {
+            "path": _string("输入 PPTX 文件路径"),
         },
         ["path"],
     ),

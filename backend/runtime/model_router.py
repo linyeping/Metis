@@ -126,6 +126,10 @@ _ARTIFACT_WORKFLOW_TOOLS = [
     "docx_inspect_layout",
     "docx_render_pages",
     "docx_to_pdf",
+    "xlsx_create",
+    "xlsx_inspect",
+    "pptx_create",
+    "pptx_inspect",
     "pdf_create",
     "pdf_extract_text",
     "pdf_info",
@@ -813,7 +817,7 @@ def should_block_desktop_control(task_type: str) -> bool:
     return str(task_type or "").strip().lower() == "artifact_workflow"
 
 
-# Office/document generation tools — a heavy cluster (~12 tools, ~2k schema
+# Office/document generation tools — a heavy cluster (~16 tools, ~2k schema
 # tokens) that only document tasks need. They stay out of the schema for every
 # other route so strong models don't re-send them every turn.
 _DOCUMENT_WORKFLOW_TOOLS = frozenset(
@@ -829,6 +833,10 @@ _DOCUMENT_WORKFLOW_TOOLS = frozenset(
         "docx_to_pdf",
         "docx_render_pages",
         "docx_inspect_layout",
+        "xlsx_create",
+        "xlsx_inspect",
+        "pptx_create",
+        "pptx_inspect",
         "office_report_from_code_run",
     }
 )

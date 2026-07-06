@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 from typing import Optional, Set
 
-
 # Maintainer-only sandbox build/verify tools + redundant low-level runtime
 # primitives. Hidden from end-user agents on every tier unless explicitly
 # exposed. The user-facing sandbox surface is just: metis_runtime_job,
@@ -115,6 +114,10 @@ TIER_3_TOOLS: Set[str] = {
     "docx_to_pdf",
     "docx_render_pages",
     "docx_inspect_layout",
+    "xlsx_create",
+    "xlsx_inspect",
+    "pptx_create",
+    "pptx_inspect",
     *_SANDBOX_USER_TOOLS,
 }
 
