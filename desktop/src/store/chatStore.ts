@@ -355,6 +355,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (sessionReloadBlocked(get(), sessionId, Boolean(options.force))) {
       return;
     }
+    const retainedPlanTodos = activeRunInfo && get().loadedSessionId === sessionId ? get().planTodos : [];
     set({
       attachments: [],
       composerText: '',
@@ -364,6 +365,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       awaySummary: null,
       recoveryNotice: activeRunInfo ? null : recoverySnapshot,
       promptSuggestions: [],
+      planTodos: retainedPlanTodos,
       usage: null,
       contextLedger: null,
       runtimeStatus: null,
