@@ -29,6 +29,7 @@ import {
 } from '../../../lib/api';
 import { safeJson, formatTime } from '../settingsShared';
 import { useT } from '../../../hooks/useT';
+import { useUiStore } from '../../../store/uiStore';
 
 interface RuntimeTabProps {
   busy: string;
@@ -310,6 +311,8 @@ export const RuntimeTab = memo(function RuntimeTab({
   status,
 }: RuntimeTabProps) {
   const t = useT();
+  const codeExecutionProfile = useUiStore(state => state.codeExecutionProfile);
+  const setCodeExecutionProfile = useUiStore(state => state.setCodeExecutionProfile);
   const [copiedPath, setCopiedPath] = useState('');
   const health = status?.health;
   const rootfs = selectedRootfs(status);
@@ -341,6 +344,30 @@ export const RuntimeTab = memo(function RuntimeTab({
     <div className="settings-card-grid runtime-manager-panel">
       {/* Hero: the sandbox provision panel is the primary UX. */}
       <SandboxProvisionPanel />
+
+      <section className="settings-section runtime-code-profile">
+        <div className="settings-section-header">
+          <Activity size={16} className="section-icon" />
+          <div>
+            <h3>{t('Code 执行策略')}</h3>
+            <p className="section-desc">{t('文件修改保持在 worktree；测试、构建和 shell 命令可切到 MetisRuntime WSL。')}</p>
+          </div>
+        </div>
+        <label className="toggle-row capsule-toggle-row">
+          <span>{t('Code 命令使用 local_vm')}</span>
+          <input
+            type="checkbox"
+            checked={codeExecutionProfile === 'local_vm'}
+            onChange={event => setCodeExecutionProfile(event.target.checked ? 'local_vm' : 'local_worktree')}
+          />
+          <i aria-hidden="true" />
+        </label>
+        <p className="runtime-manager-message">
+          {codeExecutionProfile === 'local_vm'
+            ? t('当前：Code run 会创建 worktree，命令执行进入 MetisRuntime WSL。')
+            : t('当前：Code run 创建 worktree，并在 worktree 内本机执行命令。')}
+        </p>
+      </section>
 
       {/* Advanced: Metis Runtime Manager — collapsed by default */}
       <details className="settings-card runtime-collapsible">

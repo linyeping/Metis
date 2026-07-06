@@ -518,6 +518,69 @@ def test_run_registry_accepts_local_worktree_execution_profile(
     assert payload["worktree_workspace_root"] == str(fake_worktree)
 
 
+def test_code_run_local_vm_profile_still_creates_worktree(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    target = session_manager.create_session(title="Target local vm code run", workspace_id=workspace_id)
+    source_root = web_app._active_workspace_root()
+    fake_worktree = tmp_path / "fake-code-vm-worktree"
+    fake_worktree.mkdir()
+    started_runs: List[Dict[str, Any]] = []
+
+    class FakeWorktree:
+        def to_dict(self) -> Dict[str, Any]:
+            return {
+                "schema": "metis.worktree.v1",
+                "worktree_id": "wt_vm_test",
+                "workspace_root": source_root,
+                "repo_root": source_root,
+                "worktree_path": str(fake_worktree),
+                "worktree_workspace_root": str(fake_worktree),
+                "branch": "metis/run/vm-test",
+                "base_ref": "HEAD",
+                "status": "active",
+            }
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> FakeWorktree:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == target.id
+        assert label == "code-run"
+        return FakeWorktree()
+
+    def fake_start_run_thread(run: Dict[str, Any]) -> None:
+        started_runs.append(dict(run))
+
+    monkeypatch.setattr(web_app, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(web_app, "_start_run_thread", fake_start_run_thread)
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={
+                "message": "run tests in vm",
+                "session_id": target.id,
+                "assistant_id": "assistant-run-local-vm",
+                "surface_mode": "code",
+                "execution_profile": "local_vm",
+            },
+        )
+        assert created.status_code == 200
+        payload = created.get_json()
+
+    assert payload["execution_profile"] == "local_vm"
+    assert payload["source_workspace_root"] == source_root
+    assert payload["workspace_root"] == str(fake_worktree)
+    assert payload["worktree_id"] == "wt_vm_test"
+    assert payload["worktree_workspace_root"] == str(fake_worktree)
+    assert started_runs and started_runs[0]["execution_profile"] == "local_vm"
+    assert started_runs[0]["workspace_root"] == str(fake_worktree)
+
+
 def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(isolated_flask_app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     class OneToolBackend(CrashingStreamBackend):
         def __init__(self) -> None:

@@ -38,6 +38,7 @@ from backend.runtime.agent_loop import (  # noqa: E402
 from backend.runtime.cancellation import OperationCancelled  # noqa: E402
 from backend.runtime.execution_profile import (  # noqa: E402
     LOCAL_DIRECT,
+    LOCAL_VM,
     LOCAL_WORKTREE,
     default_execution_profile_for_surface,
     normalize_execution_profile,
@@ -3048,7 +3049,9 @@ def create_run() -> Any:
     source_workspace_root = _request_workspace_root(session_id)
     workspace_root = source_workspace_root
     worktree_payload: Dict[str, Any] = {}
-    if execution_profile_result.profile == LOCAL_WORKTREE:
+    create_code_worktree = normalized_surface == "code" and execution_profile_result.profile == LOCAL_VM
+    create_run_worktree = execution_profile_result.profile == LOCAL_WORKTREE or create_code_worktree
+    if create_run_worktree:
         try:
             worktree_record = create_worktree(
                 source_workspace_root,
@@ -4960,4 +4963,3 @@ if __name__ == "__main__":
     logger.info("LLM: %s / %s", config.llm_backend, config.llm_model)
     logger.info("Tools: %s registered", registry.tool_count)
     start_server(port, host=host)
-

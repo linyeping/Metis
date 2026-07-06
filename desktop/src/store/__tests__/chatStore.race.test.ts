@@ -53,7 +53,7 @@ describe('chatStore loadSession runtime correctness', () => {
       loading: false,
       error: null,
     });
-    useUiStore.setState({ appMode: 'chat' });
+    useUiStore.setState({ appMode: 'chat', codeExecutionProfile: 'local_worktree' });
     useChatStore.setState({
       messages: [],
       composerText: '',
@@ -104,6 +104,19 @@ describe('chatStore loadSession runtime correctness', () => {
       session_id: 'session-new',
       surface_mode: 'chat',
       deep_research: true,
+    }));
+  });
+
+  it('send uses local_vm execution profile for Code mode when enabled', async () => {
+    useUiStore.setState({ appMode: 'code', codeExecutionProfile: 'local_vm' });
+
+    await useChatStore.getState().send('test in vm');
+
+    expect(api.createRun).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'test in vm',
+      session_id: 'session-new',
+      surface_mode: 'code',
+      execution_profile: 'local_vm',
     }));
   });
 

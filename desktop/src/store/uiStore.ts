@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { FileChangePreview, FileChangeSummary } from '../lib/diffPreview';
-import type { AppMode, FileChangeRevertItem, FontFamily, Language, SectionId, SettingsSection, ThemeName } from '../lib/types';
+import type { AppMode, FileChangeRevertItem, FontFamily, Language, RunExecutionProfile, SectionId, SettingsSection, ThemeName } from '../lib/types';
 import { themeMode } from '../lib/themes';
 
 type AppearanceMode = 'light' | 'dark';
@@ -124,6 +124,7 @@ interface UiState {
   sideChatWidth: number;
   terminalOpen: boolean;
   terminalHeight: number;
+  codeExecutionProfile: RunExecutionProfile;
   workspaceCardVisibility: WorkspaceCardVisibility;
   workspaceCardColumnWidths: WorkspaceCardColumnWidths;
   workspaceCardRowSplits: WorkspaceCardRowSplits;
@@ -168,6 +169,7 @@ interface UiState {
   setSideChatWidth: (width: number) => void;
   setTerminalOpen: (open: boolean) => void;
   setTerminalHeight: (height: number) => void;
+  setCodeExecutionProfile: (profile: RunExecutionProfile) => void;
   setWorkspaceCardVisible: (cardId: WorkspaceCardId, visible: boolean) => void;
   workspaceCardShortcuts: WorkspaceCardShortcuts;
   setWorkspaceCardShortcut: (cardId: WorkspaceCardId, shortcut: WorkspaceCardShortcut | null) => void;
@@ -236,6 +238,11 @@ function storedLanguage(): Language {
 function storedAppMode(): AppMode {
   const value = localStorage.getItem('metis.appMode') as AppMode | null;
   return value === 'cowork' || value === 'code' ? value : 'chat';
+}
+
+function storedCodeExecutionProfile(): RunExecutionProfile {
+  const value = localStorage.getItem('metis.codeExecutionProfile') as RunExecutionProfile | null;
+  return value === 'local_vm' ? 'local_vm' : 'local_worktree';
 }
 
 function storedFontFamily(): FontFamily {
@@ -424,6 +431,7 @@ export const useUiStore = create<UiState>(set => ({
   sideChatWidth: storedNumber('metis.sideChatWidth', 320, 286, 320),
   terminalOpen: false,
   terminalHeight: 220,
+  codeExecutionProfile: storedCodeExecutionProfile(),
   workspaceCardVisibility: initialWorkspaceCardVisibility,
   workspaceCardShortcuts: storedWorkspaceCardShortcuts(),
   workspaceCardColumnWidths: storedWorkspaceCardColumnWidths(),
@@ -536,6 +544,11 @@ export const useUiStore = create<UiState>(set => ({
       };
     }),
   setTerminalHeight: terminalHeight => set({ terminalHeight: Math.min(Math.max(terminalHeight, 140), 420) }),
+  setCodeExecutionProfile: profile => {
+    const codeExecutionProfile = profile === 'local_vm' ? 'local_vm' : 'local_worktree';
+    localStorage.setItem('metis.codeExecutionProfile', codeExecutionProfile);
+    set({ codeExecutionProfile });
+  },
   setWorkspaceCardShortcut: (cardId, shortcut) =>
     set(state => ({
       workspaceCardShortcuts: persistWorkspaceCardShortcuts({ ...state.workspaceCardShortcuts, [cardId]: shortcut }),

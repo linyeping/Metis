@@ -86,7 +86,7 @@ const PENDING_SEND_SESSION = '__pending_send_session__';
 type RewindMode = 'conversation' | 'files' | 'both';
 
 function executionProfileForSurface(surfaceMode: string): RunExecutionProfile {
-  if (surfaceMode === 'code') return 'local_worktree';
+  if (surfaceMode === 'code') return useUiStore.getState().codeExecutionProfile === 'local_vm' ? 'local_vm' : 'local_worktree';
   return 'local_direct';
 }
 

@@ -138,6 +138,8 @@ test('Runtime Manager productization stays wired', () => {
   const backend = read('electron/backend.cjs');
   const builder = read('electron-builder.yml');
   const settings = readSettingsSources();
+  const uiStore = read('src/store/uiStore.ts');
+  const chatStore = read('src/store/chatStore.ts');
   const api = read('src/lib/api.ts');
   const types = read('src/lib/types.ts');
   const css = read('src/index.css');
@@ -164,9 +166,16 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(settings, /本地 VM 基础条件/);
   assert.match(settings, /MetisRuntime WSL 是 local_vm 的第一版可用 runner/);
   assert.match(settings, /不是 HCS direct runner/);
+  assert.match(settings, /Code 执行策略/);
+  assert.match(settings, /Code 命令使用 local_vm/);
+  assert.match(settings, /setCodeExecutionProfile\(event\.target\.checked \? 'local_vm' : 'local_worktree'\)/);
   assert.match(settings, /最近结果/);
   assert.match(settings, /runtime-result-paths/);
   assert.match(settings, /extractResultPaths/);
+  assert.match(uiStore, /codeExecutionProfile:\s*RunExecutionProfile/);
+  assert.match(uiStore, /metis\.codeExecutionProfile/);
+  assert.match(uiStore, /setCodeExecutionProfile/);
+  assert.match(chatStore, /surfaceMode === 'code'[\s\S]*codeExecutionProfile === 'local_vm' \? 'local_vm' : 'local_worktree'/);
   assert.match(api, /getRuntimeManagerStatus/);
   assert.match(api, /runtimeManagerSmoke/);
   assert.match(api, /runtimeManagerRepair/);
@@ -828,6 +837,9 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(realBackend, /_RUN_ACTIVE_STATES/);
   assert.match(realBackend, /def _create_run_state/);
   assert.match(realBackend, /def _run_registry_worker/);
+  assert.match(realBackend, /LOCAL_VM/);
+  assert.match(realBackend, /create_code_worktree = normalized_surface == "code" and execution_profile_result\.profile == LOCAL_VM/);
+  assert.match(realBackend, /create_run_worktree = execution_profile_result\.profile == LOCAL_WORKTREE or create_code_worktree/);
   assert.match(realBackend, /@app\.route\("\/runs", methods=\["POST"\]\)/);
   assert.match(realBackend, /@app\.route\("\/runs\/<run_id>\/events"/);
   assert.match(realBackend, /@app\.route\("\/sessions\/<session_id>\/runs\/active"/);
@@ -835,6 +847,7 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(flaskSmoke, /test_run_registry_streams_replayable_events_to_target_session/);
   assert.match(flaskSmoke, /test_run_registry_cancel_endpoint_marks_active_run_canceling/);
   assert.match(flaskSmoke, /test_run_registry_rejects_second_active_run_for_same_session/);
+  assert.match(flaskSmoke, /test_code_run_local_vm_profile_still_creates_worktree/);
   assert.match(types, /interface ChatRunPayload/);
   assert.match(types, /interface ActiveChatRunPayload/);
   assert.match(types, /run_id\?: string/);
