@@ -25,6 +25,7 @@ class LocalVmCommand:
     expected_stdout_contains: str = ""
     export_patch: bool = True
     export_diagnostics: str = "on_failure"
+    cancel_event: Any = None
 
 
 def run_local_vm_command(request: LocalVmCommand) -> Dict[str, Any]:
@@ -76,6 +77,7 @@ def run_local_vm_command(request: LocalVmCommand) -> Dict[str, Any]:
             export_patch=bool(request.export_patch),
             export_diagnostics=str(request.export_diagnostics or "on_failure"),
             strict_sandbox=True,
+            cancel_event=request.cancel_event,
         )
         payload = json.loads(raw) if raw else {}
     except Exception as exc:
@@ -97,6 +99,7 @@ def run_local_vm_command(request: LocalVmCommand) -> Dict[str, Any]:
         "run_id": run_id,
         "started_at": started,
         "finished_at": time.time(),
+        "canceled": bool(payload.get("canceled")),
         "job": payload,
     }
 

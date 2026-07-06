@@ -41,7 +41,7 @@ def _manifest(tmp_path: Path) -> RuntimeManifest:
 def test_metis_wsl_runner_exports_env_before_multiline_command(tmp_path: Path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run_args(args, *, timeout, backend, executed_command):
+    def fake_run_args(args, *, timeout, backend, executed_command, **_kwargs):
         captured["args"] = args
         captured["backend"] = backend
         return BackendRunResult(

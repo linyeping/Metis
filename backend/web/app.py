@@ -2956,6 +2956,7 @@ def _run_cowork_registry_worker(run: Dict[str, Any]) -> None:
                 execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
                 base_config=base_config,
                 cancelled=lambda: bool(run.get("cancel_requested")),
+                cancel_event=run.get("cancel_event"),
                 resume_state=run.get("resume_state") if isinstance(run.get("resume_state"), dict) else None,
             ):
                 if run.get("cancel_requested"):

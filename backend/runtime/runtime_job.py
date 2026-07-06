@@ -42,6 +42,7 @@ def metis_runtime_job(
     strict_sandbox: bool = False,
     max_files: int = 2000,
     max_bytes: int = 80 * 1024 * 1024,
+    cancel_event: Any = None,
 ) -> str:
     """Run one Claude-style isolated runtime job and return a stable result contract."""
     started = time.time()
@@ -128,6 +129,7 @@ def metis_runtime_job(
                     cwd=cwd,
                     timeout=max(1, int(timeout or 120)),
                     allow_network=bool(allow_network),
+                    cancel_event=cancel_event,
                 )
             )
         if (collect_artifacts or bool(artifact_patterns)) and session_id:
@@ -150,7 +152,7 @@ def metis_runtime_job(
             expected_stdout_contains=expected_stdout_contains,
             create_failed=False,
         )
-        status = "done" if verifier.get("ok") else "failed"
+        status = "canceled" if bool(run.get("canceled")) else "done" if verifier.get("ok") else "failed"
 
         diagnostics_mode = str(export_diagnostics or "on_failure").strip().lower()
         should_export_diagnostics = diagnostics_mode in {"always", "true", "1", "yes"} or (
@@ -176,6 +178,8 @@ def metis_runtime_job(
         payload["message"] = (
             "Runtime job completed and verified."
             if status == "done"
+            else "Runtime job canceled by request."
+            if status == "canceled"
             else "Runtime job finished but verification failed; inspect diagnostics and stderr."
         )
         _write_job(root, payload)
@@ -279,6 +283,8 @@ def _job_payload(
         "duration_ms": int((time.time() - started) * 1000),
         "returncode": run.get("returncode"),
         "timed_out": bool(run.get("timed_out")),
+        "canceled": bool(run.get("canceled")),
+        "cancel_detail": str(run.get("cancel_detail") or ""),
         "stdout": str(run.get("stdout") or ""),
         "stderr": str(run.get("stderr") or ""),
         "stdout_path": str(run.get("stdout_path") or ""),

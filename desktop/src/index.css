@@ -5433,7 +5433,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 
 .cowork-activity-header {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
   padding: 10px;
@@ -5502,6 +5502,29 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 .cowork-activity-stats b {
   color: var(--accent);
   font-size: 15px;
+}
+
+.cowork-resume-chip {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--accent) 12%);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.cowork-resume-chip span {
+  color: var(--text-faint);
+}
+
+.cowork-resume-chip b {
+  color: var(--text);
+  font-weight: 650;
 }
 
 .cowork-progress {
@@ -5720,6 +5743,33 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cowork-subrun-meta {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 230px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cowork-subrun-meta span {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cowork-subrun-card[data-resume='reused'] .cowork-subrun-meta span {
+  border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+  background: color-mix(in srgb, var(--success-soft) 72%, transparent);
+  color: var(--success);
 }
 
 .cowork-summary-line,
@@ -6077,9 +6127,11 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   }
 
   .cowork-activity-stats,
+  .cowork-resume-chip,
   .cowork-section-head em,
   .cowork-plan-list em,
-  .cowork-subrun-head em {
+  .cowork-subrun-head em,
+  .cowork-subrun-meta {
     justify-self: start;
     max-width: 100%;
   }

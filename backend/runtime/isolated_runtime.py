@@ -2785,6 +2785,8 @@ class BackendRunResult:
     executed_command: str
     backend: str
     fallback_reason: str = ""
+    canceled: bool = False
+    cancel_detail: str = ""
 
 
 def metis_runtime_create(
@@ -2964,6 +2966,7 @@ def metis_runtime_run(
     timeout: int = 120,
     allow_network: bool = False,
     env: Optional[Dict[str, str]] = None,
+    cancel_event: Any = None,
 ) -> str:
     """Run a shell command inside an isolated runtime session."""
     started = time.time()
@@ -3003,11 +3006,13 @@ def metis_runtime_run(
             timeout=max(1, int(timeout or 120)),
             env_map=env_map,
             network_allowed=network_allowed,
+            cancel_event=cancel_event,
         )
         returncode = backend_result.returncode
         stdout = backend_result.stdout
         stderr = backend_result.stderr
         timed_out = backend_result.timed_out
+        canceled = backend_result.canceled
         duration_ms = int((time.time() - started) * 1000)
         stdout_path = run_dir / "stdout.txt"
         stderr_path = run_dir / "stderr.txt"
@@ -3023,18 +3028,20 @@ def metis_runtime_run(
             "cwd": str(work_dir),
             "returncode": returncode,
             "timed_out": timed_out,
+            "canceled": canceled,
+            "cancel_detail": backend_result.cancel_detail,
             "duration_ms": duration_ms,
             "stdout_path": str(stdout_path),
             "stderr_path": str(stderr_path),
             "network_allowed": network_allowed,
         }
         _append_run(manifest.paths.runs_path, row)
-        manifest.status = "failed" if timed_out or returncode not in (0, None) else "ran"
-        if returncode == 0:
+        manifest.status = "cancelled" if canceled else "failed" if timed_out or returncode not in (0, None) else "ran"
+        if returncode == 0 and not canceled:
             manifest.status = "ran"
         manifest.updated_at = time.time()
         diagnostics_zip = ""
-        if timed_out or returncode not in (0, None):
+        if canceled or timed_out or returncode not in (0, None):
             diagnostics = _export_diagnostics(manifest)
             diagnostics_zip = str(diagnostics.get("diagnostics_zip") or "")
             manifest.last_diagnostics_zip = diagnostics_zip
@@ -3042,7 +3049,7 @@ def metis_runtime_run(
         artifacts = _list_artifacts(manifest.paths.artifacts_dir)
         return _json(
             {
-                "ok": returncode == 0 and not timed_out,
+                "ok": returncode == 0 and not timed_out and not canceled,
                 "schema": RUNTIME_SCHEMA,
                 "session_id": manifest.session_id,
                 "run_id": run_id,
@@ -3053,6 +3060,8 @@ def metis_runtime_run(
                 "cwd": str(work_dir),
                 "returncode": returncode,
                 "timed_out": timed_out,
+                "canceled": canceled,
+                "cancel_detail": backend_result.cancel_detail,
                 "duration_ms": duration_ms,
                 "stdout": _truncate(stdout),
                 "stderr": _truncate(stderr),
@@ -9873,6 +9882,7 @@ def _run_runtime_command(
     timeout: int,
     env_map: Dict[str, str],
     network_allowed: bool,
+    cancel_event: Any = None,
 ) -> BackendRunResult:
     backend = str(manifest.backend or "local").lower()
     try:
@@ -9884,6 +9894,7 @@ def _run_runtime_command(
                 timeout=timeout,
                 env_map=env_map,
                 network_allowed=network_allowed,
+                cancel_event=cancel_event,
             )
         if backend == "metis_wsl":
             return _run_metis_wsl_command(
@@ -9893,6 +9904,7 @@ def _run_runtime_command(
                 timeout=timeout,
                 env_map=env_map,
                 network_allowed=network_allowed,
+                cancel_event=cancel_event,
             )
         if backend == "docker":
             return _run_docker_command(
@@ -9902,6 +9914,7 @@ def _run_runtime_command(
                 timeout=timeout,
                 env_map=env_map,
                 network_allowed=network_allowed,
+                cancel_event=cancel_event,
             )
         if backend == "vm":
             return _run_vm_guest_protocol_command(
@@ -9937,6 +9950,7 @@ def _run_runtime_command(
             work_dir=work_dir,
             timeout=timeout,
             env_map=env_map,
+            cancel_event=cancel_event,
         )
         local.fallback_reason = f"{backend} backend unavailable at run time: {type(exc).__name__}: {exc}"
         return local
@@ -9945,6 +9959,7 @@ def _run_runtime_command(
         work_dir=work_dir,
         timeout=timeout,
         env_map=env_map,
+        cancel_event=cancel_event,
     )
 
 
@@ -10305,38 +10320,18 @@ def _run_hcs_command(
             pass
 
 
-def _run_local_command(command_text: str, *, work_dir: Path, timeout: int, env_map: Dict[str, str]) -> BackendRunResult:
+def _run_local_command(command_text: str, *, work_dir: Path, timeout: int, env_map: Dict[str, str], cancel_event: Any = None) -> BackendRunResult:
     command_to_run = shell_command_with_configured_python(command_text)
-    try:
-        proc = subprocess.run(
-            command_to_run,
-            cwd=str(work_dir),
-            env=env_map,
-            shell=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
-        )
-        return BackendRunResult(
-            returncode=proc.returncode,
-            stdout=proc.stdout or "",
-            stderr=proc.stderr or "",
-            timed_out=False,
-            executed_command=command_to_run,
-            backend="local",
-        )
-    except subprocess.TimeoutExpired as exc:
-        return BackendRunResult(
-            returncode=None,
-            stdout=exc.stdout if isinstance(exc.stdout, str) else "",
-            stderr=((exc.stderr if isinstance(exc.stderr, str) else "") + f"\nTimeout after {timeout}s").strip(),
-            timed_out=True,
-            executed_command=command_to_run,
-            backend="local",
-        )
+    return _run_process(
+        command_to_run,
+        timeout=timeout,
+        backend="local",
+        executed_command=command_to_run,
+        cwd=str(work_dir),
+        env=env_map,
+        shell=True,
+        cancel_event=cancel_event,
+    )
 
 
 def _run_wsl_command(
@@ -10347,6 +10342,7 @@ def _run_wsl_command(
     timeout: int,
     env_map: Dict[str, str],
     network_allowed: bool,
+    cancel_event: Any = None,
 ) -> BackendRunResult:
     sandbox = manifest.sandbox or {}
     status = sandbox.get("status") if isinstance(sandbox.get("status"), dict) else {}
@@ -10378,7 +10374,14 @@ def _run_wsl_command(
     if distro:
         args.extend(["-d", distro])
     args.extend(["--", "bash", script_wsl])
-    return _run_args(args, timeout=timeout, backend="wsl", executed_command=" ".join(args))
+    return _run_args(
+        args,
+        timeout=timeout,
+        backend="wsl",
+        executed_command=" ".join(args),
+        cancel_event=cancel_event,
+        cancel_cleanup_args=_wsl_terminate_args(executable, distro) if cancel_event is not None else None,
+    )
 
 
 def _run_metis_wsl_command(
@@ -10389,6 +10392,7 @@ def _run_metis_wsl_command(
     timeout: int,
     env_map: Dict[str, str],
     network_allowed: bool,
+    cancel_event: Any = None,
 ) -> BackendRunResult:
     sandbox = manifest.sandbox or {}
     status = sandbox.get("status") if isinstance(sandbox.get("status"), dict) else {}
@@ -10420,7 +10424,14 @@ def _run_metis_wsl_command(
     )
     script_wsl = _windows_path_to_wsl(script_path)
     args = [executable, "-d", distro, "--", "bash", script_wsl]
-    return _run_args(args, timeout=timeout, backend="metis_wsl", executed_command=" ".join(args))
+    return _run_args(
+        args,
+        timeout=timeout,
+        backend="metis_wsl",
+        executed_command=" ".join(args),
+        cancel_event=cancel_event,
+        cancel_cleanup_args=_wsl_terminate_args(executable, distro) if cancel_event is not None else None,
+    )
 
 
 def _shell_export_lines(values: Dict[str, str]) -> str:
@@ -10449,6 +10460,7 @@ def _run_docker_command(
     timeout: int,
     env_map: Dict[str, str],
     network_allowed: bool,
+    cancel_event: Any = None,
 ) -> BackendRunResult:
     sandbox = manifest.sandbox or {}
     status = sandbox.get("status") if isinstance(sandbox.get("status"), dict) else {}
@@ -10488,18 +10500,131 @@ def _run_docker_command(
         if str(key).startswith("METIS_"):
             args.extend(["-e", f"{key}={value}"])
     args.extend([image, "sh", "-lc", command_text])
-    return _run_args(args, timeout=timeout, backend="docker", executed_command=" ".join(shlex.quote(str(item)) for item in args))
+    return _run_args(args, timeout=timeout, backend="docker", executed_command=" ".join(shlex.quote(str(item)) for item in args), cancel_event=cancel_event)
 
 
-def _run_args(args: List[str], *, timeout: int, backend: str, executed_command: str) -> BackendRunResult:
+def _run_args(
+    args: List[str],
+    *,
+    timeout: int,
+    backend: str,
+    executed_command: str,
+    cancel_event: Any = None,
+    cancel_cleanup_args: Optional[List[str]] = None,
+) -> BackendRunResult:
+    return _run_process(
+        args,
+        timeout=timeout,
+        backend=backend,
+        executed_command=executed_command,
+        cancel_event=cancel_event,
+        cancel_cleanup_args=cancel_cleanup_args,
+    )
+
+
+def _run_process(
+    args: Any,
+    *,
+    timeout: int,
+    backend: str,
+    executed_command: str,
+    cwd: str = "",
+    env: Optional[Dict[str, str]] = None,
+    shell: bool = False,
+    cancel_event: Any = None,
+    cancel_cleanup_args: Optional[List[str]] = None,
+) -> BackendRunResult:
+    if cancel_event is None and not cancel_cleanup_args:
+        return _run_blocking_process(
+            args,
+            timeout=timeout,
+            backend=backend,
+            executed_command=executed_command,
+            cwd=cwd,
+            env=env,
+            shell=shell,
+        )
+    started = time.time()
+    timeout_seconds = max(1, int(timeout or 120))
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    proc = subprocess.Popen(
+        args,
+        cwd=cwd or None,
+        env=env,
+        shell=shell,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=creationflags,
+    )
+    while True:
+        if _cancel_requested(cancel_event):
+            detail = _cancel_running_process(proc, cleanup_args=cancel_cleanup_args)
+            stdout, stderr = _communicate_after_stop(proc)
+            return BackendRunResult(
+                returncode=proc.returncode,
+                stdout=stdout,
+                stderr=_append_process_note(stderr, "Canceled by request."),
+                timed_out=False,
+                executed_command=executed_command,
+                backend=backend,
+                canceled=True,
+                cancel_detail=detail,
+            )
+        elapsed = time.time() - started
+        remaining = timeout_seconds - elapsed
+        if remaining <= 0:
+            detail = _cancel_running_process(proc, cleanup_args=cancel_cleanup_args)
+            stdout, stderr = _communicate_after_stop(proc)
+            return BackendRunResult(
+                returncode=proc.returncode,
+                stdout=stdout,
+                stderr=_append_process_note(stderr, f"Timeout after {timeout_seconds}s"),
+                timed_out=True,
+                executed_command=executed_command,
+                backend=backend,
+                cancel_detail=detail,
+            )
+        try:
+            stdout, stderr = proc.communicate(timeout=min(0.2, max(0.05, remaining)))
+            return BackendRunResult(
+                returncode=proc.returncode,
+                stdout=stdout or "",
+                stderr=stderr or "",
+                timed_out=False,
+                executed_command=executed_command,
+                backend=backend,
+            )
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _run_blocking_process(
+    args: Any,
+    *,
+    timeout: int,
+    backend: str,
+    executed_command: str,
+    cwd: str = "",
+    env: Optional[Dict[str, str]] = None,
+    shell: bool = False,
+) -> BackendRunResult:
+    timeout_seconds = max(1, int(timeout or 120))
     try:
         proc = subprocess.run(
             args,
+            cwd=cwd or None,
+            env=env,
+            shell=shell,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout,
+            timeout=timeout_seconds,
             check=False,
         )
         return BackendRunResult(
@@ -10514,11 +10639,73 @@ def _run_args(args: List[str], *, timeout: int, backend: str, executed_command: 
         return BackendRunResult(
             returncode=None,
             stdout=exc.stdout if isinstance(exc.stdout, str) else "",
-            stderr=((exc.stderr if isinstance(exc.stderr, str) else "") + f"\nTimeout after {timeout}s").strip(),
+            stderr=_append_process_note(exc.stderr if isinstance(exc.stderr, str) else "", f"Timeout after {timeout_seconds}s"),
             timed_out=True,
             executed_command=executed_command,
             backend=backend,
         )
+
+
+def _cancel_requested(cancel_event: Any) -> bool:
+    return bool(cancel_event is not None and hasattr(cancel_event, "is_set") and cancel_event.is_set())
+
+
+def _cancel_running_process(proc: subprocess.Popen[str], *, cleanup_args: Optional[List[str]] = None) -> str:
+    details: List[str] = []
+    if cleanup_args:
+        try:
+            cleanup = subprocess.run(
+                cleanup_args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+                check=False,
+            )
+            details.append(f"cleanup_returncode={cleanup.returncode}")
+        except Exception as exc:
+            details.append(f"cleanup_error={type(exc).__name__}: {exc}")
+    if proc.poll() is not None:
+        return "; ".join(details) or "process already exited"
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=8, check=False)
+            details.append("taskkill_sent")
+        else:
+            proc.terminate()
+            details.append("terminate_sent")
+    except Exception as exc:
+        details.append(f"terminate_error={type(exc).__name__}: {exc}")
+    try:
+        proc.wait(timeout=2)
+    except Exception:
+        try:
+            proc.kill()
+            details.append("kill_sent")
+        except Exception as exc:
+            details.append(f"kill_error={type(exc).__name__}: {exc}")
+    return "; ".join(details) or "cancel requested"
+
+
+def _communicate_after_stop(proc: subprocess.Popen[str]) -> Tuple[str, str]:
+    try:
+        stdout, stderr = proc.communicate(timeout=2)
+        return stdout or "", stderr or ""
+    except Exception:
+        return "", ""
+
+
+def _append_process_note(stderr: str, note: str) -> str:
+    text = str(stderr or "").rstrip()
+    return f"{text}\n{note}".strip() if text else note
+
+
+def _wsl_terminate_args(executable: str, distro: str) -> Optional[List[str]]:
+    distro_text = str(distro or "").strip()
+    if not distro_text:
+        return None
+    return [str(executable or "wsl.exe"), "--terminate", distro_text]
 
 
 def _quick_command(args: List[str], *, timeout: int = 8) -> Dict[str, Any]:

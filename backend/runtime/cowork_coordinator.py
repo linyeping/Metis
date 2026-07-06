@@ -529,6 +529,7 @@ def iter_local_cowork_events(
     max_subruns: int = 3,
     max_parallel_subruns: int = 3,
     cancelled: Callable[[], bool] | None = None,
+    cancel_event: Any = None,
     base_config: Optional[AgentConfig] = None,
     resume_state: Optional[Dict[str, Any]] = None,
 ) -> Iterator[Dict[str, Any]]:
@@ -613,6 +614,7 @@ def iter_local_cowork_events(
         default_subrun_profile=default_subrun_profile,
         max_parallel_subruns=max_parallel_subruns,
         cancelled=cancelled,
+        cancel_event=cancel_event,
         base_config=base_config,
         resumed=resumed,
     )
@@ -665,6 +667,7 @@ def _run_cowork_dag_scheduler(
     max_parallel_subruns: int,
     cancelled: Callable[[], bool] | None,
     base_config: Optional[AgentConfig],
+    cancel_event: Any = None,
     resumed: bool = False,
 ) -> Iterator[Dict[str, Any]]:
     subruns = [subrun for subrun in plan.get("subruns", []) if isinstance(subrun, dict)]
@@ -728,6 +731,7 @@ def _run_cowork_dag_scheduler(
                 requested_execution_profile=requested_execution_profile,
                 default_subrun_profile=default_subrun_profile,
                 cancelled=cancelled,
+                cancel_event=cancel_event,
                 base_config=base_config,
                 emit=emit,
             )
@@ -832,6 +836,7 @@ def _execute_cowork_subrun(
     cancelled: Callable[[], bool] | None,
     base_config: Optional[AgentConfig],
     emit: Callable[[Dict[str, Any]], None],
+    cancel_event: Any = None,
 ) -> str:
     subrun_profile = _normalize_planner_execution_profile(
         subrun.get("execution_profile"),
@@ -953,7 +958,7 @@ def _execute_cowork_subrun(
                         },
                     )
                 )
-                vm_result = _run_subrun_local_vm(subrun, record, tasks=tasks, cancelled=cancelled)
+                vm_result = _run_subrun_local_vm(subrun, record, tasks=tasks, cancelled=cancelled, cancel_event=cancel_event)
                 subrun["local_vm"] = vm_result
 
         _raise_if_cancelled(cancelled)
@@ -2172,6 +2177,7 @@ def _run_subrun_local_vm(
     *,
     tasks: List[Dict[str, Any]],
     cancelled: Callable[[], bool] | None = None,
+    cancel_event: Any = None,
 ) -> Dict[str, Any]:
     normalized_tasks = _normalize_vm_tasks(tasks)
     subrun_id = str(subrun.get("subrun_id") or record.worktree_id)
@@ -2215,6 +2221,7 @@ def _run_subrun_local_vm(
                 expected_stdout_contains=str(task.get("expected_stdout_contains") or ""),
                 export_patch=True,
                 export_diagnostics="on_failure",
+                cancel_event=cancel_event,
             )
         )
         compact = _compact_local_vm_result(result)
@@ -2293,6 +2300,7 @@ def _compact_local_vm_result(result: Dict[str, Any]) -> Dict[str, Any]:
         "runner": str(result.get("runner") or "local_vm"),
         "backend": str(result.get("backend") or "metis_wsl"),
         "run_id": str(result.get("run_id") or ""),
+        "canceled": bool(result.get("canceled")),
     }
     for key in ("code", "error"):
         if result.get(key):
@@ -2305,6 +2313,8 @@ def _compact_local_vm_result(result: Dict[str, Any]) -> Dict[str, Any]:
                 "command": _truncate(str(job.get("command") or ""), 1000),
                 "returncode": job.get("returncode"),
                 "timed_out": bool(job.get("timed_out")),
+                "canceled": bool(job.get("canceled")),
+                "cancel_detail": str(job.get("cancel_detail") or ""),
                 "stdout": _truncate(str(job.get("stdout") or ""), 2000),
                 "stderr": _truncate(str(job.get("stderr") or ""), 2000),
                 "artifacts_dir": str(job.get("artifacts_dir") or ""),
@@ -2486,9 +2496,10 @@ def _subrun_failure_reasons(
         else:
             reasons.append(_failure_reason("AGENT_FAILED", "Agent subrun failed without error detail.", source="agent"))
     if vm_result and not bool(vm_result.get("ok")):
-        code = "LOCAL_VM_TIMED_OUT" if bool(vm_result.get("timed_out")) else "LOCAL_VM_FAILED"
+        code = "LOCAL_VM_CANCELED" if bool(vm_result.get("canceled")) else "LOCAL_VM_TIMED_OUT" if bool(vm_result.get("timed_out")) else "LOCAL_VM_FAILED"
         message = (
             str(vm_result.get("error") or "").strip()
+            or str(vm_result.get("cancel_detail") or "").strip()
             or str(vm_result.get("stderr") or "").strip()
             or f"Local VM command failed with returncode {vm_result.get('returncode')}."
         )

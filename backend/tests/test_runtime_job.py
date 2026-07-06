@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
+from backend.runtime import isolated_runtime
 from backend.runtime import runtime_job
 from backend.tools.coding.foundation.core_mechanisms.execution_boundary_context import workspace_root_override
 
@@ -209,3 +212,52 @@ def test_metis_runtime_job_rebinds_workspace_context_for_external_worktree_root(
     assert result["created"]["source_root"] == str(external_worktree)
     assert result["run"]["cwd"].startswith(str(external_worktree / ".metis" / "runtime"))
     assert any(item.get("relative_path") == "app.txt" for item in result["changed_files"])
+
+
+def test_runtime_process_cancel_event_stops_long_running_command() -> None:
+    cancel_event = threading.Event()
+    timer = threading.Timer(0.2, cancel_event.set)
+    started = time.time()
+    timer.start()
+    try:
+        result = isolated_runtime._run_args(  # noqa: SLF001 - verifies runtime job cancellation boundary.
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            timeout=30,
+            backend="local",
+            executed_command="sleep",
+            cancel_event=cancel_event,
+        )
+    finally:
+        timer.cancel()
+
+    assert result.canceled is True
+    assert result.timed_out is False
+    assert time.time() - started < 8
+    assert "Canceled by request" in result.stderr
+
+
+def test_metis_runtime_job_cancel_event_returns_canceled_status(tmp_path: Path) -> None:
+    cancel_event = threading.Event()
+    timer = threading.Timer(0.2, cancel_event.set)
+    started = time.time()
+    timer.start()
+    try:
+        command = f'"{sys.executable}" -c "import time; time.sleep(30)"'
+        with workspace_root_override(str(tmp_path)):
+            raw = runtime_job.metis_runtime_job(
+                task="cancel job",
+                command=command,
+                root=".",
+                backend="local",
+                timeout=30,
+                cancel_event=cancel_event,
+            )
+    finally:
+        timer.cancel()
+
+    result = json.loads(raw)
+    assert result["ok"] is False
+    assert result["status"] == "canceled"
+    assert result["run"]["canceled"] is True
+    assert result["canceled"] is True
+    assert time.time() - started < 8

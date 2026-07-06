@@ -47,18 +47,29 @@ interface CoworkRow {
   diff: UnknownRecord;
   evidence: UnknownRecord;
   localVm: UnknownRecord;
+  resumeAction: '' | 'reused' | 'rerun';
   startedAt?: number;
   finishedAt?: number;
+}
+
+interface CoworkResumeSummary {
+  enabled: boolean;
+  reused: number;
+  rerun: number;
+  total: number;
+  sourceRunId: string;
 }
 
 export function CoworkActivityPanel({ items, plan, runtimeStatus }: CoworkActivityPanelProps) {
   const t = useT();
   const rows = useMemo(() => buildCoworkRows(items, plan), [items, plan]);
   const stats = useMemo(() => coworkStats(rows), [rows]);
+  const resume = useMemo(() => coworkResumeSummary(plan, rows), [plan, rows]);
   const planRows = plan?.subruns?.length ? rows : rows.filter(row => row.title);
   const goal = stringValue(plan?.goal);
   const createdAt = createdAtText(plan?.created_at);
   const runtimeLine = runtimeStatus?.display || runtimeStatus?.message || '';
+  const titleLine = [goal || runtimeLine || t('本地 plan -> subruns -> diff/artifact 汇总'), resume.enabled ? `${t('恢复')}：${t('复用')} ${resume.reused} · ${t('重跑')} ${resume.rerun}` : ''].filter(Boolean).join(' · ');
 
   if (rows.length === 0 && !plan) {
     return (
@@ -78,8 +89,15 @@ export function CoworkActivityPanel({ items, plan, runtimeStatus }: CoworkActivi
         </span>
         <div className="cowork-activity-title">
           <strong>{t('Cowork 任务详情')}</strong>
-          <span>{goal || runtimeLine || t('本地 plan -> subruns -> diff/artifact 汇总')}</span>
+          <span>{titleLine}</span>
         </div>
+        {resume.enabled && (
+          <div className="cowork-resume-chip" title={resume.sourceRunId ? `${t('来源 run')} ${resume.sourceRunId}` : undefined}>
+            <span>{t('Resume')}</span>
+            <b>{t('复用')} {resume.reused}</b>
+            <b>{t('重跑')} {resume.rerun}</b>
+          </div>
+        )}
         <div className="cowork-activity-stats" aria-label={t('Cowork 状态统计')}>
           <b>{stats.progress}%</b>
           <span>{stats.done}/{stats.total} {t('完成')}</span>
@@ -260,7 +278,7 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
   };
 
   return (
-    <article className="cowork-subrun-card" data-status={row.status}>
+    <article className="cowork-subrun-card" data-status={row.status} data-resume={row.resumeAction || undefined}>
       <div className="cowork-subrun-head">
         <StatusIcon className={row.status === 'running' ? 'spin' : undefined} size={15} />
         <div>
@@ -270,7 +288,10 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
             {elapsed ? ` · ${elapsed}` : ''}
           </span>
         </div>
-        <em>{profileLabel(row.profile)}</em>
+        <div className="cowork-subrun-meta">
+          {row.resumeAction && <span>{row.resumeAction === 'reused' ? t('复用') : t('重跑')}</span>}
+          <em>{profileLabel(row.profile)}</em>
+        </div>
       </div>
 
       <div className="cowork-progress" aria-label={`${row.title} ${row.progress}%`}>
@@ -476,6 +497,7 @@ function coworkRowFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSu
   const worktreeId = firstString(result, subrunRecord, worktree, ['worktree_id', 'worktreeId']);
   const worktreeRoot = firstString(result, subrunRecord, worktree, ['worktree_workspace_root', 'worktreeWorkspaceRoot', 'path']);
   const id = item?.taskId || firstString(subrunRecord, ['subrun_id', 'task_id', 'run_id']) || `subrun-${index}`;
+  const resumeAction = resumeActionFrom(item, result, subrunRecord);
 
   return {
     id,
@@ -491,9 +513,37 @@ function coworkRowFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSu
     diff,
     evidence,
     localVm,
+    resumeAction,
     startedAt: item?.startedAt,
     finishedAt: item?.finishedAt || item?.updatedAt,
   };
+}
+
+function coworkResumeSummary(plan: CoworkPlanSnapshot | null, rows: CoworkRow[]): CoworkResumeSummary {
+  const resume = recordValue(plan?.resume);
+  const counts = recordValue(resume.counts);
+  const enabled = resume.enabled === true || rows.some(row => row.resumeAction);
+  const reusedFromPlan = numberValue(counts.succeeded) + numberValue(counts.failed);
+  const rerunFromPlan = numberValue(counts.unfinished);
+  const reusedFromRows = rows.filter(row => row.resumeAction === 'reused').length;
+  const rerunFromRows = rows.filter(row => row.resumeAction === 'rerun').length;
+  return {
+    enabled,
+    reused: reusedFromPlan || reusedFromRows,
+    rerun: rerunFromPlan || rerunFromRows,
+    total: numberValue(counts.total) || rows.length,
+    sourceRunId: stringValue(resume.source_run_id ?? resume.sourceRunId),
+  };
+}
+
+function resumeActionFrom(item: ChatSubagentEvent | undefined, result: UnknownRecord, subrun: UnknownRecord): '' | 'reused' | 'rerun' {
+  if (item?.stage === 'resume_reused' || result.resumed === true || stringValue(result.resume_action ?? result.resumeAction) === 'reused_terminal_result') {
+    return 'reused';
+  }
+  const originalStatus = stringValue(subrun.resume_original_status ?? subrun.resumeOriginalStatus);
+  if (!originalStatus) return '';
+  const terminal = rowStatus(undefined, originalStatus);
+  return terminal === 'done' || terminal === 'error' ? 'reused' : 'rerun';
 }
 
 function coworkStats(rows: CoworkRow[]) {
