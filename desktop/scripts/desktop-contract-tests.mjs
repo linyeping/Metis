@@ -590,8 +590,11 @@ test('FABLEADV-50 preview browser automation and safety gate stay wired', () => 
 
 test('NEW-82 agent activity and compact tool calls stay wired', () => {
   const uiStore = read('src/store/uiStore.ts');
+  const chatStore = read('src/store/chatStore.ts');
+  const sseParser = read('src/store/sseParser.ts');
   const thread = read('src/components/chat/MetisThread.tsx');
   const subagentGroup = read('src/components/chat/SubagentGroup.tsx');
+  const coworkActivity = read('src/components/chat/CoworkActivityPanel.tsx');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
@@ -606,11 +609,21 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(subagentGroup, /SubagentActivityPanel/);
   assert.match(subagentGroup, /subagent-dismiss-button/);
   assert.match(subagentGroup, /subagent-open-activity-button/);
+  assert.match(chatStore, /coworkPlan/);
+  assert.match(sseParser, /coworkPlanFromRuntimeStatus/);
+  assert.match(coworkActivity, /CoworkActivityPanel/);
+  assert.match(coworkActivity, /cowork-plan-list/);
+  assert.match(coworkActivity, /worktreeId/);
+  assert.match(coworkActivity, /artifactRows/);
   assert.match(rightRail, /renderActivityPanel/);
   assert.match(rightRail, /cards:\s*\['activity', 'plan', 'research', 'session'\]/);
   assert.match(rightRail, /activity-inline-tool-output/);
+  assert.match(rightRail, /CoworkActivityPanel/);
+  assert.match(rightRail, /appMode === 'cowork'/);
   assert.match(rightRail, /SubagentActivityPanel/);
   assert.match(css, /\.activity-pane/);
+  assert.match(css, /\.cowork-activity-panel/);
+  assert.match(css, /\.cowork-subrun-card/);
   assert.match(css, /\.subagent-strip-main/);
   assert.match(css, /\.subagent-activity-panel/);
   assert.match(css, /width:\s*min\(var\(--chat-column-width\),\s*100%\)/);

@@ -41,6 +41,7 @@ import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPrev
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore, type WebPreviewTab, type WorkspaceCardColumnId, type WorkspaceCardId } from '../../store/uiStore';
+import { CoworkActivityPanel } from '../chat/CoworkActivityPanel';
 import { MarkdownText } from '../chat/threadUtils';
 import { SubagentActivityPanel } from '../chat/SubagentGroup';
 import { TerminalPanel } from '../terminal/TerminalPanel';
@@ -168,6 +169,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const activeWebPreviewId = useUiStore(state => state.activeWebPreviewId);
   const webPreviewUrl = useUiStore(state => state.webPreviewUrl);
   const subagents = useChatStore(state => state.subagents);
+  const coworkPlan = useChatStore(state => state.coworkPlan);
   const chatMessages = useChatStore(state => state.messages);
   const pendingAttachments = useChatStore(state => state.attachments);
   const planTodos = useChatStore(state => state.planTodos);
@@ -1059,7 +1061,11 @@ export function RightRail({ backendReady }: RightRailProps) {
         workspaces={workspaces}
       />
       {toolPreview && <div className="activity-inline-tool-output">{renderToolPanel()}</div>}
-      <SubagentActivityPanel items={subagents} />
+      {appMode === 'cowork' ? (
+        <CoworkActivityPanel items={subagents} plan={coworkPlan} runtimeStatus={runtimeStatus} />
+      ) : (
+        <SubagentActivityPanel items={subagents} />
+      )}
     </div>
   );
 

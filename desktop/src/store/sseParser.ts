@@ -7,7 +7,7 @@
 import { normalizeChatStreamEvent, type NormalizedChatEvent } from '../lib/agentEvents';
 import { answerPermissionRequest, markPermissionDisplayed } from '../lib/api';
 import { findSafeLocalPreviewUrl } from '../lib/webPreview';
-import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoNotice, ChatToolEvent, RuntimeStatus } from '../lib/types';
+import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoNotice, ChatToolEvent, CoworkPlanSnapshot, RuntimeStatus } from '../lib/types';
 import { useUiStore } from './uiStore';
 import {
   formatError,
@@ -454,6 +454,7 @@ function upsertSubagent(subagent: ChatSubagentEvent): void {
   const nextSubagent = (previous?: ChatSubagentEvent): ChatSubagentEvent => ({
     ...previous,
     ...subagent,
+    result: mergeSubagentResult(previous?.result, subagent.result),
     progress: clampProgress(subagent.progress),
     startedAt: previous?.startedAt || subagent.startedAt || now,
     updatedAt: now,
@@ -471,6 +472,16 @@ function upsertSubagent(subagent: ChatSubagentEvent): void {
   }
 }
 
+function mergeSubagentResult(previous: unknown, incoming: unknown): unknown {
+  if (incoming === undefined) return previous;
+  if (isPlainRecord(previous) && isPlainRecord(incoming)) return { ...previous, ...incoming };
+  return incoming;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
 function clampProgress(value: number): number {
   return Math.min(Math.max(value, 0), 100);
 }
@@ -483,13 +494,26 @@ function setRuntimeStatus(status: RuntimeStatus): void {
       ? { ...status, display: previous.display, message: previous.message, hint: previous.hint }
       : status;
   const resetStart = !previous || status.phase === 'starting' || previous.severity === 'error' || previous.severity === 'done';
-  chatStore().setState({
-    runtimeStatus: {
+  const runtimeStatus = {
       ...nextStatus,
       startedAt: resetStart ? now : previous.startedAt || now,
       updatedAt: now,
-    },
-  });
+    };
+  const coworkPlan = coworkPlanFromRuntimeStatus(status);
+  chatStore().setState(coworkPlan ? { runtimeStatus, coworkPlan } : { runtimeStatus });
+}
+
+function coworkPlanFromRuntimeStatus(status: RuntimeStatus): CoworkPlanSnapshot | null {
+  const details = isPlainRecord(status.details) ? status.details : {};
+  const plan = details.plan;
+  if (!isPlainRecord(plan)) return null;
+  const schema = String(plan.schema || '');
+  const subruns = Array.isArray(plan.subruns) ? plan.subruns : [];
+  if (schema !== 'metis.cowork_plan.v1' && subruns.length === 0) return null;
+  return {
+    ...plan,
+    subruns: subruns.filter(isPlainRecord),
+  } as CoworkPlanSnapshot;
 }
 
 function toolRuntimeStatus(

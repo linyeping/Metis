@@ -1259,6 +1259,35 @@ export interface ChatSubagentEvent {
   finishedAt?: number;
 }
 
+export interface CoworkPlanSubrun {
+  subrun_id?: string;
+  task_id?: string;
+  title?: string;
+  name?: string;
+  prompt?: string;
+  execution_profile?: string;
+  status?: string;
+  run_id?: string;
+  worktree_id?: string;
+  worktree_workspace_root?: string;
+  artifacts?: unknown[];
+  diff?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface CoworkPlanSnapshot {
+  schema?: string;
+  coordinator_schema?: string;
+  run_id?: string;
+  session_id?: string;
+  goal?: string;
+  status?: string;
+  created_at?: number;
+  subruns?: CoworkPlanSubrun[];
+  merge_policy?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 export interface ChatMemoryNotice {
   message: string;
   memoryCount: number;

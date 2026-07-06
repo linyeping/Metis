@@ -34,6 +34,7 @@ import type {
   ChatTodoNotice,
   ChatTokenUsage,
   ContextLedger,
+  CoworkPlanSnapshot,
   ParsedFile,
   RunExecutionProfile,
   RuntimeStatus,
@@ -106,6 +107,7 @@ interface ChatState {
   compactStatus: CompactStatusPayload | null;
   compacting: boolean;
   subagents: ChatSubagentEvent[];
+  coworkPlan: CoworkPlanSnapshot | null;
   controller: AbortController | null;
   loadedSessionId: string | null;
   runSessionId: string | null;
@@ -153,6 +155,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   compactStatus: null,
   compacting: false,
   subagents: [],
+  coworkPlan: null,
   controller: null,
   loadedSessionId: null,
   runSessionId: null,
@@ -289,7 +292,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     removeRecoverySnapshot(sessionId);
     set({ recoveryNotice: null });
   },
-  clearSubagents: () => set({ subagents: [] }),
+  clearSubagents: () => set({ subagents: [], coworkPlan: null }),
   loadSession: async (sessionId, options = {}) => {
     if (!sessionId) {
       set({
@@ -305,6 +308,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         compactStatus: null,
         runtimeStatus: null,
         subagents: [],
+        coworkPlan: null,
         usage: null,
         contextLedger: null,
         streaming: false,
@@ -364,6 +368,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       contextLedger: null,
       runtimeStatus: null,
       subagents: [],
+      coworkPlan: null,
       streaming: Boolean(activeRunInfo),
       loadedSessionId: sessionId,
       runSessionId: activeRunInfo ? sessionId : null,
@@ -443,6 +448,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       usage: null,
       contextLedger: null,
       subagents: [],
+      coworkPlan: null,
       messages: [
         ...state.messages,
         {
@@ -541,6 +547,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       usage: null,
       contextLedger: null,
       runtimeStatus: null,
+      subagents: [],
+      coworkPlan: null,
       error: null,
       streaming: false,
       controller: null,

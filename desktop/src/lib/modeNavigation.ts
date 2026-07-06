@@ -20,6 +20,7 @@ type ChatVisualSnapshot = Pick<
   | 'compactStatus'
   | 'compacting'
   | 'subagents'
+  | 'coworkPlan'
   | 'usage'
   | 'contextLedger'
   | 'loadedSessionId'
@@ -113,6 +114,7 @@ function captureModeSnapshot(mode: AppMode): void {
       compactStatus: chat.compactStatus,
       compacting: chat.compacting,
       subagents: chat.subagents,
+      coworkPlan: chat.coworkPlan,
       usage: chat.usage,
       contextLedger: chat.contextLedger,
       loadedSessionId: chat.loadedSessionId,
