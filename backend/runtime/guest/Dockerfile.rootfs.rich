@@ -11,8 +11,8 @@
 #   - video:     ffmpeg + imageio-ffmpeg
 #   - science:   sympy, matplotlib, numpy, pandas
 #   - LaTeX:     texlive (base + recommended)
-#   - JS:        nodejs + npm
-#   - tools:     ripgrep, uv (10x pip), xvfb, git
+#   - JS:        nodejs + npm + pnpm
+#   - tools:     ripgrep, uv (10x pip), xvfb, git, archive tools, build-essential
 FROM python:3.12-slim-bookworm
 
 ARG HTTP_PROXY=
@@ -45,7 +45,8 @@ RUN set -eu; \
 # Base shell + network + git
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash coreutils findutils grep sed gawk procps less file \
-        ca-certificates git curl wget unzip zip tar gzip xz-utils \
+        ca-certificates git curl wget unzip zip tar gzip xz-utils zstd \
+        build-essential \
         iproute2 iputils-ping isc-dhcp-client dnsutils \
         libffi8 libssl3 zlib1g
 
@@ -68,6 +69,8 @@ RUN apt-get install -y --no-install-recommends \
 # JS toolchain
 RUN apt-get install -y --no-install-recommends \
         nodejs npm
+
+RUN npm install -g pnpm@9
 
 # tabula-py needs a JVM
 RUN apt-get install -y --no-install-recommends default-jre-headless

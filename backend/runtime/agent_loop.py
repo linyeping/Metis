@@ -6,11 +6,13 @@ import math
 import queue
 import hashlib
 import os
+import shlex
 import threading
 import time
 import concurrent.futures
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 from .error_catalog import classify_llm_error, is_non_retryable_llm_error
@@ -46,6 +48,7 @@ from .tool_errors import teaching_error_text
 from .tool_profiles import normalize_tool_profile
 from .tool_registry import ToolRegistry, get_registry
 from .tool_visibility import sanitize_tool_result
+from backend.runtime.execution_profile import LOCAL_VM
 from backend.bridges.model_capability import (
     DEEPSEEK_EFFICIENCY_MARKER,
     detect_from_model_name,
@@ -226,6 +229,9 @@ class AgentConfig:
     permission_checker: Optional[Callable[[str, Dict[str, Any]], Optional[str]]] = None
     tool_boundary_overrides: Optional[Callable[[str, Dict[str, Any]], Dict[str, bool]]] = None
     surface_mode: str = ""
+    execution_profile: str = "local_direct"
+    source_workspace_root: str = ""
+    worktree_id: str = ""
     routing_task_type: str = ""
     routing_model_role: str = ""
     routing_reason: str = ""
@@ -1363,6 +1369,8 @@ def run(
                         tool_call,
                         config.tool_boundary_overrides,
                         workspace_root=config.workspace_root,
+                        session_id=config.session_id,
+                        execution_profile=config.execution_profile,
                         edit_guard=edit_guard,
                     )
                     logger.info("tool finished name=%s call_id=%s", tool_call.name, tool_call.id)
@@ -2067,6 +2075,8 @@ def run_stream(
                     config.tool_boundary_overrides,
                     cancel_event=cancel_event,
                     workspace_root=config.workspace_root,
+                    session_id=config.session_id,
+                    execution_profile=config.execution_profile,
                     edit_guard=edit_guard,
                 )
                 if is_cancel_requested(cancel_event):
@@ -2693,6 +2703,8 @@ def _execute_parallel_readonly_if_safe(
             config.tool_boundary_overrides,
             cancel_event=cancel_event,
             workspace_root=config.workspace_root,
+            session_id=config.session_id,
+            execution_profile=config.execution_profile,
             edit_guard=edit_guard,
         )
         return index, item, result
@@ -2766,6 +2778,8 @@ def _execute_tool_with_hooks(
     boundary_overrides: Optional[Callable[[str, Dict[str, Any]], Dict[str, bool]]] = None,
     cancel_event: Optional[threading.Event] = None,
     workspace_root: str = "",
+    session_id: str = "",
+    execution_profile: str = "",
     edit_guard: Optional[EditGuard] = None,
 ) -> str:
     """Execute a tool in an abort-aware isolation thread."""
@@ -2785,6 +2799,8 @@ def _execute_tool_with_hooks(
                         boundary_overrides,
                         cancel_event=effective_cancel_event,
                         workspace_root=workspace_root,
+                        session_id=session_id,
+                        execution_profile=execution_profile,
                         edit_guard=edit_guard,
                     ),
                 )
@@ -2843,6 +2859,8 @@ def _execute_tool_with_hooks_sync(
     *,
     cancel_event: Optional[threading.Event] = None,
     workspace_root: str = "",
+    session_id: str = "",
+    execution_profile: str = "",
     edit_guard: Optional[EditGuard] = None,
 ) -> str:
     """Execute a tool, run configured post-hooks, and add recovery hints."""
@@ -2883,6 +2901,15 @@ def _execute_tool_with_hooks_sync(
     with context, workspace_context, cancellation_context(cancel_event):
         raise_if_cancelled(cancel_event)
         canonical_tool_name = registry.resolve_name(tool_call.name)
+        local_vm_result = _execute_tool_with_local_vm_if_requested(
+            canonical_tool_name,
+            tool_call,
+            execution_profile=execution_profile,
+            workspace_root=workspace_root,
+            session_id=session_id,
+        )
+        if local_vm_result is not None:
+            return local_vm_result
         if edit_guard is not None:
             guard_error = edit_guard.before_execute(canonical_tool_name, tool_call.arguments)
             if guard_error:
@@ -2906,6 +2933,297 @@ def _execute_tool_with_hooks_sync(
             )
     raise_if_cancelled(cancel_event)
     return _append_error_recovery_hint(result)
+
+
+_LOCAL_VM_COMMAND_TOOLS = {"execute_bash_command", "run_tests"}
+
+
+def _execute_tool_with_local_vm_if_requested(
+    canonical_tool_name: str,
+    tool_call: ToolCall,
+    *,
+    execution_profile: str,
+    workspace_root: str,
+    session_id: str,
+) -> Optional[str]:
+    profile = str(execution_profile or "").strip().lower().replace("-", "_")
+    if profile != LOCAL_VM or canonical_tool_name not in _LOCAL_VM_COMMAND_TOOLS:
+        return None
+    if not str(workspace_root or "").strip():
+        return _append_error_recovery_hint("Error: local_vm command execution requires workspace_root")
+    if not isinstance(tool_call.arguments, dict):
+        return _append_error_recovery_hint("Error: local_vm command arguments must be an object")
+
+    try:
+        request_kwargs, immediate_result = _local_vm_command_request_kwargs(
+            canonical_tool_name,
+            tool_call.arguments,
+            workspace_root=workspace_root,
+        )
+    except Exception as exc:
+        return _append_error_recovery_hint(
+            f"Error: local_vm command request is invalid: {type(exc).__name__}: {sanitize_for_log(exc)}"
+        )
+    if immediate_result is not None:
+        return immediate_result
+
+    try:
+        from backend.runtime.local_vm_runner import LocalVmCommand, run_local_vm_command
+
+        payload = run_local_vm_command(LocalVmCommand(**request_kwargs))
+    except Exception as exc:
+        return _append_error_recovery_hint(
+            f"Error: local_vm command execution failed: {type(exc).__name__}: {sanitize_for_log(exc)}"
+        )
+
+    registered, registration_errors = _register_local_vm_result_artifacts(
+        payload,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        source_tool_call_id=tool_call.id,
+    )
+    if registered:
+        payload["registered_artifacts"] = registered
+    if registration_errors:
+        payload["artifact_registration_errors"] = registration_errors
+    return _append_error_recovery_hint(_format_local_vm_tool_result(payload))
+
+
+def _local_vm_command_request_kwargs(
+    canonical_tool_name: str,
+    arguments: Dict[str, Any],
+    *,
+    workspace_root: str,
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    cwd = _normalize_local_vm_cwd(
+        arguments.get("cwd") or arguments.get("working_directory") or ".",
+        workspace_root=workspace_root,
+    )
+    timeout = _coerce_local_vm_timeout(arguments, default=120 if canonical_tool_name == "run_tests" else 60)
+    command = str(arguments.get("command") or arguments.get("cmd") or "").strip()
+    if canonical_tool_name == "run_tests" and not command:
+        detected = _detect_local_vm_test_command(workspace_root=workspace_root, cwd=cwd)
+        if detected is None:
+            return {}, (
+                "⚠️ Could not auto-detect a test command. "
+                "Provide one, for example: run_tests(command='python -m pytest')"
+            )
+        command = detected
+    if not command:
+        return {}, _append_error_recovery_hint("Error: command is required for local_vm execution")
+    return {
+        "command": command,
+        "workspace_root": workspace_root,
+        "cwd": cwd,
+        "timeout": timeout,
+        "allow_network": _truthy(_argument_value(arguments, "allow_network", "allowNetwork")),
+        "collect_artifacts": _truthy(_argument_value(arguments, "collect_artifacts", "collectArtifacts")),
+        "export_patch": not _explicit_false(_argument_value(arguments, "export_patch", "exportPatch")),
+    }, None
+
+
+def _normalize_local_vm_cwd(value: Any, *, workspace_root: str) -> str:
+    root = Path(workspace_root).expanduser().resolve(strict=False)
+    raw = str(value or ".").strip() or "."
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / raw
+    resolved = candidate.resolve(strict=False)
+    if not _path_is_within(resolved, root):
+        raise ValueError(f"local_vm cwd must stay inside workspace_root: {resolved}")
+    if not resolved.is_dir():
+        raise ValueError(f"local_vm cwd does not exist: {resolved}")
+    rel = os.path.relpath(str(resolved), str(root))
+    if rel in {"", "."}:
+        return "."
+    return rel.replace(os.sep, "/")
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        return os.path.commonpath([str(path), str(root)]) == str(root)
+    except ValueError:
+        return False
+
+
+def _coerce_local_vm_timeout(arguments: Dict[str, Any], *, default: int) -> int:
+    raw = arguments.get("timeout")
+    if raw is None:
+        raw = arguments.get("timeout_seconds") or arguments.get("timeoutSeconds")
+    block_until_ms = _argument_value(arguments, "block_until_ms", "blockUntilMs")
+    if raw is None and block_until_ms is not None:
+        try:
+            return max(1, int(math.ceil(float(block_until_ms) / 1000.0)))
+        except Exception:
+            return max(1, int(default))
+    try:
+        return max(1, int(raw if raw is not None else default))
+    except Exception:
+        return max(1, int(default))
+
+
+def _argument_value(arguments: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in arguments:
+            return arguments.get(key)
+    return None
+
+
+def _detect_local_vm_test_command(*, workspace_root: str, cwd: str) -> Optional[str]:
+    try:
+        from backend.tools.coding.execution import test_runner
+
+        host_cwd = Path(workspace_root).resolve(strict=False)
+        if cwd and cwd != ".":
+            host_cwd = host_cwd / cwd
+        detected = test_runner._detect_test_command(str(host_cwd))  # noqa: SLF001 - shared existing detector.
+    except Exception:
+        return None
+    if not detected:
+        return None
+    command, _label = detected
+    if isinstance(command, list):
+        return shlex.join([str(part) for part in command])
+    return str(command or "").strip() or None
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _explicit_false(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value is False
+    text = str(value or "").strip().lower()
+    return text in {"0", "false", "no", "n", "off"}
+
+
+def _register_local_vm_result_artifacts(
+    payload: Dict[str, Any],
+    *,
+    workspace_root: str,
+    session_id: str,
+    source_tool_call_id: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    if not isinstance(payload, dict):
+        return [], []
+    job = payload.get("job") if isinstance(payload.get("job"), dict) else {}
+    if not isinstance(job, dict):
+        job = {}
+    run_id = str(payload.get("run_id") or job.get("job_id") or "")
+    runtime_session_id = str(job.get("session_id") or "")
+    registry_session_id = str(session_id or runtime_session_id or "")
+    metadata_base = {
+        "source": "local_vm_runner",
+        "runtime_backend": str(payload.get("backend") or job.get("backend") or "metis_wsl"),
+        "runtime_job_id": str(job.get("job_id") or ""),
+        "runtime_session_id": runtime_session_id,
+        "local_vm_run_id": str(payload.get("run_id") or ""),
+    }
+    registered: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    def add(path_value: str, *, kind: str, title: str, metadata: Dict[str, Any]) -> None:
+        path_text = str(path_value or "").strip()
+        if not path_text:
+            return
+        try:
+            from backend.runtime.artifact_registry import register_artifact
+
+            record = register_artifact(
+                kind=kind,
+                title=title,
+                path=path_text,
+                run_id=run_id,
+                session_id=registry_session_id,
+                source_tool_call_id=source_tool_call_id,
+                metadata={**metadata_base, **metadata},
+                workspace_root=workspace_root,
+            )
+            registered.append(record)
+        except Exception as exc:
+            errors.append({"path": path_text, "error": f"{type(exc).__name__}: {exc}"})
+
+    artifacts = job.get("artifacts")
+    if isinstance(artifacts, list):
+        for item in artifacts:
+            if not isinstance(item, dict):
+                continue
+            path_text = str(item.get("path") or "").strip()
+            add(
+                path_text,
+                kind=_local_vm_artifact_kind(path_text),
+                title=str(item.get("relative_path") or Path(path_text).name or "Runtime artifact"),
+                metadata={"runtime_artifact": item},
+            )
+
+    changed_files = job.get("changed_files") if isinstance(job.get("changed_files"), list) else []
+    patch_path = str(job.get("patch_path") or "").strip()
+    if patch_path and changed_files:
+        add(
+            patch_path,
+            kind="diff",
+            title="Local VM workspace diff",
+            metadata={"changed_files": changed_files},
+        )
+    return registered, errors
+
+
+def _local_vm_artifact_kind(path_value: str) -> str:
+    ext = Path(str(path_value or "")).suffix.lower()
+    if ext in {".diff", ".patch"}:
+        return "diff"
+    if ext in {".md", ".markdown", ".txt", ".pdf", ".docx", ".xlsx", ".pptx", ".csv", ".tsv"}:
+        return "document"
+    return "workspace_file"
+
+
+def _format_local_vm_tool_result(payload: Dict[str, Any]) -> str:
+    job = payload.get("job") if isinstance(payload.get("job"), dict) else {}
+    if not isinstance(job, dict):
+        job = {}
+    ok = bool(payload.get("ok"))
+    summary: Dict[str, Any] = {
+        "schema": payload.get("schema"),
+        "ok": ok,
+        "runner": payload.get("runner", "local_vm"),
+        "backend": payload.get("backend") or job.get("backend") or "metis_wsl",
+        "run_id": payload.get("run_id"),
+        "runtime_job_id": job.get("job_id"),
+        "runtime_session_id": job.get("session_id"),
+        "status": job.get("status"),
+        "command": job.get("command"),
+        "returncode": job.get("returncode"),
+        "timed_out": bool(job.get("timed_out")),
+        "duration_ms": job.get("duration_ms"),
+        "stdout": job.get("stdout", ""),
+        "stderr": job.get("stderr", ""),
+        "stdout_path": job.get("stdout_path", ""),
+        "stderr_path": job.get("stderr_path", ""),
+        "workspace_dir": job.get("workspace_dir", ""),
+        "artifacts_dir": job.get("artifacts_dir", ""),
+        "artifacts": job.get("artifacts", []),
+        "patch_path": job.get("patch_path", ""),
+        "changed_files": job.get("changed_files", []),
+        "diagnostics_zip": job.get("diagnostics_zip", ""),
+        "registered_artifacts": payload.get("registered_artifacts", []),
+        "artifact_registration_errors": payload.get("artifact_registration_errors", []),
+    }
+    if not ok:
+        summary.update(
+            {
+                "code": payload.get("code", ""),
+                "error": payload.get("error", ""),
+                "wsl_runtime": payload.get("wsl_runtime", {}),
+                "import_plan": payload.get("import_plan", {}),
+                "next_steps": payload.get("next_steps", []),
+            }
+        )
+    prefix = "local_vm command completed" if ok else "Error: local_vm command failed"
+    return f"{prefix}\n{json.dumps(summary, ensure_ascii=False, indent=2, default=str)}"
 
 
 def _append_error_recovery_hint(result: str) -> str:

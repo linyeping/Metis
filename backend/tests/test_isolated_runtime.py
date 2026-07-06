@@ -50,12 +50,17 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _no_hcs_autoselect(monkeypatch):
+def _isolated_host_runtime(monkeypatch, tmp_path):
     """Legacy backend-selection tests target the vm/wsl/docker/local tiers.
     HCS is a newer top-preference tier probed from real host state (sandbox
-    service / Hyper-V), so disable it here for deterministic results regardless
-    of whether the host running the tests has the sandbox installed."""
+    service / Hyper-V), so disable it here for deterministic results. Runtime
+    pack discovery also reads LOCALAPPDATA/APPDATA, so isolate those from any
+    real Metis install on the developer machine running the tests."""
     monkeypatch.setattr(isolated_runtime, "_hcs_backend_available", lambda: False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localapp"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.delenv("METIS_VM_BUNDLE_DIR", raising=False)
+    monkeypatch.delenv("METIS_RUNTIME_BUNDLE_DIR", raising=False)
 
 
 def _json(text: str) -> dict:
@@ -315,6 +320,46 @@ def test_sandbox_status_and_auto_backend_fallback(tmp_path: Path, monkeypatch) -
     assert created["backend"] == "local"
     assert created["sandbox"]["requested"] == "auto"
     assert "auto selected" in created["sandbox"]["fallback_reason"]
+
+
+def test_auto_does_not_select_hcs_until_guest_handshake_is_verified(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    backend_cwd = tmp_path / "backend"
+    workspace.mkdir()
+    backend_cwd.mkdir()
+    monkeypatch.chdir(backend_cwd)
+
+    fake_status = {
+        "preferred": "vm",
+        "metis_wsl": {"available": False, "reason": "not imported"},
+        "vm_pack": {
+            "available": True,
+            "runnable": True,
+            "runner_available": True,
+            "guest_protocol_ready": True,
+            "hcs_direct_ready": False,
+            "selected_bundle": {
+                "path": str(workspace / ".metis" / "runtime-pack" / "metisvm.bundle"),
+                "runner_ready": True,
+                "guest_protocol_ready": True,
+                "hcs_direct_ready": False,
+            },
+        },
+        "wsl": {"available": False, "reason": "no distro"},
+        "docker": {"available": False, "reason": "daemon unavailable"},
+        "local": {"available": True, "kind": "local_copy"},
+    }
+    monkeypatch.setattr(isolated_runtime, "_detect_sandbox_backends", lambda **_kwargs: fake_status)
+    monkeypatch.setattr(isolated_runtime, "_hcs_backend_available", lambda: True)
+
+    with workspace_root_override(str(workspace)):
+        created = _json(metis_runtime_create(task="auto no hcs", backend="auto"))
+
+    assert created["ok"] is True
+    assert created["backend"] == "vm"
+    assert created["sandbox"]["selected"] == "vm"
+    assert created["sandbox"]["status"]["vm_pack"]["hcs_direct_ready"] is False
+    assert "non-HCS" in created["sandbox"]["fallback_reason"]
 
 
 def test_strict_sandbox_refuses_local_copy_fallback(tmp_path: Path, monkeypatch) -> None:
@@ -1702,6 +1747,8 @@ def test_metis_wsl_runtime_import_dry_run_plans_wsl_import(tmp_path: Path, monke
     assert registered["ok"] is True
     assert status["ok"] is True
     assert status["ready_to_import"] is True
+    assert status["registered_install_dir"] == ""
+    assert status["install_dir"] == str(local_app / "Metis" / "runtime" / "wsl" / "MetisRuntime")
     assert status["rootfs_verification"]["verified"] is True
     assert status["selected_rootfs"]["path"] == str(rootfs)
     assert planned["ok"] is True

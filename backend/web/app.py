@@ -36,6 +36,13 @@ from backend.runtime.agent_loop import (  # noqa: E402
     run_stream,
 )
 from backend.runtime.cancellation import OperationCancelled  # noqa: E402
+from backend.runtime.execution_profile import (  # noqa: E402
+    LOCAL_DIRECT,
+    LOCAL_WORKTREE,
+    default_execution_profile_for_surface,
+    normalize_execution_profile,
+)
+from backend.runtime.worktree_manager import WorktreeError, create_worktree  # noqa: E402
 from backend.runtime.checkpoints import (  # noqa: E402
     CheckpointRecorder,
     create_checkpoint,
@@ -1657,10 +1664,15 @@ def _commit_request_history_to_active(
 
 def _create_run_state(
     *,
+    run_id: str = "",
     session_id: str,
     assistant_id: str,
     history: List[Dict[str, Any]],
     mode: str,
+    surface_mode: str = "",
+    execution_profile: str = LOCAL_DIRECT,
+    source_workspace_root: str = "",
+    worktree: Optional[Dict[str, Any]] = None,
     deep_research: bool = False,
     compact_state: Optional[Dict[str, Any]] = None,
     model_context: Optional[List[Dict[str, Any]]] = None,
@@ -1668,13 +1680,29 @@ def _create_run_state(
     checkpoint: Optional[CheckpointRecorder] = None,
 ) -> Dict[str, Any]:
     now = time.time()
+    run_id = str(run_id or uuid.uuid4().hex)
+    normalized_surface = str(surface_mode or "").strip().lower()
+    if normalized_surface not in {"chat", "cowork", "code"}:
+        normalized_surface = _surface_mode_for_session_mode(mode) or "chat"
+    normalized_profile = normalize_execution_profile(
+        execution_profile,
+        default=default_execution_profile_for_surface(normalized_surface),
+    ).profile
+    resolved_workspace_root = os.path.abspath(workspace_root or _request_workspace_root(session_id))
+    resolved_source_workspace_root = os.path.abspath(source_workspace_root or resolved_workspace_root)
     run = {
-        "id": uuid.uuid4().hex,
+        "id": run_id,
+        "turn_id": f"turn_{run_id}",
         "session_id": session_id,
         "assistant_id": assistant_id,
         "mode": mode or "auto",
+        "surface_mode": normalized_surface,
+        "schema_version": 2,
         "deep_research": bool(deep_research),
-        "workspace_root": os.path.abspath(workspace_root or _request_workspace_root(session_id)),
+        "execution_profile": normalized_profile,
+        "workspace_root": resolved_workspace_root,
+        "source_workspace_root": resolved_source_workspace_root,
+        "worktree": dict(worktree or {}),
         "status": "queued",
         "phase": "queued",
         "history": list(history),
@@ -1732,11 +1760,23 @@ def _get_run(run_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _run_public_payload(run: Dict[str, Any]) -> Dict[str, Any]:
+    worktree = run.get("worktree") if isinstance(run.get("worktree"), dict) else {}
     return {
         "run_id": run.get("id", ""),
         "id": run.get("id", ""),
+        "turn_id": run.get("turn_id", "") or f"turn_{run.get('id', '')}",
         "session_id": run.get("session_id", ""),
         "assistant_id": run.get("assistant_id", ""),
+        "mode": run.get("mode", "auto"),
+        "surface_mode": run.get("surface_mode", "chat"),
+        "execution_profile": run.get("execution_profile", LOCAL_DIRECT),
+        "workspace_root": run.get("workspace_root", ""),
+        "source_workspace_root": run.get("source_workspace_root", run.get("workspace_root", "")),
+        "worktree_id": str(worktree.get("worktree_id") or ""),
+        "worktree_path": str(worktree.get("worktree_path") or ""),
+        "worktree_workspace_root": str(worktree.get("worktree_workspace_root") or ""),
+        "worktree": worktree,
+        "schema_version": int(run.get("schema_version") or 1),
         "status": run.get("status", "unknown"),
         "phase": run.get("phase", ""),
         "cancel_requested": bool(run.get("cancel_requested")),
@@ -2305,6 +2345,12 @@ def _run_registry_worker(run_id: str) -> None:
             str(run.get("mode") or ""),
             deep_research=bool(run.get("deep_research")),
         )
+        config = replace(
+            config,
+            execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
+            source_workspace_root=str(run.get("source_workspace_root") or run.get("workspace_root") or ""),
+            worktree_id=str((run.get("worktree") or {}).get("worktree_id") if isinstance(run.get("worktree"), dict) else ""),
+        )
     except Exception as exc:
         logger.error("Agent run configuration failed: %s", sanitize_for_log(exc))
         _append_run_event(run, _event_payload(_error_event_from_exception(exc, recoverable=False)))
@@ -2508,7 +2554,15 @@ def create_run() -> Any:
 
     data = request.get_json(silent=True) or {}
     assistant_id = str(data.get("assistant_id") or data.get("assistantId") or "").strip() or f"assistant-run-{uuid.uuid4().hex[:12]}"
+    surface_mode = str(data.get("surface_mode") or data.get("surfaceMode") or "").strip().lower()
     session_id, history, compact_state, mode, explicit_session = _prepare_chat_session(user_message)
+    normalized_surface = surface_mode if surface_mode in {"chat", "cowork", "code"} else (_surface_mode_for_session_mode(mode) or "chat")
+    execution_profile_result = normalize_execution_profile(
+        data.get("execution_profile") or data.get("executionProfile"),
+        default=default_execution_profile_for_surface(normalized_surface),
+    )
+    if not execution_profile_result.ok:
+        return jsonify({"ok": False, "error": execution_profile_result.reason}), 400
     active_for_session = _active_run_for_session(session_id)
     with _runs_lock:
         if active_for_session:
@@ -2517,7 +2571,29 @@ def create_run() -> Any:
             return jsonify({"ok": False, "error": "too many active runs", "max_active_runs": _max_active_runs()}), 429
 
     was_empty = not history
-    workspace_root = _request_workspace_root(session_id)
+    run_id = uuid.uuid4().hex
+    source_workspace_root = _request_workspace_root(session_id)
+    workspace_root = source_workspace_root
+    worktree_payload: Dict[str, Any] = {}
+    if execution_profile_result.profile == LOCAL_WORKTREE:
+        try:
+            worktree_record = create_worktree(
+                source_workspace_root,
+                run_id=run_id,
+                session_id=session_id,
+                label=f"{normalized_surface}-run",
+            )
+        except WorktreeError as exc:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "execution_profile": execution_profile_result.profile,
+                    "workspace_root": source_workspace_root,
+                }
+            ), 409
+        worktree_payload = worktree_record.to_dict()
+        workspace_root = str(worktree_payload.get("worktree_workspace_root") or workspace_root)
     checkpoint_anchor = len(history)
     user_record = _new_message("user", user_message)
     history.append(user_record)
@@ -2535,10 +2611,15 @@ def create_run() -> Any:
         _generate_smart_title(session_id, user_message)
 
     run = _create_run_state(
+        run_id=run_id,
         session_id=session_id,
         assistant_id=assistant_id,
         history=history,
         mode=mode,
+        surface_mode=normalized_surface,
+        execution_profile=execution_profile_result.profile,
+        source_workspace_root=source_workspace_root,
+        worktree=worktree_payload,
         deep_research=_request_deep_research_enabled(),
         compact_state=compact_state,
         model_context=model_context,
@@ -4128,11 +4209,13 @@ from backend.web.settings_routes import settings_bp
 from backend.web.feature_routes import feature_bp
 from backend.web.session_routes import session_bp
 from backend.web.workspace_routes import workspace_bp
+from backend.web.artifact_routes import artifact_bp
 app.register_blueprint(settings_bp)
 app.register_blueprint(feature_bp)
 app.register_blueprint(session_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(preview_bridge_bp)
+app.register_blueprint(artifact_bp)
 
 try:
     from backend.web.desk_blueprint import desk_bp

@@ -18,6 +18,17 @@ from xml.etree import ElementTree
 from flask import Blueprint, Response, jsonify, request, send_file
 
 from backend.runtime.path_safety import validate_path_access
+from backend.runtime.artifact_registry import ArtifactRegistryError, register_artifact
+from backend.runtime.cowork_coordinator import build_cowork_plan, summarize_cowork_results
+from backend.runtime.worktree_manager import (
+    WorktreeError,
+    archive_worktree,
+    create_worktree,
+    diff_worktree,
+    promote_worktree,
+    registry_payload,
+    remove_worktree,
+)
 from backend.web.helpers import active_workspace_root, get_state, request_client_is_loopback
 from backend.web.sessions import get_session_manager
 from backend.web.workspaces import get_workspace_manager
@@ -838,6 +849,26 @@ def workspace_file_changes_revert() -> Any:
     reverted_count = sum(1 for item in items if item.get("status") == "reverted")
     conflict_count = sum(1 for item in items if item.get("status") == "conflict")
     blocked_count = sum(1 for item in items if item.get("status") == "blocked")
+    artifact_id = ""
+    try:
+        artifact = register_artifact(
+            kind="file_change",
+            title="File change revert audit",
+            path=audit_path,
+            mime="application/jsonl",
+            session_id=state.active_session_id,
+            metadata={
+                "summary_id": summary_id,
+                "reverted_count": reverted_count,
+                "conflict_count": conflict_count,
+                "blocked_count": blocked_count,
+                "ok": ok,
+            },
+            workspace_root=workspace_root,
+        )
+        artifact_id = str(artifact.get("artifact_id") or "")
+    except (ArtifactRegistryError, OSError, ValueError):
+        artifact_id = ""
 
     return jsonify(
         {
@@ -848,8 +879,120 @@ def workspace_file_changes_revert() -> Any:
             "blocked_count": blocked_count,
             "items": items,
             "audit_path": audit_path,
+            "artifact_id": artifact_id,
         }
     )
+
+
+@workspace_bp.route("/worktrees", methods=["GET"])
+def worktrees_list() -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    workspace_root = active_workspace_root()
+    return jsonify(registry_payload(workspace_root))
+
+
+@workspace_bp.route("/worktrees", methods=["POST"])
+def worktrees_create() -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    workspace_root = os.path.abspath(str(data.get("workspace_root") or data.get("workspaceRoot") or active_workspace_root()))
+    try:
+        record = create_worktree(
+            workspace_root,
+            run_id=str(data.get("run_id") or data.get("runId") or ""),
+            session_id=str(data.get("session_id") or data.get("sessionId") or get_state().active_session_id or ""),
+            label=str(data.get("label") or "manual"),
+        )
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify({"ok": True, "worktree": record.to_dict()})
+
+
+@workspace_bp.route("/cowork/plan", methods=["POST"])
+def cowork_plan() -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    goal = str(data.get("goal") or data.get("message") or "")
+    if not goal.strip():
+        return jsonify({"ok": False, "error": "goal is required"}), 400
+    try:
+        max_subruns = int(data.get("max_subruns") or data.get("maxSubruns") or 3)
+    except (TypeError, ValueError):
+        max_subruns = 3
+    plan = build_cowork_plan(
+        goal,
+        run_id=str(data.get("run_id") or data.get("runId") or ""),
+        session_id=str(data.get("session_id") or data.get("sessionId") or get_state().active_session_id or ""),
+        max_subruns=max_subruns,
+    )
+    return jsonify({"ok": True, "plan": plan})
+
+
+@workspace_bp.route("/cowork/summary", methods=["POST"])
+def cowork_summary() -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
+    try:
+        summary = summarize_cowork_results(
+            plan=plan,
+            workspace_root=active_workspace_root(),
+            run_id=str(data.get("run_id") or data.get("runId") or ""),
+            session_id=str(data.get("session_id") or data.get("sessionId") or get_state().active_session_id or ""),
+        )
+    except (OSError, ArtifactRegistryError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify({"ok": True, "summary": summary})
+
+
+@workspace_bp.route("/worktrees/<worktree_id>/archive", methods=["POST"])
+def worktrees_archive(worktree_id: str) -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    try:
+        record = archive_worktree(active_workspace_root(), worktree_id)
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    return jsonify({"ok": True, "worktree": record.to_dict()})
+
+
+@workspace_bp.route("/worktrees/<worktree_id>/diff", methods=["GET"])
+def worktrees_diff(worktree_id: str) -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    try:
+        return jsonify({"ok": True, **diff_worktree(active_workspace_root(), worktree_id)})
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@workspace_bp.route("/worktrees/<worktree_id>/promote", methods=["POST"])
+def worktrees_promote(worktree_id: str) -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        result = promote_worktree(active_workspace_root(), worktree_id, dry_run=bool(data.get("dry_run") or data.get("dryRun")))
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    status = 200 if result.get("ok") else 409
+    return jsonify(result), status
+
+
+@workspace_bp.route("/worktrees/<worktree_id>", methods=["DELETE"])
+def worktrees_remove(worktree_id: str) -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    force = str(request.args.get("force") or "").strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        record = remove_worktree(active_workspace_root(), worktree_id, force=force)
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify({"ok": True, "worktree": record.to_dict()})
 
 
 @workspace_bp.route("/file-preview", methods=["GET"])

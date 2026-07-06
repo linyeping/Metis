@@ -3638,10 +3638,11 @@ def _detect_runtime_commands() -> Dict[str, Dict[str, str]]:
 
 
 def _hcs_backend_available() -> bool:
-    """Check if HCS VM sandbox is usable.
+    """Check if the HCS host path is reachable.
 
-    Either the privileged service is running (non-elevated path, no UAC) or
-    HCS is directly reachable from this process (elevated) with a VM bundle.
+    This only proves the privileged service/HCS host can be contacted. It does
+    not prove a booted Metis guest has answered runtime.hello, so backend=auto
+    must gate HCS selection through _hcs_direct_backend_ready instead.
     """
     try:
         from backend.runtime import svc_client
@@ -3655,6 +3656,15 @@ def _hcs_backend_available() -> bool:
         return ok
     except Exception:
         return False
+
+
+def _hcs_direct_backend_ready(status: Dict[str, Any]) -> bool:
+    """True only after the direct HCS VM path has a verified guest handshake."""
+    vm_pack = status.get("vm_pack") if isinstance(status.get("vm_pack"), dict) else {}
+    selected = vm_pack.get("selected_bundle") if isinstance(vm_pack.get("selected_bundle"), dict) else {}
+    if not bool(vm_pack.get("hcs_direct_ready") or selected.get("hcs_direct_ready")):
+        return False
+    return _hcs_backend_available()
 
 
 def _detect_sandbox_backends(
@@ -3747,6 +3757,9 @@ def _detect_vm_runtime_pack(source_root: Path, bundle_path: str = "") -> Dict[st
         "blueprint_detected": bool(blueprint),
         "runner_prepared": bool(runner_prepared),
         "runner_available": runner_available,
+        "hcs_direct_ready": bool((selected or {}).get("hcs_direct_ready")),
+        "guest_protocol_ready": bool((selected or {}).get("guest_protocol_ready")),
+        "runner_transport": str((selected or {}).get("runner_transport") or ""),
         "reason": reason,
         "host": host,
         "selected_bundle": selected or {},
@@ -4410,12 +4423,19 @@ export DEBIAN_FRONTEND=noninteractive
 APT_PACKAGES=(
   ca-certificates \\
   curl \\
+  build-essential \\
   git \\
   jq \\
+  python-is-python3 \\
   python3 \\
   python3-pip \\
+  python3-venv \\
   ripgrep \\
-  poppler-utils
+  poppler-utils \\
+  tar \\
+  unzip \\
+  zip \\
+  zstd
 )
 
 if [ "$PROFILE" = "office" ]; then
@@ -4431,6 +4451,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get -o Acquire::Retries=5 install -y --no-install-recommends nodejs
 
 python3 -m pip install --no-cache-dir --retries 5 --timeout 60 \\
+  uv \\
   magika \\
   markitdown \\
   pdfplumber \\
@@ -4443,6 +4464,7 @@ npm config set fetch-retries 5
 npm config set fetch-retry-mintimeout 20000
 npm config set fetch-retry-maxtimeout 120000
 npm install -g \\
+  pnpm@9 \\
   typescript \\
   ts-node \\
   tsx \\
@@ -4842,9 +4864,16 @@ def _build_runtime_bundle_manifest(
         },
         "capabilities": {
             "python": True,
+            "pip": True,
+            "uv": True,
             "node": True,
+            "npm": True,
+            "pnpm": True,
             "git": True,
             "ripgrep": True,
+            "curl": True,
+            "archive_tools": True,
+            "build_essential": True,
             "pdf": True,
             "docx": True,
             "artifacts": True,
@@ -8827,11 +8856,26 @@ def _rootfs_runtime_policy(*, profile: str) -> Dict[str, Any]:
 
 def _rootfs_image_expected_tools(*, profile: str) -> List[Dict[str, Any]]:
     base = [
+        {"name": "python", "required": True},
+        {"name": "python-is-python3", "required": True, "type": "dpkg-package"},
         {"name": "python3", "required": True},
+        {"name": "pip", "required": True},
+        {"name": "pip3", "required": True},
+        {"name": "uv", "required": True},
         {"name": "node", "required": True},
         {"name": "npm", "required": True},
+        {"name": "pnpm", "required": True},
         {"name": "git", "required": True},
         {"name": "rg", "required": True},
+        {"name": "curl", "required": True},
+        {"name": "tar", "required": True},
+        {"name": "unzip", "required": True},
+        {"name": "zip", "required": True},
+        {"name": "zstd", "required": True},
+        {"name": "gcc", "required": True},
+        {"name": "g++", "required": True},
+        {"name": "make", "required": True},
+        {"name": "build-essential", "required": True, "type": "dpkg-package"},
         {"name": "poppler-utils", "required": True},
         {"name": "metisd", "required": True, "path": "/usr/local/bin/metisd"},
     ]
@@ -9480,8 +9524,8 @@ def _detect_metis_wsl_runtime(
     executable = str(wsl.get("executable") or shutil.which("wsl.exe") or shutil.which("wsl") or "")
     distros = list(wsl.get("distros") or [])
     installed = distro in distros
-    registered_install_path = _wsl_distro_base_path(distro) if installed else Path()
-    if registered_install_path and not str(install_dir or "").strip():
+    registered_install_path = _wsl_distro_base_path(distro) if installed else None
+    if registered_install_path is not None and not str(install_dir or "").strip():
         install_path = registered_install_path
     features = _detect_wsl_import_features(executable)
     rootfs_candidates = _metis_rootfs_asset_candidates(source_root, rootfs_path=rootfs_path)
@@ -9516,7 +9560,7 @@ def _detect_metis_wsl_runtime(
         "reason": reason,
         "distro_name": distro,
         "install_dir": str(install_path),
-        "registered_install_dir": str(registered_install_path) if registered_install_path else "",
+        "registered_install_dir": str(registered_install_path) if registered_install_path is not None else "",
         "wsl": wsl,
         "features": features,
         "selected_rootfs": selected_rootfs,
@@ -9541,7 +9585,10 @@ def _normalize_wsl_distro_name(name: str = "") -> str:
 def _resolve_metis_wsl_install_dir(source_root: Path, install_dir: str, distro: str) -> Path:
     raw = str(install_dir or "").strip()
     if raw:
-        return safe_path_for_write(raw).resolve(strict=False)
+        # WSL distributions are intentionally installed outside the workspace
+        # (normally under LOCALAPPDATA). Do not apply the project file-write
+        # guard here; import remains gated by the explicit destructive tool.
+        return Path(raw).expanduser().resolve(strict=False)
     local_app = os.environ.get("LOCALAPPDATA", "")
     if local_app:
         return (Path(local_app) / "Metis" / "runtime" / "wsl" / distro).resolve(strict=False)
@@ -9751,14 +9798,15 @@ def _select_runtime_backend(
     fallback_reason = ""
     selected = requested
     if requested == "auto":
-        # Prefer HCS if available, then existing VM/WSL/Docker, then local
-        hcs_ok = _hcs_backend_available()
-        if hcs_ok:
+        # HCS is allowed in auto mode only after a real booted guest handshake.
+        # Host/service reachability alone is not enough; it can hang while the
+        # service waits for a guest runtime.hello that never arrives.
+        if _hcs_direct_backend_ready(status):
             selected = "hcs"
-            fallback_reason = "auto selected HCS VM sandbox (strongest isolation)"
+            fallback_reason = "auto selected verified HCS VM sandbox"
         else:
             selected = str(status.get("preferred") or "local")
-            fallback_reason = "auto selected the strongest available backend"
+            fallback_reason = "auto selected the strongest available non-HCS backend"
             if selected == "vm" and not status.get("vm_pack", {}).get("runnable"):
                 selected = "local"
                 fallback_reason = "VM Pack is detected but not runnable in this build, falling back to local copy"
