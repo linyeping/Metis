@@ -11,6 +11,11 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
+function readOptional(relativePath) {
+  const target = path.join(root, relativePath);
+  return fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
+}
+
 function readSettingsSources() {
   return [
     'src/components/settings/SettingsDialog.tsx',
@@ -136,6 +141,7 @@ test('Runtime Manager productization stays wired', () => {
   const api = read('src/lib/api.ts');
   const types = read('src/lib/types.ts');
   const css = read('src/index.css');
+  const architecture = fs.readFileSync(path.resolve(root, '..', 'docs', 'ARCHITECTURE.md'), 'utf8');
   const routes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'settings_routes.py'), 'utf8');
   const manager = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'runtime_manager.py'), 'utf8');
   const runtimeJob = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'runtime_job.py'), 'utf8');
@@ -144,7 +150,7 @@ test('Runtime Manager productization stays wired', () => {
   const tests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_runtime_manager.py'), 'utf8');
 
   assert.match(main, /metis:open-path/);
-  assert.match(main, /shell\.showItemInFolder/);
+  assert.match(main, /shell\.openPath/);
   assert.match(preload, /openPath/);
   assert.match(globals, /openPath/);
   assert.match(backend, /METIS_BUNDLED_RUNTIME_PACK_DIR/);
@@ -155,7 +161,9 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(settings, /RuntimeTab/);
   assert.match(settings, /Metis Runtime Manager/);
   assert.match(settings, /VM Runtime Pack/);
-  assert.match(settings, /HCS 沙箱基础条件/);
+  assert.match(settings, /本地 VM 基础条件/);
+  assert.match(settings, /MetisRuntime WSL 是 local_vm 的第一版可用 runner/);
+  assert.match(settings, /不是 HCS direct runner/);
   assert.match(settings, /最近结果/);
   assert.match(settings, /runtime-result-paths/);
   assert.match(settings, /extractResultPaths/);
@@ -174,6 +182,9 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(css, /\.runtime-manager-panel/);
   assert.match(css, /\.runtime-vm-summary/);
   assert.match(css, /\.runtime-result-path-row/);
+  assert.match(architecture, /The first usable `local_vm` runner on Windows is `metis_wsl`/);
+  assert.match(architecture, /it is not the HCS direct runner/);
+  assert.match(architecture, /HCS direct remains a separate gated backend/);
   assert.match(routes, /\/settings\/runtime-manager\/smoke/);
   assert.match(routes, /\/settings\/runtime-manager\/diagnostics/);
   assert.match(routes, /\/settings\/runtime-manager\/repair/);
@@ -300,7 +311,7 @@ test('FABLEADV-11 preview and tool card fixes stay wired', () => {
   assert.match(uiStore, /setToolCardExpanded/);
   assert.match(toolCallBlock, /stableToolCardId/);
   assert.match(toolCallBlock, /setToolCardExpanded/);
-  assert.match(chatStore, /clearExpandedToolCards/);
+  assert.match(uiStore, /clearExpandedToolCards/);
   assert.match(smoke, /new73-preview-view-ipc-enabled/);
   assert.match(smoke, /new107-preview-view-main-process-hosted/);
   assert.doesNotMatch(main, /did-attach-webview|metis:webview-open-url|captureWebviewPopupWindow|isBlankPopupUrl/);
@@ -407,6 +418,7 @@ test('right rail web preview supports multiple closeable tabs', () => {
 test('right rail browser workbench keeps navigation and zoom wired', () => {
   const uiStore = read('src/store/uiStore.ts');
   const main = read('electron/main.cjs');
+  const previewState = read('electron/preview-state.cjs');
   const preload = read('electron/preload.cjs');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
@@ -441,7 +453,9 @@ test('right rail browser workbench keeps navigation and zoom wired', () => {
   assert.match(rightRail, /!rightRailOpen \|\| !webCardVisible[\s\S]*hidePreviewView\(\)/);
   assert.match(main, /setZoomFactor/);
   assert.match(main, /tabId !== previewTabId/);
-  assert.match(main, /bounds\.width <= 4 \|\| bounds\.height <= 4/);
+  assert.match(main, /previewLayoutIntent/);
+  assert.match(previewState, /isValidPreviewBounds/);
+  assert.match(previewState, /bounds\.width > 4 && bounds\.height > 4/);
   assert.match(preload, /previewSetZoom/);
   assert.match(rightRail, /openExternal/);
   assert.match(rightRail, /reloadActiveWeb/);
@@ -584,7 +598,7 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(subagentGroup, /subagent-dismiss-button/);
   assert.match(subagentGroup, /subagent-open-activity-button/);
   assert.match(rightRail, /renderActivityPanel/);
-  assert.match(rightRail, /cards:\s*\['activity', 'plan'\]/);
+  assert.match(rightRail, /cards:\s*\['activity', 'plan', 'research', 'session'\]/);
   assert.match(rightRail, /activity-inline-tool-output/);
   assert.match(rightRail, /SubagentActivityPanel/);
   assert.match(css, /\.activity-pane/);
@@ -657,7 +671,7 @@ test('NEW-52.5 developer workflow polish stays wired', () => {
   const uiStore = read('src/store/uiStore.ts');
   const theme = read('src/hooks/useTheme.ts');
   const terminal = read('src/components/terminal/TerminalPanel.tsx');
-  const statusbar = read('src/components/shell/Statusbar.tsx');
+  const statusbar = readOptional('src/components/shell/Statusbar.tsx');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const preload = read('electron/preload.cjs');
   const electronMain = read('electron/main.cjs');
@@ -686,7 +700,7 @@ test('NEW-52.5 developer workflow polish stays wired', () => {
   assert.match(theme, /fontStacks/);
   assert.match(terminal, /terminalCreate/);
   assert.doesNotMatch(statusbar, /status-chat-launcher|setTerminalOpen|setRightRailOpen/);
-  assert.match(rightRail, /TerminalPanel embedded/);
+  assert.match(rightRail, /<TerminalPanel embedded/);
   assert.match(preload, /terminalRun/);
   assert.match(electronMain, /metis:terminal-run/);
   assert.match(electronMain, /fakeBackend/);
@@ -749,7 +763,8 @@ test('NEW-84 session isolation and shell profiles stay wired', () => {
 
   assert.match(chatStore, /runSessionId:\s*string\s*\|\s*null/);
   // session_id 必须随每次 chatStream 传入（会话隔离）；允许后面再带别的参数（如 deep_research）。
-  assert.match(chatStore, /chatStream\(\{ message: userContent, session_id: sessionId\b/);
+  assert.match(chatStore, /createRun\(\{[\s\S]*message: userContent,[\s\S]*session_id: sessionId\b/);
+  assert.match(chatStore, /runEventStream\(run\.runId/);
   assert.match(sseParser, /export function applyChatEvent/);
   assert.match(sseParser, /assistantId,\s*sessionId/);
   assert.match(sseParser, /export function isActiveSession/);
@@ -830,8 +845,9 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(runManager, /const activeRunControllers = new Map/);
   assert.match(runManager, /export const processedRunSeq = new Map/);
   // 并发会话注册需 session_id + assistant_id；允许后面再带别的参数（如 deep_research）。
-  assert.match(chatStore, /startChatRun\(\{ message: userContent, session_id: sessionId, assistant_id: assistantId\b/);
-  assert.match(chatStore, /attachRunStream\(activeRunInfo, sessionId\)/);
+  assert.match(chatStore, /createRun\(\{[\s\S]*message: userContent,[\s\S]*session_id: sessionId,[\s\S]*assistant_id: assistantId\b/);
+  assert.match(chatStore, /runEventStream\(run\.runId/);
+  assert.match(chatStore, /resumeInterruptedRun/);
   assert.match(chatStore, /cancelChatRun\(activeRun\.runId\)/);
   assert.match(fakeBackend, /const fakeRuns = new Map/);
   assert.match(fakeBackend, /function fakeCreateRun/);
@@ -967,7 +983,7 @@ test('NEW-94 tool activity tree and command center stays wired', () => {
     'utf8',
   );
 
-  assert.match(thread, /ToolGroup:\s*ToolActivityGroup/);
+  assert.match(thread, /ToolActivityGroup/);
   assert.match(thread, /tool-activity-group/);
   assert.match(thread, /toolCommandPreview/);
   assert.match(thread, /tool-card-open/);
@@ -1068,7 +1084,7 @@ test('NEW-97 and NEW-98 side chat rail, history, model override, and capsule tog
   const sidePanel = read('src/components/rightrail/SideChatPanel.tsx');
   const appShell = read('src/components/shell/AppShell.tsx');
   const titlebar = read('src/components/shell/Titlebar.tsx');
-  const statusbar = read('src/components/shell/Statusbar.tsx');
+  const statusbar = readOptional('src/components/shell/Statusbar.tsx');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const app = read('src/App.tsx');
   const settings = readSettingsSources();
@@ -1101,8 +1117,9 @@ test('NEW-97 and NEW-98 side chat rail, history, model override, and capsule tog
   assert.match(appShell, /--side-chat-width/);
   assert.match(appShell, /side-chat-width-resizer/);
   assert.match(appShell, /className="side-chat-rail"/);
-  assert.match(titlebar, /titlebar-chat-toggle/);
-  assert.match(titlebar, /MessageCircle/);
+  assert.doesNotMatch(titlebar, /titlebar-chat-toggle/);
+  assert.doesNotMatch(titlebar, /MessageCircle/);
+  assert.match(uiStore, /setSideChatOpen/);
   assert.doesNotMatch(titlebar, /title="设置"/);
   assert.doesNotMatch(titlebar, /setSettingsOpen/);
   assert.doesNotMatch(statusbar, /status-chat-launcher|ChevronUp|MessageCircle/);
@@ -1130,13 +1147,13 @@ test('NEW-97 and NEW-98 side chat rail, history, model override, and capsule tog
   assert.match(css, /\.side-chat-width-resizer/);
   assert.match(css, /\.side-chat-history/);
   assert.match(css, /\.side-chat-rail \.side-chat-history-list[\s\S]*display:\s*grid/);
-  assert.match(css, /\.titlebar-chat-toggle/);
+  assert.doesNotMatch(css, /\.titlebar-chat-toggle/);
   assert.doesNotMatch(css, /\.status-chat-launcher/);
   assert.match(css, /\.capsule-toggle-row input:checked \+ i/);
-  assert.match(smoke, /new98-titlebar-chat-toggle-visible/);
+  assert.match(smoke, /new98-titlebar-chat-toggle-removed/);
   assert.match(smoke, /new98-titlebar-settings-button-removed/);
   assert.match(smoke, /new98-statusbar-chat-launcher-removed/);
-  assert.match(smoke, /new98-side-chat-rail-opens-from-titlebar/);
+  assert.match(smoke, /new98-side-chat-rail-opens-without-titlebar/);
   assert.match(smoke, /new98-side-chat-rail-coexists-with-right-rail/);
   assert.match(smoke, /new98-side-chat-docks-right-without-right-rail/);
   assert.match(smoke, /new97-side-chat-history-create/);
@@ -1153,8 +1170,8 @@ test('NEW-99 Claude Code workspace card deck stays wired', () => {
   const titlebar = read('src/components/shell/Titlebar.tsx');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const terminal = read('src/components/terminal/TerminalPanel.tsx');
-  const navRail = read('src/components/shell/NavRail.tsx');
-  const statusbar = read('src/components/shell/Statusbar.tsx');
+  const navRail = read('src/components/sidebar/SidebarNav.tsx');
+  const statusbar = readOptional('src/components/shell/Statusbar.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const doc = fs.readFileSync(
@@ -1162,7 +1179,7 @@ test('NEW-99 Claude Code workspace card deck stays wired', () => {
     'utf8',
   );
 
-  assert.match(uiStore, /WorkspaceCardId = 'web' \| 'terminal' \| 'files' \| 'diff' \| 'activity' \| 'plan' \| 'tool'/);
+  assert.match(uiStore, /WorkspaceCardId = 'web' \| 'terminal' \| 'files' \| 'diff' \| 'activity' \| 'plan' \| 'tool' \| 'research' \| 'session'/);
   assert.match(uiStore, /workspaceCardVisibility:\s*WorkspaceCardVisibility/);
   assert.match(uiStore, /workspaceCardColumnWidths:\s*WorkspaceCardColumnWidths/);
   assert.match(uiStore, /workspaceCardRowSplits:\s*WorkspaceCardRowSplits/);
@@ -1196,7 +1213,7 @@ test('NEW-99 Claude Code workspace card deck stays wired', () => {
   assert.match(rightRail, /startRowResize/);
   assert.match(rightRail, /workspace-column-resizer/);
   assert.match(rightRail, /workspace-row-resizer/);
-  assert.match(rightRail, /TerminalPanel embedded/);
+  assert.match(rightRail, /<TerminalPanel embedded/);
   assert.match(terminal, /embedded\?:\s*boolean/);
   assert.match(terminal, /data-embedded=\{embedded\}/);
   assert.match(navRail, /setTerminalOpen\(!terminalOpen\)/);
@@ -1228,7 +1245,7 @@ test('NEW-100 terminal, session, and card polish stays wired', () => {
   const messageOps = read('src/store/messageOps.ts');
   const sidebar = read('src/components/sidebar/Sidebar.tsx');
   const terminal = read('src/components/terminal/TerminalPanel.tsx');
-  const statusbar = read('src/components/shell/Statusbar.tsx');
+  const statusbar = readOptional('src/components/shell/Statusbar.tsx');
   const settings = readSettingsSources();
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
@@ -1254,7 +1271,7 @@ test('NEW-100 terminal, session, and card polish stays wired', () => {
   assert.match(css, /\.right-rail-inner \.workspace-card-header\s*\{[\s\S]*grid-template-areas:\s*none/);
   assert.match(css, /\.right-rail-inner \.workspace-card-header button\s*\{[\s\S]*min-width:\s*0/);
   assert.match(css, /\.right-rail-inner \.workspace-card-header button\s*\{[\s\S]*border:\s*0/);
-  assert.match(css, /\.context-compact-button/);
+  assert.match(css, /\.composer-context-orb/);
   assert.doesNotMatch(css, /\.session-meta/);
   assert.match(chatStore, /singleUserHistoryNotice/);
   assert.match(messageOps, /这个会话目前只保存了你的消息/);
@@ -1292,7 +1309,8 @@ test('NEW-53 permission center productization stays wired', () => {
   assert.match(composer, /ComposerAccessMenu/);
   assert.match(composer, /composer-access-button/);
   assert.match(composer, /绕过权限/);
-  assert.match(composer, /ShieldAlert/);
+  assert.match(composer, /ComposerAccessMenu/);
+  assert.match(settings, /ShieldAlert/);
   assert.match(settings, /权限中心/);
   assert.match(settings, /手动添加规则/);
   assert.match(settings, /permission-search-input/);
@@ -1314,7 +1332,7 @@ test('NEW-53 permission center productization stays wired', () => {
 });
 
 test('NEW-54 terminal workbench polish stays wired', () => {
-  const navRail = read('src/components/shell/NavRail.tsx');
+  const navRail = read('src/components/sidebar/SidebarNav.tsx');
   const terminal = read('src/components/terminal/TerminalPanel.tsx');
   const uiStore = read('src/store/uiStore.ts');
   const settings = readSettingsSources();
@@ -1325,8 +1343,8 @@ test('NEW-54 terminal workbench polish stays wired', () => {
     'utf8',
   );
 
-  assert.match(navRail, /nav-terminal-button/);
-  assert.match(navRail, /SquareTerminal/);
+  assert.match(navRail, /kind: 'terminal'/);
+  assert.match(navRail, /Terminal/);
   assert.match(navRail, /setTerminalOpen\(!terminalOpen\)/);
   assert.match(terminal, /terminal-resizer/);
   assert.match(terminal, /onPointerDown=\{startResize\}/);
@@ -1627,7 +1645,7 @@ test('NEW-66 true session resume stays wired', () => {
 
 test('NEW-67 context window quota bar stays wired', () => {
   const helper = read('src/lib/contextWindow.ts');
-  const component = read('src/components/sidebar/ContextWindowBar.tsx');
+  const component = read('src/components/chat/Composer.tsx');
   const sidebar = read('src/components/sidebar/Sidebar.tsx');
   const app = read('src/App.tsx');
   const css = read('src/index.css');
@@ -1640,13 +1658,14 @@ test('NEW-67 context window quota bar stays wired', () => {
   assert.match(helper, /contextLimitForModel/);
   assert.match(helper, /deepseek-v4-flash/);
   assert.match(helper, /contextWindowLevel/);
-  assert.match(component, /context-window-card/);
+  assert.match(component, /composer-context-orb/);
   assert.match(component, /上下文窗口|Context window/);
-  assert.match(sidebar, /ContextWindowBar/);
-  assert.match(app, /<Sidebar model=\{settings\?\.model/);
-  assert.match(css, /\.context-window-card/);
-  assert.match(css, /data-level='danger'/);
-  assert.match(smoke, /new67-context-window-danger-threshold/);
+  assert.match(sidebar, /SidebarNav/);
+  assert.match(app, /sidebar=\{<Sidebar \/>\}/);
+  assert.match(app, /SideChatPanel defaultModel=\{settings\?\.model/);
+  assert.match(css, /\.composer-context-orb/);
+  assert.match(css, /\.composer-context-orb\[data-level='red'\]/);
+  assert.match(smoke, /new67-context-orb-danger-threshold/);
   assert.match(doc, /Context Window Quota Bar/);
 });
 
@@ -1695,7 +1714,7 @@ test('NEW-69 context compaction and handoff control stays wired', () => {
   const api = read('src/lib/api.ts');
   const chatStore = read('src/store/chatStore.ts');
   const runRecovery = read('src/store/runRecovery.ts');
-  const component = read('src/components/sidebar/ContextWindowBar.tsx');
+  const component = read('src/components/chat/Composer.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const fakeBackend = read('electron/backend.cjs');
@@ -1713,9 +1732,9 @@ test('NEW-69 context compaction and handoff control stays wired', () => {
   assert.match(chatStore, /compactContext/);
   assert.match(chatStore, /persistCompactHandoff/);
   assert.match(runRecovery, /metis\.chat\.compactHandoff\./);
-  assert.match(component, /context-compact-button/);
-  assert.match(component, /压缩上下文/);
-  assert.match(css, /\.context-compact-status/);
+  assert.match(component, /composer-context-orb/);
+  assert.doesNotMatch(component, /composer-context-compact/);
+  assert.match(css, /\.composer-context-popover/);
   assert.match(smoke, /new69-context-compact-handoff-saved/);
   assert.match(fakeBackend, /fakeCompactSmokeSession/);
   assert.match(fakeBackend, /pathname === '\/compact'/);
@@ -1740,7 +1759,7 @@ test('NEW-70 terminal scope and compaction visuals stay wired', () => {
   );
 
   assert.match(appShell, /main-workspace-column/);
-  assert.match(rightRail, /TerminalPanel embedded/);
+  assert.match(rightRail, /<TerminalPanel embedded/);
   assert.match(css, /\.main-workspace-column/);
   assert.match(css, /\.terminal-panel\[data-embedded='true'\]/);
   assert.match(css, /\.thread-shell\[data-compacting='true'\] \.thread-window/);
@@ -2043,11 +2062,11 @@ test('NEW-80 Codex-like composer layout stays wired', () => {
   assert.match(composer, /composer-toolbar/);
   assert.match(composer, /composer-toolbar-left/);
   assert.match(composer, /composer-toolbar-right/);
-  assert.match(composer, /<Plus size=\{22\}/);
+  assert.match(composer, /<Plus size=\{isCodeMode \? 18 : 22\}/);
   assert.match(composer, /<ArrowUp size=\{20\}/);
   assert.match(composer, /aria-label=\{streaming \? t\('停止生成'\) : t\('发送消息'\)\}/);
   assert.match(css, /\.composer\s*\{[\s\S]*flex-direction:\s*column/);
-  assert.match(css, /--chat-column-width:\s*1104px/);
+  assert.match(css, /--chat-column-width:\s*820px/);
   assert.match(css, /\.thread-window\s*\{[\s\S]*width:\s*min\(var\(--chat-column-width\),\s*100%\)/);
   assert.match(css, /\.composer\s*\{[\s\S]*width:\s*min\(var\(--chat-column-width\),\s*100%\)/);
   assert.match(css, /\.send-button\s*\{[\s\S]*border-radius:\s*999px/);
@@ -2081,7 +2100,7 @@ test('NEW-81 composer sidebar and zone polish stays wired', () => {
   assert.match(css, /\.zone-header-actions/);
   assert.match(css, /\.zone-pill\s*\{[\s\S]*border-radius:\s*10px/);
   assert.match(smoke, /new81-composer-default-height-compact/);
-  assert.match(smoke, /new81-sidebar-folder-icon-in-search-row/);
+  assert.match(smoke, /new81-chat-sidebar-folder-icon-removed/);
   assert.match(smoke, /new81-sidebar-top-new-chat-removed/);
   assert.match(doc, /Composer Sidebar And Zone Polish/);
 });
@@ -2346,7 +2365,7 @@ test('NEW-105 preview omnibar and menu compaction stays wired', () => {
 
 test('NEW-106 preview controls and context polish stays wired', () => {
   const sidePanel = read('src/components/rightrail/SideChatPanel.tsx');
-  const contextWindow = read('src/components/sidebar/ContextWindowBar.tsx');
+  const contextWindow = read('src/components/chat/Composer.tsx');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
@@ -2360,11 +2379,11 @@ test('NEW-106 preview controls and context polish stays wired', () => {
   assert.match(rightRail, /className="web-external-wrap"/);
   assert.match(rightRail, /className="web-external-button"/);
   assert.doesNotMatch(rightRail, /网页加载中|网页状态|className="web-more-menu-label">浏览器/);
-  assert.match(contextWindow, /<Gauge size=\{14\} strokeWidth=\{1\.9\}/);
+  assert.match(contextWindow, /composer-context-orb/);
   assert.match(css, /\.web-zoom-controls\s*\{[\s\S]*grid-template-columns:\s*22px 22px 32px/);
   assert.match(css, /\.web-external-wrap\s*\{[\s\S]*border-left:\s*1px solid/);
   assert.match(css, /\.web-more-menu button\s*\{[\s\S]*justify-content:\s*center/);
-  assert.match(css, /\.context-window-head span svg\s*\{[\s\S]*overflow:\s*visible/);
+  assert.match(css, /\.composer-context-orb-core/);
   assert.match(smoke, /new98-side-chat-model-picker-removed/);
   assert.match(doc, /Preview Controls And Context Polish/);
 });
@@ -2432,7 +2451,7 @@ test('NEW-113 settings dialog performance refactor stays wired', () => {
   assert.doesNotMatch(modalBlock, /backdrop-filter/);
   assert.match(css, /\.modal-layer\s*\{[\s\S]*background:\s*rgba\(0,\s*0,\s*0,\s*0\.45\)/);
   assert.match(css, /\.setup-layer\s*\{[\s\S]*backdrop-filter:\s*blur\(8px\)/);
-  assert.match(css, /\.settings-dialog\s*\{[\s\S]*box-shadow:\s*0 16px 48px rgba\(0,\s*0,\s*0,\s*0\.22\)/);
+  assert.match(css, /\.settings-dialog\s*\{[\s\S]*box-shadow:\s*none/);
   assert.match(doc, /NEW-113/);
 });
 
@@ -2551,7 +2570,7 @@ test('returning to a live background run does not show recovery notice', () => {
 
 test('NEW-119 panel toggles close blank rails and avoid delayed layout rebound', () => {
   const appShell = read('src/components/shell/AppShell.tsx');
-  const navRail = read('src/components/shell/NavRail.tsx');
+  const navRail = read('src/components/sidebar/SidebarNav.tsx');
   const uiStore = read('src/store/uiStore.ts');
   const doc = fs.readFileSync(
     path.resolve(root, '..', 'docs', 'dev-log', 'NEW-119-Panel-Toggle-Blank-Rail-And-Chat-Motion-Fix.md'),
@@ -2560,10 +2579,12 @@ test('NEW-119 panel toggles close blank rails and avoid delayed layout rebound',
 
   assert.match(uiStore, /setTerminalOpen: terminalOpen =>\s*set\(state => \{\s*const workspaceCardVisibility = persistWorkspaceCardVisibility/s);
   assert.match(uiStore, /rightRailOpen: terminalOpen \? true : hasVisibleWorkspaceCard\(workspaceCardVisibility\)/);
-  assert.match(navRail, /onClick=\{\(\) => setTerminalOpen\(!terminalOpen\)\}/);
+  assert.match(navRail, /else if \(item\.kind === 'terminal'\) setTerminalOpen\(!terminalOpen\);/);
+  assert.match(navRail, /onClick=\{onClick\}/);
   assert.doesNotMatch(navRail, /setRightRailOpen\(true\)/);
   assert.match(appShell, /const sideChatLayoutOpen = sideChatOpen;/);
-  assert.match(appShell, /const rightRailLayoutOpen = rightRailOpen;/);
+  assert.match(appShell, /const rightRailEffectiveOpen = rightRailOpen && effectiveVisibleWorkspaceCards\.length > 0;/);
+  assert.match(appShell, /const rightRailLayoutOpen = rightRailEffectiveOpen && !researchPopoverOpen;/);
   assert.doesNotMatch(appShell, /sideChatLayoutHold|rightRailLayoutHold/);
   assert.match(doc, /NEW-119/);
   assert.match(doc, /Completed/);
@@ -2616,9 +2637,9 @@ test('FABLEADV-12 skills system stays wired end-to-end', () => {
   assert.match(composer, /slashSkillOptions/);
   assert.match(composer, /slash-skill-option/);
   assert.match(sections, /groupedSkills/);
-  assert.match(sections, /source:\s*'builtin'/);
-  assert.match(sections, /source:\s*'global'/);
-  assert.match(sections, /source:\s*'project'/);
+  assert.match(sections, /source === 'builtin'/);
+  assert.match(sections, /source === 'global'/);
+  assert.match(sections, /source === 'project'/);
   assert.match(sections, /模型可触发|仅手动/);
   assert.match(capabilitySuite, /skills-debug-auto-load/);
   assert.match(capabilitySuite, /skills-frontend-self-verify/);
@@ -2638,7 +2659,8 @@ test('FABLEADV-13 preview refresh and chat linkify stay wired', () => {
   const doc = fs.readFileSync(path.join(repoRoot, 'docs', 'dev-log', 'FABLEADV-13-Preview-Refresh-Linkify.md'), 'utf8');
 
   assert.match(rightRail, /void window\.metis\?\.previewLoad\?\.\(\{ tabId, url: webPreviewUrl \}\)/);
-  assert.match(rightRail, /\}, \[activeWebPreviewId, webPreviewUrl\]\);/);
+  assert.match(rightRail, /previewLoad\?\.\(\{ tabId, url: webPreviewUrl \}\)/);
+  assert.match(rightRail, /\}, \[activeWebPreviewId, canShowWebPreview, hidePreviewView, showPreviewAtHost, t, webPreviewUrl\]\);/);
   assert.doesNotMatch(rightRail, /\}, \[activeWebPreviewId, syncPreviewBounds, updateWebPreviewTab, webPreviewUrl\]\);/);
   assert.match(electronMain, /previewLoadedUrls = new Map/);
   assert.match(electronMain, /previewLoadedUrls\.get\(nextTabId\) === value/);

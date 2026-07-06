@@ -27,6 +27,18 @@ backend/runtime + backend/tools
 
 `backend/bridges/` contains small contracts for provider, tool, session, and event interoperability.
 
+## Execution Profiles
+
+Metis separates command execution from UI authority:
+
+- `local_direct` runs commands in the source workspace on the host.
+- `local_worktree` runs code sessions in isolated host worktrees and promotes diffs explicitly.
+- `local_vm` runs commands in an isolated local runtime and returns stdout, diffs, and artifacts to the normal registry.
+
+The first usable `local_vm` runner on Windows is `metis_wsl`, a Metis-managed WSL distro. It may show up in `hcsdiag` as a WSL2 utility VM, but it is not the HCS direct runner and Metis does not select `backend=hcs` for that path.
+
+HCS direct remains a separate gated backend. It requires Metis-owned VM assets, a booted guest `metisd`, and a successful `runtime.hello` handshake over the HCS/vsock transport before it can be considered ready.
+
 ## Data Boundaries
 
 Runtime state belongs in user-local directories such as `~/.metis/`, with legacy `.miro` paths read only where migration compatibility requires it. Build outputs, caches, logs, and local dev logs are ignored by default.

@@ -163,13 +163,16 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
     <div className="runtime-provision" data-ready={status.ready}>
       <div className="runtime-provision-head">
         {status.ready ? <CheckCircle2 size={15} className="ok" /> : <ShieldCheck size={15} />}
-        <span className="runtime-provision-title">{t('HCS 沙箱基础条件')}</span>
+        <span className="runtime-provision-title">{t('本地 VM 基础条件')}</span>
         <span className="runtime-provision-badge" data-ok={status.ready}>
           {status.ready ? t('可自检') : t('需要设置')}
         </span>
       </div>
 
       <p className="runtime-provision-summary">{status.uxSummary}</p>
+      <p className="runtime-provision-note">
+        {t('当前 local_vm 首版使用 MetisRuntime WSL 执行命令。Windows 可能在 hcsdiag 中显示 WSL utility VM，但 Metis 没有选择 HCS direct backend。')}
+      </p>
 
       <div className="runtime-provision-checks">
         {status.virtualizationOk !== null && (
@@ -356,6 +359,9 @@ export const RuntimeTab = memo(function RuntimeTab({
           <RuntimeMetric label={t('Docker')} neutral ok={health?.dockerAvailable} value={health?.dockerAvailable ? t('可用') : t('不可用')} />
           <RuntimeMetric label={t('WSL')} ok={health?.wslAvailable} value={health?.wslAvailable ? t('可用') : t('不可用')} />
         </div>
+        <p className="runtime-manager-message">
+          {t('边界说明：MetisRuntime WSL 是 local_vm 的第一版可用 runner；它会使用 WSL2 utility VM，但不是 HCS direct runner。HCS direct 只有在 Metis 自有 VM 资产启动 guest metisd 并完成 runtime.hello 后才算就绪。')}
+        </p>
 
         <div className="runtime-actions">
           <button type="button" onClick={() => void onRefresh()} disabled={Boolean(busy)}>
