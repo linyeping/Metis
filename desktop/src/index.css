@@ -9240,8 +9240,8 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   display: grid;
   height: 100%;
   min-height: 0;
-  grid-template-rows: minmax(0, 1fr) auto auto auto auto;
-  gap: 8px;
+  grid-template-rows: minmax(132px, 38%) minmax(0, 1fr);
+  gap: 10px;
   padding: 8px;
   overflow: hidden;
 }
@@ -9254,6 +9254,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   padding: 10px;
   border: 1px dashed var(--border);
   border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
   color: var(--text-faint);
   text-align: center;
 }
@@ -9274,12 +9275,16 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   -webkit-line-clamp: 4;
 }
 
-/* FABLEADV-31: Plan 面板的实时任务清单 */
 .plan-card-todos {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   min-height: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  overflow: hidden;
 }
 
 .plan-card-todos-head {
@@ -9332,64 +9337,10 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   transition: width 180ms ease;
 }
 
-.plan-step-focus {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
-}
-
-.plan-step-focus[data-status='active'] {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  background: color-mix(in srgb, var(--accent-soft) 62%, transparent);
-}
-
-.plan-step-focus[data-status='blocked'],
-.plan-step-focus[data-status='failed'],
-.plan-step-focus[data-status='canceled'] {
-  border-color: color-mix(in srgb, var(--danger) 36%, var(--border));
-  background: color-mix(in srgb, var(--danger-soft) 56%, transparent);
-}
-
-.plan-step-focus div {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.plan-step-focus span,
-.plan-step-focus p {
-  color: var(--text-faint);
-  font-size: var(--ui-font-size-xs);
-}
-
-.plan-step-focus strong,
-.plan-step-focus p {
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-}
-
-.plan-step-focus strong {
-  color: var(--text);
-  font-size: var(--ui-font-size-sm);
-  line-height: 1.35;
-  -webkit-line-clamp: 2;
-}
-
-.plan-step-focus p {
-  margin: 0;
-  line-height: 1.4;
-  -webkit-line-clamp: 2;
-}
-
 .plan-todo-list {
   display: grid;
   align-content: start;
-  gap: 1px;
+  gap: 3px;
   margin: 0;
   padding: 0;
   min-height: 0;
@@ -9403,7 +9354,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
-  padding: 6px 6px;
+  padding: 5px 6px;
   border-radius: 8px;
   font-size: var(--ui-font-size-sm);
   line-height: 1.4;
@@ -9478,239 +9429,90 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   white-space: nowrap;
 }
 
-.plan-action-panel,
-.plan-run-monitor {
+.plan-agent-panel {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
+  min-height: 0;
   min-width: 0;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  overflow: hidden;
 }
 
-.plan-action-head,
-.plan-run-monitor header {
+.plan-agent-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.plan-action-head {
-  align-items: start;
-}
-
-.plan-action-head strong,
-.plan-run-monitor strong {
+.plan-agent-head strong {
   color: var(--text);
   font-size: var(--ui-font-size-sm);
 }
 
-.plan-action-head span,
-.plan-run-monitor header span {
+.plan-agent-head span,
+.plan-agent-head em {
   color: var(--text-faint);
   font-size: var(--ui-font-size-xs);
+  font-style: normal;
 }
 
-.plan-action-head div,
-.plan-run-monitor header div {
+.plan-agent-head div {
   display: grid;
   min-width: 0;
   gap: 1px;
 }
 
-.plan-action-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.plan-action-grid button,
-.plan-run-monitor header button {
-  display: inline-flex;
-  min-width: 0;
-  height: 27px;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-tertiary);
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: var(--ui-font-size-xs);
-}
-
-.plan-action-grid button:hover,
-.plan-run-monitor header button:hover {
-  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
-  background: var(--accent-soft);
-  color: var(--text);
-}
-
-.plan-action-grid button:disabled,
-.plan-run-monitor header button:disabled {
-  cursor: default;
-  opacity: 0.52;
-}
-
-.plan-action-grid button span {
-  min-width: 0;
+.plan-agent-head span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agent-runtime-card {
+.plan-agent-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.plan-agent-task {
   display: grid;
   min-width: 0;
-  gap: 7px;
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
-}
-
-.agent-runtime-card[data-empty='true'] {
-  opacity: 0.72;
-}
-
-.agent-runtime-card header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
-}
-
-.agent-runtime-card header div {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.agent-runtime-card header strong {
-  color: var(--text);
-  font-size: var(--ui-font-size-xs);
-}
-
-.agent-runtime-card header span,
-.agent-runtime-card header em,
-.agent-runtime-card p,
-.agent-runtime-card > small {
-  color: var(--text-faint);
-  font-size: var(--ui-font-size-xs);
-  font-style: normal;
-}
-
-.agent-runtime-card header span,
-.agent-runtime-card p,
-.agent-runtime-card > small {
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.agent-runtime-grid {
+.plan-agent-task[data-status='running'] {
+  border-color: color-mix(in srgb, #4c8dff 30%, var(--border));
+}
+
+.plan-agent-task[data-status='error'] {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+}
+
+.plan-agent-task-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-  gap: 5px;
-}
-
-.agent-runtime-metric {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-  padding: 6px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-}
-
-.agent-runtime-metric b {
-  color: var(--text);
-  font-size: var(--ui-font-size-sm);
-  font-weight: 680;
-}
-
-.agent-runtime-metric em,
-.agent-runtime-metric small {
-  overflow: hidden;
-  color: var(--text-faint);
-  font-size: 10px;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-worker-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
-}
-
-.agent-worker-strip span {
-  display: flex;
-  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 5px;
-  padding: 5px 6px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-
-.agent-worker-strip span[data-status='done'] {
-  border-color: color-mix(in srgb, var(--success) 38%, var(--border));
-}
-
-.agent-worker-strip span[data-status='running'] {
-  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
-}
-
-.agent-worker-strip span[data-status='error'] {
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
-  color: var(--danger);
-}
-
-.agent-worker-strip b {
-  color: var(--text-faint);
-  font-size: 10px;
-}
-
-.plan-run-monitor header button {
-  width: 27px;
-  flex: 0 0 auto;
-  padding: 0;
-}
-
-.plan-run-monitor[data-active='true'] {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
-}
-
-.plan-run-note {
-  display: flex;
   min-width: 0;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  color: var(--text-faint);
-  font-size: var(--ui-font-size-xs);
-  line-height: 1.4;
 }
 
-.plan-run-note[data-tone='error'] {
-  color: var(--danger);
-}
-
-.plan-run-row {
+.plan-agent-task-main {
   display: grid;
-  min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 14px 10px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 0;
+  min-width: 0;
+  padding: 9px 10px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -9718,51 +9520,144 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   cursor: pointer;
 }
 
-.plan-run-row > span:not(.run-status-dot) {
+.plan-agent-task-main:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 66%, transparent);
+}
+
+.plan-agent-task-main > span:not(.plan-agent-dot) {
   display: grid;
   min-width: 0;
   gap: 1px;
 }
 
-.plan-run-row strong,
-.plan-run-row small {
+.plan-agent-task-main strong,
+.plan-agent-task-main small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.plan-run-row small {
-  color: var(--text-faint);
-  font-size: var(--ui-font-size-xs);
-}
-
-.plan-run-row:hover strong {
-  color: var(--accent);
-}
-
-.plan-card-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.plan-card-metrics span {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  padding: 7px;
-  border-radius: 7px;
-  background: var(--bg-tertiary);
-  color: var(--text-faint);
-  font-size: var(--ui-font-size-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.plan-card-metrics b {
+.plan-agent-task-main strong {
   color: var(--text);
   font-size: var(--ui-font-size-sm);
+}
+
+.plan-agent-task-main small,
+.plan-agent-task-main em {
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-xs);
+  font-style: normal;
+}
+
+.plan-agent-task-main em {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-tertiary) 84%, transparent);
+  white-space: nowrap;
+}
+
+.plan-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.plan-agent-dot[data-status='done'] {
+  background: #2da66e;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #2da66e 22%, transparent);
+}
+
+.plan-agent-dot[data-status='running'] {
+  background: #4c8dff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #4c8dff 26%, transparent);
+  animation: run-dot-pulse 1.8s ease-in-out infinite;
+}
+
+.plan-agent-dot[data-status='error'] {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.plan-agent-stop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  margin-right: 7px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger-soft) 72%, transparent);
+  color: var(--danger);
+  cursor: pointer;
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-agent-stop:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.plan-agent-stop span {
+  white-space: nowrap;
+}
+
+.plan-agent-task-detail {
+  display: grid;
+  gap: 7px;
+  padding: 0 10px 10px 40px;
+}
+
+.plan-agent-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+}
+
+.plan-agent-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 72%, #2da66e);
+}
+
+.plan-agent-meta {
+  display: flex;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.plan-agent-task-detail p,
+.plan-agent-task-detail pre {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-xs);
+  line-height: 1.45;
+}
+
+.plan-agent-task-detail pre {
+  max-height: 160px;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-tertiary) 76%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.plan-agent-empty {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 92px;
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
 }
 
 .file-tree,

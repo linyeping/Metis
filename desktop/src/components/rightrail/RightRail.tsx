@@ -21,7 +21,6 @@ import {
   Network,
   RefreshCw,
   ScanSearch,
-  ShieldCheck,
   SquareTerminal,
   Square,
   StickyNote,
@@ -32,10 +31,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { apiBase, cancelChatRun, getAgentRuntimeProfile, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth } from '../../lib/api';
+import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth } from '../../lib/api';
 import { DOCUMENT_LIBRARY_EVENT, listDocumentLibraryItems, syncDocumentLibraryFromArtifacts, upsertDocumentLibraryItem, type DocumentLibraryItem } from '../../lib/documentLibrary';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { AgentRuntimeProfilePayload, BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatTodoItem, ContextLedger, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import type { BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatSubagentEvent, ChatTodoItem, CoworkPlanSnapshot, CoworkPlanSubrun, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -70,7 +69,20 @@ const workspaceCardColumns: Array<{ id: WorkspaceCardColumnId; cards: WorkspaceC
 ];
 
 type PlanTodoStatus = 'done' | 'active' | 'pending' | 'blocked' | 'failed' | 'canceled';
-type PlanActionKind = 'retry' | 'strategy' | 'manual';
+type PlanAgentTaskStatus = 'planned' | 'running' | 'done' | 'error';
+
+interface PlanAgentTask {
+  id: string;
+  title: string;
+  status: PlanAgentTaskStatus;
+  progress: number;
+  summary: string;
+  prompt: string;
+  resultText: string;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
 function planTodoStatus(raw?: string): PlanTodoStatus {
   const value = String(raw || '').trim().toLowerCase();
   if (['done', 'completed', 'complete', 'finished'].includes(value)) return 'done';
@@ -95,26 +107,6 @@ function planTodoLabel(item: ChatTodoItem | null | undefined, index: number, t: 
   return String(item.content || item.task || item.title || item.id || `${t('任务 ')}${index + 1}`).trim();
 }
 
-function planTodoDetail(item: ChatTodoItem | null | undefined): string {
-  if (!item) return '';
-  const record = item as Record<string, unknown>;
-  for (const key of ['note', 'error', 'reason', 'summary', 'result']) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
-}
-
-function planFocusTodo(todos: ChatTodoItem[]): { item: ChatTodoItem | null; index: number; status: PlanTodoStatus | 'idle' } {
-  const indexed = todos.map((item, index) => ({ item, index, status: planTodoStatus(item.status) }));
-  return (
-    indexed.find(row => row.status === 'active') ||
-    indexed.find(row => row.status === 'failed' || row.status === 'blocked') ||
-    indexed.find(row => row.status === 'pending') ||
-    indexed[indexed.length - 1] || { item: null, index: -1, status: 'idle' }
-  );
-}
-
 function planOverviewText(
   total: number,
   doneCount: number,
@@ -124,22 +116,145 @@ function planOverviewText(
   t: (text: string) => string,
 ): string {
   if (runtimeStatus?.phase === 'todo_progress' && runtimeStatus.display) return runtimeStatus.display;
-  if (issueCount > 0) return t('有步骤受阻，可以重试或换策略。');
+  if (issueCount > 0) return t('有步骤失败或受阻。');
   if (activeCount > 0) return t('智能体正在推进当前步骤。');
   if (total > 0 && doneCount >= total) return t('任务清单已完成。');
   if (total > 0) return t('等待智能体继续执行下一步。');
   return t('等待任务清单。');
 }
 
-function buildPlanFollowUpPrompt(kind: PlanActionKind, stepLabel: string): string {
-  const target = stepLabel ? `当前步骤：${stepLabel}` : '当前没有可见任务清单项。';
-  if (kind === 'retry') {
-    return `${target}\n请继续执行任务清单中的当前步骤。先简短说明刚才失败或卡住的原因，然后重试该步骤；重试后用 todo_write 更新每步状态，并给出可验证的完成证据。`;
+function buildPlanAgentTasks(subagents: ChatSubagentEvent[], plan: CoworkPlanSnapshot | null): PlanAgentTask[] {
+  const planSubruns = Array.isArray(plan?.subruns) ? plan.subruns : [];
+  const itemById = new Map(subagents.map(item => [item.taskId, item]));
+  const used = new Set<string>();
+  const tasks: PlanAgentTask[] = [];
+
+  for (const subrun of planSubruns) {
+    const id = planAgentSubrunId(subrun, tasks.length + 1);
+    const title = textFromUnknown(subrun.title) || textFromUnknown(subrun.name) || id;
+    const item = itemById.get(id) || subagents.find(candidate => candidate.name === title);
+    if (item) used.add(item.taskId);
+    tasks.push(planAgentTaskFrom(item, subrun, tasks.length + 1));
   }
-  if (kind === 'strategy') {
-    return `${target}\n当前步骤受阻。请先用 todo_write 标记障碍，再换一种策略或工具继续，不要重复已经失败的路径；完成后更新任务清单，并说明新的验收证据。`;
+
+  for (const item of subagents) {
+    if (used.has(item.taskId)) continue;
+    tasks.push(planAgentTaskFrom(item, null, tasks.length + 1));
   }
-  return '我已经手动接管并完成或调整了当前界面状态。请重新观察当前状态，更新 todo_write，然后从任务清单的下一步继续；如果当前步骤已完成，请标记完成并继续后续步骤。';
+
+  return tasks;
+}
+
+function planAgentSubrunId(subrun: CoworkPlanSubrun, index: number): string {
+  return (
+    textFromUnknown(subrun.subrun_id) ||
+    textFromUnknown(subrun.task_id) ||
+    textFromUnknown(subrun.run_id) ||
+    textFromUnknown(subrun.title) ||
+    `subrun-${index}`
+  );
+}
+
+function planAgentTaskFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSubrun | null, index: number): PlanAgentTask {
+  const result = recordFromUnknown(item?.result);
+  const worktree = recordFromUnknown(result.worktree);
+  const id = item?.taskId || (subrun ? planAgentSubrunId(subrun, index) : `subrun-${index}`);
+  const title = item?.name || textFromUnknown(subrun?.title) || textFromUnknown(subrun?.name) || `${index}. Subrun`;
+  const summary =
+    item?.summary ||
+    textFromUnknown(result.summary) ||
+    textFromUnknown(result.message) ||
+    textFromUnknown(subrun?.status);
+  const prompt = textFromUnknown(subrun?.prompt);
+  const resultText = compactPlanAgentResult(item?.result);
+  const worktreeId = textFromUnknown(result.worktree_id) || textFromUnknown(worktree.worktree_id) || textFromUnknown(subrun?.worktree_id);
+  const worktreeRoot =
+    textFromUnknown(result.worktree_workspace_root) ||
+    textFromUnknown(worktree.worktree_workspace_root) ||
+    textFromUnknown(worktree.path) ||
+    textFromUnknown(subrun?.worktree_workspace_root);
+  const details = [
+    summary,
+    prompt ? `Prompt: ${prompt}` : '',
+    worktreeId ? `Worktree: ${worktreeId}` : '',
+    worktreeRoot ? `Path: ${compactPath(worktreeRoot)}` : '',
+  ].filter(Boolean);
+
+  return {
+    id,
+    title,
+    status: planAgentStatus(item?.status, textFromUnknown(subrun?.status)),
+    progress: clampPercent(item?.progress ?? planAgentProgressFromStatus(textFromUnknown(subrun?.status))),
+    summary: details[0] || '',
+    prompt,
+    resultText: [details.slice(1).join('\n'), resultText].filter(Boolean).join('\n\n'),
+    startedAt: item?.startedAt,
+    finishedAt: item?.finishedAt || item?.updatedAt,
+  };
+}
+
+function planAgentStatus(itemStatus: ChatSubagentEvent['status'] | undefined, planStatus: string): PlanAgentTaskStatus {
+  if (itemStatus === 'running') return 'running';
+  if (itemStatus === 'done') return 'done';
+  if (itemStatus === 'error') return 'error';
+  const value = planStatus.toLowerCase();
+  if (['running', 'active', 'in_progress', 'in-progress'].includes(value)) return 'running';
+  if (['done', 'complete', 'completed', 'finished'].includes(value)) return 'done';
+  if (['failed', 'failure', 'error', 'blocked'].includes(value)) return 'error';
+  return 'planned';
+}
+
+function planAgentProgressFromStatus(status: string): number {
+  const value = status.toLowerCase();
+  if (['done', 'complete', 'completed', 'finished'].includes(value)) return 100;
+  if (['running', 'active', 'in_progress', 'in-progress'].includes(value)) return 35;
+  if (['failed', 'failure', 'error', 'blocked'].includes(value)) return 100;
+  return 0;
+}
+
+function planAgentStatusLabel(status: PlanAgentTaskStatus): string {
+  if (status === 'running') return '正在运行';
+  if (status === 'done') return '已完成';
+  if (status === 'error') return '失败';
+  return '待开始';
+}
+
+function compactPlanAgentResult(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  let text = '';
+  if (typeof value === 'string') {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2) || '';
+    } catch {
+      text = String(value);
+    }
+  }
+  return text.length > 1600 ? `${text.slice(0, 1600).trimEnd()}...` : text;
+}
+
+function planAgentElapsed(startedAt?: number, finishedAt?: number): string {
+  if (!startedAt || !finishedAt || finishedAt < startedAt) return '';
+  const ms = finishedAt - startedAt;
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function clampPercent(value: number): number {
+  return Math.min(Math.max(Math.round(value || 0), 0), 100);
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function textFromUnknown(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
 }
 
 function workspaceColumnWidth(
@@ -175,9 +290,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const planTodos = useChatStore(state => state.planTodos);
   const streaming = useChatStore(state => state.streaming);
   const runtimeStatus = useChatStore(state => state.runtimeStatus);
-  const contextLedger = useChatStore(state => state.contextLedger);
-  const sendChat = useChatStore(state => state.send);
-  const rewindLatest = useChatStore(state => state.rewindLatest);
+  const stopChatRun = useChatStore(state => state.stop);
   const loadChatSession = useChatStore(state => state.loadSession);
   const activateWebPreviewTab = useUiStore(state => state.activateWebPreviewTab);
   const closeWebPreviewTab = useUiStore(state => state.closeWebPreviewTab);
@@ -213,11 +326,10 @@ export function RightRail({ backendReady }: RightRailProps) {
   const [previewAudit, setPreviewAudit] = useState<PreviewAuditResult | null>(null);
   const [previewState, setPreviewState] = useState<PreviewStatePayload | null>(null);
   const [browserActivity, setBrowserActivity] = useState<BrowserActivityPayload | null>(null);
-  const [agentRuntimeProfile, setAgentRuntimeProfile] = useState<AgentRuntimeProfilePayload | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
   const [devDetailsOpen, setDevDetailsOpen] = useState(false);
   const [workspaceSettling, setWorkspaceSettling] = useState(false);
-  const [planActionBusy, setPlanActionBusy] = useState<PlanActionKind | 'rewind' | ''>('');
+  const [openPlanAgentTasks, setOpenPlanAgentTasks] = useState<Record<string, boolean>>({});
   const [researchJobs, setResearchJobs] = useState<ResearchJob[]>([]);
   const [researchJob, setResearchJob] = useState<ResearchJob | null>(null);
   const [researchError, setResearchError] = useState('');
@@ -247,50 +359,9 @@ export function RightRail({ backendReady }: RightRailProps) {
         : null,
     [activeDiffFile?.preview, activeDiffPreview, diffRevertItems, diffRevertSummaryId, diffSummary],
   );
-  useEffect(() => {
-    if (!backendReady || !activeSessionId) {
-      setAgentRuntimeProfile(null);
-      return undefined;
-    }
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const profile = await getAgentRuntimeProfile(activeSessionId);
-        if (!cancelled) setAgentRuntimeProfile(profile);
-      } catch {
-        if (!cancelled) setAgentRuntimeProfile(null);
-      }
-    };
-    void refresh();
-    const timer = window.setInterval(refresh, streaming ? 8000 : 30000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [activeSessionId, backendReady, planTodos.length, streaming, subagents.length]);
-
-  const submitPlanFollowUp = useCallback(
-    async (kind: PlanActionKind, stepLabel: string) => {
-      if (streaming || planActionBusy) return;
-      setPlanActionBusy(kind);
-      try {
-        await sendChat(buildPlanFollowUpPrompt(kind, stepLabel));
-      } finally {
-        setPlanActionBusy('');
-      }
-    },
-    [planActionBusy, sendChat, streaming],
-  );
-
-  const rewindPlanStep = useCallback(async () => {
-    if (streaming || planActionBusy) return;
-    setPlanActionBusy('rewind');
-    try {
-      await rewindLatest();
-    } finally {
-      setPlanActionBusy('');
-    }
-  }, [planActionBusy, rewindLatest, streaming]);
+  const togglePlanAgentTask = useCallback((taskId: string) => {
+    setOpenPlanAgentTasks(current => ({ ...current, [taskId]: !current[taskId] }));
+  }, []);
 
   const loadTree = async () => {
     const requestWorkspaceId = activeWorkspaceId;
@@ -1453,32 +1524,27 @@ export function RightRail({ backendReady }: RightRailProps) {
     const activeCount = statuses.filter(status => status === 'active').length;
     const issueCount = statuses.filter(status => status === 'failed' || status === 'blocked').length;
     const canceledCount = statuses.filter(status => status === 'canceled').length;
-    const focus = planFocusTodo(todos);
-    const focusLabel = planTodoLabel(focus.item, focus.index, t);
-    const focusDetail = planTodoDetail(focus.item);
     const progress = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-    const actionsLocked = streaming || Boolean(planActionBusy);
-    const canTargetStep = Boolean(focusLabel);
+    const agentTasks = buildPlanAgentTasks(subagents, coworkPlan);
+    const agentDone = agentTasks.filter(task => task.status === 'done').length;
+    const agentRunning = agentTasks.filter(task => task.status === 'running').length;
+    const agentFailed = agentTasks.filter(task => task.status === 'error').length;
+    const agentProgress = agentTasks.length
+      ? Math.round(agentTasks.reduce((sum, task) => sum + task.progress, 0) / agentTasks.length)
+      : 0;
     return (
     <div className="plan-card-pane">
       {total > 0 ? (
         <div className="plan-card-todos">
           <div className="plan-card-todos-head">
             <div>
-              <strong>{t('任务清单')}</strong>
+              <strong>{t('任务进度')}</strong>
               <span>{planOverviewText(total, doneCount, activeCount, issueCount + canceledCount, runtimeStatus, t)}</span>
             </div>
             <em>{doneCount}/{total} {t('完成')}</em>
           </div>
           <div className="plan-progress-track" aria-label={t('任务进度')}>
             <span style={{ width: `${progress}%` }} />
-          </div>
-          <div className="plan-step-focus" data-status={focus.status}>
-            <div>
-              <span>{focus.status === 'idle' ? t('当前步骤') : t(planTodoStatusLabel(focus.status))}</span>
-              <strong>{focusLabel || t('等待任务清单')}</strong>
-            </div>
-            {focusDetail ? <p>{focusDetail}</p> : <p>{t('失败时可以重试当前步骤，或要求 Metis 换一种策略继续。')}</p>}
           </div>
           <ul className="plan-todo-list">
             {todos.map((item, index) => {
@@ -1508,74 +1574,78 @@ export function RightRail({ backendReady }: RightRailProps) {
         <div className="plan-card-empty">
           <StickyNote size={18} />
           <strong>Plan</strong>
-          <span>{t('任务清单：智能体规划任务后，这里实时显示进度——完成打钩、进行中转圈、待办空心圆。')}</span>
+          <span>{t('智能体规划任务后，这里显示整体进度和每个步骤状态。')}</span>
         </div>
       )}
-      <div className="plan-action-panel" data-streaming={streaming}>
-        <div className="plan-action-head">
-          <strong>{t('任务编排')}</strong>
-          <span>{streaming ? t('当前运行中，完成或停止后可接管。') : t('失败后可从这里续跑。')}</span>
+      <section className="plan-agent-panel" aria-label={t('智能体任务')}>
+        <div className="plan-agent-head">
+          <div>
+            <strong>{t('智能体任务')}</strong>
+            <span>
+              {agentTasks.length
+                ? `${agentDone}/${agentTasks.length} ${t('已完成')}${agentRunning ? ` · ${agentRunning} ${t('正在运行')}` : ''}${agentFailed ? ` · ${agentFailed} ${t('失败')}` : ''}`
+                : t('等待 subrun 启动')}
+            </span>
+          </div>
+          {agentTasks.length > 0 && <em>{agentProgress}%</em>}
         </div>
-        <div className="plan-action-grid">
-          <button
-            type="button"
-            disabled={actionsLocked || !canTargetStep}
-            title={t('重试当前步骤')}
-            onClick={() => void submitPlanFollowUp('retry', focusLabel)}
-          >
-            <RefreshCw className={planActionBusy === 'retry' ? 'spin' : undefined} size={13} />
-            <span>{t('重试当前')}</span>
-          </button>
-          <button
-            type="button"
-            disabled={actionsLocked || !canTargetStep}
-            title={t('换一种策略继续')}
-            onClick={() => void submitPlanFollowUp('strategy', focusLabel)}
-          >
-            <ArrowRight size={13} />
-            <span>{t('换策略')}</span>
-          </button>
-          <button
-            type="button"
-            disabled={actionsLocked}
-            title={t('回到上一个检查点')}
-            onClick={() => void rewindPlanStep()}
-          >
-            <ArrowLeft size={13} />
-            <span>{t('回到上步')}</span>
-          </button>
-          <button
-            type="button"
-            disabled={actionsLocked}
-            title={t('手动接管后继续')}
-            onClick={() => void submitPlanFollowUp('manual', focusLabel)}
-          >
-            <Check size={13} />
-            <span>{t('接管后继续')}</span>
-          </button>
-        </div>
-      </div>
-      <AgentRuntimeProfileCard profile={agentRuntimeProfile} contextLedger={contextLedger} />
-      <PlanRunMonitor
-        backendReady={backendReady}
-        loadChatSession={loadChatSession}
-        selectSession={selectSession}
-        sessions={sessions}
-      />
-      <div className="plan-card-metrics">
-        <span>
-          <b>{sessions.length}</b>
-          Sessions
-        </span>
-        <span>
-          <b>{workspaces.length}</b>
-          Workspaces
-        </span>
-        <span>
-          <b>{subagents.length}</b>
-          Agents
-        </span>
-      </div>
+        {agentTasks.length > 0 ? (
+          <div className="plan-agent-list">
+            {agentTasks.map(task => {
+              const open = openPlanAgentTasks[task.id] ?? task.status === 'error';
+              const elapsed = planAgentElapsed(task.startedAt, task.finishedAt);
+              const detailText = task.resultText || task.prompt || task.summary;
+              return (
+                <article className="plan-agent-task" data-status={task.status} data-open={open} key={task.id}>
+                  <div className="plan-agent-task-row">
+                    <button className="plan-agent-task-main" type="button" onClick={() => togglePlanAgentTask(task.id)}>
+                      <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
+                      <span className="plan-agent-dot" data-status={task.status} />
+                      <span>
+                        <strong>{task.title}</strong>
+                        <small>{task.summary || t(planAgentStatusLabel(task.status))}</small>
+                      </span>
+                      <em>{t(planAgentStatusLabel(task.status))}</em>
+                    </button>
+                    {task.status === 'running' && (
+                      <button
+                        className="plan-agent-stop"
+                        type="button"
+                        disabled={!streaming}
+                        title={t('停止当前运行')}
+                        onClick={event => {
+                          event.stopPropagation();
+                          stopChatRun();
+                        }}
+                      >
+                        <Square size={12} />
+                        <span>{t('停止')}</span>
+                      </button>
+                    )}
+                  </div>
+                  {open && (
+                    <div className="plan-agent-task-detail">
+                      <div className="plan-agent-progress" aria-label={`${task.title} ${task.progress}%`}>
+                        <span style={{ width: `${task.progress}%` }} />
+                      </div>
+                      <div className="plan-agent-meta">
+                        <span>{task.progress}%</span>
+                        {elapsed && <span>{elapsed}</span>}
+                      </div>
+                      {detailText ? <pre>{detailText}</pre> : <p>{t('等待智能体输出详情。')}</p>}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="plan-agent-empty">
+            <Network size={16} />
+            <span>{t('启动 Cowork 或并行 subrun 后，这里显示每个智能体任务。')}</span>
+          </div>
+        )}
+      </section>
     </div>
     );
   };
@@ -2376,210 +2446,6 @@ function fallbackResearchReport(job: ResearchJob, t: (text: string) => string): 
     }
   }
   return lines.join('\n').trim() || t('暂无报告内容');
-}
-
-function AgentRuntimeProfileCard({ profile, contextLedger }: { profile: AgentRuntimeProfilePayload | null; contextLedger: ContextLedger | null }) {
-  const t = useT();
-  const cacheRate = Math.round((contextLedger?.cacheHitRate || 0) * 100);
-  const cacheDetail = contextLedger
-    ? `${compactMetricNumber(contextLedger.cacheHitTokens)} ${t('命中')} · ${compactMetricNumber(contextLedger.cacheMissTokens)} ${t('未命中')}`
-    : t('等待下一次运行');
-  if (!profile) {
-    return (
-      <section className="agent-runtime-card" data-empty="true">
-        <header>
-          <ShieldCheck size={14} />
-          <div>
-            <strong>{t('Agent Runtime')}</strong>
-            <span>{t('当前会话暂无运行时画像。')}</span>
-          </div>
-        </header>
-        <div className="agent-runtime-grid">
-          <RuntimeMetric label={t('Cache')} value={contextLedger ? `${cacheRate}%` : '--'} detail={cacheDetail} />
-        </div>
-      </section>
-    );
-  }
-
-  const workers = profile.coordinator.workers || [];
-  const doneWorkers = workers.filter(worker => worker.status === 'done').length;
-  const issueWorkers = workers.filter(worker => worker.status === 'error').length;
-  const riskyContracts = profile.toolContracts.items.filter(item => item.requiresPermission).length;
-  const promptLayers = profile.promptRuntime.stablePrefix.length + profile.promptRuntime.sessionSuffix.length + profile.promptRuntime.requestSuffix.length;
-
-  return (
-    <section className="agent-runtime-card" aria-label={t('Agent Runtime')}>
-      <header>
-        <ShieldCheck size={14} />
-        <div>
-          <strong>{t('Agent Runtime')}</strong>
-          <span>{t(runtimeProfileSubtitle(profile.proactive.state))}</span>
-        </div>
-        <em>{profile.promptRuntime.version || 'v2'}</em>
-      </header>
-      <div className="agent-runtime-grid">
-        <RuntimeMetric label={t('Prompt')} value={`${promptLayers}`} detail={profile.promptRuntime.cachePolicy} />
-        <RuntimeMetric label={t('Tools')} value={`${riskyContracts}/${profile.toolContracts.items.length}`} detail={t('需权限')} />
-        <RuntimeMetric label={t('Workers')} value={`${doneWorkers}/${workers.length}`} detail={issueWorkers ? t('有错误') : t('新鲜验收')} />
-        <RuntimeMetric label={t('Ticks')} value={`${profile.proactive.tickSeconds || 15}s`} detail={profile.proactive.enabled ? t('后台可用') : t('需手动开启')} />
-        <RuntimeMetric label={t('Cache')} value={contextLedger ? `${cacheRate}%` : '--'} detail={cacheDetail} />
-      </div>
-      {workers.length > 0 && (
-        <div className="agent-worker-strip">
-          {workers.map(worker => (
-            <span key={worker.id || worker.name} data-status={worker.status}>
-              {t(workerLabel(worker.name))}
-              <b>{worker.progress}%</b>
-            </span>
-          ))}
-        </div>
-      )}
-      <p>{profile.coordinator.nextAction || t('等待下一步任务。')}</p>
-      {profile.promptRuntime.scratchpadPath && <small title={profile.promptRuntime.scratchpadPath}>{compactPath(profile.promptRuntime.scratchpadPath)}</small>}
-    </section>
-  );
-}
-
-function compactMetricNumber(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return `${Math.round(value)}`;
-}
-
-function RuntimeMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <span className="agent-runtime-metric">
-      <b>{value}</b>
-      <em>{label}</em>
-      <small>{detail}</small>
-    </span>
-  );
-}
-
-function runtimeProfileSubtitle(state: string): string {
-  if (state === 'running') return '长任务正在运行';
-  if (state === 'available') return '长任务模式已授权';
-  return '后台主动性保持手动开启';
-}
-
-function workerLabel(name: string): string {
-  if (name === 'research') return '研究';
-  if (name === 'implementation') return '实现';
-  if (name === 'verification') return '验收';
-  return name || 'Worker';
-}
-
-function PlanRunMonitor({
-  backendReady,
-  loadChatSession,
-  selectSession,
-  sessions,
-}: {
-  backendReady: boolean;
-  sessions: SessionMeta[];
-  selectSession: (sessionId: string) => Promise<void>;
-  loadChatSession: (sessionId: string | null, options?: { force?: boolean }) => Promise<void>;
-}) {
-  const t = useT();
-  const [runs, setRuns] = useState<ChatRunPayload[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
-  const activeRuns = useMemo(() => runs.filter(run => isActiveRunStatus(run.status)), [runs]);
-  const latestRun = activeRuns[0] || runs[0] || null;
-  const latestSession = latestRun ? sessionById.get(latestRun.sessionId) : undefined;
-  const latestActive = latestRun ? isActiveRunStatus(latestRun.status) : false;
-  const elapsed = latestRun
-    ? formatElapsed(latestRun.startedAt || latestRun.createdAt, latestRun.finishedAt || (latestActive ? Date.now() / 1000 : latestRun.updatedAt))
-    : '';
-
-  const refresh = useCallback(async () => {
-    if (!backendReady) return;
-    setBusy(true);
-    try {
-      const payload = await getChatRuns();
-      setRuns(payload.runs);
-      setError('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [backendReady]);
-
-  useEffect(() => {
-    if (!backendReady) {
-      setRuns([]);
-      return undefined;
-    }
-    let disposed = false;
-    const refreshSafely = async () => {
-      if (disposed) return;
-      await refresh();
-    };
-    void refreshSafely();
-    const timer = window.setInterval(() => void refreshSafely(), 2500);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [backendReady, refresh]);
-
-  const jumpToRunSession = async () => {
-    if (!latestRun?.sessionId) return;
-    await selectSession(latestRun.sessionId);
-    await loadChatSession(latestRun.sessionId);
-  };
-
-  return (
-    <section className="plan-run-monitor" data-active={latestActive}>
-      <header>
-        <div>
-          <strong>{t('长任务模式')}</strong>
-          <span>
-            {latestActive
-              ? `${activeRuns.length} ${t('运行中')} · ${latestRun?.phase || t('执行中')}`
-              : latestRun
-                ? `${t('最近任务')} · ${t(statusLabel(latestRun.status))}`
-                : t('暂无后台任务')}
-          </span>
-        </div>
-        <button type="button" title={t('刷新后台任务')} disabled={!backendReady} onClick={() => void refresh()}>
-          <RefreshCw className={busy ? 'spin' : undefined} size={13} />
-        </button>
-      </header>
-      {!backendReady ? (
-        <p className="plan-run-note">
-          <LoaderCircle className="spin" size={13} />
-          {t('后端连接后显示可恢复任务。')}
-        </p>
-      ) : error ? (
-        <p className="plan-run-note" data-tone="error">
-          <AlertTriangle size={13} />
-          {error}
-        </p>
-      ) : latestRun ? (
-        <button className="plan-run-row" type="button" onClick={() => void jumpToRunSession()}>
-          <span className="run-status-dot" data-tone={latestRun.status === 'failed' ? 'error' : latestActive ? 'running' : 'done'} />
-          <span>
-            <strong>{latestSession?.title || latestRun.sessionId || 'Metis run'}</strong>
-            <small>
-              {t(statusLabel(latestRun.status))}
-              {elapsed ? ` · ${elapsed}` : ''}
-              {latestRun.lastSeq || latestRun.eventCount ? ` · #${latestRun.lastSeq || latestRun.eventCount}` : ''}
-            </small>
-          </span>
-          <ArrowRight size={13} />
-        </button>
-      ) : (
-        <p className="plan-run-note">
-          <Network size={13} />
-          {t('关闭页面再回来，也会在这里接回最近任务。')}
-        </p>
-      )}
-    </section>
-  );
 }
 
 function RunActivityCenter({
