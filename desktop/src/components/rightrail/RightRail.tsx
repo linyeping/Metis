@@ -31,7 +31,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth } from '../../lib/api';
+import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth, resumeRun } from '../../lib/api';
 import { DOCUMENT_LIBRARY_EVENT, listDocumentLibraryItems, syncDocumentLibraryFromArtifacts, upsertDocumentLibraryItem, type DocumentLibraryItem } from '../../lib/documentLibrary';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
 import type { BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatSubagentEvent, ChatTodoItem, CoworkPlanSnapshot, CoworkPlanSubrun, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
@@ -2500,6 +2500,7 @@ function RunActivityCenter({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [cancelingId, setCancelingId] = useState('');
+  const [resumingId, setResumingId] = useState('');
   const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
   const workspaceById = useMemo(() => new Map(workspaces.map(workspace => [workspace.id, workspace])), [workspaces]);
   const activeRuns = useMemo(() => runs.filter(run => isActiveRunStatus(run.status)), [runs]);
@@ -2562,6 +2563,24 @@ function RunActivityCenter({
     }
   };
 
+  const resumeCoworkRun = async (run: ChatRunPayload) => {
+    if (!run.runId || !run.resumable) return;
+    setResumingId(run.runId);
+    try {
+      const next = await resumeRun(run.runId);
+      setRuns(state => [next, ...state.filter(item => item.runId !== next.runId)]);
+      if (next.sessionId) {
+        await selectSession(next.sessionId);
+        await loadChatSession(next.sessionId);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResumingId('');
+    }
+  };
+
   return (
     <section className="run-activity-center" aria-label={t('后台任务中心')}>
       <header className="activity-section-head">
@@ -2602,6 +2621,8 @@ function RunActivityCenter({
               key={run.runId}
               onCancel={cancelRun}
               onJump={jumpToRunSession}
+              onResume={resumeCoworkRun}
+              resuming={resumingId === run.runId}
               run={run}
               session={sessionById.get(run.sessionId)}
               workspace={workspaceById.get(sessionById.get(run.sessionId)?.workspaceId || '')}
@@ -2619,6 +2640,8 @@ function RunActivityCenter({
                 key={run.runId}
                 onCancel={cancelRun}
                 onJump={jumpToRunSession}
+                onResume={resumeCoworkRun}
+                resuming={resumingId === run.runId}
                 run={run}
                 session={sessionById.get(run.sessionId)}
                 workspace={workspaceById.get(sessionById.get(run.sessionId)?.workspaceId || '')}
@@ -2636,22 +2659,27 @@ function RunActivityCard({
   canceling,
   onCancel,
   onJump,
+  onResume,
+  resuming,
   run,
   session,
   workspace,
 }: {
   canceling: boolean;
+  resuming: boolean;
   run: ChatRunPayload;
   session?: SessionMeta;
   workspace?: Workspace;
   onJump: (run: ChatRunPayload) => Promise<void>;
   onCancel: (run: ChatRunPayload) => Promise<void>;
+  onResume: (run: ChatRunPayload) => Promise<void>;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const active = isActiveRunStatus(run.status);
   // 状态色点：失败=红、运行中=蓝、其余（完成）=灰
-  const dotTone = run.status === 'failed' ? 'error' : active ? 'running' : 'done';
+  const resumable = !active && run.resumable;
+  const dotTone = run.status === 'failed' ? 'error' : active ? 'running' : resumable ? 'warning' : 'done';
   const elapsed = formatElapsed(run.startedAt || run.createdAt, run.finishedAt || (active ? Date.now() / 1000 : run.updatedAt));
 
   return (
@@ -2668,7 +2696,7 @@ function RunActivityCard({
         <span className="run-status-dot" data-tone={dotTone} />
         <button className="run-card-open" type="button" onClick={() => void onJump(run)} title={t('跳转到会话')}>
           <strong>{session?.title || run.sessionId || 'Metis run'}</strong>
-          <span>{t(workspace?.name || session?.workspaceId || '当前工作区')} · {t(statusLabel(run.status))}</span>
+          <span>{t(workspace?.name || session?.workspaceId || '当前工作区')} · {t(statusLabel(run.status, resumable))}</span>
         </button>
         <em>{elapsed || t('刚刚')}</em>
       </div>
@@ -2694,6 +2722,16 @@ function RunActivityCard({
               {canceling || run.status === 'canceling' ? t('取消中') : t('取消')}
             </button>
           )}
+          {resumable && (
+            <button
+              className="run-resume-button"
+              type="button"
+              disabled={resuming}
+              onClick={() => void onResume(run)}
+            >
+              {resuming ? t('继续中') : t('继续')}
+            </button>
+          )}
         </div>
       )}
     </article>
@@ -2704,7 +2742,8 @@ function isActiveRunStatus(status: string): boolean {
   return status === 'queued' || status === 'running' || status === 'canceling';
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: string, resumable = false): string {
+  if (resumable) return '可继续';
   if (status === 'queued') return '排队';
   if (status === 'running') return '运行中';
   if (status === 'canceling') return '取消中';

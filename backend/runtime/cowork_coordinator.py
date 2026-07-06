@@ -530,11 +530,13 @@ def iter_local_cowork_events(
     max_parallel_subruns: int = 3,
     cancelled: Callable[[], bool] | None = None,
     base_config: Optional[AgentConfig] = None,
+    resume_state: Optional[Dict[str, Any]] = None,
 ) -> Iterator[Dict[str, Any]]:
     """Execute the local Cowork path and yield desktop stream events."""
     source_root = Path(source_workspace_root or workspace_root or ".").expanduser().resolve()
     default_subrun_profile = _subrun_execution_profile(execution_profile)
-    plan = build_cowork_plan(
+    resume_payload = resume_state if isinstance(resume_state, dict) else {}
+    plan = _plan_from_resume_state(resume_payload, run_id=run_id, session_id=session_id) or build_cowork_plan(
         goal,
         run_id=run_id,
         session_id=session_id,
@@ -543,15 +545,17 @@ def iter_local_cowork_events(
         base_config=base_config,
         workspace_root=str(source_root),
     )
+    resumed = bool(resume_payload)
 
     yield _runtime_status(
-        "planning",
-        "Cowork plan created.",
+        "resuming" if resumed else "planning",
+        "Cowork run resumed from scheduler state." if resumed else "Cowork plan created.",
         details={
             "schema": COWORK_EXECUTION_SCHEMA,
             "plan": plan,
             "default_execution_profile": default_subrun_profile,
             "allowed_execution_profiles": _allowed_subrun_profiles(execution_profile),
+            "resume": _resume_details(resume_payload),
             "scheduler": {
                 "schema": COWORK_SCHEDULER_SCHEMA,
                 "mode": "dag_parallel",
@@ -591,12 +595,13 @@ def iter_local_cowork_events(
     )
     yield _runtime_status(
         "scheduling",
-        "Cowork DAG scheduler started.",
+        "Cowork DAG scheduler resumed." if resumed else "Cowork DAG scheduler started.",
         details={
             "schema": COWORK_SCHEDULER_SCHEMA,
             "mode": "dag_parallel",
             "max_parallel_subruns": _bounded_parallelism(max_parallel_subruns, len(subruns)),
             "state_path": state_path,
+            "resume": _resume_details(resume_payload),
         },
     )
     yield from _run_cowork_dag_scheduler(
@@ -609,6 +614,7 @@ def iter_local_cowork_events(
         max_parallel_subruns=max_parallel_subruns,
         cancelled=cancelled,
         base_config=base_config,
+        resumed=resumed,
     )
 
     _raise_if_cancelled(cancelled)
@@ -659,6 +665,7 @@ def _run_cowork_dag_scheduler(
     max_parallel_subruns: int,
     cancelled: Callable[[], bool] | None,
     base_config: Optional[AgentConfig],
+    resumed: bool = False,
 ) -> Iterator[Dict[str, Any]]:
     subruns = [subrun for subrun in plan.get("subruns", []) if isinstance(subrun, dict)]
     if not subruns:
@@ -666,8 +673,11 @@ def _run_cowork_dag_scheduler(
 
     max_parallel = _bounded_parallelism(max_parallel_subruns, len(subruns))
     indexed = {str(subrun.get("subrun_id") or f"subrun_{index}"): (index, subrun) for index, subrun in enumerate(subruns, 1)}
-    status_by_id = {subrun_id: "planned" for subrun_id in indexed}
-    pending = set(indexed)
+    status_by_id = {
+        subrun_id: _scheduler_initial_status(subrun, resumed=resumed)
+        for subrun_id, (_index, subrun) in indexed.items()
+    }
+    pending = {subrun_id for subrun_id, status in status_by_id.items() if status not in {"succeeded", "failed"}}
     running: Dict[concurrent.futures.Future[str], str] = {}
     emitted: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 
@@ -724,6 +734,17 @@ def _run_cowork_dag_scheduler(
             running[future] = subrun_id
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel, thread_name_prefix="metis-cowork") as executor:
+        if resumed:
+            for subrun_id, status in status_by_id.items():
+                if status not in {"succeeded", "failed"}:
+                    continue
+                index, subrun = indexed[subrun_id]
+                yield _resumed_terminal_subrun_event(
+                    subrun=subrun,
+                    index=index,
+                    total=len(subruns),
+                    status=status,
+                )
         while pending or running or not emitted.empty():
             _raise_if_cancelled(cancelled)
             schedule_ready(executor)
@@ -1119,6 +1140,56 @@ def _emit_dependency_failed(
     )
 
 
+def _resumed_terminal_subrun_event(
+    *,
+    subrun: Dict[str, Any],
+    index: int,
+    total: int,
+    status: str,
+) -> Dict[str, Any]:
+    succeeded = status == "succeeded"
+    result = {
+        "execution_profile": str(subrun.get("execution_profile") or LOCAL_WORKTREE),
+        "resumed": True,
+        "resume_action": "reused_terminal_result",
+        "artifacts": subrun.get("artifacts") if isinstance(subrun.get("artifacts"), list) else [],
+        "diff": subrun.get("diff") if isinstance(subrun.get("diff"), dict) else {},
+        "evidence": subrun.get("evidence") if isinstance(subrun.get("evidence"), dict) else {},
+    }
+    if isinstance(subrun.get("worktree"), dict):
+        result["worktree"] = subrun["worktree"]
+    if subrun.get("worktree_id"):
+        result["worktree_id"] = str(subrun.get("worktree_id") or "")
+    if subrun.get("worktree_workspace_root"):
+        result["worktree_workspace_root"] = str(subrun.get("worktree_workspace_root") or "")
+    return _subrun_event(
+        "subrun_succeeded" if succeeded else "subrun_failed",
+        subrun=subrun,
+        index=index,
+        total=total,
+        progress=100,
+        status=status,
+        stage="resume_reused",
+        result=result,
+    )
+
+
+def _scheduler_initial_status(subrun: Dict[str, Any], *, resumed: bool) -> str:
+    status = _terminal_subrun_status(subrun.get("status"))
+    if resumed and status in {"succeeded", "failed"}:
+        return status
+    return "planned"
+
+
+def _terminal_subrun_status(value: Any) -> str:
+    status = str(value or "").strip().lower().replace("-", "_")
+    if status in {"succeeded", "success", "done", "complete", "completed", "finished", "promoted"}:
+        return "succeeded"
+    if status in {"failed", "failure", "error"}:
+        return "failed"
+    return ""
+
+
 def _subrun_dependencies(subrun: Dict[str, Any], indexed: Dict[str, tuple[int, Dict[str, Any]]]) -> List[str]:
     raw = subrun.get("dependencies") if isinstance(subrun.get("dependencies"), list) else []
     deps: List[str] = []
@@ -1161,6 +1232,8 @@ def _write_cowork_scheduler_state(
             "updated_at": time.time(),
             "mode": "dag_parallel",
             "subruns": [_scheduler_subrun_state(item) for item in subruns if isinstance(item, dict)],
+            "plan": plan,
+            "counts": _scheduler_counts(subruns),
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
         return str(path)
@@ -1168,19 +1241,179 @@ def _write_cowork_scheduler_state(
         return ""
 
 
+def load_cowork_scheduler_state(
+    *,
+    workspace_root: str,
+    run_id: str = "",
+    session_id: str = "",
+) -> Dict[str, Any]:
+    root = Path(workspace_root or ".").expanduser().resolve()
+    candidates: List[Path] = []
+    if run_id:
+        candidates.append(root / ".metis" / "cowork" / f"scheduler-{_safe_filename_fragment(run_id)}.json")
+    state_dir = root / ".metis" / "cowork"
+    if state_dir.is_dir():
+        candidates.extend(sorted(state_dir.glob("scheduler-*.json"), key=lambda item: item.stat().st_mtime, reverse=True))
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen or not path.is_file():
+            continue
+        seen.add(key)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict) or payload.get("schema") != COWORK_SCHEDULER_SCHEMA:
+            continue
+        payload_run_id = str(payload.get("run_id") or "")
+        payload_session_id = str(payload.get("session_id") or "")
+        if run_id and payload_run_id != run_id:
+            continue
+        if session_id and payload_session_id and payload_session_id != session_id:
+            continue
+        payload["state_path"] = str(path)
+        return payload
+    return {}
+
+
+def has_cowork_scheduler_state(*, workspace_root: str, run_id: str = "", session_id: str = "") -> bool:
+    return bool(load_cowork_scheduler_state(workspace_root=workspace_root, run_id=run_id, session_id=session_id))
+
+
+def _plan_from_resume_state(
+    state: Dict[str, Any],
+    *,
+    run_id: str,
+    session_id: str,
+) -> Dict[str, Any]:
+    if not isinstance(state, dict):
+        return {}
+    raw_plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
+    if raw_plan:
+        plan = json.loads(json.dumps(raw_plan, ensure_ascii=False))
+    else:
+        subruns = state.get("subruns") if isinstance(state.get("subruns"), list) else []
+        if not subruns:
+            return {}
+        plan = {
+            "schema": COWORK_PLAN_SCHEMA,
+            "version": COWORK_PLAN_VERSION,
+            "coordinator_schema": COWORK_COORDINATOR_SCHEMA,
+            "goal": str(state.get("goal") or ""),
+            "status": "planned",
+            "created_at": time.time(),
+            "subruns": [_subrun_plan_from_scheduler_state(item) for item in subruns if isinstance(item, dict)],
+            "planner": {"schema": COWORK_PLANNER_SCHEMA, "mode": "resume_state_fallback", "bounded": True},
+            "merge_policy": {
+                "diffs": "review_then_promote",
+                "artifacts": "register_all",
+                "conflicts": "main_run_decides",
+            },
+        }
+    plan["run_id"] = run_id
+    plan["session_id"] = session_id
+    plan["status"] = "planned"
+    plan["resume"] = _resume_details(state)
+    plan["subruns"] = [
+        _resume_subrun_plan(item)
+        for item in (plan.get("subruns") if isinstance(plan.get("subruns"), list) else [])
+        if isinstance(item, dict)
+    ]
+    return plan
+
+
+def _subrun_plan_from_scheduler_state(item: Dict[str, Any]) -> Dict[str, Any]:
+    subrun_id = str(item.get("subrun_id") or item.get("task_id") or f"subrun_{uuid.uuid4().hex[:10]}")
+    title = str(item.get("title") or subrun_id)
+    return CoworkSubrunPlan(
+        subrun_id=subrun_id,
+        title=title,
+        objective=str(item.get("objective") or title),
+        inputs=[str(value) for value in item.get("inputs", []) if value] if isinstance(item.get("inputs"), list) else ["Resume scheduler state"],
+        expected_artifacts=[str(value) for value in item.get("expected_artifacts", []) if value] if isinstance(item.get("expected_artifacts"), list) else ["Resume result"],
+        acceptance_criteria=[str(value) for value in item.get("acceptance_criteria", []) if value] if isinstance(item.get("acceptance_criteria"), list) else ["Subrun reaches terminal status"],
+        dependencies=[str(value) for value in item.get("dependencies", []) if value] if isinstance(item.get("dependencies"), list) else [],
+        prompt=str(item.get("prompt") or title),
+        execution_profile=str(item.get("execution_profile") or LOCAL_WORKTREE),
+        status=str(item.get("status") or "planned"),
+        run_id=str(item.get("run_id") or ""),
+        worktree_id=str(item.get("worktree_id") or ""),
+        artifacts=item.get("artifacts") if isinstance(item.get("artifacts"), list) else [],
+        diff=item.get("diff") if isinstance(item.get("diff"), dict) else {},
+        evidence=item.get("evidence") if isinstance(item.get("evidence"), dict) else {},
+        vm_tasks=item.get("vm_tasks") if isinstance(item.get("vm_tasks"), list) else [],
+    ).to_dict()
+
+
+def _resume_subrun_plan(subrun: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(subrun)
+    row["resume_original_status"] = str(row.get("status") or "")
+    if _terminal_subrun_status(row.get("status")) in {"succeeded", "failed"}:
+        return row
+    row["status"] = "planned"
+    for key in ("worktree", "worktree_id", "worktree_workspace_root", "agent", "local_vm", "error"):
+        row.pop(key, None)
+    row["artifacts"] = []
+    row["diff"] = {}
+    row["evidence"] = {}
+    return row
+
+
+def _resume_details(state: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(state, dict) or not state:
+        return {}
+    subruns = state.get("subruns") if isinstance(state.get("subruns"), list) else []
+    counts = _scheduler_counts(subruns)
+    return {
+        "enabled": True,
+        "source_run_id": str(state.get("run_id") or ""),
+        "source_session_id": str(state.get("session_id") or ""),
+        "state_path": str(state.get("state_path") or ""),
+        "state_status": str(state.get("status") or ""),
+        "counts": counts,
+        "policy": "reuse_succeeded_and_failed_rerun_unfinished",
+    }
+
+
+def _scheduler_counts(subruns: List[Any]) -> Dict[str, int]:
+    counts = {"total": 0, "succeeded": 0, "failed": 0, "unfinished": 0}
+    for item in subruns:
+        if not isinstance(item, dict):
+            continue
+        counts["total"] += 1
+        terminal = _terminal_subrun_status(item.get("status"))
+        if terminal == "succeeded":
+            counts["succeeded"] += 1
+        elif terminal == "failed":
+            counts["failed"] += 1
+        else:
+            counts["unfinished"] += 1
+    return counts
+
+
 def _scheduler_subrun_state(subrun: Dict[str, Any]) -> Dict[str, Any]:
     evidence = subrun.get("evidence") if isinstance(subrun.get("evidence"), dict) else {}
     counts = evidence.get("counts") if isinstance(evidence.get("counts"), dict) else {}
-    return {
+    row = {
         "subrun_id": str(subrun.get("subrun_id") or ""),
         "title": str(subrun.get("title") or ""),
         "status": str(subrun.get("status") or "planned"),
         "execution_profile": str(subrun.get("execution_profile") or LOCAL_WORKTREE),
+        "objective": str(subrun.get("objective") or ""),
+        "inputs": [str(item) for item in subrun.get("inputs", []) if item] if isinstance(subrun.get("inputs"), list) else [],
+        "expected_artifacts": [str(item) for item in subrun.get("expected_artifacts", []) if item] if isinstance(subrun.get("expected_artifacts"), list) else [],
+        "acceptance_criteria": [str(item) for item in subrun.get("acceptance_criteria", []) if item] if isinstance(subrun.get("acceptance_criteria"), list) else [],
         "dependencies": [str(item) for item in subrun.get("dependencies", []) if item] if isinstance(subrun.get("dependencies"), list) else [],
+        "prompt": str(subrun.get("prompt") or ""),
         "worktree_id": str(subrun.get("worktree_id") or ""),
         "worktree_workspace_root": str(subrun.get("worktree_workspace_root") or ""),
         "evidence_counts": counts,
     }
+    for key in ("worktree", "artifacts", "diff", "evidence", "vm_tasks", "agent", "local_vm"):
+        if isinstance(subrun.get(key), (dict, list)):
+            row[key] = subrun[key]
+    return row
 
 
 def _safe_filename_fragment(value: str) -> str:
@@ -2606,6 +2839,8 @@ __all__ = [
     "COWORK_SUBRUN_EVENT_VERSION",
     "COWORK_SUMMARY_SCHEMA",
     "build_cowork_plan",
+    "has_cowork_scheduler_state",
     "iter_local_cowork_events",
+    "load_cowork_scheduler_state",
     "summarize_cowork_results",
 ]

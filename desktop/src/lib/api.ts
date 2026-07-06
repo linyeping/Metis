@@ -2798,6 +2798,11 @@ export async function cancelChatRun(runId: string): Promise<ChatRunPayload> {
   return cancelRun(runId);
 }
 
+export async function resumeRun(runId: string): Promise<ChatRunPayload> {
+  const data = await requestJson<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+  return chatRunFromRecord(data);
+}
+
 class StreamHttpError extends Error {
   status: number;
 
@@ -2954,6 +2959,10 @@ function chatRunFromRecord(data: Record<string, unknown>): ChatRunPayload {
     worktreePath: stringValue(data.worktree_path ?? data.worktreePath),
     worktreeWorkspaceRoot: stringValue(data.worktree_workspace_root ?? data.worktreeWorkspaceRoot),
     worktree: Object.keys(worktree).length ? worktreeFromRecord(worktree) : null,
+    resumeFromRunId: stringValue(data.resume_from_run_id ?? data.resumeFromRunId),
+    resumable: Boolean(data.resumable),
+    resumeAvailable: Boolean(data.resume_available ?? data.resumeAvailable ?? data.resumable),
+    resumeStatePath: stringValue(data.resume_state_path ?? data.resumeStatePath),
     schemaVersion: numberValue(data.schema_version ?? data.schemaVersion) || 1,
     status: stringValue(data.status),
     phase: stringValue(data.phase),

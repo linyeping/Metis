@@ -36,7 +36,11 @@ from backend.runtime.agent_loop import (  # noqa: E402
     run_stream,
 )
 from backend.runtime.cancellation import OperationCancelled  # noqa: E402
-from backend.runtime.cowork_coordinator import iter_local_cowork_events  # noqa: E402
+from backend.runtime.cowork_coordinator import (  # noqa: E402
+    has_cowork_scheduler_state,
+    iter_local_cowork_events,
+    load_cowork_scheduler_state,
+)
 from backend.runtime.execution_profile import (  # noqa: E402
     LOCAL_DIRECT,
     LOCAL_VM,
@@ -1796,6 +1800,8 @@ def _create_run_state(
     model_context: Optional[List[Dict[str, Any]]] = None,
     workspace_root: str = "",
     checkpoint: Optional[CheckpointRecorder] = None,
+    resume_from_run_id: str = "",
+    resume_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     now = time.time()
     run_id = str(run_id or uuid.uuid4().hex)
@@ -1821,6 +1827,9 @@ def _create_run_state(
         "workspace_root": resolved_workspace_root,
         "source_workspace_root": resolved_source_workspace_root,
         "worktree": dict(worktree or {}),
+        "resume_from_run_id": str(resume_from_run_id or ""),
+        "resume_state": dict(resume_state or {}),
+        "cowork_scheduler_state_path": str((resume_state or {}).get("state_path") or ""),
         "status": "queued",
         "phase": "queued",
         "history": list(history),
@@ -1883,6 +1892,8 @@ def _get_run(run_id: str) -> Optional[Dict[str, Any]]:
 
 def _run_public_payload(run: Dict[str, Any]) -> Dict[str, Any]:
     worktree = run.get("worktree") if isinstance(run.get("worktree"), dict) else {}
+    resume_state_path = str(run.get("cowork_scheduler_state_path") or "")
+    resumable = _run_is_resumable(run)
     return {
         "run_id": run.get("id", ""),
         "id": run.get("id", ""),
@@ -1898,6 +1909,10 @@ def _run_public_payload(run: Dict[str, Any]) -> Dict[str, Any]:
         "worktree_path": str(worktree.get("worktree_path") or ""),
         "worktree_workspace_root": str(worktree.get("worktree_workspace_root") or ""),
         "worktree": worktree,
+        "resume_from_run_id": str(run.get("resume_from_run_id") or ""),
+        "resumable": resumable,
+        "resume_available": resumable,
+        "resume_state_path": resume_state_path,
         "schema_version": int(run.get("schema_version") or 1),
         "status": run.get("status", "unknown"),
         "phase": run.get("phase", ""),
@@ -1910,6 +1925,24 @@ def _run_public_payload(run: Dict[str, Any]) -> Dict[str, Any]:
         "last_seq": int(run.get("next_seq") or 1) - 1,
         "error": run.get("error", ""),
     }
+
+
+def _run_is_resumable(run: Dict[str, Any]) -> bool:
+    if str(run.get("surface_mode") or "") != "cowork":
+        return False
+    if str(run.get("status") or "") not in {"canceled", "failed"}:
+        return False
+    source_root = str(run.get("source_workspace_root") or run.get("workspace_root") or "")
+    if not source_root:
+        return False
+    try:
+        return has_cowork_scheduler_state(
+            workspace_root=source_root,
+            run_id=str(run.get("id") or ""),
+            session_id=str(run.get("session_id") or ""),
+        )
+    except Exception:
+        return False
 
 
 def _latest_session_run(session_id: str, *, active_only: bool = True) -> Optional[Dict[str, Any]]:
@@ -2923,6 +2956,7 @@ def _run_cowork_registry_worker(run: Dict[str, Any]) -> None:
                 execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
                 base_config=base_config,
                 cancelled=lambda: bool(run.get("cancel_requested")),
+                resume_state=run.get("resume_state") if isinstance(run.get("resume_state"), dict) else None,
             ):
                 if run.get("cancel_requested"):
                     raise OperationCancelled("Cowork run cancelled")
@@ -2931,6 +2965,11 @@ def _run_cowork_registry_worker(run: Dict[str, Any]) -> None:
                 kind = str(event.get("kind") or "")
                 if kind == "runtime_status":
                     phase = str(event.get("payload", {}).get("phase") or event.get("phase") or "")
+                    details = event.get("payload", {}).get("details") if isinstance(event.get("payload"), dict) else {}
+                    if isinstance(details, dict):
+                        state_path = str(details.get("state_path") or "")
+                        if state_path:
+                            run["cowork_scheduler_state_path"] = state_path
                     if phase:
                         _set_run_status(run, "running", phase=phase)
                 elif kind == "content":
@@ -3246,6 +3285,83 @@ def cancel_run(run_id: str) -> Any:
             },
         )
     return jsonify({"ok": True, **_run_public_payload(run)})
+
+
+@app.route("/runs/<run_id>/resume", methods=["POST"])
+def resume_run(run_id: str) -> Any:
+    source_run = _get_run(run_id)
+    if source_run is None:
+        return jsonify({"ok": False, "error": "run not found"}), 404
+    if str(source_run.get("surface_mode") or "") != "cowork":
+        return jsonify({"ok": False, "error": "only cowork runs can be resumed"}), 400
+    if str(source_run.get("status") or "") not in {"canceled", "failed"}:
+        return jsonify({"ok": False, "error": "run is not resumable", "run": _run_public_payload(source_run)}), 409
+
+    session_id = str(source_run.get("session_id") or "")
+    if not session_id:
+        return jsonify({"ok": False, "error": "source run has no session_id"}), 409
+    source_root = str(source_run.get("source_workspace_root") or source_run.get("workspace_root") or "")
+    resume_state = load_cowork_scheduler_state(
+        workspace_root=source_root,
+        run_id=str(source_run.get("id") or run_id),
+        session_id=session_id,
+    )
+    if not resume_state:
+        return jsonify({"ok": False, "error": "cowork scheduler state not found", "run": _run_public_payload(source_run)}), 409
+
+    active_for_session = _active_run_for_session(session_id)
+    with _runs_lock:
+        if active_for_session:
+            return jsonify({"ok": False, "error": "session already has an active run", "run": _run_public_payload(active_for_session)}), 409
+        if _active_run_count_locked() >= _max_active_runs():
+            return jsonify({"ok": False, "error": "too many active runs", "max_active_runs": _max_active_runs()}), 429
+
+    data = request.get_json(silent=True) or {}
+    new_run_id = uuid.uuid4().hex
+    history = list(source_run.get("history") or [])
+    compact_state = dict(source_run.get("compact_state") or {})
+    checkpoint = create_checkpoint(
+        session_id=session_id,
+        workspace_root=source_root,
+        anchor_index=len(history),
+        user_message_id="",
+    )
+    resumed_run = _create_run_state(
+        run_id=new_run_id,
+        session_id=session_id,
+        assistant_id=str(data.get("assistant_id") or data.get("assistantId") or f"assistant-{new_run_id}"),
+        history=history,
+        mode=str(source_run.get("mode") or "auto"),
+        surface_mode="cowork",
+        execution_profile=str(source_run.get("execution_profile") or LOCAL_DIRECT),
+        source_workspace_root=source_root,
+        worktree={},
+        deep_research=bool(source_run.get("deep_research")),
+        compact_state=compact_state,
+        model_context=list(source_run.get("model_context") or history),
+        workspace_root=source_root,
+        checkpoint=checkpoint,
+        resume_from_run_id=str(source_run.get("id") or run_id),
+        resume_state=resume_state,
+    )
+    _append_run_event(
+        resumed_run,
+        {
+            "type": "runtime_status",
+            "kind": "runtime_status",
+            "payload": {
+                "phase": "resume_queued",
+                "message": "Cowork resume queued",
+                "recoverable": True,
+                "details": {
+                    "source_run_id": str(source_run.get("id") or run_id),
+                    "state_path": str(resume_state.get("state_path") or ""),
+                },
+            },
+        },
+    )
+    _start_run_thread(resumed_run)
+    return jsonify({"ok": True, **_run_public_payload(resumed_run)})
 
 
 @app.route("/api/checkpoints/<session_id>", methods=["GET"])

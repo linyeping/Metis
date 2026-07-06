@@ -10209,6 +10209,11 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
 }
 
+.run-status-dot[data-tone='warning'] {
+  background: #d18a00;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #d18a00 22%, transparent);
+}
+
 .run-status-dot[data-tone='running'] {
   background: #4c8dff;
   box-shadow: 0 0 0 3px color-mix(in srgb, #4c8dff 26%, transparent);
@@ -10279,6 +10284,23 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 }
 
 .run-card-details .run-cancel-button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.run-card-details .run-resume-button {
+  justify-self: start;
+  height: 25px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--ui-font-size-xs);
+}
+
+.run-card-details .run-resume-button:disabled {
   cursor: default;
   opacity: 0.58;
 }

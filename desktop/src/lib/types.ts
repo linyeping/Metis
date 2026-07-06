@@ -701,6 +701,10 @@ export interface ChatRunPayload {
   worktreePath: string;
   worktreeWorkspaceRoot: string;
   worktree: WorktreeRecord | null;
+  resumeFromRunId?: string;
+  resumable?: boolean;
+  resumeAvailable?: boolean;
+  resumeStatePath?: string;
   schemaVersion: number;
   status: ChatRunStatus;
   phase: string;

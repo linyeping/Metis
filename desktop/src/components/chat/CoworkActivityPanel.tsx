@@ -127,7 +127,7 @@ export function CoworkActivityPanel({ items, plan, runtimeStatus }: CoworkActivi
         <div className="cowork-section-head">
           <div>
             <strong>{t('Subruns')}</strong>
-            <span>{t('本地顺序执行；每个 subrun 绑定自己的 worktree。')}</span>
+            <span>{t('按依赖解锁并行执行；每个 subrun 绑定自己的 worktree。')}</span>
           </div>
         </div>
         <div className="cowork-subrun-list">

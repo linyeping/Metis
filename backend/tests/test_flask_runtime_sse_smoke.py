@@ -14,6 +14,7 @@ from backend.runtime.cancellation import OperationCancelled, current_cancel_even
 from backend.runtime import cowork_coordinator
 from backend.runtime.agent_loop import (
     AgentConfig,
+    DoneEvent,
     _chat_surface_blocked_tool_result,
     _chat_surface_blocks_tool,
     run_stream as real_run_stream,
@@ -842,6 +843,148 @@ def test_cowork_local_vm_subruns_use_metis_wsl_runner(
     assert len(done_events) == 2
     assert all(event["payload"]["result"]["local_vm"]["backend"] == "metis_wsl" for event in done_events)
     assert all("hcs" not in json.dumps(event["payload"]["result"]["local_vm"]).lower() for event in done_events)
+
+
+def test_cowork_run_resume_reuses_terminal_subruns_and_runs_unfinished(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    target = session_manager.create_session(title="Target cowork resume", workspace_id=workspace_id)
+    source_root = web_app._active_workspace_root()
+    Path(source_root).mkdir(parents=True, exist_ok=True)
+    source_run_id = "run_resume_source"
+    plan = {
+        "schema": cowork_coordinator.COWORK_PLAN_SCHEMA,
+        "version": cowork_coordinator.COWORK_PLAN_VERSION,
+        "run_id": source_run_id,
+        "session_id": target.id,
+        "goal": "Resume cowork work",
+        "status": "planned",
+        "created_at": time.time(),
+        "subruns": [
+            {
+                "subrun_id": "subrun_done",
+                "title": "Already done",
+                "objective": "Reuse completed result.",
+                "inputs": ["source"],
+                "expected_artifacts": ["diff"],
+                "acceptance_criteria": ["has evidence"],
+                "dependencies": [],
+                "prompt": "Already done",
+                "execution_profile": "local_worktree",
+                "status": "succeeded",
+                "diff": {"status": " M done.txt\n", "stat": "done.txt | 1 +\n", "patch_preview": "+done"},
+                "evidence": {
+                    "schema": cowork_coordinator.COWORK_SUBRUN_EVIDENCE_SCHEMA,
+                    "success_evidence": True,
+                    "counts": {"diff": 1, "artifacts": 0, "stdout_test": 0, "failure_reasons": 0},
+                },
+                "artifacts": [],
+            },
+            {
+                "subrun_id": "subrun_pending",
+                "title": "Still pending",
+                "objective": "Run only unfinished work.",
+                "inputs": ["source"],
+                "expected_artifacts": ["diff"],
+                "acceptance_criteria": ["has diff"],
+                "dependencies": ["subrun_done"],
+                "prompt": "Still pending",
+                "execution_profile": "local_worktree",
+                "status": "running",
+            },
+        ],
+    }
+    state_dir = Path(source_root) / ".metis" / "cowork"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_path = state_dir / f"scheduler-{source_run_id}.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema": cowork_coordinator.COWORK_SCHEDULER_SCHEMA,
+                "version": 1,
+                "run_id": source_run_id,
+                "session_id": target.id,
+                "status": "canceled",
+                "updated_at": time.time(),
+                "mode": "dag_parallel",
+                "subruns": plan["subruns"],
+                "plan": plan,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    source_run = web_app._create_run_state(
+        run_id=source_run_id,
+        session_id=target.id,
+        assistant_id="assistant-source",
+        history=[{"role": "user", "content": "Resume cowork work"}],
+        mode="auto",
+        surface_mode="cowork",
+        execution_profile="local_worktree",
+        source_workspace_root=source_root,
+        workspace_root=source_root,
+    )
+    web_app._set_run_status(source_run, "canceled", phase="canceled")
+
+    records: List[WorktreeRecord] = []
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        assert label == "cowork-2"
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / "cowork-resume-worktree",
+            run_id=run_id,
+            session_id=session_id,
+            index=2,
+        )
+        records.append(record)
+        return record
+
+    def fake_diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = 200000) -> Dict[str, Any]:
+        record = records[0]
+        assert worktree_id == record.worktree_id
+        return {
+            "schema": "metis.worktree_diff.v1",
+            "worktree": record.to_dict(),
+            "status": " M pending.txt\n",
+            "stat": "pending.txt | 1 +\n",
+            "patch": "diff --git a/pending.txt b/pending.txt\n+resumed\n",
+            "truncated": False,
+            "base_ref": "HEAD",
+        }
+
+    def fake_run_agent_loop(messages: List[Dict[str, Any]], config: AgentConfig):
+        yield DoneEvent(total_turns=1, total_tool_calls=0, total_tokens=1)
+
+    monkeypatch.setattr(cowork_coordinator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(cowork_coordinator, "diff_worktree", fake_diff_worktree)
+    monkeypatch.setattr(cowork_coordinator, "run_agent_loop", fake_run_agent_loop)
+
+    with app.test_client() as client:
+        source_payload = client.get(f"/runs/{source_run_id}").get_json()
+        resumed = client.post(f"/runs/{source_run_id}/resume", json={"assistant_id": "assistant-resume"})
+        assert resumed.status_code == 200
+        resumed_payload = resumed.get_json()
+        events, saw_done_marker = _run_events(client, resumed_payload["run_id"])
+        final_status = client.get(f"/runs/{resumed_payload['run_id']}").get_json()
+
+    assert source_payload["resumable"] is True
+    assert resumed_payload["resume_from_run_id"] == source_run_id
+    assert resumed_payload["surface_mode"] == "cowork"
+    assert saw_done_marker is True
+    assert final_status["status"] == "done"
+    assert len(records) == 1
+    succeeded = [event for event in events if event["kind"] == "subrun_succeeded"]
+    assert [event["payload"]["subrun_id"] for event in succeeded] == ["subrun_done", "subrun_pending"]
+    assert succeeded[0]["payload"]["stage"] == "resume_reused"
+    assert succeeded[0]["payload"]["result"]["resumed"] is True
 
 
 def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(
