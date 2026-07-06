@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatMessage } from '../../lib/types';
+import type { ChatMessage, ChatTodoItem, ChatTodoNotice } from '../../lib/types';
 import { _bindChatStore, _bindSessionStore, applyChatEvent, flushAssistantText } from '../sseParser';
 
 function bindParserState() {
-  const state: { messages: ChatMessage[]; runtimeStatus: unknown; runSessionId: string | null; subagents: []; todoNotice: null } = {
+  const state: {
+    messages: ChatMessage[];
+    planTodos: ChatTodoItem[];
+    runtimeStatus: unknown;
+    runSessionId: string | null;
+    subagents: [];
+    todoNotice: ChatTodoNotice | null;
+  } = {
     messages: [
       {
         id: 'assistant-1',
@@ -13,6 +20,7 @@ function bindParserState() {
         pending: true,
       },
     ],
+    planTodos: [],
     runtimeStatus: null,
     runSessionId: 'session-1',
     subagents: [],
@@ -140,6 +148,69 @@ describe('sseParser ordered message parts', () => {
     expect(state.messages[0].tools?.[0].status).toBe('success');
     expect(state.messages[0].tools?.[0].finishedAt).toEqual(expect.any(Number));
     expect(state.messages[0].tools?.[0].result).toBe('[Run completed without a separate tool result event]');
+  });
+
+  it('finalizes stale plan todos when the assistant turn is done', () => {
+    const state = bindParserState();
+    const persistSnapshot = () => undefined;
+    const persistRecovery = () => undefined;
+
+    applyChatEvent(
+      {
+        type: 'todo_update',
+        payload: {
+          summary: 'demo plan',
+          todos: [
+            { id: 'step-1', content: '生成 xlsx', status: 'completed' },
+            { id: 'step-2', content: '生成 docx', status: 'in_progress' },
+            { id: 'step-3', content: '生成 pptx', status: 'pending' },
+          ],
+        },
+      },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+    applyChatEvent({ type: 'done', payload: {} }, 'assistant-1', 'session-1', persistSnapshot, persistRecovery);
+
+    expect(state.planTodos.map(item => item.status)).toEqual(['completed', 'done', 'done']);
+    expect(state.todoNotice?.activeCount).toBe(0);
+    expect(state.todoNotice?.doneCount).toBe(3);
+  });
+
+  it('finalizes stale plan todos when runtime status reports completion', () => {
+    const state = bindParserState();
+    const persistSnapshot = () => undefined;
+    const persistRecovery = () => undefined;
+
+    applyChatEvent(
+      {
+        type: 'todo_update',
+        payload: {
+          summary: 'demo plan',
+          todos: [
+            { id: 'step-1', content: '收集数据', status: 'done' },
+            { id: 'step-2', content: '汇总结果', status: 'running' },
+          ],
+        },
+      },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+    applyChatEvent(
+      { type: 'runtime_status', payload: { phase: 'completed', message: 'Run completed' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+
+    expect(state.planTodos.map(item => item.status)).toEqual(['done', 'done']);
+    expect(state.todoNotice?.activeCount).toBe(0);
+    expect(state.todoNotice?.doneCount).toBe(2);
   });
 
   it('finalizes running tools when the runtime reports cancellation', () => {

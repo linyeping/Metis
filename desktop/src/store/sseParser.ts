@@ -7,7 +7,7 @@
 import { normalizeChatStreamEvent, type NormalizedChatEvent } from '../lib/agentEvents';
 import { answerPermissionRequest, markPermissionDisplayed } from '../lib/api';
 import { findSafeLocalPreviewUrl } from '../lib/webPreview';
-import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoNotice, ChatToolEvent, CoworkPlanSnapshot, RuntimeStatus } from '../lib/types';
+import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoItem, ChatTodoNotice, ChatToolEvent, CoworkPlanSnapshot, RuntimeStatus } from '../lib/types';
 import { useUiStore } from './uiStore';
 import {
   formatError,
@@ -39,6 +39,7 @@ let textFlushFrame: number | ReturnType<typeof globalThis.setTimeout> | null = n
 type LazyStore = {
   getState: () => {
     messages: ChatMessage[];
+    planTodos: ChatTodoItem[];
     runtimeStatus: any;
     runSessionId: string | null;
     subagents: ChatSubagentEvent[];
@@ -106,6 +107,7 @@ export function applyChatEvent(
     const terminal = runtimeTerminalToolFinalizer(normalized.runtimeStatus);
     if (terminal) {
       finalizeOpenTools(assistantId, terminal.status, terminal.result, terminal.errorHint);
+      finalizePlanTodos(terminal.planStatus);
     }
     persistRecovery(assistantId);
   } else if (normalized.kind === 'tool_call') {
@@ -166,6 +168,7 @@ export function applyChatEvent(
       `[Run failed before this tool returned a result]\n${message}`,
       normalized.error.hint || '运行流失败，工具活动已停止。查看错误信息后可重试。',
     );
+    finalizePlanTodos('failed');
     chatStore().setState({ runtimeStatus: runtimeStatusFromError(normalized.error) });
     updateAssistant(assistantId, current => ({ ...current, content: current.content || message, error: message }));
     useUiStore.getState().pushToast({
@@ -182,10 +185,12 @@ export function applyChatEvent(
     chatStore().setState({ compactStatus: normalized.compactStatus });
   } else if (normalized.kind === 'done') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
+    const completedWithError = chatStore().getState().runtimeStatus?.severity === 'error';
     finalizeOpenTools(
       assistantId,
-      chatStore().getState().runtimeStatus?.severity === 'error' ? 'error' : 'success',
+      completedWithError ? 'error' : 'success',
     );
+    finalizePlanTodos(completedWithError ? 'failed' : 'success');
     maybeOpenLocalPreview(chatStore().getState().messages.find(message => message.id === assistantId)?.content || '');
     if (chatStore().getState().runtimeStatus?.severity !== 'error') {
       chatStore().setState({ runtimeStatus: null });
@@ -396,6 +401,7 @@ function finalizeOpenTools(
 
 function runtimeTerminalToolFinalizer(runtimeStatus: RuntimeStatus): {
   status: 'success' | 'error';
+  planStatus: PlanTerminalStatus;
   result: string;
   errorHint?: string;
 } | null {
@@ -404,12 +410,14 @@ function runtimeTerminalToolFinalizer(runtimeStatus: RuntimeStatus): {
   if (phase === 'completed') {
     return {
       status: 'success',
+      planStatus: 'success',
       result: '[Run completed without a separate tool result event]',
     };
   }
   if (phase === 'failed') {
     return {
       status: 'error',
+      planStatus: 'failed',
       result: `[Run failed before this tool returned a result]${message ? `\n${message}` : ''}`,
       errorHint: runtimeStatus.hint || '运行失败，工具活动已停止。查看错误信息后可重试。',
     };
@@ -417,6 +425,7 @@ function runtimeTerminalToolFinalizer(runtimeStatus: RuntimeStatus): {
   if (phase === 'canceled' || phase === 'cancelled') {
     return {
       status: 'error',
+      planStatus: 'canceled',
       result: `[Run canceled before this tool returned a result]${message ? `\n${message}` : ''}`,
       errorHint: runtimeStatus.hint || '任务已取消，工具活动已停止。',
     };
@@ -424,11 +433,61 @@ function runtimeTerminalToolFinalizer(runtimeStatus: RuntimeStatus): {
   if (phase === 'timeout' || phase === 'timed_out' || phase === 'tool_timeout') {
     return {
       status: 'error',
+      planStatus: 'failed',
       result: `[Run timed out before this tool returned a result]${message ? `\n${message}` : ''}`,
       errorHint: runtimeStatus.hint || '任务超时，工具活动已停止。可以缩小目标后重试。',
     };
   }
   return null;
+}
+
+type PlanTerminalStatus = 'success' | 'failed' | 'canceled';
+
+function finalizePlanTodos(terminalStatus: PlanTerminalStatus): void {
+  const state = chatStore().getState();
+  const todos = Array.isArray(state.planTodos) ? state.planTodos : [];
+  if (todos.length === 0) return;
+  const nextStatus = terminalStatus === 'success' ? 'done' : terminalStatus;
+  let changed = false;
+  const nextTodos = todos.map(todo => {
+    if (isTerminalPlanTodoStatus(todo.status)) return todo;
+    changed = true;
+    return { ...todo, status: nextStatus };
+  });
+  if (!changed) return;
+  const nextState: { planTodos: ChatTodoItem[]; todoNotice?: ChatTodoNotice } = {
+    planTodos: nextTodos,
+  };
+  if (state.todoNotice) {
+    nextState.todoNotice = {
+      ...state.todoNotice,
+      todos: nextTodos,
+      activeCount: 0,
+      doneCount: nextTodos.filter(item => isDonePlanTodoStatus(item.status)).length,
+    };
+  }
+  chatStore().setState(nextState);
+}
+
+function isTerminalPlanTodoStatus(status: unknown): boolean {
+  const value = String(status || '').trim().toLowerCase();
+  return (
+    isDonePlanTodoStatus(value) ||
+    value === 'failed' ||
+    value === 'failure' ||
+    value === 'error' ||
+    value === 'blocked' ||
+    value === 'blocker' ||
+    value === 'stuck' ||
+    value === 'canceled' ||
+    value === 'cancelled' ||
+    value === 'cancel'
+  );
+}
+
+function isDonePlanTodoStatus(status: unknown): boolean {
+  const value = String(status || '').trim().toLowerCase();
+  return value === 'done' || value === 'completed' || value === 'complete' || value === 'finished';
 }
 
 function ensureParts(message: ChatMessage): ChatMessagePart[] {

@@ -540,6 +540,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       composerText: '',
       memoryNotice: null,
       todoNotice: null,
+      planTodos: [],
       recoveryNotice: null,
       awaySummary: null,
       promptSuggestions: [],
