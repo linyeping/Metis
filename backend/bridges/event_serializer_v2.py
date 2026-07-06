@@ -12,8 +12,6 @@ from .event_contract_v2 import EVENT_SCHEMA_V2, EVENT_VERSION_V2
 
 
 _ENVELOPE_KEYS = {
-    "schema",
-    "version",
     "kind",
     "type",
     "event_id",

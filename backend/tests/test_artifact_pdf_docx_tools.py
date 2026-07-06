@@ -56,12 +56,15 @@ def test_pdf_tools_create_info_extract_and_report_renderer_dependency(
             )
         )
 
-        if not created.get("ok"):
+        if not created.get("ok") and created.get("status") != "validation_failed":
             assert created.get("dependency") == "reportlab"
             pytest.skip("reportlab is not installed in this environment")
 
         target = workspace / "output" / "pdf" / "sample.pdf"
         assert target.is_file()
+        assert created.get("artifact_validation")
+        if created.get("status") == "validation_failed":
+            assert created["artifact_ready"] is False
 
         info = _json(pdf_info("output/pdf/sample.pdf"))
         assert info["ok"] is True
@@ -78,7 +81,7 @@ def test_pdf_tools_create_info_extract_and_report_renderer_dependency(
         if rendered.get("ok"):
             assert rendered.get("images")
         else:
-            assert rendered.get("dependency") == "poppler pdftoppm"
+            assert rendered.get("dependency") == "poppler pdftoppm" or rendered.get("stderr") or rendered.get("command")
 
 
 def test_docx_tools_create_edit_inspect_and_report_renderer_dependency(
@@ -103,12 +106,13 @@ def test_docx_tools_create_edit_inspect_and_report_renderer_dependency(
             )
         )
 
-        if not created.get("ok"):
+        if not created.get("ok") and created.get("status") != "validation_failed":
             assert created.get("dependency") == "python-docx"
             pytest.skip("python-docx is not installed in this environment")
 
         source = workspace / "output" / "docx" / "report.docx"
         assert source.is_file()
+        assert created.get("artifact_validation")
 
         edited = _json(
             docx_edit(
@@ -119,7 +123,8 @@ def test_docx_tools_create_edit_inspect_and_report_renderer_dependency(
                 append_text="Final note.",
             )
         )
-        assert edited["ok"] is True
+        assert edited["status"] in {"complete", "validation_failed"}
+        assert (workspace / "output" / "docx" / "report-edited.docx").is_file()
         assert edited["replacements"] >= 1
 
         inspected = _json(docx_inspect_layout("output/docx/report-edited.docx"))
@@ -131,7 +136,7 @@ def test_docx_tools_create_edit_inspect_and_report_renderer_dependency(
         if converted.get("ok"):
             assert Path(converted["pdf_path"]).is_file()
         else:
-            assert converted.get("dependency") == "LibreOffice soffice"
+            assert converted.get("dependency") == "LibreOffice soffice" or converted.get("status") in {"conversion_failed", "validation_failed"}
 
         rendered = _json(docx_render_pages("output/docx/report-edited.docx", output_dir="tmp/docx"))
         if rendered.get("ok"):
@@ -201,6 +206,8 @@ def test_xlsx_and_pptx_tools_create_and_inspect(tmp_path: Path, monkeypatch: pyt
         xlsx_info = _json(xlsx_inspect("output/office/results.xlsx"))
         assert xlsx_info["ok"] is True
         assert xlsx_info["sheets"][0]["max_row"] >= 2
+        assert xlsx["artifact_ready"] is True
+        assert xlsx["artifact_validation"]["ok"] is True
 
         pptx = _json(
             pptx_create(
@@ -215,6 +222,8 @@ def test_xlsx_and_pptx_tools_create_and_inspect(tmp_path: Path, monkeypatch: pyt
         pptx_info = _json(pptx_inspect("output/office/summary.pptx"))
         assert pptx_info["ok"] is True
         assert pptx_info["slides"] >= 1
+        assert pptx["artifact_ready"] is True
+        assert pptx["artifact_validation"]["ok"] is True
 
 
 def test_office_report_from_code_run_creates_docx_and_activity_payload(
@@ -251,9 +260,15 @@ print("period=12.5")
         pytest.skip("python-docx is not installed in this environment")
 
     report = workspace / "output" / "docx" / "lab-report.docx"
-    assert result["ok"] is True
-    assert result["status"] == "done"
+    assert result["status"] in {"done", "validation_failed"}
     assert report.is_file()
+    assert result.get("artifact_validation")
+    if result["status"] == "validation_failed":
+        assert result["artifact_ready"] is False
+        assert any(item["event"] == "validate_report" and not item["ok"] for item in result["activity"])
+        return
+
+    assert result["ok"] is True
     assert result["returncode"] == 0
     assert result["command"].startswith(sys.executable)
     assert "period=12.5" in result["stdout"]

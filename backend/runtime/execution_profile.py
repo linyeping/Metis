@@ -42,7 +42,9 @@ def normalize_execution_profile(value: Any, *, default: str = LOCAL_DIRECT) -> R
 
 
 def default_execution_profile_for_surface(surface_mode: str) -> str:
-    _ = surface_mode
+    surface = str(surface_mode or "").strip().lower()
+    if surface == "code":
+        return LOCAL_WORKTREE
     return LOCAL_DIRECT
 
 

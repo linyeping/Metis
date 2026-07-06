@@ -11,6 +11,7 @@ from backend.tools.coding.foundation.core_mechanisms.path_security import (
     safe_path_for_read,
     safe_path_for_write,
 )
+from backend.runtime.office_artifact_validation import validate_office_artifact
 
 
 def xlsx_create(
@@ -53,7 +54,19 @@ def xlsx_create(
                 ws.cell(row=row_index, column=col_index, value=value)
         summaries.append({"name": ws.title, "rows": len(data_rows), "columns": max((len(row) for row in data_rows), default=0)})
     wb.save(str(target))
-    return _json({"ok": True, "output_path": str(target), "title": title, "sheets": summaries})
+    validation = validate_office_artifact(target)
+    return _json(
+        {
+            "ok": bool(validation.get("ok")),
+            "status": "complete" if validation.get("ok") else "validation_failed",
+            "output_path": str(target),
+            "title": title,
+            "sheets": summaries,
+            "artifact_ready": bool(validation.get("ok")),
+            "artifact_validation": validation,
+            "error": "" if validation.get("ok") else str(validation.get("summary") or validation.get("error") or "artifact validation failed"),
+        }
+    )
 
 
 def xlsx_inspect(path: str, max_rows: int = 20) -> str:
@@ -126,7 +139,19 @@ def pptx_create(
                 paragraph.text = str(bullet)
                 paragraph.level = 0
     prs.save(str(target))
-    return _json({"ok": True, "output_path": str(target), "title": title, "slides": len(normalized_slides)})
+    validation = validate_office_artifact(target)
+    return _json(
+        {
+            "ok": bool(validation.get("ok")),
+            "status": "complete" if validation.get("ok") else "validation_failed",
+            "output_path": str(target),
+            "title": title,
+            "slides": len(normalized_slides),
+            "artifact_ready": bool(validation.get("ok")),
+            "artifact_validation": validation,
+            "error": "" if validation.get("ok") else str(validation.get("summary") or validation.get("error") or "artifact validation failed"),
+        }
+    )
 
 
 def pptx_inspect(path: str) -> str:

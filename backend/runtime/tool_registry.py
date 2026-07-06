@@ -95,6 +95,25 @@ def _first_argument_path(arguments: Dict[str, Any]) -> str:
     return ""
 
 
+def _strip_command_execution_selector_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    selector_keys = {
+        "execution_profile",
+        "executionProfile",
+        "run_in",
+        "runIn",
+        "runner",
+        "backend",
+        "sandbox",
+        "sandbox_backend",
+        "sandboxBackend",
+        "use_local_vm",
+        "useLocalVm",
+        "local_vm",
+        "localVm",
+    }
+    return {str(key): value for key, value in arguments.items() if str(key) not in selector_keys}
+
+
 def deferred_tools_enabled() -> bool:
     """FABLEADV-23: 工具按需加载总开关。默认关 = 行为与改动前完全一致。"""
     value = os.environ.get("METIS_DEFERRED_TOOLS", "0").strip().lower()
@@ -360,6 +379,8 @@ class ToolRegistry:
             )
             return f"Error: Tool arguments for '{name}' must be an object"
         arguments = dict(arguments)
+        if tool.name in {"execute_bash_command", "run_tests"}:
+            arguments = _strip_command_execution_selector_args(arguments)
         if tool.name == "todo_write" and "path" not in arguments and workspace_root:
             arguments["path"] = os.path.join(str(workspace_root), ".agent_todos.json")
         if tool.name == "load_skill" and "workspace_root" not in arguments and workspace_root:
@@ -577,7 +598,7 @@ _TOOL_USAGE_HINTS: Dict[str, str] = {
     "semantic_search": "Use when you need concept search rather than exact text, such as finding authentication or retry logic.",
     "robust_replace_in_file": "Use for targeted modifications to existing files. You should read the file first and prefer this over full rewrites.",
     "write_file": "Use for creating new files or complete rewrites. For small edits to existing files, prefer robust_replace_in_file.",
-    "execute_bash_command": "Use for tests, builds, git, package managers, and other true shell work. Do not use it for file reading or code search.",
+    "execute_bash_command": "Use for tests, builds, git, package managers, and other true shell work. Code runs default to the current local_worktree; set execution_profile='local_vm' or use_local_vm=true only when the command should run inside MetisRuntime WSL isolation. Do not use it for file reading or code search.",
     "metis_rootfs_asset_status": "Use before WSL import to inspect a Metis rootfs asset and verify SHA256/signature state.",
     "metis_rootfs_asset_register": "Use after building or downloading a Metis-owned rootfs asset to copy/register it in the VM pack manifest with SHA256.",
     "metis_rootfs_source_status": "Use before downloading a Metis rootfs to inspect the manifest/direct asset source without writing files.",
@@ -619,7 +640,7 @@ _TOOL_USAGE_HINTS: Dict[str, str] = {
     "fetch_content": "Use as the unified first choice for a known URL; it returns readable content plus structured source metadata and fallbacks.",
     "ask_question": "Use when requirements are unclear or when a destructive action needs explicit user confirmation.",
     "apply_patch": "Use when you have a precise patch for one or more files and want the smallest possible diff.",
-    "run_tests": "Use after code changes to verify behavior or reproduce a failure with a focused command.",
+    "run_tests": "Use after code changes to verify behavior or reproduce a failure with a focused command. Default runs in the current local_worktree; set execution_profile='local_vm' or use_local_vm=true for isolated VM execution.",
     "list_directory": "Use to inspect directory contents before navigating deeper or choosing specific files to read.",
 }
 

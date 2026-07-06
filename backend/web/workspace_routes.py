@@ -28,6 +28,8 @@ from backend.runtime.worktree_manager import (
     promote_worktree,
     registry_payload,
     remove_worktree,
+    review_worktree_promote,
+    rollback_worktree_promotion,
 )
 from backend.web.helpers import active_workspace_root, get_state, request_client_is_loopback
 from backend.web.sessions import get_session_manager
@@ -976,7 +978,48 @@ def worktrees_promote(worktree_id: str) -> Any:
         return jsonify({"error": "forbidden"}), 403
     data = request.get_json(silent=True) or {}
     try:
-        result = promote_worktree(active_workspace_root(), worktree_id, dry_run=bool(data.get("dry_run") or data.get("dryRun")))
+        raw_paths = data.get("paths") if isinstance(data.get("paths"), list) else []
+        result = promote_worktree(
+            active_workspace_root(),
+            worktree_id,
+            dry_run=bool(data.get("dry_run") or data.get("dryRun")),
+            paths=[str(item) for item in raw_paths],
+        )
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    status = 200 if result.get("ok") else 409
+    return jsonify(result), status
+
+
+@workspace_bp.route("/worktrees/<worktree_id>/promote/review", methods=["POST"])
+def worktrees_promote_review(worktree_id: str) -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    raw_paths = data.get("paths") if isinstance(data.get("paths"), list) else []
+    try:
+        result = review_worktree_promote(
+            active_workspace_root(),
+            worktree_id,
+            paths=[str(item) for item in raw_paths],
+        )
+    except WorktreeError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify(result)
+
+
+@workspace_bp.route("/worktrees/<worktree_id>/promote/rollback", methods=["POST"])
+def worktrees_promote_rollback(worktree_id: str) -> Any:
+    if not request_client_is_loopback():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        result = rollback_worktree_promotion(
+            active_workspace_root(),
+            worktree_id,
+            promotion_id=str(data.get("promotion_id") or data.get("promotionId") or ""),
+            dry_run=bool(data.get("dry_run") or data.get("dryRun")),
+        )
     except WorktreeError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 409
     status = 200 if result.get("ok") else 409

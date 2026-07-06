@@ -11,6 +11,7 @@ from backend.tools.coding.foundation.core_mechanisms.path_security import (
     safe_path_for_read,
     safe_path_for_write,
 )
+from backend.runtime.office_artifact_validation import validate_office_artifact
 
 
 def pdf_info(path: str) -> str:
@@ -168,7 +169,18 @@ def pdf_merge_split(
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("wb") as handle:
         writer.write(handle)
-    return _json({"ok": True, "output_path": str(target), "pages_written": added})
+    validation = validate_office_artifact(target)
+    return _json(
+        {
+            "ok": bool(validation.get("ok")),
+            "status": "complete" if validation.get("ok") else "validation_failed",
+            "output_path": str(target),
+            "pages_written": added,
+            "artifact_ready": bool(validation.get("ok")),
+            "artifact_validation": validation,
+            "error": "" if validation.get("ok") else str(validation.get("summary") or validation.get("error") or "artifact validation failed"),
+        }
+    )
 
 
 def pdf_create(
@@ -208,7 +220,18 @@ def pdf_create(
             c.drawString(72, y, wrapped)
             y -= 16
     c.save()
-    return _json({"ok": True, "output_path": str(target), "title": title})
+    validation = validate_office_artifact(target)
+    return _json(
+        {
+            "ok": bool(validation.get("ok")),
+            "status": "complete" if validation.get("ok") else "validation_failed",
+            "output_path": str(target),
+            "title": title,
+            "artifact_ready": bool(validation.get("ok")),
+            "artifact_validation": validation,
+            "error": "" if validation.get("ok") else str(validation.get("summary") or validation.get("error") or "artifact validation failed"),
+        }
+    )
 
 
 def _pypdf_reader(path: Path) -> Any:

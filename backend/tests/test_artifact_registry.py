@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from flask import Flask
 
+from backend.runtime import artifact_registry
 from backend.core.paths import clear_metis_home_cache
 from backend.runtime.artifact_registry import (
     ArtifactFilters,
@@ -76,6 +77,36 @@ def test_register_artifact_rejects_unsafe_path(tmp_path: Path) -> None:
             path=str(denied),
             workspace_root=str(workspace),
         )
+
+
+def test_register_office_document_requires_validation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "workspace"
+    target = workspace / "output" / "report.docx"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"placeholder")
+
+    monkeypatch.setattr(
+        artifact_registry.office_artifact_validation,
+        "validate_office_artifact",
+        lambda path: {"ok": False, "schema": "metis.office_artifact_validation.v1", "summary": "render failed"},
+    )
+    with pytest.raises(ArtifactRegistryError, match="office artifact validation failed"):
+        register_artifact(kind="document", title="Report", path=str(target), workspace_root=str(workspace))
+
+    monkeypatch.setattr(
+        artifact_registry.office_artifact_validation,
+        "validate_office_artifact",
+        lambda path: {
+            "ok": True,
+            "schema": "metis.office_artifact_validation.v1",
+            "status": "validated",
+            "summary": "validated with render evidence",
+        },
+    )
+    artifact = register_artifact(kind="document", title="Report", path=str(target), workspace_root=str(workspace))
+    assert artifact["metadata"]["validated"] is True
+    assert artifact["metadata"]["artifact_state"] == "complete"
+    assert artifact["metadata"]["office_validation"]["ok"] is True
 
 
 def test_research_report_registers_artifact() -> None:

@@ -147,8 +147,36 @@ def _with_legacy_fields(
         legacy["status"] = str(payload.get("status") or ("done" if kind == "subagent_done" else "running"))
         if "result" in payload:
             legacy["result"] = payload["result"]
+    elif kind.startswith("subrun_"):
+        legacy["subrun_id"] = str(payload.get("subrun_id") or payload.get("subrunId") or payload.get("task_id") or "")
+        legacy["subrunId"] = legacy["subrun_id"]
+        legacy["task_id"] = legacy["subrun_id"]
+        legacy["taskId"] = legacy["subrun_id"]
+        legacy["name"] = str(payload.get("name") or payload.get("title") or "subrun")
+        legacy["title"] = str(payload.get("title") or legacy["name"])
+        legacy["progress"] = int(_to_float(payload.get("progress"), 0))
+        legacy["status"] = str(payload.get("status") or _subrun_status_from_kind(kind))
+        legacy["stage"] = str(payload.get("stage") or legacy["status"])
+        if "result" in payload:
+            legacy["result"] = payload["result"]
 
     return _json_safe(legacy)
+
+
+def _subrun_status_from_kind(kind: str) -> str:
+    if kind == "subrun_planned":
+        return "planned"
+    if kind == "subrun_waiting_permission":
+        return "waiting_permission"
+    if kind == "subrun_succeeded":
+        return "succeeded"
+    if kind == "subrun_failed":
+        return "failed"
+    if kind == "subrun_canceled":
+        return "canceled"
+    if kind == "subrun_promoted":
+        return "promoted"
+    return "running"
 
 
 def _payload_from_runtime_event(kind: str, event: Any) -> Dict[str, Any]:

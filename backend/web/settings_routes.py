@@ -50,6 +50,26 @@ def runtime_manager_status_route() -> Any:
     return jsonify(runtime_manager_status())
 
 
+@settings_bp.route("/settings/metis-runtime", methods=["GET"])
+def metis_runtime_status_route() -> Any:
+    from backend.runtime.runtime_manager import metis_runtime_status
+
+    return jsonify(metis_runtime_status())
+
+
+@settings_bp.route("/settings/metis-runtime/repair", methods=["POST"])
+def metis_runtime_repair_route() -> Any:
+    from backend.runtime.runtime_manager import metis_runtime_repair
+
+    data = request.get_json(silent=True) or {}
+    return jsonify(
+        metis_runtime_repair(
+            allow_download=bool(data.get("allow_download", data.get("allowDownload", True))),
+            force=bool(data.get("force")),
+        )
+    )
+
+
 @settings_bp.route("/settings/runtime-manager/provision-status", methods=["GET"])
 def runtime_manager_provision_status_route() -> Any:
     from backend.runtime.runtime_provision import provision_status

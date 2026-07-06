@@ -8,6 +8,7 @@ import {
   deletePermissionRule,
   getDocumentConverters,
   getMemory,
+  getMetisRuntimeStatus,
   getModelCapabilities,
   getPermissions,
   getProviderModels,
@@ -27,6 +28,7 @@ import {
   runtimeManagerSmoke,
   runtimeManagerStartupTest,
   runtimeManagerValidateRelease,
+  repairMetisRuntime,
   saveMemory,
   updateSettings,
   verifyProviderConfig,
@@ -38,6 +40,7 @@ import type {
   Language,
   MemoryPayload,
   ModelCapabilities,
+  MetisRuntimeStatus,
   PermissionStatePayload,
   ProviderModelCatalog,
   ProviderProfile,
@@ -107,7 +110,7 @@ const sectionDescriptions: Record<SettingsSection, string> = {
   usage: '模型额度、用量统计和供应商账单状态。',
   network: '代理、网络访问和外部连接配置。',
   terminal: '默认 shell、Python 路径和文档转换器。',
-  runtime: '本机运行时、VM 资产和诊断修复工具。',
+  runtime: 'MetisRuntime、本机隔离执行和诊断修复工具。',
   tools: '工具权限、写入目录和自动审批规则。',
   connectors: '外部服务、MCP 和桌面连接能力。',
   desktop: '桌面接管、视觉能力和本机集成。',
@@ -180,6 +183,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsPayload | null>(null);
   const [documentConverters, setDocumentConverters] = useState<DocumentConverterStatus | null>(null);
   const [runtimeManager, setRuntimeManager] = useState<RuntimeManagerStatus | null>(null);
+  const [metisRuntime, setMetisRuntime] = useState<MetisRuntimeStatus | null>(null);
   const [runtimeManagerBusy, setRuntimeManagerBusy] = useState('');
   const [runtimeManagerMessage, setRuntimeManagerMessage] = useState('');
   const [runtimeManagerResult, setRuntimeManagerResult] = useState<RuntimeManagerCommandResult | null>(null);
@@ -297,7 +301,12 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const refreshRuntimeManager = useCallback(async () => {
     setRuntimeManagerBusy(current => current || 'refresh');
     try {
-      setRuntimeManager(await getRuntimeManagerStatus());
+      const [managerStatus, metisStatus] = await Promise.all([
+        getRuntimeManagerStatus(),
+        getMetisRuntimeStatus(),
+      ]);
+      setRuntimeManager(managerStatus);
+      setMetisRuntime(metisStatus);
       setRuntimeManagerMessage('');
     } catch (error) {
       setRuntimeManagerMessage(error instanceof Error ? error.message : String(error));
@@ -569,6 +578,18 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     [refreshRuntimeManager, t],
   );
 
+  const repairRuntimeOneClick = useCallback(
+    () =>
+      runRuntimeAction('metis-runtime-repair', async () => {
+        const result = await repairMetisRuntime({
+          allowDownload: metisRuntime?.repairRequiresDownload ?? true,
+        });
+        setMetisRuntime(result);
+        return result as unknown as RuntimeManagerCommandResult;
+      }),
+    [metisRuntime?.repairRequiresDownload, runRuntimeAction],
+  );
+
   const visibleNavGroups = useMemo(() => {
     const query = filter.trim().toLowerCase();
     return settingsNavGroups
@@ -690,6 +711,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             onPackageVmBundle={() => runRuntimeAction('package-vm-bundle', () => runtimeManagerPackageVmBundle('', 'direct'))}
             onPrepareBundle={() => runRuntimeAction('prepare-bundle', () => runtimeManagerPrepareBundle('', 'local'))}
             onRefresh={refreshRuntimeManager}
+            onRepairMetisRuntime={repairRuntimeOneClick}
             onRepair={() =>
               runRuntimeAction('repair-runtime', () =>
                 runtimeManagerRepair({ source: 'auto', allowDownload: Boolean(runtimeManager?.releaseIntegration.downloadAvailable) }),
@@ -698,6 +720,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             onSmoke={() => runRuntimeAction('smoke', runtimeManagerSmoke)}
             onStartupTest={() => runRuntimeAction('startup-test', runtimeManagerStartupTest)}
             onValidateRelease={() => runRuntimeAction('validate-release', () => runtimeManagerValidateRelease())}
+            metisRuntime={metisRuntime}
             result={runtimeManagerResult}
             status={runtimeManager}
           />

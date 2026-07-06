@@ -518,7 +518,7 @@ function upsertSubagent(subagent: ChatSubagentEvent): void {
     startedAt: previous?.startedAt || subagent.startedAt || now,
     updatedAt: now,
     finishedAt:
-      subagent.status === 'done' || subagent.status === 'error'
+      subagent.status === 'done' || subagent.status === 'error' || subagent.status === 'canceled' || subagent.status === 'promoted'
         ? previous?.finishedAt || subagent.finishedAt || now
         : previous?.finishedAt,
   });
@@ -568,7 +568,7 @@ function coworkPlanFromRuntimeStatus(status: RuntimeStatus): CoworkPlanSnapshot 
   if (!isPlainRecord(plan)) return null;
   const schema = String(plan.schema || '');
   const subruns = Array.isArray(plan.subruns) ? plan.subruns : [];
-  if (schema !== 'metis.cowork_plan.v1' && subruns.length === 0) return null;
+  if (!['metis.cowork_plan.v1', 'metis.cowork_plan.v2'].includes(schema) && subruns.length === 0) return null;
   return {
     ...plan,
     subruns: subruns.filter(isPlainRecord),

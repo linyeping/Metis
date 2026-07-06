@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   Wrench,
 } from 'lucide-react';
-import type { RuntimeManagerCommandResult, RuntimeManagerStatus } from '../../../lib/types';
+import type { MetisRuntimeStatus, RuntimeManagerCommandResult, RuntimeManagerStatus } from '../../../lib/types';
 import {
   runtimeManagerProvision,
   runtimeManagerProvisionStatus,
@@ -44,10 +44,12 @@ interface RuntimeTabProps {
   onPackageVmBundle: () => void | Promise<void>;
   onPrepareBundle: () => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
+  onRepairMetisRuntime: () => void | Promise<void>;
   onRepair: () => void | Promise<void>;
   onSmoke: () => void | Promise<void>;
   onStartupTest: () => void | Promise<void>;
   onValidateRelease: () => void | Promise<void>;
+  metisRuntime: MetisRuntimeStatus | null;
   result: RuntimeManagerCommandResult | null;
   status: RuntimeManagerStatus | null;
 }
@@ -103,7 +105,7 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
   const downloadPack = useCallback(async () => {
     setDownloading(true);
     setProgress(null);
-    setNote(t('正在下载沙箱运行时（约 800 MB，解压后约 3.2 GB），首次下载较久，请保持网络通畅…'));
+    setNote(t('正在下载运行组件，首次下载较久，请保持网络通畅…'));
     try {
       await runtimeManagerDownloadStart();
       // Poll progress until the background job finishes.
@@ -118,7 +120,7 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
         setProgress(p);
         if (p.done) {
           await refresh(true);
-          setNote(p.ok ? t('沙箱运行时已下载并安装完成。') : (p.error || t('下载未完成，请重试。')));
+          setNote(p.ok ? t('运行组件已下载并安装完成。') : (p.error || t('下载未完成，请重试。')));
           break;
         }
       }
@@ -132,7 +134,7 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
   const selfTest = useCallback(async () => {
     setTesting(true);
     setTestResult(null);
-    setNote(t('正在自检：真实启动沙箱并运行一个任务…'));
+    setNote(t('正在自检 MetisRuntime 并运行一个任务…'));
     try {
       const res = await runtimeManagerSelfTest();
       setTestResult(res);
@@ -164,24 +166,24 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
     <div className="runtime-provision" data-ready={status.ready}>
       <div className="runtime-provision-head">
         {status.ready ? <CheckCircle2 size={15} className="ok" /> : <ShieldCheck size={15} />}
-        <span className="runtime-provision-title">{t('本地 VM 基础条件')}</span>
+        <span className="runtime-provision-title">{t('系统基础能力')}</span>
         <span className="runtime-provision-badge" data-ok={status.ready}>
-          {status.ready ? t('可自检') : t('需要设置')}
+          {status.ready ? t('可用') : t('需设置')}
         </span>
       </div>
 
       <p className="runtime-provision-summary">{status.uxSummary}</p>
       <p className="runtime-provision-note">
-        {t('当前 local_vm 首版使用 MetisRuntime WSL 执行命令。Windows 可能在 hcsdiag 中显示 WSL utility VM，但 Metis 没有选择 HCS direct backend。')}
+        {t('MetisRuntime 会自动选择可用的本地隔离执行路径，普通使用不需要理解底层实现。')}
       </p>
 
       <div className="runtime-provision-checks">
         {status.virtualizationOk !== null && (
           <ProvisionCheck ok={status.virtualizationOk} label={t('CPU 虚拟化')} />
         )}
-        <ProvisionCheck ok={status.vmPlatformEnabled} label={t('虚拟机平台')} />
-        <ProvisionCheck ok={status.serviceResponding} label={t('沙箱服务')} />
-        <ProvisionCheck ok={status.bundleInstalled} label={t('运行时包')} />
+        <ProvisionCheck ok={status.vmPlatformEnabled} label={t('隔离平台')} />
+        <ProvisionCheck ok={status.serviceResponding} label={t('后台服务')} />
+        <ProvisionCheck ok={status.bundleInstalled} label={t('运行组件')} />
       </div>
 
       {status.virtualizationOk === false && (
@@ -201,8 +203,8 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
                   : elevatedNeeds.length === 1 && elevatedNeeds[0] === 'repair_service'
                     ? t('修复服务（需一次 UAC）')
                     : status.rebootRequired
-                      ? t('开通沙箱（需一次 UAC + 重启）')
-                      : t('开通沙箱（需一次 UAC）')}
+                      ? t('开通系统能力（需一次 UAC + 重启）')
+                      : t('开通系统能力（需一次 UAC）')}
               </span>
             </button>
           )}
@@ -213,12 +215,11 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
         </div>
       )}
 
-      {/* Runtime pack download (first launch / missing bundle) */}
       {!status.bundleInstalled && (
         <div className="runtime-provision-actions">
           <button type="button" onClick={() => void downloadPack()} disabled={downloading}>
             <FileDown size={13} className={downloading ? 'spin' : ''} />
-            <span>{downloading ? t('下载中…') : t('下载沙箱运行时（约 800 MB）')}</span>
+            <span>{downloading ? t('下载中…') : t('下载运行组件')}</span>
           </button>
         </div>
       )}
@@ -246,12 +247,11 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
         </div>
       )}
 
-      {/* Real self-test: actually boots the VM + runs a job (no false positives) */}
       {status.ready && (
         <div className="runtime-provision-actions">
           <button type="button" onClick={() => void selfTest()} disabled={testing}>
             <Play size={13} className={testing ? 'spin' : ''} />
-            <span>{testing ? t('自检中…') : t('自检沙箱')}</span>
+            <span>{testing ? t('自检中…') : t('自检 MetisRuntime')}</span>
           </button>
         </div>
       )}
@@ -290,6 +290,85 @@ function ProvisionCheck({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+function MetisRuntimeOverview({
+  busy,
+  message,
+  onCheck,
+  onRepair,
+  status,
+}: {
+  busy: string;
+  message: string;
+  onCheck: () => void | Promise<void>;
+  onRepair: () => void | Promise<void>;
+  status: MetisRuntimeStatus | null;
+}) {
+  const t = useT();
+  const ready = Boolean(status?.ready);
+  const checking = busy === 'refresh';
+  const repairing = busy === 'metis-runtime-repair';
+  const blockedBySetup = status?.primaryAction === 'setup';
+  return (
+    <section className="settings-section metis-runtime-overview" data-ready={ready}>
+      <div className="metis-runtime-head">
+        {ready ? <CheckCircle2 size={18} className="ok" /> : <Server size={18} />}
+        <div>
+          <h3>{status?.title || 'MetisRuntime'}</h3>
+          <p className="section-desc">
+            {status?.summary || t('检查本地隔离执行环境是否可用。')}
+          </p>
+        </div>
+        <span className="runtime-manager-status" data-ok={ready}>
+          {ready ? t('可用') : blockedBySetup ? t('需设置') : t('需修复')}
+        </span>
+      </div>
+
+      <div className="metis-runtime-checks">
+        {(status?.checks.length ? status.checks : [
+          { id: 'system', label: t('系统基础能力'), ok: false, status: 'pending' },
+          { id: 'runtime_components', label: t('运行组件'), ok: false, status: 'pending' },
+          { id: 'runner', label: t('隔离执行'), ok: false, status: 'pending' },
+        ]).map(check => (
+          <span key={check.id} className="metis-runtime-check" data-ok={check.ok}>
+            <CheckCircle2 size={13} />
+            {t(check.label)}
+          </span>
+        ))}
+      </div>
+
+      {status?.steps?.length ? (
+        <div className="metis-runtime-steps">
+          {status.steps.map(step => (
+            <span key={step.id} data-ok={step.ok}>
+              {t(step.label)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="runtime-actions">
+        <button type="button" onClick={() => void onCheck()} disabled={Boolean(busy)}>
+          <RefreshCw size={13} className={checking ? 'spin' : ''} />
+          <span>{checking ? t('检查中...') : t('检查')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => void onRepair()}
+          disabled={Boolean(busy) || ready || !status?.canRepair}
+        >
+          <Wrench size={13} className={repairing ? 'spin' : ''} />
+          <span>{repairing ? t('修复中...') : status?.repairRequiresDownload ? t('下载并修复') : t('一键修复')}</span>
+        </button>
+      </div>
+
+      {blockedBySetup ? (
+        <p className="runtime-manager-message">{t('需要系统授权或重启时，展开下方“系统设置与缓存”处理。')}</p>
+      ) : null}
+      {message ? <p className="runtime-manager-message">{message}</p> : null}
+    </section>
+  );
+}
+
 export const RuntimeTab = memo(function RuntimeTab({
   busy,
   message,
@@ -303,10 +382,12 @@ export const RuntimeTab = memo(function RuntimeTab({
   onPackageVmBundle,
   onPrepareBundle,
   onRefresh,
+  onRepairMetisRuntime,
   onRepair,
   onSmoke,
   onStartupTest,
   onValidateRelease,
+  metisRuntime,
   result,
   status,
 }: RuntimeTabProps) {
@@ -342,15 +423,20 @@ export const RuntimeTab = memo(function RuntimeTab({
 
   return (
     <div className="settings-card-grid runtime-manager-panel">
-      {/* Hero: the sandbox provision panel is the primary UX. */}
-      <SandboxProvisionPanel />
+      <MetisRuntimeOverview
+        busy={busy}
+        message={message}
+        onCheck={onRefresh}
+        onRepair={onRepairMetisRuntime}
+        status={metisRuntime}
+      />
 
       <section className="settings-section runtime-code-profile">
         <div className="settings-section-header">
           <Activity size={16} className="section-icon" />
           <div>
             <h3>{t('Code 执行策略')}</h3>
-            <p className="section-desc">{t('文件修改保持在 worktree；测试、构建和 shell 命令可切到 MetisRuntime WSL。')}</p>
+            <p className="section-desc">{t('文件修改保持在 worktree；测试、构建和 shell 命令可切到 MetisRuntime。')}</p>
           </div>
         </div>
         <label className="toggle-row capsule-toggle-row">
@@ -364,30 +450,40 @@ export const RuntimeTab = memo(function RuntimeTab({
         </label>
         <p className="runtime-manager-message">
           {codeExecutionProfile === 'local_vm'
-            ? t('当前：Code run 会创建 worktree，命令执行进入 MetisRuntime WSL。')
+            ? t('当前：Code run 会创建 worktree，命令执行进入 MetisRuntime。')
             : t('当前：Code run 创建 worktree，并在 worktree 内本机执行命令。')}
         </p>
       </section>
 
-      {/* Advanced: Metis Runtime Manager — collapsed by default */}
+      <details className="settings-card runtime-collapsible">
+        <summary className="settings-section-header">
+          <ShieldCheck size={16} className="section-icon" />
+          <span><h3>{t('系统设置与缓存')}</h3></span>
+          <span className="runtime-manager-status" data-ok={metisRuntime?.ready ?? false}>
+            {metisRuntime?.repairRequiresAdmin ? t('需设置') : t('高级')}
+          </span>
+        </summary>
+        <SandboxProvisionPanel />
+      </details>
+
       <details className="settings-card runtime-collapsible">
         <summary className="settings-section-header">
           <Server size={16} className="section-icon" />
-          <span><h3>{t('Metis Runtime Manager')}</h3></span>
+          <span><h3>{t('运行时诊断')}</h3></span>
           <span className="runtime-manager-status" data-ok={health?.ready ?? false}>
-            {health?.preferredBackend || t('检测中')}
+            {health?.ready ? t('可用') : t('诊断')}
           </span>
         </summary>
 
         <div className="runtime-health-grid">
-          <RuntimeMetric label={t('Metis WSL')} ok={health?.metisWslReady} value={installed ? t('已安装') : t('未安装')} />
-          <RuntimeMetric label={t('rootfs')} ok={health?.rootfsReady} value={rootfs.size ? formatBytes(rootfs.size) : t('未检测到')} />
+          <RuntimeMetric label={t('托管 runner')} ok={health?.metisWslReady} value={installed ? t('已启用') : t('未启用')} />
+          <RuntimeMetric label={t('导入资产')} ok={health?.rootfsReady} value={rootfs.size ? formatBytes(rootfs.size) : t('未检测到')} />
           <RuntimeMetric label={t('Bundle')} neutral ok={health?.runtimeBundleReady} value={health?.runtimeBundleReady ? t('已准备') : t('未准备')} />
-          <RuntimeMetric label={t('Docker')} neutral ok={health?.dockerAvailable} value={health?.dockerAvailable ? t('可用') : t('不可用')} />
-          <RuntimeMetric label={t('WSL')} ok={health?.wslAvailable} value={health?.wslAvailable ? t('可用') : t('不可用')} />
+          <RuntimeMetric label={t('备用容器')} neutral ok={health?.dockerAvailable} value={health?.dockerAvailable ? t('可用') : t('不可用')} />
+          <RuntimeMetric label={t('系统 runner')} ok={health?.wslAvailable} value={health?.wslAvailable ? t('可用') : t('不可用')} />
         </div>
         <p className="runtime-manager-message">
-          {t('边界说明：MetisRuntime WSL 是 local_vm 的第一版可用 runner；它会使用 WSL2 utility VM，但不是 HCS direct runner。HCS direct 只有在 Metis 自有 VM 资产启动 guest metisd 并完成 runtime.hello 后才算就绪。')}
+          {t('诊断详情显示底层 runner、组件和主机能力；普通使用只需要关注上方 MetisRuntime 状态。')}
         </p>
 
         <div className="runtime-actions">
@@ -405,7 +501,7 @@ export const RuntimeTab = memo(function RuntimeTab({
           </button>
           <button type="button" onClick={() => void onImport()} disabled={Boolean(busy) || installed || !canImport}>
             <Archive size={13} />
-            <span>{installed ? t('已导入') : t('导入 WSL')}</span>
+            <span>{installed ? t('已启用') : t('启用 runner')}</span>
           </button>
           <button type="button" onClick={() => void onBuildPlan()} disabled={Boolean(busy)}>
             <Wrench size={13} />
@@ -428,21 +524,20 @@ export const RuntimeTab = memo(function RuntimeTab({
         {message ? <p className="runtime-manager-message">{message}</p> : null}
       </details>
 
-      {/* Advanced: VM Runtime Pack — collapsed by default */}
       <details className="settings-card runtime-collapsible">
         <summary className="settings-section-header">
           <HardDrive size={16} className="section-icon" />
-          <span><h3>{t('VM Runtime Pack')}</h3></span>
+          <span><h3>{t('运行组件包')}</h3></span>
           <span className="runtime-manager-status" data-ok={vmRuntime?.installed && vmRuntime?.assetsVerified}>
             {vmRuntime?.runnerTransport || release?.installStrategy || t('未安装')}
           </span>
         </summary>
 
         <div className="runtime-health-grid">
-          <RuntimeMetric label={t('VM Runtime')} ok={vmRuntime?.installed} value={vmRuntime?.installed ? t('已安装') : t('未安装')} />
+          <RuntimeMetric label={t('运行组件')} ok={vmRuntime?.installed} value={vmRuntime?.installed ? t('已安装') : t('未安装')} />
           <RuntimeMetric label={t('资产大小')} ok={(vmRuntime?.assetBytes ?? 0) > 0} value={formatBytes(vmRuntime?.assetBytes ?? 0)} />
           <RuntimeMetric label={t('SHA 校验')} ok={vmRuntime?.assetsVerified} value={vmRuntime?.assetsVerified ? t('通过') : t('未通过/无校验')} />
-          <RuntimeMetric label={t('Guest')} ok={vmRuntime?.guestProtocolReady || vmRuntime?.hcsDirectReady} value={vmRuntime?.runnerTransport || t('未就绪')} />
+          <RuntimeMetric label={t('协议')} ok={vmRuntime?.guestProtocolReady || vmRuntime?.hcsDirectReady} value={vmRuntime?.runnerTransport || t('未就绪')} />
           <RuntimeMetric label={t('安装包内置')} neutral ok={release?.bundledAvailable} value={release?.bundledAvailable ? t('可用') : t('按需下载')} />
           <RuntimeMetric label={t('下载源')} ok={release?.downloadAvailable} value={release?.downloadAvailable ? t('已配置') : t('未配置')} />
         </div>
@@ -470,7 +565,7 @@ export const RuntimeTab = memo(function RuntimeTab({
           </button>
           <button type="button" onClick={() => void onPackageVmBundle()} disabled={Boolean(busy) || !canPackageVmBundle}>
             <Archive size={13} />
-            <span>{busy === 'package-vm-bundle' ? t('打包中...') : t('打包 VM Bundle')}</span>
+            <span>{busy === 'package-vm-bundle' ? t('打包中...') : t('打包组件包')}</span>
           </button>
           <button type="button" onClick={() => void onDiagnostics(latestSession?.sessionId)} disabled={Boolean(busy) || !latestSession}>
             <FileDown size={13} />
@@ -566,13 +661,13 @@ function RuntimePath({
 function actionTitle(id: string, fallback: string, t: (zh: string) => string): string {
   if (id === 'smoke') return t('运行 runtime smoke');
   if (id === 'import') return t('导入 MetisRuntime');
-  if (id === 'build-plan') return t('准备 rootfs 构建计划');
+  if (id === 'build-plan') return t('准备运行组件构建计划');
   if (id === 'prepare-bundle') return t('准备 Metis Runtime Bundle');
   if (id === 'package-bundle') return t('打包 Runtime Bundle');
-  if (id === 'repair-runtime') return t('修复/安装 VM Runtime');
+  if (id === 'repair-runtime') return t('修复/安装运行组件');
   if (id === 'startup-test') return t('运行启动测试');
-  if (id === 'package-vm-bundle') return t('打包 VM Runtime Bundle');
-  if (id === 'build-vm-assets') return t('构建真实 VM 资产');
+  if (id === 'package-vm-bundle') return t('打包运行组件包');
+  if (id === 'build-vm-assets') return t('构建运行组件资产');
   if (id === 'validate-release') return t('校验 Runtime Release');
   if (id === 'fallback') return t('使用本地副本兜底');
   if (id === 'diagnostics') return t('导出运行时诊断');
@@ -581,16 +676,16 @@ function actionTitle(id: string, fallback: string, t: (zh: string) => string): s
 
 function actionDescription(id: string, fallback: string, t: (zh: string) => string): string {
   if (id === 'smoke') return t('验证 Python、Node、Git、rg 和产物回收链路。');
-  if (id === 'import') return t('把已校验的 rootfs 注册成 Metis 管理的 WSL 发行版。');
+  if (id === 'import') return t('把已校验的运行组件启用为 MetisRuntime runner。');
   if (id === 'build-plan') return t('生成构建计划；真正长时间构建应走后台任务。');
   if (id === 'prepare-bundle') return t('写入 bundle manifest、origin 溯源文件、安装脚本和 latest 元数据。');
   if (id === 'package-bundle') return t('生成 release zip、SHA256 文件和 runtime release manifest。');
-  if (id === 'repair-runtime') return t('从安装包内置资源或下载源安装/修复 VM runtime pack。');
+  if (id === 'repair-runtime') return t('从安装包内置资源或下载源安装/修复运行组件。');
   if (id === 'startup-test') return t('创建运行时会话并验证命令执行、stdout/stderr 和产物回收。');
   if (id === 'package-vm-bundle') return t('生成 v2 release zip、manifest、SHA256SUMS、安装脚本和 latest 元数据。');
-  if (id === 'build-vm-assets') return t('构建 rootfs.vhdx、vmlinuz、initrd、metis-bin.vhdx，并可直接打包成 v2 release。');
+  if (id === 'build-vm-assets') return t('构建运行组件资产，并可直接打包成 v2 release。');
   if (id === 'validate-release') return t('下载 release manifest/zip，校验 package SHA 和内部 SHA256SUMS。');
-  if (id === 'fallback') return t('没有 Docker/WSL 时仍可使用本机 copy-mode。');
+  if (id === 'fallback') return t('隔离执行不可用时仍可使用本机 copy-mode。');
   if (id === 'diagnostics') return t('收集最近运行 manifest、命令日志、产物和 patch 摘要。');
   return t(fallback);
 }

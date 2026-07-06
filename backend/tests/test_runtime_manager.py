@@ -77,7 +77,7 @@ def test_runtime_manager_status_aggregates_health(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         runtime_manager,
-        "metis_runtime_status",
+        "isolated_metis_runtime_status",
         lambda **kwargs: _json({"ok": True, "sessions": [{"session_id": "rt_1", "backend": "metis_wsl", "status": "ran"}]}),
     )
     monkeypatch.setattr(
@@ -104,6 +104,75 @@ def test_runtime_manager_status_aggregates_health(monkeypatch) -> None:
     assert any(action["id"] == "startup-test" for action in status["actions"])
     assert any(action["id"] == "smoke" for action in status["actions"])
     assert status["jobs"]["jobs"][0]["job_id"] == "job_1"
+
+
+def test_metis_runtime_status_is_user_facing(monkeypatch) -> None:
+    raw_status = {
+        "ok": True,
+        "schema": "metis.runtime_manager.v1",
+        "health": {
+            "preferred_backend": "metis_wsl",
+            "metis_wsl_ready": True,
+            "ready": True,
+        },
+        "vm_runtime": {"runner_ready": False},
+        "wsl_runtime": {"ready_to_import": False},
+        "release_integration": {"download_available": True},
+    }
+    monkeypatch.setattr(runtime_manager, "runtime_manager_status", lambda **kwargs: raw_status)
+
+    status = runtime_manager.metis_runtime_status()
+
+    assert status["schema"] == "metis.metis_runtime.health.v1"
+    assert status["ready"] is True
+    assert status["status"] == "ready"
+    public = {key: value for key, value in status.items() if key not in {"diagnostics", "technical_status"}}
+    public_text = json.dumps(public, ensure_ascii=False).lower()
+    assert "wsl" not in public_text
+    assert "hcs" not in public_text
+    assert status["diagnostics"]["runtime_manager"] is raw_status
+
+
+def test_metis_runtime_repair_activates_ready_runtime(monkeypatch) -> None:
+    before = {
+        "ok": True,
+        "health": {"metis_wsl_ready": False},
+        "vm_runtime": {"runner_ready": False},
+        "wsl_runtime": {
+            "ready_to_import": True,
+            "wsl": {"executable": "wsl.exe"},
+            "features": {"import_supported": True},
+            "selected_rootfs": {"exists": True},
+        },
+        "release_integration": {"download_available": False},
+    }
+    after = {
+        "ok": True,
+        "health": {"metis_wsl_ready": True},
+        "vm_runtime": {"runner_ready": False},
+        "wsl_runtime": {"ready_to_import": False},
+        "release_integration": {"download_available": False},
+    }
+    calls = {"status": 0, "import": 0}
+
+    def fake_status(**kwargs: object) -> dict:
+        calls["status"] += 1
+        return before if calls["status"] == 1 else after
+
+    def fake_import(**kwargs: object) -> dict:
+        calls["import"] += 1
+        return {"ok": True, "schema": "metis.wsl.import.v1"}
+
+    monkeypatch.setattr(runtime_manager, "runtime_manager_status", fake_status)
+    monkeypatch.setattr(runtime_manager, "runtime_manager_import", fake_import)
+
+    result = runtime_manager.metis_runtime_repair()
+
+    assert result["schema"] == "metis.metis_runtime.repair.v1"
+    assert result["ready"] is True
+    assert result["repaired"] is True
+    assert calls["import"] == 1
+    assert [step["id"] for step in result["steps"]] == ["check", "activate_runtime", "verify"]
 
 
 def test_runtime_manager_smoke_requires_artifact(monkeypatch) -> None:
@@ -275,6 +344,8 @@ def test_runtime_manager_validate_release_source_verifies_zip_and_sha(tmp_path: 
 
 def test_runtime_manager_settings_routes_round_trip(monkeypatch) -> None:
     monkeypatch.setattr(runtime_manager, "runtime_manager_status", lambda **kwargs: {"ok": True, "schema": "status"})
+    monkeypatch.setattr(runtime_manager, "metis_runtime_status", lambda **kwargs: {"ok": True, "schema": "metis-runtime"})
+    monkeypatch.setattr(runtime_manager, "metis_runtime_repair", lambda **kwargs: {"ok": True, "schema": "metis-runtime-repair", "allow_download": kwargs.get("allow_download")})
     monkeypatch.setattr(runtime_manager, "runtime_manager_import_plan", lambda **kwargs: {"ok": True, "schema": "import-plan"})
     monkeypatch.setattr(runtime_manager, "runtime_manager_import", lambda **kwargs: {"ok": True, "schema": "import"})
     monkeypatch.setattr(
@@ -326,6 +397,8 @@ def test_runtime_manager_settings_routes_round_trip(monkeypatch) -> None:
 
     with app.test_client() as client:
         assert client.get("/settings/runtime-manager").get_json()["schema"] == "status"
+        assert client.get("/settings/metis-runtime").get_json()["schema"] == "metis-runtime"
+        assert client.post("/settings/metis-runtime/repair", json={"allow_download": False}).get_json()["allow_download"] is False
         assert client.post("/settings/runtime-manager/import-plan", json={}).get_json()["schema"] == "import-plan"
         assert client.post("/settings/runtime-manager/import", json={}).get_json()["schema"] == "import"
         assert client.post("/settings/runtime-manager/build-plan", json={"profile": "office"}).get_json()["profile"] == "office"

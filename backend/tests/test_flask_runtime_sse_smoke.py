@@ -397,12 +397,35 @@ def test_workspace_file_previews_pdf_and_docx(isolated_flask_app: Any) -> None:
         assert "Metis DOCX preview" in docx_payload["content"]
 
 
-def test_run_registry_streams_replayable_events_to_target_session(isolated_flask_app: Any) -> None:
+def test_run_registry_streams_replayable_events_to_target_session(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     app, session_manager = isolated_flask_app
     workspace_id = web_app._runtime_state.active_workspace_id
     target = session_manager.create_session(title="Target run", workspace_id=workspace_id)
     active = session_manager.create_session(title="Active run", workspace_id=workspace_id)
     web_app._runtime_state.activate_session(active.id, history=[], mode="auto")
+    source_root = web_app._active_workspace_root()
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == target.id
+        assert label == "code-run"
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / "code-default-worktree",
+            run_id=run_id,
+            session_id=session_id,
+            index=1,
+        )
+        record.worktree_id = "wt_code_default"
+        record.label = "code-run"
+        return record
+
+    monkeypatch.setattr(web_app, "create_worktree", fake_create_worktree)
 
     with app.test_client() as client:
         created = client.post(
@@ -419,6 +442,9 @@ def test_run_registry_streams_replayable_events_to_target_session(isolated_flask
         run_id = created_payload["run_id"]
         assert created_payload["turn_id"] == f"turn_{run_id}"
         assert created_payload["surface_mode"] == "code"
+        assert created_payload["execution_profile"] == "local_worktree"
+        assert created_payload["source_workspace_root"] == source_root
+        assert created_payload["worktree_id"] == "wt_code_default"
         assert created_payload["last_seq"] == 0
         events, saw_done_marker = _run_events(client, run_id)
         replay, replay_done_marker = _run_events(client, run_id)
@@ -436,6 +462,7 @@ def test_run_registry_streams_replayable_events_to_target_session(isolated_flask
     assert status["status"] == "done"
     assert status["turn_id"] == f"turn_{run_id}"
     assert status["surface_mode"] == "code"
+    assert status["execution_profile"] == "local_worktree"
     assert status["last_seq"] == len(events)
     assert active_run["ok"] is False
     saved_target = session_manager.get_session(target.id)
@@ -447,10 +474,33 @@ def test_run_registry_streams_replayable_events_to_target_session(isolated_flask
     assert web_app._runtime_state.active_session_id == active.id
 
 
-def test_run_registry_streams_agent_event_v2_envelopes(isolated_flask_app: Any) -> None:
+def test_run_registry_streams_agent_event_v2_envelopes(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     app, session_manager = isolated_flask_app
     workspace_id = web_app._runtime_state.active_workspace_id
     target = session_manager.create_session(title="Target run v2", workspace_id=workspace_id)
+    source_root = web_app._active_workspace_root()
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == target.id
+        assert label == "code-run"
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / "code-v2-default-worktree",
+            run_id=run_id,
+            session_id=session_id,
+            index=2,
+        )
+        record.worktree_id = "wt_code_v2_default"
+        record.label = "code-run"
+        return record
+
+    monkeypatch.setattr(web_app, "create_worktree", fake_create_worktree)
 
     with app.test_client() as client:
         created = client.post(
@@ -463,7 +513,10 @@ def test_run_registry_streams_agent_event_v2_envelopes(isolated_flask_app: Any) 
             },
         )
         assert created.status_code == 200
-        run_id = created.get_json()["run_id"]
+        created_payload = created.get_json()
+        run_id = created_payload["run_id"]
+        assert created_payload["execution_profile"] == "local_worktree"
+        assert created_payload["worktree_id"] == "wt_code_v2_default"
         events, saw_done_marker = _run_events_v2(client, run_id)
         replay_tail, replay_done_marker = _run_events_v2(client, run_id, after=1)
 
@@ -662,6 +715,7 @@ def test_cowork_run_streams_subruns_diff_and_summary_artifact(
         payload = created.get_json()
         run_id = payload["run_id"]
         events, saw_done_marker = _run_events(client, run_id)
+        events_v2, saw_done_marker_v2 = _run_events_v2(client, run_id)
         status = client.get(f"/runs/{run_id}").get_json()
 
     assert payload["surface_mode"] == "cowork"
@@ -669,9 +723,20 @@ def test_cowork_run_streams_subruns_diff_and_summary_artifact(
     assert payload["workspace_root"] == source_root
     assert payload["worktree_id"] == ""
     assert saw_done_marker is True
+    assert saw_done_marker_v2 is True
     assert status["status"] == "done"
-    assert [event["kind"] for event in events].count("subagent_start") == 2
-    assert [event["kind"] for event in events].count("subagent_done") == 2
+    assert [event["kind"] for event in events].count("subrun_planned") == 2
+    assert [event["kind"] for event in events].count("subrun_running") >= 2
+    assert [event["kind"] for event in events].count("subrun_succeeded") == 2
+    assert "subagent_start" not in [event["kind"] for event in events]
+    assert "subagent_done" not in [event["kind"] for event in events]
+    assert all(event["schema"] == "metis.agent_event.v2" for event in events_v2)
+    assert [event["kind"] for event in events_v2].count("subrun_succeeded") == 2
+    assert all(
+        event["payload"]["schema"] == cowork_coordinator.COWORK_SUBRUN_EVENT_SCHEMA
+        for event in events_v2
+        if event["kind"].startswith("subrun_")
+    )
     assert any(event["kind"] == "artifact_created" for event in events)
     assert events[-1]["kind"] == "done"
     summary_event = next(event for event in events if event["kind"] == "artifact_created")
@@ -728,7 +793,7 @@ def test_cowork_local_vm_subruns_use_metis_wsl_runner(
                 "status": "done",
                 "returncode": 0,
                 "timed_out": False,
-                "stdout": "METIS_COWORK_VM_OK\n",
+                "stdout": "VALIDATION_OK\n",
                 "stderr": "",
                 "artifacts_dir": str(tmp_path / "vm-artifacts"),
                 "patch_path": str(tmp_path / "vm-artifacts" / "changes.patch"),
@@ -773,13 +838,17 @@ def test_cowork_local_vm_subruns_use_metis_wsl_runner(
     assert saw_done_marker is True
     assert len(vm_roots) == 2
     assert vm_roots == [record.worktree_workspace_root for record in records]
-    done_events = [event for event in events if event["kind"] == "subagent_done"]
+    done_events = [event for event in events if event["kind"] == "subrun_succeeded"]
     assert len(done_events) == 2
     assert all(event["payload"]["result"]["local_vm"]["backend"] == "metis_wsl" for event in done_events)
     assert all("hcs" not in json.dumps(event["payload"]["result"]["local_vm"]).lower() for event in done_events)
 
 
-def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(isolated_flask_app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     class OneToolBackend(CrashingStreamBackend):
         def __init__(self) -> None:
             self.calls = 0
@@ -820,6 +889,25 @@ def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(isolated_flask_
         workspace_id=web_app._runtime_state.active_workspace_id,
         mode="code",
     )
+    source_root = web_app._active_workspace_root()
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == code_session.id
+        assert label == "code-run"
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / "code-tool-lifecycle-worktree",
+            run_id=run_id,
+            session_id=session_id,
+            index=3,
+        )
+        record.worktree_id = "wt_code_tool_lifecycle"
+        record.label = "code-run"
+        return record
+
+    monkeypatch.setattr(web_app, "create_worktree", fake_create_worktree)
     registry.register(
         ToolDefinition(
             name="slow_cancel_tool",
@@ -967,6 +1055,7 @@ def test_run_registry_cancel_aborts_blocking_provider_stream(
 def test_run_registry_cancel_releases_blocking_tool_execution(
     isolated_flask_app: Any,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     def patched_run_stream(messages: List[Dict[str, Any]], config: AgentConfig, registry: Optional[ToolRegistry] = None, **kwargs: Any):
         return real_run_stream(messages, config, registry=registry, backend=ToolCallingBackend(), **kwargs)
@@ -988,6 +1077,25 @@ def test_run_registry_cancel_releases_blocking_tool_execution(
         workspace_id=web_app._runtime_state.active_workspace_id,
         mode="code",
     )
+    source_root = web_app._active_workspace_root()
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == code_session.id
+        assert label == "code-run"
+        record = _fake_worktree_record(
+            source_root,
+            tmp_path / "code-cancel-tool-worktree",
+            run_id=run_id,
+            session_id=session_id,
+            index=4,
+        )
+        record.worktree_id = "wt_code_cancel_tool"
+        record.label = "code-run"
+        return record
+
+    monkeypatch.setattr(web_app, "create_worktree", fake_create_worktree)
     registry.register(
         ToolDefinition(
             name="slow_cancel_tool",

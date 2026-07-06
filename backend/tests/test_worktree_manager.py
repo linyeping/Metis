@@ -75,6 +75,59 @@ def test_worktree_manager_create_diff_promote_archive_remove(tmp_path: Path, mon
     assert not Path(record.worktree_path).exists()
 
 
+def test_worktree_promote_review_selective_promote_and_rollback(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    monkeypatch.setenv("METIS_WORKTREE_BASE", str(tmp_path / "worktrees"))
+
+    record = wm.create_worktree(str(repo), run_id="runselective123", session_id="session-1", label="Code Run")
+    worktree = Path(record.worktree_path)
+    (worktree / "app.txt").write_text("hello changed\n", encoding="utf-8")
+    (worktree / "new-report.md").write_text("# New report\n", encoding="utf-8")
+
+    review = wm.review_worktree_promote(str(repo), record.worktree_id, paths=["new-report.md"])
+    assert review["schema"] == wm.WORKTREE_PROMOTE_REVIEW_SCHEMA
+    assert review["ok"] is True
+    assert review["can_apply"] is True
+    assert review["paths"] == ["new-report.md"]
+    assert [item["path"] for item in review["files"]] == ["new-report.md"]
+    assert "new-report.md" in review["patch"]
+    assert "app.txt" not in review["patch"]
+
+    promoted = wm.promote_worktree(str(repo), record.worktree_id, paths=["new-report.md"])
+    assert promoted["ok"] is True
+    assert promoted["rollback_available"] is True
+    assert promoted["promotion_id"].startswith("promo_")
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "hello\n"
+    assert (repo / "new-report.md").read_text(encoding="utf-8") == "# New report\n"
+
+    rollback_check = wm.rollback_worktree_promotion(str(repo), record.worktree_id, dry_run=True)
+    assert rollback_check["ok"] is True
+    rolled_back = wm.rollback_worktree_promotion(str(repo), record.worktree_id)
+    assert rolled_back["ok"] is True
+    assert rolled_back["promotion_id"] == promoted["promotion_id"]
+    assert not (repo / "new-report.md").exists()
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "hello\n"
+
+
+def test_worktree_promote_review_explains_conflict(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    monkeypatch.setenv("METIS_WORKTREE_BASE", str(tmp_path / "worktrees"))
+
+    record = wm.create_worktree(str(repo), run_id="runconflict123", session_id="session-1", label="Code Run")
+    worktree = Path(record.worktree_path)
+    (worktree / "app.txt").write_text("hello from worktree\n", encoding="utf-8")
+    (repo / "app.txt").write_text("hello from source\n", encoding="utf-8")
+
+    review = wm.review_worktree_promote(str(repo), record.worktree_id, paths=["app.txt"])
+    assert review["ok"] is False
+    assert review["can_apply"] is False
+    assert review["conflicts"]["ok"] is False
+    assert review["conflicts"]["files"][0]["path"] == "app.txt"
+    assert "source workspace already has changes" in review["conflicts"]["files"][0]["reason"]
+
+
 def test_create_worktree_refuses_non_git_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "plain"
     workspace.mkdir()

@@ -587,6 +587,41 @@ export interface RuntimeManagerCommandResult {
   [key: string]: unknown;
 }
 
+export interface MetisRuntimeCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  status: string;
+}
+
+export interface MetisRuntimeStep {
+  id: string;
+  label: string;
+  status: string;
+  ok: boolean;
+}
+
+export interface MetisRuntimeStatus {
+  ok: boolean;
+  schema: string;
+  generatedAt: number;
+  title: string;
+  ready: boolean;
+  status: 'ready' | 'needs_repair' | 'needs_system_setup' | 'blocked' | string;
+  summary: string;
+  primaryAction: 'none' | 'repair' | 'setup' | 'diagnostics' | string;
+  canRepair: boolean;
+  repairRequiresDownload: boolean;
+  repairRequiresAdmin: boolean;
+  downloadAvailable: boolean;
+  repaired?: boolean;
+  message?: string;
+  checks: MetisRuntimeCheck[];
+  steps: MetisRuntimeStep[];
+  diagnostics: Record<string, unknown>;
+  technicalStatus: Record<string, unknown>;
+}
+
 export interface ModelCapabilities {
   tier: number;
   tierLabel: string;
@@ -727,9 +762,24 @@ export interface WorktreeDiffPayload {
   status: string;
   stat: string;
   patch: string;
+  files: WorktreeChangedFile[];
   truncated: boolean;
   baseRef: string;
   error?: string;
+}
+
+export interface WorktreeChangedFile {
+  path: string;
+  status: string;
+  reason?: string;
+  sourceStatus?: string;
+}
+
+export interface WorktreePromoteConflictPayload {
+  ok: boolean;
+  summary: string;
+  files: WorktreeChangedFile[];
+  raw: string;
 }
 
 export interface WorktreePromotePayload {
@@ -737,6 +787,14 @@ export interface WorktreePromotePayload {
   schema: string;
   dryRun: boolean;
   worktree: WorktreeRecord | null;
+  promotionId: string;
+  rollbackAvailable: boolean;
+  rollbackPatchPath: string;
+  paths: string[];
+  files: WorktreeChangedFile[];
+  stat: string;
+  canApply: boolean;
+  conflicts: WorktreePromoteConflictPayload | null;
   message: string;
   error: string;
 }
@@ -1247,13 +1305,26 @@ export interface AutoTitlePayload {
   error?: string;
 }
 
+export type ChatSubagentStatus =
+  | 'planned'
+  | 'running'
+  | 'waiting_permission'
+  | 'done'
+  | 'error'
+  | 'canceled'
+  | 'promoted';
+
 export interface ChatSubagentEvent {
   taskId: string;
   name: string;
-  status: 'running' | 'done' | 'error';
+  status: ChatSubagentStatus;
   progress: number;
   summary?: string;
   result?: unknown;
+  source?: 'subagent' | 'cowork_subrun';
+  stage?: string;
+  executionProfile?: string;
+  worktreeId?: string;
   startedAt?: number;
   updatedAt?: number;
   finishedAt?: number;
@@ -1264,6 +1335,11 @@ export interface CoworkPlanSubrun {
   task_id?: string;
   title?: string;
   name?: string;
+  objective?: string;
+  inputs?: unknown[];
+  expected_artifacts?: unknown[];
+  acceptance_criteria?: unknown[];
+  dependencies?: unknown[];
   prompt?: string;
   execution_profile?: string;
   status?: string;
@@ -1378,6 +1454,13 @@ export type AgentEventKind =
   | 'subagent_start'
   | 'subagent_progress'
   | 'subagent_done'
+  | 'subrun_planned'
+  | 'subrun_running'
+  | 'subrun_waiting_permission'
+  | 'subrun_succeeded'
+  | 'subrun_failed'
+  | 'subrun_canceled'
+  | 'subrun_promoted'
   | 'done';
 
 export interface AgentEventEnvelope {

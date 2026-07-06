@@ -159,10 +159,21 @@ function normalizeArtifactKind(value: string): DocumentLibraryItemKind {
 function artifactSubtitle(artifact: ArtifactRecord): string {
   const kind = String(artifact.kind || 'workspace_file');
   const pathOrUrl = artifact.path || artifact.url || '';
-  return pathOrUrl ? `${kind} · ${pathOrUrl}` : kind;
+  const validation = officeValidationLabel(artifact.metadata);
+  const base = pathOrUrl ? `${kind} · ${pathOrUrl}` : kind;
+  return validation ? `${validation} · ${base}` : base;
 }
 
 function isoToMs(value: string): number {
   const parsed = Date.parse(value || '');
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function officeValidationLabel(metadata: Record<string, unknown>): string {
+  const validation = metadata.office_validation;
+  if (!validation || typeof validation !== 'object') return '';
+  const row = validation as Record<string, unknown>;
+  if (row.ok === true) return '已验收';
+  const summary = typeof row.summary === 'string' ? row.summary : '';
+  return summary ? `验收失败: ${summary}` : '验收失败';
 }

@@ -101,13 +101,40 @@ Cowork 第一版只做本地协调：
 
 - `plan -> subruns -> diff/artifact summary`
 - parent `/runs` 不创建全局 worktree；每个 subrun 创建自己的 managed worktree
+- plan 使用 bounded LLM planner，输出 `metis.cowork_plan.v2`
+- 每个 subrun 必须包含 `objective`、`inputs`、`expected_artifacts`、`acceptance_criteria`、`execution_profile`、`dependencies`
 - subrun 默认 `local_worktree`
-- 需要执行测试/构建的 subrun 可选择 `local_vm` command runner
+- 当 parent run 选择 `local_vm` 时，planner 可让测试/构建类 subrun 选择 `local_vm` command runner
 - `local_vm` subrun 仍在 worktree 副本上执行，runner/backend 必须是 `local_vm` / `metis_wsl`
-- 后端发 `subagent_start -> subagent_progress -> subagent_done`
+- 后端发稳定 `subrun_*` lifecycle：`subrun_planned -> subrun_running -> subrun_succeeded | subrun_failed | subrun_canceled`
+- 每个 terminal subrun 必须产出 `metis.cowork_subrun_evidence.v1`：成功需要 diff、真实 artifact 或 stdout/test evidence；失败/取消需要 failure reason。没有 evidence 的 subrun 由后端强制转成 `subrun_failed`，不算完成。
 - summary 注册为 `metis.artifact.v1` report，subrun report/diff 一并汇总
 - UI 只展示任务拆分、状态、diff、artifact
 - 不做 cloud worker，不做复杂远程调度
+
+Code 边界：
+
+- Code run 默认 `execution_profile=local_worktree`，因此默认创建 managed worktree，文件编辑和 diff review 都在 worktree 中发生。
+- `execution_profile=local_vm` 不是让 Code UI 或文件编辑进 VM；它只让 `execute_bash_command` / `run_tests` 这类命令工具通过 MetisRuntime WSL 执行，workspace 仍是 Code worktree 副本。
+- 在 `local_worktree` Code run 内，单次 `execute_bash_command` / `run_tests` 可传 `execution_profile="local_vm"` 或 `use_local_vm=true`，用于测试、构建、危险 shell 的隔离执行。
+- 不传命令级 selector 时，命令仍在当前 worktree 内按原权限协议执行。
+
+Promote review flow：
+
+- Promote 不再是直接全量 apply。UI 必须先展示 diff/review，再让用户选择文件。
+- 后端 review schema 为 `metis.worktree_promote_review.v1`，包含 `files`、`stat`、`patch`、`can_apply`、`conflicts`。
+- `paths` 为空表示 review/apply 全量 diff；传入 `paths` 表示选择性 promote。
+- 冲突解释由后端生成，至少包含冲突文件、source workspace 当前状态和原始 `git apply --check` 输出。
+- apply 成功后写入 promotion record 和 rollback patch，记录在 worktree registry metadata。
+- rollback 使用 `git apply -R` 回滚指定 promotion；如果 source workspace 后续又被改动，rollback 也必须先 check 并返回 conflicts。
+
+Planner 边界：
+
+- LLM planner 只允许输出 JSON，不允许工具调用。
+- `max_subruns` 被后端限制在 1-6。
+- 后端生成 `subrun_id`，不信任模型生成的身份。
+- `dependencies` 只能引用已经存在的更早 subrun。
+- planner 失败、坏 JSON、字段缺失或越界时，后端回退 deterministic planner，但仍填齐 v2 必填字段。
 
 第一版实现入口：
 

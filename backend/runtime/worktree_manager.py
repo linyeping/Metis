@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional
 
 WORKTREE_SCHEMA = "metis.worktree.v1"
 WORKTREE_REGISTRY_SCHEMA = "metis.worktree_registry.v1"
+WORKTREE_PROMOTE_REVIEW_SCHEMA = "metis.worktree_promote_review.v1"
+WORKTREE_PROMOTE_SCHEMA = "metis.worktree_promote.v1"
+WORKTREE_PROMOTE_ROLLBACK_SCHEMA = "metis.worktree_promote_rollback.v1"
 WORKTREE_STATUSES = {"active", "archived", "removed", "promoted", "failed"}
 _MAX_DIFF_CHARS = int(os.environ.get("METIS_WORKTREE_MAX_DIFF_CHARS", "200000"))
 
@@ -209,80 +212,413 @@ def diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = _MA
         "status": status,
         "stat": stat,
         "patch": patch,
+        "files": _changed_files_from_status(status),
         "truncated": truncated,
         "base_ref": record.base_ref,
     }
 
 
-def promote_worktree(workspace_root: str, worktree_id: str, *, dry_run: bool = False) -> Dict[str, Any]:
+def review_worktree_promote(
+    workspace_root: str,
+    worktree_id: str,
+    *,
+    paths: Optional[List[str]] = None,
+    max_chars: int = _MAX_DIFF_CHARS,
+) -> Dict[str, Any]:
     record = get_worktree(workspace_root, worktree_id)
     source_repo = Path(record.repo_root)
     worktree_path = Path(record.worktree_path)
     if not source_repo.is_dir() or not worktree_path.is_dir():
         raise WorktreeError("source repo or worktree path no longer exists")
-    patch = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=False)
+
+    selected_paths = _normalize_promote_paths(paths)
+    status = _git_stdout(["status", "--short", "--", *selected_paths] if selected_paths else ["status", "--short"], cwd=worktree_path)
+    stat = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=True, paths=selected_paths)
+    patch = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=False, paths=selected_paths)
+    files = _changed_files_from_status(status)
+    patch_preview = patch
+    truncated = len(patch_preview) > max_chars
+    if truncated:
+        patch_preview = patch_preview[:max_chars] + "\n[diff truncated]"
+
+    check = _check_patch_applies(source_repo, patch)
+    conflicts = _conflict_payload(check, files=files, source_repo=source_repo)
+    return {
+        "schema": WORKTREE_PROMOTE_REVIEW_SCHEMA,
+        "ok": bool(check.returncode == 0),
+        "worktree": record.to_dict(),
+        "paths": selected_paths,
+        "files": files,
+        "status": status,
+        "stat": stat,
+        "patch": patch_preview,
+        "truncated": truncated,
+        "base_ref": record.base_ref,
+        "can_apply": bool(check.returncode == 0),
+        "conflicts": conflicts,
+        "message": "patch applies cleanly" if check.returncode == 0 else conflicts.get("summary", "patch does not apply cleanly"),
+    }
+
+
+def promote_worktree(
+    workspace_root: str,
+    worktree_id: str,
+    *,
+    dry_run: bool = False,
+    paths: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    record = get_worktree(workspace_root, worktree_id)
+    source_repo = Path(record.repo_root)
+    worktree_path = Path(record.worktree_path)
+    if not source_repo.is_dir() or not worktree_path.is_dir():
+        raise WorktreeError("source repo or worktree path no longer exists")
+
+    selected_paths = _normalize_promote_paths(paths)
+    status = _git_stdout(["status", "--short", "--", *selected_paths] if selected_paths else ["status", "--short"], cwd=worktree_path)
+    stat = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=True, paths=selected_paths)
+    patch = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=False, paths=selected_paths)
+    files = _changed_files_from_status(status)
     if not patch.strip():
         return {
-            "schema": "metis.worktree_promote.v1",
+            "schema": WORKTREE_PROMOTE_SCHEMA,
             "ok": True,
             "dry_run": dry_run,
             "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": files,
             "message": "no changes to promote",
         }
-    check = _run_git_with_input(["apply", "--check", "-"], cwd=source_repo, input_text=patch, timeout=60)
+    check = _check_patch_applies(source_repo, patch)
+    conflicts = _conflict_payload(check, files=files, source_repo=source_repo)
     if check.returncode != 0:
         return {
-            "schema": "metis.worktree_promote.v1",
+            "schema": WORKTREE_PROMOTE_SCHEMA,
             "ok": False,
             "dry_run": dry_run,
             "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": files,
+            "conflicts": conflicts,
             "error": _git_error("patch does not apply cleanly", check),
         }
     if dry_run:
         return {
-            "schema": "metis.worktree_promote.v1",
+            "schema": WORKTREE_PROMOTE_SCHEMA,
             "ok": True,
             "dry_run": True,
             "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": files,
+            "stat": stat,
+            "can_apply": True,
+            "conflicts": conflicts,
             "message": "patch applies cleanly",
         }
+    promotion_id = f"promo_{uuid.uuid4().hex[:12]}"
+    patch_path = _write_promotion_patch(source_repo, promotion_id, patch)
     applied = _run_git_with_input(["apply", "-"], cwd=source_repo, input_text=patch, timeout=60)
     if applied.returncode != 0:
         return {
-            "schema": "metis.worktree_promote.v1",
+            "schema": WORKTREE_PROMOTE_SCHEMA,
             "ok": False,
             "dry_run": False,
             "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": files,
+            "conflicts": _conflict_payload(applied, files=files, source_repo=source_repo),
             "error": _git_error("failed to apply patch", applied),
         }
     record.status = "promoted"
     record.promoted_at = time.time()
     record.updated_at = record.promoted_at
+    _record_promotion(
+        record,
+        promotion_id=promotion_id,
+        patch_path=patch_path,
+        paths=selected_paths,
+        files=files,
+        stat=stat,
+    )
     _upsert_record(workspace_root, record)
     return {
-        "schema": "metis.worktree_promote.v1",
+        "schema": WORKTREE_PROMOTE_SCHEMA,
         "ok": True,
         "dry_run": False,
         "worktree": record.to_dict(),
+        "promotion_id": promotion_id,
+        "rollback_available": True,
+        "rollback_patch_path": str(patch_path),
+        "paths": selected_paths,
+        "files": files,
+        "stat": stat,
         "message": "patch promoted to source workspace",
     }
 
 
-def _diff_worktree_with_untracked(worktree_path: Path, base_ref: str, *, stat: bool) -> str:
-    untracked = _untracked_files(worktree_path)
+def rollback_worktree_promotion(
+    workspace_root: str,
+    worktree_id: str,
+    *,
+    promotion_id: str = "",
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    record = get_worktree(workspace_root, worktree_id)
+    source_repo = Path(record.repo_root)
+    if not source_repo.is_dir():
+        raise WorktreeError("source repo no longer exists")
+    promotion = _find_rollback_promotion(record, promotion_id)
+    if not promotion:
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": False,
+            "dry_run": dry_run,
+            "worktree": record.to_dict(),
+            "error": "no rollback promotion found",
+        }
+    patch_path = Path(str(promotion.get("patch_path") or "")).expanduser()
+    if not patch_path.is_file():
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": False,
+            "dry_run": dry_run,
+            "worktree": record.to_dict(),
+            "promotion_id": str(promotion.get("promotion_id") or ""),
+            "error": f"rollback patch not found: {patch_path}",
+        }
+    patch = patch_path.read_text(encoding="utf-8", errors="replace")
+    check = _run_git_with_input(["apply", "-R", "--check", "-"], cwd=source_repo, input_text=patch, timeout=60)
+    files = promotion.get("files") if isinstance(promotion.get("files"), list) else []
+    conflicts = _conflict_payload(check, files=[item for item in files if isinstance(item, dict)], source_repo=source_repo)
+    if check.returncode != 0:
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": False,
+            "dry_run": dry_run,
+            "worktree": record.to_dict(),
+            "promotion_id": str(promotion.get("promotion_id") or ""),
+            "conflicts": conflicts,
+            "error": _git_error("rollback patch does not apply cleanly", check),
+        }
+    if dry_run:
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": True,
+            "dry_run": True,
+            "worktree": record.to_dict(),
+            "promotion_id": str(promotion.get("promotion_id") or ""),
+            "paths": promotion.get("paths") if isinstance(promotion.get("paths"), list) else [],
+            "files": files,
+            "message": "rollback patch applies cleanly",
+        }
+    applied = _run_git_with_input(["apply", "-R", "-"], cwd=source_repo, input_text=patch, timeout=60)
+    if applied.returncode != 0:
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": False,
+            "dry_run": False,
+            "worktree": record.to_dict(),
+            "promotion_id": str(promotion.get("promotion_id") or ""),
+            "conflicts": _conflict_payload(applied, files=[item for item in files if isinstance(item, dict)], source_repo=source_repo),
+            "error": _git_error("failed to apply rollback patch", applied),
+        }
+    promotion["rolled_back"] = True
+    promotion["rolled_back_at"] = time.time()
+    record.status = "active"
+    record.updated_at = time.time()
+    record.metadata["last_rollback"] = {
+        "promotion_id": str(promotion.get("promotion_id") or ""),
+        "rolled_back_at": promotion["rolled_back_at"],
+    }
+    _upsert_record(workspace_root, record)
+    return {
+        "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+        "ok": True,
+        "dry_run": False,
+        "worktree": record.to_dict(),
+        "promotion_id": str(promotion.get("promotion_id") or ""),
+        "paths": promotion.get("paths") if isinstance(promotion.get("paths"), list) else [],
+        "files": files,
+        "message": "promotion rolled back from source workspace",
+    }
+
+
+def _diff_worktree_with_untracked(
+    worktree_path: Path,
+    base_ref: str,
+    *,
+    stat: bool,
+    paths: Optional[List[str]] = None,
+) -> str:
+    selected_paths = _normalize_promote_paths(paths)
+    untracked = _untracked_files(worktree_path, paths=selected_paths)
     if untracked:
         _git_stdout(["add", "-N", "--", *untracked], cwd=worktree_path, timeout=60)
     try:
         args = ["diff", "--stat" if stat else "--binary", base_ref]
+        if selected_paths:
+            args.extend(["--", *selected_paths])
         return _git_stdout(args, cwd=worktree_path, timeout=60)
     finally:
         if untracked:
             _git_stdout(["reset", "--", *untracked], cwd=worktree_path, timeout=60)
 
 
-def _untracked_files(worktree_path: Path) -> List[str]:
-    out = _git_stdout(["ls-files", "--others", "--exclude-standard"], cwd=worktree_path)
+def _untracked_files(worktree_path: Path, *, paths: Optional[List[str]] = None) -> List[str]:
+    selected_paths = _normalize_promote_paths(paths)
+    args = ["ls-files", "--others", "--exclude-standard"]
+    if selected_paths:
+        args.extend(["--", *selected_paths])
+    out = _git_stdout(args, cwd=worktree_path)
     return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def _normalize_promote_paths(paths: Optional[List[str]]) -> List[str]:
+    if not paths:
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for item in paths:
+        text = str(item or "").replace("\\", "/").strip().strip('"')
+        if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+            continue
+        parts = [part for part in text.split("/") if part not in {"", "."}]
+        if not parts or any(part == ".." for part in parts):
+            continue
+        normalized = "/".join(parts)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out[:200]
+
+
+def _changed_files_from_status(status: str) -> List[Dict[str, str]]:
+    files: List[Dict[str, str]] = []
+    for line in str(status or "").splitlines():
+        if not line.strip():
+            continue
+        marker = line[:2].strip() or line[:1].strip() or "?"
+        path = line[3:].strip() if len(line) >= 4 else line.strip()
+        if " -> " in path:
+            path = path.rsplit(" -> ", 1)[-1].strip()
+        path = path.strip('"').replace("\\", "/")
+        if path:
+            files.append({"path": path, "status": marker})
+        if len(files) >= 200:
+            break
+    return files
+
+
+def _check_patch_applies(source_repo: Path, patch: str) -> subprocess.CompletedProcess[str]:
+    if not str(patch or "").strip():
+        return subprocess.CompletedProcess(args=["git", "apply", "--check", "-"], returncode=0, stdout="", stderr="")
+    return _run_git_with_input(["apply", "--check", "-"], cwd=source_repo, input_text=patch, timeout=60)
+
+
+def _conflict_payload(
+    result: subprocess.CompletedProcess[str],
+    *,
+    files: List[Dict[str, str]],
+    source_repo: Path,
+) -> Dict[str, Any]:
+    raw = "\n".join(part for part in [result.stderr, result.stdout] if part).strip()
+    if result.returncode == 0:
+        return {
+            "ok": True,
+            "summary": "No conflicts detected.",
+            "files": [],
+            "raw": "",
+        }
+    conflict_paths = _paths_from_git_apply_error(raw)
+    if not conflict_paths:
+        conflict_paths = [str(item.get("path") or "") for item in files if isinstance(item, dict) and item.get("path")]
+    rows: List[Dict[str, str]] = []
+    for path in conflict_paths:
+        source_status = _source_status_for_path(source_repo, path)
+        reason = "patch context does not match the source workspace"
+        if source_status:
+            reason = f"source workspace already has changes for this path ({source_status})"
+        rows.append({"path": path, "reason": reason, "source_status": source_status})
+    return {
+        "ok": False,
+        "summary": "Patch does not apply cleanly. Review conflicting files before promoting.",
+        "files": rows,
+        "raw": raw,
+    }
+
+
+def _paths_from_git_apply_error(text: str) -> List[str]:
+    paths: List[str] = []
+    seen: set[str] = set()
+    patterns = [
+        r"error: patch failed: (.+?):\d+",
+        r"error: (.+?): patch does not apply",
+        r"error: (.+?): already exists in working directory",
+        r"error: (.+?): No such file or directory",
+    ]
+    for line in str(text or "").splitlines():
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if not match:
+                continue
+            path = match.group(1).strip().strip('"').replace("\\", "/")
+            if path and path not in seen:
+                seen.add(path)
+                paths.append(path)
+    return paths[:200]
+
+
+def _source_status_for_path(source_repo: Path, path: str) -> str:
+    try:
+        out = _git_stdout(["status", "--short", "--", path], cwd=source_repo, timeout=20)
+    except Exception:
+        return ""
+    return " ".join(line.strip() for line in out.splitlines() if line.strip())
+
+
+def _write_promotion_patch(source_repo: Path, promotion_id: str, patch: str) -> Path:
+    out_dir = source_repo / ".metis" / "worktrees" / "promotions"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{promotion_id}.patch"
+    path.write_text(patch, encoding="utf-8", newline="\n")
+    return path
+
+
+def _record_promotion(
+    record: WorktreeRecord,
+    *,
+    promotion_id: str,
+    patch_path: Path,
+    paths: List[str],
+    files: List[Dict[str, str]],
+    stat: str,
+) -> None:
+    promotions = record.metadata.get("promotions") if isinstance(record.metadata.get("promotions"), list) else []
+    row = {
+        "schema": WORKTREE_PROMOTE_SCHEMA,
+        "promotion_id": promotion_id,
+        "patch_path": str(patch_path),
+        "paths": list(paths),
+        "files": list(files),
+        "stat": stat,
+        "created_at": time.time(),
+        "rolled_back": False,
+        "rolled_back_at": 0.0,
+    }
+    promotions.append(row)
+    record.metadata["promotions"] = promotions[-50:]
+    record.metadata["last_promotion"] = row
+
+
+def _find_rollback_promotion(record: WorktreeRecord, promotion_id: str) -> Optional[Dict[str, Any]]:
+    promotions = record.metadata.get("promotions") if isinstance(record.metadata.get("promotions"), list) else []
+    candidates = [item for item in promotions if isinstance(item, dict) and not bool(item.get("rolled_back"))]
+    if promotion_id:
+        for item in candidates:
+            if str(item.get("promotion_id") or "") == promotion_id:
+                return item
+        return None
+    return candidates[-1] if candidates else None
 
 
 def registry_payload(workspace_root: str) -> Dict[str, Any]:
@@ -441,6 +777,9 @@ def _run_git_with_input(
 
 
 __all__ = [
+    "WORKTREE_PROMOTE_REVIEW_SCHEMA",
+    "WORKTREE_PROMOTE_ROLLBACK_SCHEMA",
+    "WORKTREE_PROMOTE_SCHEMA",
     "WORKTREE_REGISTRY_SCHEMA",
     "WORKTREE_SCHEMA",
     "WorktreeError",
@@ -453,4 +792,6 @@ __all__ = [
     "promote_worktree",
     "registry_payload",
     "remove_worktree",
+    "review_worktree_promote",
+    "rollback_worktree_promotion",
 ]

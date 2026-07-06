@@ -12,8 +12,8 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useT } from '../../hooks/useT';
-import { getWorktreeDiff, promoteWorktree } from '../../lib/api';
-import type { ChatSubagentEvent, CoworkPlanSnapshot, CoworkPlanSubrun, RuntimeStatus, WorktreeDiffPayload, WorktreePromotePayload } from '../../lib/types';
+import { getWorktreeDiff, promoteWorktree, reviewWorktreePromote, rollbackWorktreePromotion } from '../../lib/api';
+import type { ChatSubagentEvent, CoworkPlanSnapshot, CoworkPlanSubrun, RuntimeStatus, WorktreeChangedFile, WorktreeDiffPayload, WorktreePromotePayload } from '../../lib/types';
 
 type UnknownRecord = Record<string, unknown>;
 type CoworkRowStatus = 'planned' | 'running' | 'done' | 'error';
@@ -30,6 +30,7 @@ interface CoworkArtifactRow {
   kind: string;
   path: string;
   mime: string;
+  validation: string;
 }
 
 interface CoworkRow {
@@ -44,6 +45,7 @@ interface CoworkRow {
   worktreeRoot: string;
   artifacts: CoworkArtifactRow[];
   diff: UnknownRecord;
+  evidence: UnknownRecord;
   localVm: UnknownRecord;
   startedAt?: number;
   finishedAt?: number;
@@ -143,8 +145,10 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
   const [reviewDiff, setReviewDiff] = useState<WorktreeDiffPayload | null>(null);
   const [promoteCheck, setPromoteCheck] = useState<WorktreePromotePayload | null>(null);
   const [promoteResult, setPromoteResult] = useState<WorktreePromotePayload | null>(null);
+  const [rollbackResult, setRollbackResult] = useState<WorktreePromotePayload | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [actionError, setActionError] = useState('');
-  const [busyAction, setBusyAction] = useState<'diff' | 'check' | 'promote' | ''>('');
+  const [busyAction, setBusyAction] = useState<'diff' | 'check' | 'promote' | 'rollback' | ''>('');
   const StatusIcon = row.status === 'error' ? AlertTriangle : row.status === 'done' ? CheckCircle2 : LoaderCircle;
   const displayedDiff = reviewDiff
     ? {
@@ -164,8 +168,21 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
   const localVmStderr = stringValue(row.localVm.stderr);
   const localVmChangedFiles = stringArray(row.localVm.changed_files);
   const localVmArtifacts = artifactRows(row.localVm.artifacts);
+  const evidenceCounts = recordValue(row.evidence.counts);
+  const failureReasons = failureReasonRows(row.evidence.failure_reasons);
+  const evidenceStats = [
+    { label: 'Diff', value: numberValue(evidenceCounts.diff) },
+    { label: 'Artifacts', value: numberValue(evidenceCounts.artifacts) },
+    { label: 'Stdout/Test', value: numberValue(evidenceCounts.stdout_test ?? evidenceCounts.stdoutTest) },
+    { label: 'Failures', value: numberValue(evidenceCounts.failure_reasons ?? evidenceCounts.failureReasons) },
+  ];
   const elapsed = elapsedText(row.startedAt, row.finishedAt);
-  const canPromote = Boolean(row.worktreeId && promoteCheck?.ok && !promoteResult?.ok);
+  const diffFiles = reviewDiff?.files?.length ? reviewDiff.files : changedFilesFromDiff(displayedDiff);
+  const selectedPromotePaths = reviewDiff ? selectedPaths : diffFiles.map(file => file.path);
+  const canReview = Boolean(row.worktreeId && (!reviewDiff || selectedPromotePaths.length > 0));
+  const canPromote = Boolean(row.worktreeId && promoteCheck?.ok && !promoteResult?.ok && selectedPromotePaths.length > 0);
+  const conflictFiles = promoteCheck?.conflicts?.files || [];
+  const rollbackPromotionId = promoteResult?.promotionId || '';
 
   const loadDiff = async () => {
     if (!row.worktreeId || busyAction) return;
@@ -174,6 +191,10 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
     try {
       const payload = await getWorktreeDiff(row.worktreeId);
       setReviewDiff(payload);
+      setPromoteCheck(null);
+      setPromoteResult(null);
+      setRollbackResult(null);
+      setSelectedPaths(payload.files.map(file => file.path));
     } catch (error) {
       setActionError(formatActionError(error));
     } finally {
@@ -186,8 +207,9 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
     setBusyAction('check');
     setActionError('');
     setPromoteResult(null);
+    setRollbackResult(null);
     try {
-      const payload = await promoteWorktree(row.worktreeId, true);
+      const payload = await reviewWorktreePromote(row.worktreeId, selectedPromotePaths);
       setPromoteCheck(payload);
       if (!payload.ok) setActionError(payload.error || t('Diff 无法干净应用。'));
     } catch (error) {
@@ -202,9 +224,34 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
     setBusyAction('promote');
     setActionError('');
     try {
-      const payload = await promoteWorktree(row.worktreeId, false);
+      const payload = await promoteWorktree(row.worktreeId, false, selectedPromotePaths);
       setPromoteResult(payload);
       if (!payload.ok) setActionError(payload.error || t('Promote 失败。'));
+    } catch (error) {
+      setActionError(formatActionError(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const toggleSelectedPath = (path: string) => {
+    setPromoteCheck(null);
+    setPromoteResult(null);
+    setRollbackResult(null);
+    setSelectedPaths(current => {
+      if (current.includes(path)) return current.filter(item => item !== path);
+      return [...current, path];
+    });
+  };
+
+  const applyRollback = async () => {
+    if (!row.worktreeId || !rollbackPromotionId || busyAction) return;
+    setBusyAction('rollback');
+    setActionError('');
+    try {
+      const payload = await rollbackWorktreePromotion(row.worktreeId, rollbackPromotionId, false);
+      setRollbackResult(payload);
+      if (!payload.ok) setActionError(payload.error || t('Rollback 失败。'));
     } catch (error) {
       setActionError(formatActionError(error));
     } finally {
@@ -248,7 +295,7 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
                   <FileText size={12} />
                   <div>
                     <strong>{artifact.title || artifact.id || artifact.path || t('Artifact')}</strong>
-                    <span>{[artifact.kind, artifact.mime].filter(Boolean).join(' · ') || artifact.id}</span>
+                    <span>{[artifact.validation, artifact.kind, artifact.mime].filter(Boolean).join(' · ') || artifact.id}</span>
                     {(artifact.path || artifact.id) && <code>{artifact.path || artifact.id}</code>}
                   </div>
                 </li>
@@ -259,22 +306,85 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
           )}
         </div>
 
+        <div className="cowork-detail-cell">
+          <span><ScrollText size={13} />{t('证据')}</span>
+          {Object.keys(row.evidence).length ? (
+            <>
+              <div className="cowork-evidence-pills">
+                {evidenceStats.map(item => (
+                  <b key={item.label} data-active={item.value > 0}>
+                    {item.label} <em>{item.value}</em>
+                  </b>
+                ))}
+              </div>
+              {failureReasons.length > 0 && (
+                <ul className="cowork-reason-list">
+                  {failureReasons.map((reason, index) => (
+                    <li key={`${reason.code}-${index}`}>
+                      <strong>{reason.code}</strong>
+                      <span>{reason.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : (
+            <small>{t('等待 evidence')}</small>
+          )}
+        </div>
+
         <div className="cowork-detail-cell cowork-detail-wide">
           <span><FileCode size={13} />{t('Diff')}</span>
           <div className="cowork-diff-actions">
             <button type="button" disabled={!row.worktreeId || Boolean(busyAction)} onClick={() => void loadDiff()}>
               {busyAction === 'diff' ? t('加载中') : t('完整 Diff')}
             </button>
-            <button type="button" disabled={!row.worktreeId || Boolean(busyAction)} onClick={() => void checkPromote()}>
-              {busyAction === 'check' ? t('检查中') : t('检查可应用')}
+            <button type="button" disabled={!canReview || Boolean(busyAction)} onClick={() => void checkPromote()}>
+              {busyAction === 'check' ? t('检查中') : t('Review')}
             </button>
             <button type="button" data-danger="true" disabled={!canPromote || Boolean(busyAction)} onClick={() => void applyPromote()}>
               {busyAction === 'promote' ? t('Promote 中') : t('Promote')}
             </button>
+            <button type="button" disabled={!rollbackPromotionId || Boolean(busyAction) || rollbackResult?.ok} onClick={() => void applyRollback()}>
+              {busyAction === 'rollback' ? t('回滚中') : t('Rollback')}
+            </button>
           </div>
+          {diffFiles.length > 0 && (
+            <div className="cowork-promote-file-list" aria-label={t('选择要 Promote 的文件')}>
+              {diffFiles.map(file => (
+                <label key={file.path}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPromotePaths.includes(file.path)}
+                    disabled={Boolean(busyAction) || Boolean(promoteResult?.ok)}
+                    onChange={() => toggleSelectedPath(file.path)}
+                  />
+                  <span>{file.status || 'M'}</span>
+                  <code>{file.path}</code>
+                </label>
+              ))}
+            </div>
+          )}
           {actionError && <p className="cowork-error-line">{actionError}</p>}
           {promoteCheck?.ok && !promoteResult?.ok && <small>{promoteCheck.message || t('Patch 可以干净应用。')}</small>}
+          {promoteCheck && !promoteCheck.ok && (
+            <div className="cowork-conflict-box">
+              <strong>{promoteCheck.conflicts?.summary || t('Patch 无法干净应用。')}</strong>
+              {conflictFiles.length > 0 && (
+                <ul>
+                  {conflictFiles.map(file => (
+                    <li key={file.path}>
+                      <code>{file.path}</code>
+                      <span>{file.reason || file.sourceStatus || t('上下文不匹配')}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {promoteCheck.conflicts?.raw && <pre data-tone="danger">{compactText(promoteCheck.conflicts.raw, 1200)}</pre>}
+            </div>
+          )}
           {promoteResult?.ok && <small>{promoteResult.message || t('已 promote 到主 workspace。')}</small>}
+          {rollbackResult?.ok && <small>{rollbackResult.message || t('已回滚本次 promote。')}</small>}
           {Object.keys(displayedDiff).length ? (
             <>
               {diffError && <p className="cowork-error-line">{diffError}</p>}
@@ -361,6 +471,7 @@ function coworkRowFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSu
   const diff = nonEmptyRecord(value(result, subrunRecord, 'diff')) || {};
   const localVm = nonEmptyRecord(value(result, subrunRecord, 'local_vm', 'localVm')) || {};
   const artifacts = artifactRows(value(result, subrunRecord, 'artifacts'));
+  const evidence = nonEmptyRecord(value(result, subrunRecord, 'evidence')) || {};
   const profile = firstString(result, subrunRecord, ['execution_profile', 'executionProfile']) || 'local_worktree';
   const worktreeId = firstString(result, subrunRecord, worktree, ['worktree_id', 'worktreeId']);
   const worktreeRoot = firstString(result, subrunRecord, worktree, ['worktree_workspace_root', 'worktreeWorkspaceRoot', 'path']);
@@ -369,7 +480,7 @@ function coworkRowFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSu
   return {
     id,
     title: item?.name || firstString(subrunRecord, ['title', 'name']) || `Subrun ${index}`,
-    prompt: firstString(subrunRecord, ['prompt']),
+    prompt: firstString(subrunRecord, ['objective', 'prompt']),
     status: rowStatus(item?.status, firstString(subrunRecord, ['status'])),
     progress: clampProgress(item?.progress ?? progressFromPlanStatus(firstString(subrunRecord, ['status']))),
     profile,
@@ -378,6 +489,7 @@ function coworkRowFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSu
     worktreeRoot,
     artifacts,
     diff,
+    evidence,
     localVm,
     startedAt: item?.startedAt,
     finishedAt: item?.finishedAt || item?.updatedAt,
@@ -396,21 +508,23 @@ function coworkStats(rows: CoworkRow[]) {
 }
 
 function rowStatus(itemStatus: ChatSubagentEvent['status'] | undefined, planStatus: string): CoworkRowStatus {
-  if (itemStatus === 'error') return 'error';
-  if (itemStatus === 'done') return 'done';
-  if (itemStatus === 'running') return 'running';
+  if (itemStatus === 'error' || itemStatus === 'canceled') return 'error';
+  if (itemStatus === 'done' || itemStatus === 'promoted') return 'done';
+  if (itemStatus === 'running' || itemStatus === 'waiting_permission') return 'running';
+  if (itemStatus === 'planned') return 'planned';
   const status = planStatus.toLowerCase();
-  if (['failed', 'failure', 'error'].includes(status)) return 'error';
-  if (['done', 'complete', 'completed', 'finished'].includes(status)) return 'done';
-  if (['running', 'active', 'in_progress', 'in-progress'].includes(status)) return 'running';
+  if (['failed', 'failure', 'error', 'canceled', 'cancelled'].includes(status)) return 'error';
+  if (['done', 'complete', 'completed', 'finished', 'succeeded', 'success', 'promoted'].includes(status)) return 'done';
+  if (['running', 'active', 'in_progress', 'in-progress', 'waiting_permission', 'waiting-permission'].includes(status)) return 'running';
   return 'planned';
 }
 
 function progressFromPlanStatus(status: string): number {
   const normalized = status.toLowerCase();
-  if (['done', 'complete', 'completed', 'finished'].includes(normalized)) return 100;
+  if (['done', 'complete', 'completed', 'finished', 'succeeded', 'success', 'promoted'].includes(normalized)) return 100;
   if (['running', 'active', 'in_progress', 'in-progress'].includes(normalized)) return 35;
-  if (['failed', 'failure', 'error'].includes(normalized)) return 100;
+  if (['waiting_permission', 'waiting-permission'].includes(normalized)) return 50;
+  if (['failed', 'failure', 'error', 'canceled', 'cancelled'].includes(normalized)) return 100;
   return 0;
 }
 
@@ -439,7 +553,41 @@ function artifactRows(value: unknown): CoworkArtifactRow[] {
       kind: firstString(item, ['kind', 'type']),
       path: firstString(item, ['path', 'url', 'relative_path', 'relativePath']),
       mime: firstString(item, ['mime', 'mime_type', 'mimeType']),
+      validation: officeValidationLabel(recordValue(item.metadata)),
     }));
+}
+
+function officeValidationLabel(metadata: UnknownRecord): string {
+  const validation = recordValue(metadata.office_validation ?? metadata.officeValidation);
+  if (!Object.keys(validation).length) return '';
+  if (validation.ok === true) return '已验收';
+  return firstString(validation, ['summary', 'error']) || '验收失败';
+}
+
+function changedFilesFromDiff(diff: UnknownRecord): WorktreeChangedFile[] {
+  const rawFiles = diff.files;
+  if (Array.isArray(rawFiles)) {
+    return rawFiles
+      .map(item => recordValue(item))
+      .map(item => ({
+        path: firstString(item, ['path']),
+        status: firstString(item, ['status']),
+        reason: firstString(item, ['reason']),
+        sourceStatus: firstString(item, ['source_status', 'sourceStatus']),
+      }))
+      .filter(item => item.path);
+  }
+  const status = stringValue(diff.status);
+  if (!status) return [];
+  return status.split('\n')
+    .map(line => {
+      const marker = line.slice(0, 2).trim() || line.slice(0, 1).trim() || '?';
+      let path = line.length >= 4 ? line.slice(3).trim() : line.trim();
+      if (path.includes(' -> ')) path = path.split(' -> ').pop()?.trim() || path;
+      path = path.replace(/^"|"$/g, '').replace(/\\/g, '/');
+      return { path, status: marker };
+    })
+    .filter(item => item.path);
 }
 
 function firstString(...args: Array<UnknownRecord | string[]>): string {
@@ -484,6 +632,25 @@ function stringValue(value: unknown): string {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map(item => stringValue(item)).filter(Boolean);
+}
+
+function failureReasonRows(value: unknown): Array<{ code: string; message: string; source: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => recordValue(item))
+    .filter(item => Object.keys(item).length > 0)
+    .map(item => ({
+      code: stringValue(item.code) || 'SUBRUN_FAILED',
+      message: stringValue(item.message),
+      source: stringValue(item.source),
+    }))
+    .filter(item => item.code || item.message);
+}
+
+function numberValue(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function compactText(value: string, maxLength: number): string {

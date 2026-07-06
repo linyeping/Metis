@@ -26,6 +26,13 @@ KNOWN_AGENT_EVENT_KINDS_V2: Tuple[str, ...] = (
     "tool_timed_out",
     "artifact_created",
     "runtime_status",
+    "subrun_planned",
+    "subrun_running",
+    "subrun_waiting_permission",
+    "subrun_succeeded",
+    "subrun_failed",
+    "subrun_canceled",
+    "subrun_promoted",
     "run_completed",
     "run_failed",
     "run_canceled",
@@ -35,9 +42,6 @@ PASSTHROUGH_AGENT_EVENT_KINDS_V2: Tuple[str, ...] = (
     "compact",
     "todo_update",
     "memory_nudge",
-    "subagent_start",
-    "subagent_progress",
-    "subagent_done",
 )
 
 ENVELOPE_REQUIRED_V2: Tuple[str, ...] = (
@@ -66,4 +70,5 @@ def agent_event_contract_payload_v2() -> Dict[str, Any]:
         "envelope_required": list(ENVELOPE_REQUIRED_V2),
         "identity_authority": "backend",
         "tool_identity_key": "payload.call_id",
+        "subrun_identity_key": "payload.subrun_id",
     }

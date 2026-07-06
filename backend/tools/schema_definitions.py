@@ -57,6 +57,8 @@ K 侧：超时与输出截断防死锁；description 仅用于日志审计（5�
             "timeout": _integer("超时秒数，默认 60（对应 C 的 block_until_ms/1000 近似）"),
             "cwd": _string("工作目录，默认 '.'（C 名 working_directory 会在 registry 映射到此）"),
             "description": _string("5–10 词说明用途（可选，与 C Shell 一致）"),
+            "execution_profile": _string("可选。设为 'local_vm' 时，此命令在 MetisRuntime WSL 中执行；默认在当前 Code worktree 执行。"),
+            "use_local_vm": _boolean("可选。true 时等价于 execution_profile='local_vm'。"),
         },
         ["command"],
     ),
@@ -247,7 +249,7 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
     ),
     (
         "pdf_create",
-        "创建简单 PDF 文档。复杂排版优先生成 DOCX 后渲染/转换，或用专门脚本生成后再 pdf_render_pages 验收。",
+        "创建简单 PDF 文档，并在返回完成前 inspect + render 验收；渲染失败时不算完成品。",
         {
             "output_path": _string("输出 PDF 路径"),
             "title": _string("可选标题"),
@@ -258,7 +260,7 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
     ),
     (
         "docx_create",
-        "创建 Word/DOCX 文档，适合报告、作业、说明书草稿。完成后应 docx_render_pages 或 docx_inspect_layout 验收。",
+        "创建 Word/DOCX 文档，适合报告、作业、说明书草稿，并在返回完成前 inspect + render 验收。",
         {
             "output_path": _string("输出 DOCX 路径"),
             "title": _string("可选标题"),
@@ -269,7 +271,7 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
     ),
     (
         "docx_edit",
-        "编辑现有 DOCX：简单查找替换、追加文本。会保留原结构，复杂修订后应重新渲染验收。",
+        "编辑现有 DOCX：简单查找替换、追加文本。保存后会重新 inspect + render 验收。",
         {
             "path": _string("输入 DOCX 路径"),
             "output_path": _string("输出 DOCX 路径；为空则原地保存"),
@@ -310,7 +312,7 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
     ),
     (
         "xlsx_create",
-        "创建 XLSX 工作簿，适合数据表、实验结果表、清单和简单多 sheet 交付物。完成后应 xlsx_inspect 验收。",
+        "创建 XLSX 工作簿，适合数据表、实验结果表、清单和简单多 sheet 交付物，并在返回完成前 inspect 验收。",
         {
             "output_path": _string("输出 XLSX 路径，例如 output/office/results.xlsx"),
             "title": _string("可选标题；单 sheet 时会写入 A1"),
@@ -330,7 +332,7 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
     ),
     (
         "pptx_create",
-        "创建简单 PPTX 演示文稿，适合报告提纲、汇报草稿和多页摘要。完成后应 pptx_inspect 验收。",
+        "创建简单 PPTX 演示文稿，适合报告提纲、汇报草稿和多页摘要，并在返回完成前 inspect 验收。",
         {
             "output_path": _string("输出 PPTX 路径，例如 output/office/summary.pptx"),
             "title": _string("可选标题"),
@@ -348,7 +350,7 @@ C：可用 path 代替 file_path；offset/limit 是推荐分页参数（offset �
     ),
     (
         "office_report_from_code_run",
-        "后台执行 Python 代码/脚本或工作区命令，收集 stdout、stderr 和生成文件，并组装成 DOCX 报告。运行时会注入 METIS_REPORT_ARTIFACTS_DIR 供脚本保存图表/结果。适合实验报告、作业、数据分析、代码运行结果归档；不要为了这类任务默认接管 WPS/PyCharm。",
+        "后台执行 Python 代码/脚本或工作区命令，收集 stdout、stderr 和生成文件，并组装成 DOCX 报告。最终 DOCX 必须 inspect + render 验收后才算完成品。运行时会注入 METIS_REPORT_ARTIFACTS_DIR 供脚本保存图表/结果。适合实验报告、作业、数据分析、代码运行结果归档；不要为了这类任务默认接管 WPS/PyCharm。",
         {
             "output_path": _string("输出 DOCX 路径，例如 output/docx/experiment-report.docx"),
             "title": _string("报告标题"),
@@ -1115,6 +1117,8 @@ cell_language 与 cell_type 二选一指定类型（python/markdown/...）。"""
             "command": _string("Optional custom command, e.g. python -m pytest"),
             "cwd": _string("Working directory, default '.'"),
             "timeout": _integer("Timeout in seconds, default 120"),
+            "execution_profile": _string("Optional. Set to 'local_vm' to run this test command in MetisRuntime WSL; default runs in the current Code worktree."),
+            "use_local_vm": _boolean("Optional. true is equivalent to execution_profile='local_vm'."),
         },
         [],
     ),

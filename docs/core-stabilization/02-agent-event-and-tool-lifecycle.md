@@ -88,11 +88,63 @@ v2 的核心不是换名字，而是建立这些硬约束：
 | `tool_timed_out` | 工具超时 |
 | `artifact_created` | 产物创建 |
 | `runtime_status` | 非工具类运行状态 |
+| `subrun_planned` | Cowork subrun 已进入计划 |
+| `subrun_running` | Cowork subrun 正在执行 |
+| `subrun_waiting_permission` | Cowork subrun 等待权限答复 |
+| `subrun_succeeded` | Cowork subrun 成功结束 |
+| `subrun_failed` | Cowork subrun 失败结束 |
+| `subrun_canceled` | Cowork subrun 被取消 |
+| `subrun_promoted` | Cowork subrun diff 已应用到主 workspace |
 | `run_completed` | run 正常结束 |
 | `run_failed` | run 异常结束 |
 | `run_canceled` | run 被取消 |
 
 旧的 `tool_call`、`tool_result` 保留在 v1 adapter，不进入 v2 reducer。
+旧的 `subagent_start/progress/done` 只作为 legacy adapter 兼容，不再是 Cowork subrun 主协议。
+
+---
+
+### 3.1 Cowork Subrun Payload
+
+`subrun_*` 事件的 `payload` 必须包含：
+
+```json
+{
+  "schema": "metis.cowork_subrun_event.v1",
+  "version": 1,
+  "subrun_id": "subrun_xxx",
+  "title": "Inspect implementation",
+  "objective": "Map the current implementation.",
+  "inputs": ["Parent goal", "Current workspace"],
+  "expected_artifacts": ["diff summary", "validation evidence"],
+  "acceptance_criteria": ["Changed files or evidence are attached."],
+  "execution_profile": "local_worktree|local_vm",
+  "dependencies": ["subrun_previous"],
+  "status": "planned|running|waiting_permission|succeeded|failed|canceled|promoted",
+  "stage": "agent_running",
+  "progress": 40,
+  "evidence": {
+    "schema": "metis.cowork_subrun_evidence.v1",
+    "success_evidence": true,
+    "missing_success_evidence": false,
+    "counts": {
+      "diff": 1,
+      "artifacts": 0,
+      "stdout_test": 1,
+      "failure_reasons": 0
+    }
+  }
+}
+```
+
+规则：
+
+- `subrun_id` 由后端生成。
+- `dependencies` 只能引用同一 plan 中更早的 `subrun_id`。
+- terminal event 必须有 `evidence`。成功 subrun 至少要有 `diff`、真实 artifact、stdout/test evidence 之一。
+- 失败或取消 subrun 必须有 `failure_reasons`。如果 subrun 没有 diff、artifact、stdout/test，也没有失败原因，后端强制转成 `subrun_failed`，原因码为 `SUBRUN_MISSING_EVIDENCE`。
+- coordinator 自动生成的 subrun report 不算成功 evidence；它只是记录 evidence 的持久报告。
+- `subrun_promoted` 是用户 review/promote 后的状态，不由普通执行完成自动产生。
 
 ---
 

@@ -13,6 +13,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from backend.core.paths import metis_dir, metis_home, metis_path
+from backend.runtime import office_artifact_validation
 
 ARTIFACT_SCHEMA = "metis.artifact.v1"
 ARTIFACT_VERSION = 1
@@ -71,6 +72,18 @@ def register_artifact(
         _assert_path_allowed(normalized_path, workspace_root=workspace_root)
 
     clean_metadata = dict(metadata or {}) if isinstance(metadata, dict) else {}
+    if _requires_office_validation(normalized_kind, normalized_path):
+        validation = office_artifact_validation.validate_office_artifact(normalized_path)
+        if not validation.get("ok"):
+            raise ArtifactRegistryError(
+                f"office artifact validation failed: {validation.get('summary') or validation.get('error') or 'unknown error'}"
+            )
+        clean_metadata = {
+            **clean_metadata,
+            "office_validation": validation,
+            "artifact_state": "complete",
+            "validated": True,
+        }
     now = _utc_now()
     with _LOCK:
         current = _read_registry_unlocked()
@@ -329,6 +342,12 @@ def _kind_for_file(path: Path) -> str:
     if ext in {".diff", ".patch"}:
         return "diff"
     return "workspace_file"
+
+
+def _requires_office_validation(kind: str, path: str) -> bool:
+    if kind not in {"document", "report"}:
+        return False
+    return bool(path and office_artifact_validation.is_office_artifact_path(path))
 
 
 def _assert_path_allowed(path: str, *, workspace_root: str = "") -> None:

@@ -89,13 +89,13 @@ function SubagentCard({ item }: { item: ChatSubagentEvent }) {
   const summary = item.summary || compactResult(item.result);
   const progress = clampProgress(item.progress);
   const elapsed = elapsedText(item.startedAt, item.finishedAt || item.updatedAt);
-  const StatusIcon = item.status === 'error' ? AlertTriangle : item.status === 'done' ? CheckCircle2 : LoaderCircle;
+  const StatusIcon = item.status === 'error' || item.status === 'canceled' ? AlertTriangle : isDoneStatus(item.status) ? CheckCircle2 : LoaderCircle;
 
   return (
     <article className="subagent-card" data-status={item.status}>
       <button className="subagent-open-button" type="button" onClick={() => setOpen(value => !value)}>
         <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
-        <StatusIcon className={item.status === 'running' ? 'spin' : undefined} size={14} />
+        <StatusIcon className={item.status === 'running' || item.status === 'waiting_permission' ? 'spin' : undefined} size={14} />
         <span>{item.name}</span>
         {elapsed && <small>{elapsed}</small>}
         <em>{t(statusText(item.status))}</em>
@@ -125,17 +125,25 @@ function SubagentCard({ item }: { item: ChatSubagentEvent }) {
 
 function subagentStats(items: ChatSubagentEvent[]) {
   const total = items.length;
-  const done = items.filter(item => item.status === 'done').length;
-  const error = items.filter(item => item.status === 'error').length;
-  const running = items.filter(item => item.status === 'running').length;
+  const done = items.filter(item => isDoneStatus(item.status)).length;
+  const error = items.filter(item => item.status === 'error' || item.status === 'canceled').length;
+  const running = items.filter(item => item.status === 'running' || item.status === 'waiting_permission').length;
   const progress = total ? Math.round(items.reduce((sum, item) => sum + clampProgress(item.progress), 0) / total) : 0;
   return { total, done, error, running, progress };
 }
 
 function statusText(status: ChatSubagentEvent['status']): string {
+  if (status === 'planned') return '待执行';
   if (status === 'running') return '运行中';
+  if (status === 'waiting_permission') return '等待确认';
+  if (status === 'canceled') return '已取消';
+  if (status === 'promoted') return '已应用';
   if (status === 'error') return '错误';
   return '完成';
+}
+
+function isDoneStatus(status: ChatSubagentEvent['status']): boolean {
+  return status === 'done' || status === 'promoted';
 }
 
 function elapsedText(startedAt?: number, finishedAt?: number): string {

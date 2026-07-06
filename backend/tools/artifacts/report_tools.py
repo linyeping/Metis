@@ -13,8 +13,7 @@ from backend.tools.coding.foundation.core_mechanisms.path_security import (
     safe_path_for_read,
     safe_path_for_write,
 )
-
-from .docx_tools import docx_inspect_layout
+from backend.runtime.office_artifact_validation import validate_office_artifact
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -111,28 +110,26 @@ def office_report_from_code_run(
         report_error = f"{type(exc).__name__}: {exc}"
         _add_activity(activity, "write_report", "Write DOCX report", False, detail=report_error)
 
-    inspect_payload: Dict[str, Any] = {}
+    validation_payload: Dict[str, Any] = {}
     if report_ok:
         try:
-            inspect_payload = json.loads(
-                docx_inspect_layout(str(target), render=bool(render), output_dir=str(target.parent / f"{target.stem}_render"))
-            )
+            validation_payload = validate_office_artifact(str(target))
         except Exception as exc:
-            inspect_payload = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            validation_payload = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         _add_activity(
             activity,
-            "verify_report",
-            "Inspect/render report",
-            bool(inspect_payload.get("ok")),
-            detail=_verification_detail(inspect_payload),
+            "validate_report",
+            "Validate report artifact",
+            bool(validation_payload.get("ok")),
+            detail=_verification_detail(validation_payload),
         )
 
-    ok = bool(report_ok)
+    ok = bool(report_ok and validation_payload.get("ok"))
     status = "done"
     if not run_result.get("ok"):
-        status = "code_failed_report_written" if report_ok else "code_failed"
-    if report_ok and render and not _render_ok(inspect_payload):
-        status = "render_unavailable_or_failed"
+        status = "code_failed_report_written" if ok else "code_failed"
+    if report_ok and not validation_payload.get("ok"):
+        status = "validation_failed"
 
     payload = {
         "ok": ok,
@@ -149,8 +146,11 @@ def office_report_from_code_run(
         "stdout": _truncate(run_result.get("stdout", "")),
         "stderr": _truncate(run_result.get("stderr", "")),
         "artifacts": artifacts,
-        "report_inspection": inspect_payload,
+        "report_inspection": validation_payload.get("inspect", {}) if isinstance(validation_payload, dict) else {},
+        "artifact_ready": ok,
+        "artifact_validation": validation_payload,
         "report_error": report_error,
+        "error": "" if ok else report_error or str(validation_payload.get("summary") or validation_payload.get("error") or ""),
         "activity": activity,
         "artifact_activity": {
             "kind": "code_to_report",
@@ -443,7 +443,9 @@ def _activity_summary(status: str, target: Path | None, artifacts: List[Dict[str
 
 def _verification_detail(payload: Dict[str, Any]) -> str:
     if not payload:
-        return "not inspected"
+        return "not validated"
+    if payload.get("summary"):
+        return str(payload.get("summary"))
     if payload.get("render"):
         render = payload.get("render") if isinstance(payload.get("render"), dict) else {}
         images = render.get("images", []) if isinstance(render, dict) else []

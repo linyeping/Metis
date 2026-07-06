@@ -72,6 +72,13 @@ const knownKinds = new Set<AgentEventKind>([
   'subagent_start',
   'subagent_progress',
   'subagent_done',
+  'subrun_planned',
+  'subrun_running',
+  'subrun_waiting_permission',
+  'subrun_succeeded',
+  'subrun_failed',
+  'subrun_canceled',
+  'subrun_promoted',
   'done',
 ]);
 
@@ -86,9 +93,11 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
   const memoryPath = stringValue(value(payload, eventRecord, 'memory_path', 'memoryPath'));
   const skillPath = stringValue(value(payload, eventRecord, 'skill_path', 'skillPath'));
   const todoItems = todoListValue(value(payload, eventRecord, 'todos'));
-  const taskId = stringValue(value(payload, eventRecord, 'task_id', 'taskId', 'call_id', 'callId'));
+  const taskId = stringValue(value(payload, eventRecord, 'subrun_id', 'subrunId', 'task_id', 'taskId', 'call_id', 'callId'));
   const subagentStatus = stringValue(value(payload, eventRecord, 'status'));
   const subagentProgress = clampProgress(numberValue(value(payload, eventRecord, 'progress')));
+  const isSubrunEvent = kind.startsWith('subrun_');
+  const isSubagentEvent = kind === 'subagent_start' || kind === 'subagent_progress' || kind === 'subagent_done';
   const phase = stringValue(value(payload, eventRecord, 'phase'));
   const toolName = stringValue(value(payload, eventRecord, 'tool', 'toolName', 'tool_name', 'name')) || 'tool';
   const errorInfo = recordValue(value(payload, eventRecord, 'error_info', 'errorInfo'));
@@ -178,18 +187,45 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
           }
         : null,
     subagent:
-      kind === 'subagent_start' || kind === 'subagent_progress' || kind === 'subagent_done'
+      isSubagentEvent || isSubrunEvent
         ? {
             taskId,
-            name: stringValue(value(payload, eventRecord, 'name', 'tool')) || 'subagent',
-            status: subagentStatus === 'error' ? 'error' : kind === 'subagent_done' ? 'done' : 'running',
-            progress: subagentProgress || (kind === 'subagent_done' ? 100 : 0),
-            summary: stringValue(value(payload, eventRecord, 'summary', 'message')),
+            name: stringValue(value(payload, eventRecord, 'title', 'name', 'tool')) || (isSubrunEvent ? 'subrun' : 'subagent'),
+            status: subrunStatus(kind, subagentStatus),
+            progress: subagentProgress || fallbackSubrunProgress(kind),
+            summary: stringValue(value(payload, eventRecord, 'summary', 'message', 'stage')),
             result: value(payload, eventRecord, 'result'),
+            source: isSubrunEvent ? 'cowork_subrun' : 'subagent',
+            stage: stringValue(value(payload, eventRecord, 'stage')),
+            executionProfile: stringValue(value(payload, eventRecord, 'execution_profile', 'executionProfile')),
+            worktreeId: stringValue(value(payload, eventRecord, 'worktree_id', 'worktreeId')),
           }
         : null,
     permission: kind === 'permission_request' ? permissionMetadataValue(permissionPayload) : null,
   };
+}
+
+function subrunStatus(kind: AgentEventKind, payloadStatus: string): ChatSubagentEvent['status'] {
+  const status = payloadStatus.toLowerCase();
+  if (status === 'planned') return 'planned';
+  if (status === 'waiting_permission' || status === 'waiting-permission') return 'waiting_permission';
+  if (status === 'succeeded' || status === 'success' || status === 'done' || status === 'completed') return 'done';
+  if (status === 'failed' || status === 'failure' || status === 'error') return 'error';
+  if (status === 'canceled' || status === 'cancelled') return 'canceled';
+  if (status === 'promoted') return 'promoted';
+  if (kind === 'subrun_planned') return 'planned';
+  if (kind === 'subrun_waiting_permission') return 'waiting_permission';
+  if (kind === 'subrun_succeeded' || kind === 'subrun_promoted' || kind === 'subagent_done') return kind === 'subrun_promoted' ? 'promoted' : 'done';
+  if (kind === 'subrun_failed') return 'error';
+  if (kind === 'subrun_canceled') return 'canceled';
+  return 'running';
+}
+
+function fallbackSubrunProgress(kind: AgentEventKind): number {
+  if (kind === 'subrun_planned') return 0;
+  if (kind === 'subrun_succeeded' || kind === 'subrun_failed' || kind === 'subrun_canceled' || kind === 'subrun_promoted' || kind === 'subagent_done') return 100;
+  if (kind === 'subrun_waiting_permission') return 50;
+  return 0;
 }
 
 function permissionMetadataValue(payload: UnknownRecord): PermissionRequestMetadata | null {

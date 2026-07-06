@@ -2941,16 +2941,17 @@ def _execute_tool_with_hooks_sync(
         )
         if local_vm_result is not None:
             return local_vm_result
+        tool_arguments = _strip_tool_execution_selector_arguments(tool_call.arguments)
         if edit_guard is not None:
-            guard_error = edit_guard.before_execute(canonical_tool_name, tool_call.arguments)
+            guard_error = edit_guard.before_execute(canonical_tool_name, tool_arguments)
             if guard_error:
                 return _append_error_recovery_hint(guard_error)
-            edit_snapshot = edit_guard.capture_before(canonical_tool_name, tool_call.arguments)
+            edit_snapshot = edit_guard.capture_before(canonical_tool_name, tool_arguments)
         else:
             edit_snapshot = None
         result = registry.execute(
             tool_call.name,
-            tool_call.arguments,
+            tool_arguments,
             cancel_event=cancel_event,
             workspace_root=workspace_root or None,
         )
@@ -2958,7 +2959,7 @@ def _execute_tool_with_hooks_sync(
         if edit_guard is not None:
             result = edit_guard.after_execute(
                 canonical_tool_name,
-                tool_call.arguments,
+                tool_arguments,
                 result,
                 edit_snapshot,
             )
@@ -2967,6 +2968,21 @@ def _execute_tool_with_hooks_sync(
 
 
 _LOCAL_VM_COMMAND_TOOLS = {"execute_bash_command", "run_tests"}
+_TOOL_EXECUTION_SELECTOR_KEYS = {
+    "execution_profile",
+    "executionProfile",
+    "run_in",
+    "runIn",
+    "runner",
+    "backend",
+    "sandbox",
+    "sandbox_backend",
+    "sandboxBackend",
+    "use_local_vm",
+    "useLocalVm",
+    "local_vm",
+    "localVm",
+}
 
 
 def _execute_tool_with_local_vm_if_requested(
@@ -2978,7 +2994,8 @@ def _execute_tool_with_local_vm_if_requested(
     session_id: str,
 ) -> Optional[str]:
     profile = str(execution_profile or "").strip().lower().replace("-", "_")
-    if profile != LOCAL_VM or canonical_tool_name not in _LOCAL_VM_COMMAND_TOOLS:
+    requested_profile = LOCAL_VM if profile == LOCAL_VM or _tool_requests_local_vm(tool_call.arguments) else profile
+    if requested_profile != LOCAL_VM or canonical_tool_name not in _LOCAL_VM_COMMAND_TOOLS:
         return None
     if not str(workspace_root or "").strip():
         return _append_error_recovery_hint("Error: local_vm command execution requires workspace_root")
@@ -3018,6 +3035,25 @@ def _execute_tool_with_local_vm_if_requested(
     if registration_errors:
         payload["artifact_registration_errors"] = registration_errors
     return _append_error_recovery_hint(_format_local_vm_tool_result(payload))
+
+
+def _tool_requests_local_vm(arguments: Any) -> bool:
+    if not isinstance(arguments, dict):
+        return False
+    for key in ("use_local_vm", "useLocalVm", "local_vm", "localVm"):
+        if _truthy(arguments.get(key)):
+            return True
+    for key in ("execution_profile", "executionProfile", "run_in", "runIn", "runner", "backend", "sandbox", "sandbox_backend", "sandboxBackend"):
+        value = str(arguments.get(key) or "").strip().lower().replace("-", "_")
+        if value in {LOCAL_VM, "vm", "metis_wsl", "wsl"}:
+            return True
+    return False
+
+
+def _strip_tool_execution_selector_arguments(arguments: Any) -> Any:
+    if not isinstance(arguments, dict):
+        return arguments
+    return {str(key): value for key, value in arguments.items() if str(key) not in _TOOL_EXECUTION_SELECTOR_KEYS}
 
 
 def _local_vm_command_request_kwargs(

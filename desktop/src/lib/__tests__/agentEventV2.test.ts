@@ -115,6 +115,55 @@ describe('agentEventV2ToChatStreamEvent', () => {
     expect(event.runtimeStatus?.callId).toBe('call-3');
   });
 
+  it('keeps cowork subrun lifecycle as first-class activity events', () => {
+    const running = normalizeChatStreamEvent(
+      agentEventV2ToChatStreamEvent(
+        v2('subrun_running', {
+          schema: 'metis.cowork_subrun_event.v1',
+          version: 1,
+          subrun_id: 'subrun-1',
+          title: 'Inspect implementation',
+          status: 'running',
+          progress: 40,
+          stage: 'agent_running',
+          execution_profile: 'local_worktree',
+          worktree_id: 'wt_1',
+        }),
+      ),
+    );
+    const succeeded = normalizeChatStreamEvent(
+      agentEventV2ToChatStreamEvent(
+        v2('subrun_succeeded', {
+          schema: 'metis.cowork_subrun_event.v1',
+          version: 1,
+          subrun_id: 'subrun-1',
+          title: 'Inspect implementation',
+          status: 'succeeded',
+          progress: 100,
+          result: { ok: true },
+        }),
+      ),
+    );
+
+    expect(running.kind).toBe('subrun_running');
+    expect(running.subagent).toMatchObject({
+      taskId: 'subrun-1',
+      name: 'Inspect implementation',
+      status: 'running',
+      progress: 40,
+      source: 'cowork_subrun',
+      stage: 'agent_running',
+      executionProfile: 'local_worktree',
+      worktreeId: 'wt_1',
+    });
+    expect(succeeded.subagent).toMatchObject({
+      taskId: 'subrun-1',
+      status: 'done',
+      progress: 100,
+      source: 'cowork_subrun',
+    });
+  });
+
   it('maps run_completed into done with usage preserved', () => {
     const event = normalizeChatStreamEvent(
       agentEventV2ToChatStreamEvent(

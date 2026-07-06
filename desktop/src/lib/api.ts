@@ -22,6 +22,9 @@ import type {
   McpConfigSource,
   McpServerStatus,
   McpStatusPayload,
+  MetisRuntimeCheck,
+  MetisRuntimeStatus,
+  MetisRuntimeStep,
   ModelCapabilities,
   ParsedFile,
   PermissionAccessMode,
@@ -60,6 +63,8 @@ import type {
   SkillDetail,
   SkillSummary,
   WorkspaceFile,
+  WorktreeChangedFile,
+  WorktreePromoteConflictPayload,
   WorktreeDiffPayload,
   WorktreePromotePayload,
   WorktreeRecord,
@@ -1022,6 +1027,65 @@ function runtimeManagerCommandResultFromRecord(row: Record<string, unknown>): Ru
     alreadyInstalled: Boolean(row.already_installed ?? row.alreadyInstalled),
     diagnosticsZip: stringValue(row.diagnostics_zip ?? row.diagnosticsZip),
   };
+}
+
+function metisRuntimeCheckFromRecord(row: Record<string, unknown>): MetisRuntimeCheck {
+  return {
+    id: stringValue(row.id),
+    label: stringValue(row.label),
+    ok: Boolean(row.ok),
+    status: stringValue(row.status),
+  };
+}
+
+function metisRuntimeStepFromRecord(row: Record<string, unknown>): MetisRuntimeStep {
+  return {
+    id: stringValue(row.id),
+    label: stringValue(row.label),
+    ok: Boolean(row.ok),
+    status: stringValue(row.status),
+  };
+}
+
+function metisRuntimeStatusFromRecord(row: Record<string, unknown>): MetisRuntimeStatus {
+  const checks = Array.isArray(row.checks) ? row.checks : [];
+  const steps = Array.isArray(row.steps) ? row.steps : [];
+  return {
+    ok: Boolean(row.ok),
+    schema: stringValue(row.schema),
+    generatedAt: numberValue(row.generated_at ?? row.generatedAt),
+    title: stringValue(row.title) || 'MetisRuntime',
+    ready: Boolean(row.ready),
+    status: stringValue(row.status),
+    summary: stringValue(row.summary),
+    primaryAction: stringValue(row.primary_action ?? row.primaryAction),
+    canRepair: Boolean(row.can_repair ?? row.canRepair),
+    repairRequiresDownload: Boolean(row.repair_requires_download ?? row.repairRequiresDownload),
+    repairRequiresAdmin: Boolean(row.repair_requires_admin ?? row.repairRequiresAdmin),
+    downloadAvailable: Boolean(row.download_available ?? row.downloadAvailable),
+    repaired: typeof (row.repaired) === 'boolean' ? row.repaired : undefined,
+    message: stringValue(row.message),
+    checks: checks.map(item => metisRuntimeCheckFromRecord(recordValue(item))),
+    steps: steps.map(item => metisRuntimeStepFromRecord(recordValue(item))),
+    diagnostics: recordValue(row.diagnostics),
+    technicalStatus: recordValue(row.technical_status ?? row.technicalStatus),
+  };
+}
+
+export async function getMetisRuntimeStatus(): Promise<MetisRuntimeStatus> {
+  return metisRuntimeStatusFromRecord(await requestJson<Record<string, unknown>>('/settings/metis-runtime'));
+}
+
+export async function repairMetisRuntime(options: { allowDownload?: boolean; force?: boolean } = {}): Promise<MetisRuntimeStatus> {
+  return metisRuntimeStatusFromRecord(
+    await requestJson<Record<string, unknown>>('/settings/metis-runtime/repair', {
+      method: 'POST',
+      body: JSON.stringify({
+        allow_download: options.allowDownload ?? true,
+        force: Boolean(options.force),
+      }),
+    }),
+  );
 }
 
 export async function getRuntimeManagerStatus(): Promise<RuntimeManagerStatus> {
@@ -2656,25 +2720,35 @@ export async function getWorktreeDiff(worktreeId: string): Promise<WorktreeDiffP
     status: stringValue(data.status),
     stat: stringValue(data.stat),
     patch: stringValue(data.patch),
+    files: worktreeChangedFiles(data.files),
     truncated: Boolean(data.truncated),
     baseRef: stringValue(data.base_ref ?? data.baseRef),
     error: stringValue(data.error) || undefined,
   };
 }
 
-export async function promoteWorktree(worktreeId: string, dryRun = false): Promise<WorktreePromotePayload> {
+export async function reviewWorktreePromote(worktreeId: string, paths: string[] = []): Promise<WorktreePromotePayload> {
+  const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}/promote/review`, {
+    method: 'POST',
+    body: JSON.stringify({ paths }),
+  });
+  return worktreePromoteFromRecord(data);
+}
+
+export async function promoteWorktree(worktreeId: string, dryRun = false, paths: string[] = []): Promise<WorktreePromotePayload> {
   const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}/promote`, {
     method: 'POST',
-    body: JSON.stringify({ dry_run: dryRun }),
+    body: JSON.stringify({ dry_run: dryRun, paths }),
   });
-  return {
-    ok: Boolean(data.ok),
-    schema: stringValue(data.schema),
-    dryRun: Boolean(data.dry_run ?? data.dryRun),
-    worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null,
-    message: stringValue(data.message),
-    error: stringValue(data.error),
-  };
+  return worktreePromoteFromRecord(data);
+}
+
+export async function rollbackWorktreePromotion(worktreeId: string, promotionId = '', dryRun = false): Promise<WorktreePromotePayload> {
+  const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}/promote/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ promotion_id: promotionId, dry_run: dryRun }),
+  });
+  return worktreePromoteFromRecord(data);
 }
 
 export async function startChatRun(body: unknown): Promise<ChatRunPayload> {
@@ -2917,5 +2991,49 @@ function worktreeFromRecord(row: Record<string, unknown>): WorktreeRecord {
     promotedAt: numberValue(row.promoted_at ?? row.promotedAt),
     error: stringValue(row.error),
     metadata: recordValue(row.metadata),
+  };
+}
+
+function worktreeChangedFiles(value: unknown): WorktreeChangedFile[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => recordValue(item))
+    .filter(item => Object.keys(item).length > 0)
+    .map(item => ({
+      path: stringValue(item.path),
+      status: stringValue(item.status),
+      reason: stringValue(item.reason),
+      sourceStatus: stringValue(item.source_status ?? item.sourceStatus),
+    }))
+    .filter(item => item.path);
+}
+
+function worktreePromoteConflicts(value: unknown): WorktreePromoteConflictPayload | null {
+  const row = recordValue(value);
+  if (Object.keys(row).length === 0) return null;
+  return {
+    ok: Boolean(row.ok),
+    summary: stringValue(row.summary),
+    files: worktreeChangedFiles(row.files),
+    raw: stringValue(row.raw),
+  };
+}
+
+function worktreePromoteFromRecord(data: Record<string, unknown>): WorktreePromotePayload {
+  return {
+    ok: Boolean(data.ok),
+    schema: stringValue(data.schema),
+    dryRun: Boolean(data.dry_run ?? data.dryRun),
+    worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null,
+    promotionId: stringValue(data.promotion_id ?? data.promotionId),
+    rollbackAvailable: Boolean(data.rollback_available ?? data.rollbackAvailable),
+    rollbackPatchPath: stringValue(data.rollback_patch_path ?? data.rollbackPatchPath),
+    paths: stringArray(data.paths),
+    files: worktreeChangedFiles(data.files),
+    stat: stringValue(data.stat),
+    canApply: Boolean(data.can_apply ?? data.canApply ?? data.ok),
+    conflicts: worktreePromoteConflicts(data.conflicts),
+    message: stringValue(data.message),
+    error: stringValue(data.error),
   };
 }

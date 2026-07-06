@@ -13,6 +13,7 @@ from backend.tools.coding.foundation.core_mechanisms.path_security import (
     safe_path_for_write,
 )
 from backend.runtime.document_converters import soffice_path
+from backend.runtime.office_artifact_validation import validate_office_artifact
 
 from .pdf_tools import pdf_render_pages
 
@@ -66,7 +67,8 @@ def docx_create(
             for bullet in bullets:
                 doc.add_paragraph(str(bullet), style="List Bullet")
     doc.save(str(target))
-    return _json({"ok": True, "output_path": str(target), "title": title})
+    validation = validate_office_artifact(target)
+    return _json(_artifact_result(str(target), title=title, validation=validation))
 
 
 def docx_edit(
@@ -108,13 +110,18 @@ def docx_edit(
     target = _resolve_output_path(output_path) if output_path else source
     target.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(target))
+    validation = validate_office_artifact(target)
     return _json(
         {
-            "ok": True,
+            "ok": bool(validation.get("ok")),
+            "status": "complete" if validation.get("ok") else "validation_failed",
             "path": str(source),
             "output_path": str(target),
             "replacements": replacements,
             "appended": bool(append_text),
+            "artifact_ready": bool(validation.get("ok")),
+            "artifact_validation": validation,
+            "error": "" if validation.get("ok") else str(validation.get("summary") or validation.get("error") or "artifact validation failed"),
         }
     )
 
@@ -143,14 +150,20 @@ def docx_to_pdf(path: str, output_dir: str = "") -> str:
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
     pdf = out_dir / f"{source.stem}.pdf"
+    validation = validate_office_artifact(pdf) if proc.returncode == 0 and pdf.is_file() else {}
+    ok = proc.returncode == 0 and pdf.is_file() and bool(validation.get("ok"))
     return _json(
         {
-            "ok": proc.returncode == 0 and pdf.is_file(),
+            "ok": ok,
+            "status": "complete" if ok else "validation_failed" if pdf.is_file() else "conversion_failed",
             "path": str(source),
             "pdf_path": str(pdf),
             "command": cmd,
             "stdout": (proc.stdout or "")[:2000],
             "stderr": (proc.stderr or "")[:2000],
+            "artifact_ready": ok,
+            "artifact_validation": validation,
+            "error": "" if ok else str(validation.get("summary") or validation.get("error") or proc.stderr or "DOCX to PDF conversion failed"),
         }
     )
 
@@ -273,3 +286,16 @@ def _json_error(message: str, **extra: Any) -> str:
     payload = {"ok": False, "error": message}
     payload.update(extra)
     return _json(payload)
+
+
+def _artifact_result(output_path: str, *, title: str = "", validation: Dict[str, Any]) -> Dict[str, Any]:
+    ok = bool(validation.get("ok"))
+    return {
+        "ok": ok,
+        "status": "complete" if ok else "validation_failed",
+        "output_path": output_path,
+        "title": title,
+        "artifact_ready": ok,
+        "artifact_validation": validation,
+        "error": "" if ok else str(validation.get("summary") or validation.get("error") or "artifact validation failed"),
+    }

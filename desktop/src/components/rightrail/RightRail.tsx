@@ -165,7 +165,7 @@ function planAgentTaskFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPl
     textFromUnknown(result.summary) ||
     textFromUnknown(result.message) ||
     textFromUnknown(subrun?.status);
-  const prompt = textFromUnknown(subrun?.prompt);
+  const prompt = textFromUnknown(subrun?.objective) || textFromUnknown(subrun?.prompt);
   const resultText = compactPlanAgentResult(item?.result);
   const worktreeId = textFromUnknown(result.worktree_id) || textFromUnknown(worktree.worktree_id) || textFromUnknown(subrun?.worktree_id);
   const worktreeRoot =
@@ -194,21 +194,23 @@ function planAgentTaskFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPl
 }
 
 function planAgentStatus(itemStatus: ChatSubagentEvent['status'] | undefined, planStatus: string): PlanAgentTaskStatus {
-  if (itemStatus === 'running') return 'running';
-  if (itemStatus === 'done') return 'done';
-  if (itemStatus === 'error') return 'error';
+  if (itemStatus === 'running' || itemStatus === 'waiting_permission') return 'running';
+  if (itemStatus === 'done' || itemStatus === 'promoted') return 'done';
+  if (itemStatus === 'error' || itemStatus === 'canceled') return 'error';
+  if (itemStatus === 'planned') return 'planned';
   const value = planStatus.toLowerCase();
-  if (['running', 'active', 'in_progress', 'in-progress'].includes(value)) return 'running';
-  if (['done', 'complete', 'completed', 'finished'].includes(value)) return 'done';
-  if (['failed', 'failure', 'error', 'blocked'].includes(value)) return 'error';
+  if (['running', 'active', 'in_progress', 'in-progress', 'waiting_permission', 'waiting-permission'].includes(value)) return 'running';
+  if (['done', 'complete', 'completed', 'finished', 'succeeded', 'success', 'promoted'].includes(value)) return 'done';
+  if (['failed', 'failure', 'error', 'blocked', 'canceled', 'cancelled'].includes(value)) return 'error';
   return 'planned';
 }
 
 function planAgentProgressFromStatus(status: string): number {
   const value = status.toLowerCase();
-  if (['done', 'complete', 'completed', 'finished'].includes(value)) return 100;
+  if (['done', 'complete', 'completed', 'finished', 'succeeded', 'success', 'promoted'].includes(value)) return 100;
   if (['running', 'active', 'in_progress', 'in-progress'].includes(value)) return 35;
-  if (['failed', 'failure', 'error', 'blocked'].includes(value)) return 100;
+  if (['waiting_permission', 'waiting-permission'].includes(value)) return 50;
+  if (['failed', 'failure', 'error', 'blocked', 'canceled', 'cancelled'].includes(value)) return 100;
   return 0;
 }
 
@@ -2884,6 +2886,7 @@ function CodePreview({ file }: { file: WorkspaceFile }) {
   const appearanceMode = useUiStore(state => state.appearanceMode);
   const content = file.content || (file.truncated ? t('文件过大，已省略内容。') : '');
   const language = useMemo(() => codePreviewLanguage(file), [file]);
+  const lineCount = useMemo(() => codePreviewLineCount(content), [content]);
   const [highlightHtml, setHighlightHtml] = useState('');
   const [highlightError, setHighlightError] = useState('');
 
@@ -2919,13 +2922,25 @@ function CodePreview({ file }: { file: WorkspaceFile }) {
         </div>
       </div>
       {highlightError && <p className="rail-warning">{t('代码高亮失败，已显示纯文本。')}</p>}
-      {highlightHtml ? (
-        <div className="code-preview-html" dangerouslySetInnerHTML={{ __html: highlightHtml }} />
-      ) : (
-        <pre className="code-preview-plain">{content}</pre>
-      )}
+      <div className="code-preview-body">
+        <div className="code-preview-gutter" aria-hidden="true">
+          {Array.from({ length: lineCount }, (_, index) => (
+            <span key={index}>{index + 1}</span>
+          ))}
+        </div>
+        {highlightHtml ? (
+          <div className="code-preview-code code-preview-html" dangerouslySetInnerHTML={{ __html: highlightHtml }} />
+        ) : (
+          <pre className="code-preview-code code-preview-plain">{content}</pre>
+        )}
+      </div>
     </div>
   );
+}
+
+function codePreviewLineCount(content: string): number {
+  if (!content) return 1;
+  return content.split(/\r\n|\r|\n/).length;
 }
 
 function codePreviewLanguage(file: WorkspaceFile): string {

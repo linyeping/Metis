@@ -28,7 +28,7 @@ from backend.runtime.isolated_runtime import (
     metis_runtime_create,
     metis_runtime_export_diagnostics,
     metis_runtime_run,
-    metis_runtime_status,
+    metis_runtime_status as isolated_metis_runtime_status,
     metis_sandbox_status,
     metis_vm_direct_assets_prepare,
     metis_vm_direct_runner_prepare,
@@ -46,6 +46,8 @@ RUNTIME_MANAGER_RELEASE_SCHEMA = "metis.runtime_manager.release_integration.v1"
 RUNTIME_MANAGER_PACKAGE_VM_SCHEMA = "metis.runtime_manager.package_vm_bundle.v1"
 RUNTIME_MANAGER_BUILD_VM_ASSETS_SCHEMA = "metis.runtime_manager.build_vm_assets.v1"
 RUNTIME_MANAGER_VALIDATE_RELEASE_SCHEMA = "metis.runtime_manager.validate_release.v1"
+METIS_RUNTIME_HEALTH_SCHEMA = "metis.metis_runtime.health.v1"
+METIS_RUNTIME_REPAIR_SCHEMA = "metis.metis_runtime.repair.v1"
 # Guest tools (metisd) are baked into rootfs.vhdx since 0.3.0, so metis-bin.vhdx
 # is no longer a separate required asset.
 VM_REQUIRED_RUNTIME_FILES = ("vmlinuz", "initrd", "metis-vm-pack.json")
@@ -75,7 +77,7 @@ def runtime_manager_status(root: str = ".") -> Dict[str, Any]:
     builder = _loads(metis_rootfs_builder_status(root=root))
     wsl_runtime = _loads(metis_wsl_runtime_status(root=root))
     vm_bundle = _loads(metis_vm_bundle_status(root=root))
-    sessions = _loads(metis_runtime_status(root=root))
+    sessions = _loads(isolated_metis_runtime_status(root=root))
     jobs = _loads(metis_runtime_job_status(root=root))
 
     rootfs_asset = _first_dict(rootfs.get("selected_rootfs"), rootfs.get("selectedRootfs"))
@@ -157,6 +159,212 @@ def runtime_manager_status(root: str = ".") -> Dict[str, Any]:
             "Long rootfs builds should run as an explicit background task in a later product pass.",
         ],
     }
+
+
+def metis_runtime_status(root: str = ".") -> Dict[str, Any]:
+    """User-facing MetisRuntime health.
+
+    The full runtime manager keeps backend-specific diagnostics. This facade is
+    intentionally product-level: settings UI can expose MetisRuntime check/fix
+    without asking users to understand the host runner implementation.
+    """
+    manager = runtime_manager_status(root=root)
+    return _metis_runtime_public_status(manager=manager)
+
+
+def metis_runtime_repair(root: str = ".", allow_download: bool = True, force: bool = False) -> Dict[str, Any]:
+    """One-click repair for the managed local runtime path."""
+    before = runtime_manager_status(root=root)
+    before_public = _metis_runtime_public_status(manager=before)
+    raw_steps: List[Dict[str, Any]] = []
+    public_steps: List[Dict[str, Any]] = [
+        {"id": "check", "label": "检查 MetisRuntime", "status": "completed", "ok": True},
+    ]
+
+    if before_public.get("ready") and not force:
+        public = _metis_runtime_public_status(
+            manager=before,
+            diagnostics_extra={"before": before, "raw_steps": raw_steps},
+        )
+        public.update(
+            {
+                "schema": METIS_RUNTIME_REPAIR_SCHEMA,
+                "repaired": False,
+                "steps": public_steps,
+                "message": "MetisRuntime 已可用。",
+            }
+        )
+        return public
+
+    working_status = before
+    if _metis_runtime_ready_to_activate(working_status):
+        activated = runtime_manager_import(root=root)
+        raw_steps.append({"id": "activate_runtime", "result": activated})
+        public_steps.append(
+            {
+                "id": "activate_runtime",
+                "label": "启用隔离执行",
+                "status": "completed" if activated.get("ok") else "failed",
+                "ok": bool(activated.get("ok")),
+            }
+        )
+    else:
+        installed = runtime_manager_repair(root=root, source="auto", allow_download=allow_download, force=force)
+        raw_steps.append({"id": "prepare_runtime", "result": installed})
+        public_steps.append(
+            {
+                "id": "prepare_runtime",
+                "label": "准备运行组件",
+                "status": "completed" if installed.get("ok") else "failed",
+                "ok": bool(installed.get("ok")),
+            }
+        )
+        working_status = runtime_manager_status(root=root)
+        if _metis_runtime_ready_to_activate(working_status):
+            activated = runtime_manager_import(root=root)
+            raw_steps.append({"id": "activate_runtime", "result": activated})
+            public_steps.append(
+                {
+                    "id": "activate_runtime",
+                    "label": "启用隔离执行",
+                    "status": "completed" if activated.get("ok") else "failed",
+                    "ok": bool(activated.get("ok")),
+                }
+            )
+
+    after = runtime_manager_status(root=root)
+    public = _metis_runtime_public_status(
+        manager=after,
+        diagnostics_extra={"before": before, "raw_steps": raw_steps},
+    )
+    public_steps.append(
+        {
+            "id": "verify",
+            "label": "刷新状态",
+            "status": "completed" if public.get("ready") else "failed",
+            "ok": bool(public.get("ready")),
+        }
+    )
+    public.update(
+        {
+            "schema": METIS_RUNTIME_REPAIR_SCHEMA,
+            "repaired": bool(public.get("ready")) and not bool(before_public.get("ready")),
+            "steps": public_steps,
+            "message": "MetisRuntime 修复完成。" if public.get("ready") else "MetisRuntime 修复未完成，请查看诊断详情。",
+        }
+    )
+    return public
+
+
+def _metis_runtime_public_status(
+    *,
+    manager: Dict[str, Any],
+    diagnostics_extra: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    vm_runtime = _first_dict(manager.get("vm_runtime"), manager.get("vmRuntime"))
+    wsl_runtime = _first_dict(manager.get("wsl_runtime"), manager.get("wslRuntime"))
+    release = _first_dict(manager.get("release_integration"), manager.get("releaseIntegration"))
+    runner_ready = _metis_runtime_runner_ready(manager)
+    system_ready = _metis_runtime_system_ready(manager)
+    activation_ready = _metis_runtime_ready_to_activate(manager)
+    has_runtime_components = bool(
+        vm_runtime.get("installed")
+        or vm_runtime.get("assets_verified")
+        or vm_runtime.get("runner_ready")
+        or activation_ready
+        or _first_dict(wsl_runtime.get("selected_rootfs")).get("exists")
+    )
+    bundled_available = bool(release.get("bundled_available") or release.get("bundledAvailable"))
+    download_available = bool(release.get("download_available") or release.get("downloadAvailable"))
+    can_repair = bool(not runner_ready and system_ready and (activation_ready or has_runtime_components or bundled_available or download_available))
+    requires_download = bool(not runner_ready and system_ready and not activation_ready and not bundled_available and download_available)
+    repair_requires_admin = bool(not runner_ready and not system_ready)
+
+    if runner_ready:
+        status = "ready"
+        primary_action = "none"
+        summary = "MetisRuntime 可用，隔离命令可以直接运行。"
+    elif repair_requires_admin:
+        status = "needs_system_setup"
+        primary_action = "setup"
+        summary = "MetisRuntime 需要完成一次系统基础设置，然后才能启用隔离执行。"
+    elif can_repair:
+        status = "needs_repair"
+        primary_action = "repair"
+        summary = "MetisRuntime 需要修复；一键修复会准备运行组件并启用隔离执行。"
+    else:
+        status = "blocked"
+        primary_action = "diagnostics"
+        summary = "MetisRuntime 暂时不可用，请展开诊断详情查看原因。"
+
+    checks = [
+        {
+            "id": "system",
+            "label": "系统基础能力",
+            "ok": bool(system_ready),
+            "status": "ready" if system_ready else "needs_setup",
+        },
+        {
+            "id": "runtime_components",
+            "label": "运行组件",
+            "ok": bool(has_runtime_components),
+            "status": "ready" if has_runtime_components else ("download_available" if download_available else "missing"),
+        },
+        {
+            "id": "runner",
+            "label": "隔离执行",
+            "ok": bool(runner_ready),
+            "status": "ready" if runner_ready else ("repairable" if can_repair else "unavailable"),
+        },
+    ]
+    diagnostics = {"runtime_manager": manager}
+    if diagnostics_extra:
+        diagnostics.update(diagnostics_extra)
+    return {
+        "ok": True,
+        "schema": METIS_RUNTIME_HEALTH_SCHEMA,
+        "generated_at": time.time(),
+        "title": "MetisRuntime",
+        "ready": bool(runner_ready),
+        "status": status,
+        "summary": summary,
+        "primary_action": primary_action,
+        "can_repair": can_repair,
+        "repair_requires_download": requires_download,
+        "repair_requires_admin": repair_requires_admin,
+        "download_available": download_available,
+        "checks": checks,
+        "diagnostics": diagnostics,
+        "technical_status": {
+            "runner_ready": bool(runner_ready),
+            "activation_ready": bool(activation_ready),
+        },
+    }
+
+
+def _metis_runtime_runner_ready(manager: Dict[str, Any]) -> bool:
+    health = _first_dict(manager.get("health"))
+    vm_runtime = _first_dict(manager.get("vm_runtime"), manager.get("vmRuntime"))
+    return bool(
+        health.get("metis_wsl_ready")
+        or health.get("metisWslReady")
+        or vm_runtime.get("runner_ready")
+        or vm_runtime.get("runnerReady")
+    )
+
+
+def _metis_runtime_system_ready(manager: Dict[str, Any]) -> bool:
+    if _metis_runtime_runner_ready(manager):
+        return True
+    wsl_runtime = _first_dict(manager.get("wsl_runtime"), manager.get("wslRuntime"))
+    wsl = _first_dict(wsl_runtime.get("wsl"))
+    features = _first_dict(wsl_runtime.get("features"))
+    return bool(wsl.get("executable") and features.get("import_supported"))
+
+
+def _metis_runtime_ready_to_activate(manager: Dict[str, Any]) -> bool:
+    wsl_runtime = _first_dict(manager.get("wsl_runtime"), manager.get("wslRuntime"))
+    return bool(wsl_runtime.get("ready_to_import") or wsl_runtime.get("readyToImport"))
 
 
 def runtime_manager_import_plan(root: str = ".") -> Dict[str, Any]:
@@ -663,7 +871,7 @@ def _selftest_debug(*, passed: bool, used_local: bool, reason: str, backend: str
 def runtime_manager_export_diagnostics(session_id: str = "", root: str = ".") -> Dict[str, Any]:
     target_session = str(session_id or "").strip()
     if not target_session:
-        sessions = _loads(metis_runtime_status(root=root))
+        sessions = _loads(isolated_metis_runtime_status(root=root))
         rows = sessions.get("sessions") if isinstance(sessions.get("sessions"), list) else []
         if rows and isinstance(rows[0], dict):
             target_session = str(rows[0].get("session_id") or "")

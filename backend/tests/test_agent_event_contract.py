@@ -225,9 +225,20 @@ def test_agent_event_contract_v2_payload_lists_stable_envelope() -> None:
         "permission_audited",
         "tool_running",
         "tool_succeeded",
+        "subrun_planned",
+        "subrun_running",
+        "subrun_waiting_permission",
+        "subrun_succeeded",
+        "subrun_failed",
+        "subrun_canceled",
+        "subrun_promoted",
         "run_completed",
     ):
         assert kind in payload["event_kinds"]
+    assert "subagent_start" not in payload["passthrough_event_kinds"]
+    assert "subagent_progress" not in payload["passthrough_event_kinds"]
+    assert "subagent_done" not in payload["passthrough_event_kinds"]
+    assert payload["subrun_identity_key"] == "payload.subrun_id"
 
 
 def test_agent_event_v2_payload_uses_backend_identity_and_payload_only_business_fields() -> None:
@@ -244,6 +255,8 @@ def test_agent_event_v2_payload_uses_backend_identity_and_payload_only_business_
             "tool_name": "read_file",
             "call_id": "call-1",
             "arguments": {"path": "x.py"},
+            "schema": "metis.tool_payload.v1",
+            "version": 1,
             "run_id": "legacy-run",
             "seq": 99,
         },
@@ -261,6 +274,8 @@ def test_agent_event_v2_payload_uses_backend_identity_and_payload_only_business_
     assert payload["kind"] == "tool_requested"
     assert payload["payload"]["call_id"] == "call-1"
     assert payload["payload"]["tool_name"] == "read_file"
+    assert payload["payload"]["schema"] == "metis.tool_payload.v1"
+    assert payload["payload"]["version"] == 1
     assert payload["payload"]["source_event_id"] == "evt_legacy"
     assert "run_id" not in payload["payload"]
     assert "seq" not in payload["payload"]

@@ -4,7 +4,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from backend.runtime.isolated_runtime import metis_wsl_runtime_import, metis_wsl_runtime_status
 from backend.runtime.runtime_job import metis_runtime_job
@@ -20,6 +20,9 @@ class LocalVmCommand:
     timeout: int = 120
     allow_network: bool = False
     collect_artifacts: bool = False
+    artifact_patterns: Optional[List[str]] = None
+    require_artifacts: bool = False
+    expected_stdout_contains: str = ""
     export_patch: bool = True
     export_diagnostics: str = "on_failure"
 
@@ -67,6 +70,9 @@ def run_local_vm_command(request: LocalVmCommand) -> Dict[str, Any]:
             timeout=max(1, int(request.timeout or 120)),
             allow_network=bool(request.allow_network),
             collect_artifacts=bool(request.collect_artifacts),
+            artifact_patterns=_clean_artifact_patterns(request.artifact_patterns),
+            require_artifacts=bool(request.require_artifacts),
+            expected_stdout_contains=str(request.expected_stdout_contains or ""),
             export_patch=bool(request.export_patch),
             export_diagnostics=str(request.export_diagnostics or "on_failure"),
             strict_sandbox=True,
@@ -126,6 +132,19 @@ def _metis_wsl_readiness(root: str) -> Dict[str, Any] | None:
             "Use the import_plan command only after confirming the rootfs asset is trusted.",
         ],
     }
+
+
+def _clean_artifact_patterns(value: Any) -> List[str] | None:
+    if not isinstance(value, list):
+        return None
+    patterns: List[str] = []
+    for item in value:
+        text = str(item or "").replace("\x00", "").strip()
+        if text and text not in patterns:
+            patterns.append(text[:300])
+        if len(patterns) >= 20:
+            break
+    return patterns or None
 
 
 __all__ = ["LOCAL_VM_RUNNER_SCHEMA", "LocalVmCommand", "run_local_vm_command"]

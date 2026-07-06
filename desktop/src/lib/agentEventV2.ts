@@ -18,6 +18,13 @@ const legacyKinds = new Set<AgentEventKind>([
   'subagent_start',
   'subagent_progress',
   'subagent_done',
+  'subrun_planned',
+  'subrun_running',
+  'subrun_waiting_permission',
+  'subrun_succeeded',
+  'subrun_failed',
+  'subrun_canceled',
+  'subrun_promoted',
   'done',
 ]);
 
