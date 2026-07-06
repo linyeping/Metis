@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   Bot,
   Calendar,
-  ChevronDown,
   ChevronRight,
   CheckCircle2,
   Cpu,
@@ -384,7 +383,7 @@ function SkillsPanel() {
                             aria-expanded={expandedSkillIds.includes(skill.id)}
                             onClick={() => toggleSkillExpanded(skill.id)}
                           >
-                            {expandedSkillIds.includes(skill.id) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            <ChevronRight className="disclosure-chevron" data-open={expandedSkillIds.includes(skill.id)} size={14} />
                           </button>
                         </div>
                         {expandedSkillIds.includes(skill.id) && (

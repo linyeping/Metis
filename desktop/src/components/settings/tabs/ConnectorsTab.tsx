@@ -108,17 +108,21 @@ export const ConnectorsTab = memo(function ConnectorsTab() {
   const services = status?.services || [];
   return (
     <div className="settings-card-grid connectors-panel">
-      <section className="settings-section">
+      <section className="settings-section connector-overview-section">
         <div className="settings-section-header">
           <Plug size={16} className="section-icon" />
           <h3>{t('连接器')}</h3>
         </div>
-        <p className="section-desc">{t('第三方连接器使用标准 OAuth 或本地配置，敏感信息仅在本机加密保存。')}</p>
-        <p className="section-desc">{t('授权 token 或保存配置后点“激活”启动该连接器的工具；新保存的敏感信息需重启后端才会注入。')}</p>
-        <button type="button" onClick={() => void refresh()}>
-          <RefreshCw size={14} />
-          {t('刷新状态')}
-        </button>
+        <div className="connector-overview-body">
+          <div>
+            <p className="section-desc">{t('第三方连接器使用标准 OAuth 或本地配置，敏感信息仅在本机加密保存。')}</p>
+            <p className="section-desc">{t('保存配置后点“激活”启动工具；新保存的敏感信息需重启后端才会注入。')}</p>
+          </div>
+          <button type="button" className="connector-refresh-button" onClick={() => void refresh()}>
+            <RefreshCw size={14} />
+            {t('刷新状态')}
+          </button>
+        </div>
         {!status?.encryptionAvailable && <p className="section-desc warning">{t('当前系统暂不可用安全加密存储。')}</p>}
         {message && <p className="section-desc">{message}</p>}
       </section>
@@ -196,11 +200,10 @@ function ConnectorCard({
         <span className="connector-state">{active ? t('运行中') : service.connected ? t('已连接') : t('未连接')}</span>
         {active && backend ? <span className="connector-state">{backend.toolsCount} {t('个工具')}</span> : null}
       </div>
-      <p className="section-desc">{service.scopes.join(' · ')}</p>
-      <label>
-        <span>{t('认证方式')}</span>
+      <div className="connector-meta">
+        <span>{service.scopes.join(' · ') || t('无额外 scope')}</span>
         <code>{envSecretConnector ? [...secretEnvs, ...optionalSecretEnvs].join(' · ') : service.tokenEnv || t('无需 token')}</code>
-      </label>
+      </div>
       {envSecretConnector && (
         <>
           {[...secretEnvs, ...optionalSecretEnvs].map(envName => (

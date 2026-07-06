@@ -1,6 +1,6 @@
 import {
   Check,
-  ChevronDown,
+  ChevronRight,
   Columns3,
   FileCode,
   Folder,
@@ -59,6 +59,7 @@ export function Titlebar() {
   const cardMenuRef = useRef<HTMLDivElement | null>(null);
   const showWorkspaceCards = appMode !== 'chat';
   const researchSourceOpen = appMode === 'chat' && rightRailOpen && workspaceCardVisibility.research;
+  const sessionWorkspaceOpen = appMode === 'chat' && rightRailOpen && workspaceCardVisibility.session;
 
   // 原生 preview 视图没有 z-index，永远盖在 DOM 之上。此下拉菜单浮在 preview 区域上方，
   // 打开时必须通知主进程藏掉 preview，否则 webview 会盖住菜单下半部分（尤其末尾两项）。
@@ -107,7 +108,18 @@ export function Titlebar() {
       setRightRailOpen(false);
       return;
     }
+    setWorkspaceCardVisible('session', false);
     setWorkspaceCardVisible('research', true);
+  };
+
+  const toggleSessionWorkspace = () => {
+    if (sessionWorkspaceOpen) {
+      setWorkspaceCardVisible('session', false);
+      setRightRailOpen(false);
+      return;
+    }
+    setWorkspaceCardVisible('research', false);
+    setWorkspaceCardVisible('session', true);
   };
 
   // Wire the (user-customizable) card shortcuts: Ctrl/⌘ [+Shift] + key. Read
@@ -155,7 +167,7 @@ export function Titlebar() {
             onClick={() => setCardMenuOpen(value => !value)}
           >
             <Columns3 size={15} />
-            <ChevronDown size={12} />
+            <ChevronRight className="disclosure-chevron" data-open={cardMenuOpen} size={12} />
           </button>
           <div className="titlebar-cards-menu workspace-card-menu" data-open={cardMenuOpen} role="menu" aria-label="Workspace cards">
             {titlebarWorkspaceCardOptions.map(option => {
@@ -180,15 +192,26 @@ export function Titlebar() {
           </div>
         </div>}
         {appMode === 'chat' && (
-          <button
-            type="button"
-            className="titlebar-source-button"
-            title={t('来源')}
-            data-active={researchSourceOpen}
-            onClick={toggleResearchSources}
-          >
-            <List size={15} />
-          </button>
+          <>
+            <button
+              type="button"
+              className="titlebar-source-button"
+              title={t('来源')}
+              data-active={researchSourceOpen}
+              onClick={toggleResearchSources}
+            >
+              <List size={15} />
+            </button>
+            <button
+              type="button"
+              className="titlebar-session-workspace-button"
+              title={t('会话文件')}
+              data-active={sessionWorkspaceOpen}
+              onClick={toggleSessionWorkspace}
+            >
+              <Folder size={15} />
+            </button>
+          </>
         )}
         <button type="button" title={t('最小化')} onClick={() => void window.metis.window('minimize')}>
           <Minus size={15} />

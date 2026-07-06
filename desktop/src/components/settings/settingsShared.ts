@@ -2,6 +2,40 @@ import type { FontFamily, PermissionRule, SettingsSection, TerminalShell } from 
 
 export const sections: SettingsSection[] = ['appearance', 'conversation', 'model', 'usage', 'network', 'terminal', 'runtime', 'tools', 'connectors', 'desktop', 'about'];
 
+export type SettingsNavGroup = {
+  id: string;
+  labelZh: string;
+  labelEn: string;
+  sections: SettingsSection[];
+};
+
+export const settingsNavGroups: SettingsNavGroup[] = [
+  {
+    id: 'personal',
+    labelZh: '个人',
+    labelEn: 'Personal',
+    sections: ['appearance', 'conversation', 'model', 'usage'],
+  },
+  {
+    id: 'integrations',
+    labelZh: '集成',
+    labelEn: 'Integrations',
+    sections: ['connectors', 'desktop', 'tools'],
+  },
+  {
+    id: 'coding',
+    labelZh: '编码',
+    labelEn: 'Coding',
+    sections: ['terminal', 'runtime', 'network'],
+  },
+  {
+    id: 'system',
+    labelZh: '系统',
+    labelEn: 'System',
+    sections: ['about'],
+  },
+];
+
 export const fontOptions: Array<{ value: FontFamily; label: string; hint: string }> = [
   { value: 'official-sans', label: '官方 Sans', hint: 'Metis 默认字体栈，英文和中文都优先保证清晰。' },
   { value: 'system', label: '系统默认', hint: '跟随 Windows / 系统 UI 字体。' },

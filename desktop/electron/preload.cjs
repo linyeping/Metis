@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('metis', {
   devServerStop: payload => ipcRenderer.invoke('metis:dev-server-stop', payload),
   devServerStatus: payload => ipcRenderer.invoke('metis:dev-server-status', payload),
   savePreviewEvidence: payload => ipcRenderer.invoke('metis:save-preview-evidence', payload),
+  previewSetLayoutIntent: payload => ipcRenderer.invoke('metis:preview-set-layout-intent', payload),
   previewSetBounds: payload => ipcRenderer.invoke('metis:preview-set-bounds', payload),
   previewSetOccluded: value => ipcRenderer.invoke('metis:preview-set-occluded', value),
   previewLoad: payload => ipcRenderer.invoke('metis:preview-load', payload),

@@ -20,7 +20,10 @@ const {
   isSafeExternalUrl
 } = require('./security.cjs')
 const {
-  previewBoundsIntent,
+  PREVIEW_STATE_SCHEMA,
+  PREVIEW_STATE_VERSION,
+  normalizePreviewStateName,
+  previewLayoutIntent,
   previewOcclusionRestoreIntent
 } = require('./preview-state.cjs')
 
@@ -54,6 +57,22 @@ let lastPreviewBoundsKey = ''
 let pendingUpdateInfo = null
 let updateCheckTimer = null
 let lastPreviewBounds = null
+let previewRuntimeState = {
+  schema: PREVIEW_STATE_SCHEMA,
+  version: PREVIEW_STATE_VERSION,
+  state: 'hidden',
+  tab_id: '',
+  url: '',
+  title: '',
+  bounds: null,
+  visible: false,
+  loading: false,
+  occluded: false,
+  error: '',
+  last_command_id: '',
+  activity_seq: 0,
+  updated_at: new Date().toISOString()
+}
 // 原生 WebContentsView 永远盖在 DOM 之上（Electron 无 z-index）。任意 DOM 浮层（设置/命令面板/弹窗）打开时
 // 必须把它藏掉，否则就会像截图那样压在弹窗上面。这是 VS Code / 各家稳定方案的核心做法。
 let previewOccluded = false
@@ -440,7 +459,7 @@ function routePreviewWindowOpen(url, source = 'window-open') {
   const value = String(url || '').trim()
   if (!isSafeExternalUrl(value)) {
     log(`[security] denied preview popup url ${value.slice(0, 120)}`)
-    emitPreviewState({ error: 'Preview 拦截了不安全的新窗口地址。', loading: false })
+    emitPreviewState({ error: 'Preview 拦截了不安全的新窗口地址。', loading: false, state: 'error' })
     return false
   }
   log(`[preview] ${source} -> ${value}`)
@@ -448,19 +467,135 @@ function routePreviewWindowOpen(url, source = 'window-open') {
   return true
 }
 
-function emitPreviewState(patch = {}) {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  const webContents = previewView?.webContents
-  const canRead = webContents && !webContents.isDestroyed()
-  const payload = {
-    tabId: previewTabId,
-    canGoBack: canRead ? webContents.canGoBack() : false,
-    canGoForward: canRead ? webContents.canGoForward() : false,
-    title: canRead ? webContents.getTitle() : '',
-    url: canRead ? webContents.getURL() : '',
-    ...patch
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value || {}, key)
+}
+
+function clonePreviewBounds(bounds) {
+  if (!bounds) return null
+  return {
+    x: Math.max(0, Math.round(Number(bounds.x) || 0)),
+    y: Math.max(0, Math.round(Number(bounds.y) || 0)),
+    width: Math.max(0, Math.round(Number(bounds.width) || 0)),
+    height: Math.max(0, Math.round(Number(bounds.height) || 0))
   }
+}
+
+function previewWebContentsSnapshot() {
+  const webContents = previewView?.webContents
+  if (!webContents || webContents.isDestroyed()) {
+    return {
+      canRead: false,
+      url: '',
+      title: '',
+      canGoBack: false,
+      canGoForward: false,
+      loading: false
+    }
+  }
+  return {
+    canRead: true,
+    url: webContents.getURL() || '',
+    title: webContents.getTitle() || '',
+    canGoBack: webContents.canGoBack(),
+    canGoForward: webContents.canGoForward(),
+    loading: webContents.isLoading()
+  }
+}
+
+function inferPreviewStateName(next, currentState = 'hidden') {
+  if (next.occluded) return next.bounds ? 'occluded' : 'hidden'
+  if (next.error) return 'error'
+  if (next.loading) return currentState === 'hidden' ? 'mounting' : 'loading'
+  if (!next.visible) return 'hidden'
+  return 'ready'
+}
+
+function reducePreviewRuntimeState(patch = {}) {
+  const web = previewWebContentsSnapshot()
+  const next = {
+    ...previewRuntimeState,
+    schema: PREVIEW_STATE_SCHEMA,
+    version: PREVIEW_STATE_VERSION
+  }
+
+  if (hasOwn(patch, 'tab_id') || hasOwn(patch, 'tabId')) {
+    next.tab_id = String(patch.tab_id ?? patch.tabId ?? '')
+  } else if (previewTabId) {
+    next.tab_id = previewTabId
+  }
+
+  if (hasOwn(patch, 'url')) {
+    next.url = String(patch.url || '')
+  } else if (web.canRead && web.url) {
+    next.url = web.url
+  }
+
+  if (hasOwn(patch, 'title')) {
+    next.title = String(patch.title || '')
+  } else if (web.canRead) {
+    next.title = web.title
+  }
+
+  if (hasOwn(patch, 'bounds')) {
+    next.bounds = clonePreviewBounds(patch.bounds)
+  } else if (lastPreviewBounds && (next.visible || next.occluded)) {
+    next.bounds = clonePreviewBounds(lastPreviewBounds)
+  }
+
+  if (hasOwn(patch, 'visible')) next.visible = Boolean(patch.visible)
+  if (hasOwn(patch, 'loading')) next.loading = Boolean(patch.loading)
+  else if (web.canRead) next.loading = web.loading
+  if (hasOwn(patch, 'occluded')) next.occluded = Boolean(patch.occluded)
+  else next.occluded = previewOccluded
+  if (hasOwn(patch, 'error')) next.error = String(patch.error || '')
+  if (hasOwn(patch, 'last_command_id') || hasOwn(patch, 'lastCommandId')) {
+    next.last_command_id = String(patch.last_command_id ?? patch.lastCommandId ?? '')
+  }
+  if (hasOwn(patch, 'activity_seq') || hasOwn(patch, 'activitySeq')) {
+    next.activity_seq = Math.max(0, Number(patch.activity_seq ?? patch.activitySeq) || 0)
+  }
+
+  next.state = hasOwn(patch, 'state')
+    ? normalizePreviewStateName(patch.state, next.state)
+    : inferPreviewStateName(next, previewRuntimeState.state)
+  next.updated_at = new Date().toISOString()
+  previewRuntimeState = next
+  return previewStatePayload()
+}
+
+function previewStatePayload(extra = {}) {
+  const web = previewWebContentsSnapshot()
+  const state = {
+    ...previewRuntimeState,
+    tab_id: previewRuntimeState.tab_id || previewTabId,
+    url: web.canRead ? (web.url || previewRuntimeState.url) : previewRuntimeState.url,
+    title: web.canRead ? web.title : previewRuntimeState.title,
+    loading: previewRuntimeState.loading || web.loading,
+    occluded: previewOccluded,
+    bounds: clonePreviewBounds(previewRuntimeState.bounds),
+    canGoBack: web.canGoBack,
+    canGoForward: web.canGoForward
+  }
+  const payload = {
+    ok: web.canRead,
+    ...state,
+    tabId: state.tab_id,
+    lastCommandId: state.last_command_id,
+    activitySeq: state.activity_seq,
+    updatedAt: state.updated_at,
+    ...extra
+  }
+  if (!payload.tab_id && payload.tabId) payload.tab_id = payload.tabId
+  if (!payload.tabId && payload.tab_id) payload.tabId = payload.tab_id
+  return payload
+}
+
+function emitPreviewState(patch = {}) {
+  const payload = reducePreviewRuntimeState(patch)
+  if (!mainWindow || mainWindow.isDestroyed()) return payload
   mainWindow.webContents.send('metis:preview-state', payload)
+  return payload
 }
 
 function emitUpdateEvent(payload = {}) {
@@ -484,18 +619,35 @@ function setPreviewOccluded(value) {
   const next = Boolean(value)
   if (next === previewOccluded) return
   previewOccluded = next
-  if (!previewView || previewView.webContents.isDestroyed()) return
   if (previewOccluded) {
     hidePreviewView()
+    emitPreviewState({
+      bounds: lastPreviewBounds,
+      occluded: true,
+      state: lastPreviewBounds ? 'occluded' : 'hidden',
+      visible: false
+    })
   } else {
     const restore = previewOcclusionRestoreIntent(lastPreviewBounds)
-    if (restore.visible) {
+    if (restore.visible && previewView && !previewView.webContents.isDestroyed()) {
       lastPreviewBoundsKey = restore.key
       try { previewView.setBounds(restore.bounds) } catch {}
       try { previewView.setVisible?.(true) } catch {}
+      emitPreviewState({
+        bounds: restore.bounds,
+        occluded: false,
+        state: previewRuntimeState.error ? 'error' : (previewRuntimeState.loading ? 'loading' : 'ready'),
+        visible: true
+      })
     } else {
       // 渲染端最新意图是隐藏（遮挡期间关掉了预览）——保持隐藏，别用旧位置把网页恢复出来。
       hidePreviewView()
+      emitPreviewState({
+        bounds: null,
+        occluded: false,
+        state: 'hidden',
+        visible: false
+      })
     }
   }
 }
@@ -513,7 +665,9 @@ function disposePreviewView() {
   previewView = null
   previewTabId = ''
   lastPreviewBoundsKey = ''
+  lastPreviewBounds = null
   previewLoadedUrls.clear()
+  emitPreviewState({ bounds: null, loading: false, state: 'hidden', tab_id: '', visible: false })
 }
 
 function ensurePreviewView() {
@@ -565,7 +719,7 @@ function ensurePreviewView() {
       })
     })
   } catch {}
-  webContents.on('did-start-loading', () => emitPreviewState({ error: '', loading: true }))
+  webContents.on('did-start-loading', () => emitPreviewState({ error: '', loading: true, state: 'loading' }))
   webContents.on('did-stop-loading', () => emitPreviewState({ loading: false }))
   webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (errorCode === -3 || isMainFrame === false) {
@@ -582,11 +736,12 @@ function ensurePreviewView() {
     emitPreviewState({
       error: errorDescription || '网页加载失败',
       loading: false,
+      state: 'error',
       url: validatedURL || webContents.getURL()
     })
   })
-  webContents.on('did-navigate', (_event, url) => emitPreviewState({ error: '', loading: false, url }))
-  webContents.on('did-navigate-in-page', (_event, url) => emitPreviewState({ error: '', loading: false, url }))
+  webContents.on('did-navigate', (_event, url) => emitPreviewState({ error: '', loading: false, state: 'ready', url }))
+  webContents.on('did-navigate-in-page', (_event, url) => emitPreviewState({ error: '', loading: false, state: 'ready', url }))
   webContents.on('did-finish-load', () => {
     void installPreviewPageDiagnosticsHooks(webContents)
   })
@@ -600,7 +755,7 @@ async function loadPreviewUrl(url, tabId = '') {
   const nextTabId = String(tabId || '')
   const resolved = await resolvePreviewNavigationUrl(requestedValue)
   if (!resolved.ok) {
-    emitPreviewState({ error: resolved.error || 'Preview URL 解析失败', loading: false, tabId: nextTabId, url: resolved.url || '' })
+    emitPreviewState({ error: resolved.error || 'Preview URL 解析失败', loading: false, state: 'error', tabId: nextTabId, url: resolved.url || '' })
     recordPreviewAction({
       event: 'navigate',
       action: 'navigate',
@@ -620,7 +775,7 @@ async function loadPreviewUrl(url, tabId = '') {
   }
   const value = resolved.url
   if (!isSafeExternalUrl(value)) {
-    emitPreviewState({ error: 'Preview 只允许 http(s) 地址', loading: false, tabId: nextTabId })
+    emitPreviewState({ error: 'Preview 只允许 http(s) 地址', loading: false, state: 'error', tabId: nextTabId })
     recordPreviewAction({
       event: 'navigate',
       action: 'navigate',
@@ -634,6 +789,13 @@ async function loadPreviewUrl(url, tabId = '') {
   }
   const view = ensurePreviewView()
   if (!view) {
+    emitPreviewState({
+      error: 'preview view unavailable',
+      loading: false,
+      state: 'error',
+      tabId: nextTabId,
+      url: value
+    })
     recordPreviewAction({
       event: 'navigate',
       action: 'navigate',
@@ -647,7 +809,7 @@ async function loadPreviewUrl(url, tabId = '') {
   }
   const currentUrl = view.webContents.getURL()
   if (previewTabId === nextTabId && (currentUrl === value || previewLoadedUrls.get(nextTabId) === value)) {
-    emitPreviewState({ error: '', loading: false, tabId: nextTabId, url: value })
+    emitPreviewState({ error: '', loading: false, state: 'ready', tabId: nextTabId, url: value })
     recordPreviewAction({
       event: 'navigate',
       action: 'navigate',
@@ -669,11 +831,11 @@ async function loadPreviewUrl(url, tabId = '') {
   }
   previewTabId = nextTabId
   resetPreviewDiagnostics(`navigate:${value}`)
-  emitPreviewState({ error: '', loading: true, tabId: previewTabId, url: value })
+  emitPreviewState({ error: '', loading: true, state: 'loading', tabId: previewTabId, url: value })
   try {
     await view.webContents.loadURL(value)
     previewLoadedUrls.set(previewTabId, value)
-    emitPreviewState({ error: '', loading: false, tabId: previewTabId, url: view.webContents.getURL() || value })
+    emitPreviewState({ error: '', loading: false, state: 'ready', tabId: previewTabId, url: view.webContents.getURL() || value })
     recordPreviewAction({
       event: 'navigate',
       action: 'navigate',
@@ -692,7 +854,7 @@ async function loadPreviewUrl(url, tabId = '') {
   } catch (error) {
     const message = error?.message || String(error)
     previewLoadedUrls.delete(previewTabId)
-    emitPreviewState({ error: message, loading: false, tabId: previewTabId, url: value })
+    emitPreviewState({ error: message, loading: false, state: 'error', tabId: previewTabId, url: value })
     recordPreviewAction({
       event: 'navigate',
       action: 'navigate',
@@ -718,20 +880,6 @@ function previewWebContents() {
   const webContents = previewView?.webContents
   if (!webContents || webContents.isDestroyed()) return null
   return webContents
-}
-
-function previewStatePayload(extra = {}) {
-  const webContents = previewWebContents()
-  return {
-    ok: Boolean(webContents),
-    tabId: previewTabId,
-    url: webContents ? webContents.getURL() : '',
-    title: webContents ? webContents.getTitle() : '',
-    canGoBack: webContents ? webContents.canGoBack() : false,
-    canGoForward: webContents ? webContents.canGoForward() : false,
-    loading: webContents ? webContents.isLoading() : false,
-    ...extra
-  }
 }
 
 function clampPreviewNumber(value, min, max, fallback = 0) {
@@ -760,6 +908,7 @@ function recordPreviewAction(entry = {}) {
     ...entry
   })
   while (logItems.length > 80) logItems.shift()
+  emitPreviewState({ activity_seq: previewRuntimeState.activity_seq + 1 })
 }
 
 function previewActivityLabel(item = {}) {
@@ -1708,12 +1857,25 @@ async function handlePreviewBridgeRequest(request = {}) {
   return { ok: false, error: `unknown preview bridge command: ${kind}` }
 }
 
+function previewBridgeResultPayload(commandId, result) {
+  const base = result && typeof result === 'object' ? result : { ok: false, error: 'invalid preview bridge result' }
+  const browserActivity = base.browser_activity && typeof base.browser_activity === 'object'
+    ? base.browser_activity
+    : previewActivityPayload()
+  return {
+    ...base,
+    command_id: commandId,
+    preview_state: previewStatePayload(),
+    browser_activity: browserActivity
+  }
+}
+
 async function postPreviewBridgeResult(requestId, result) {
   if (!backendPort || !requestId) return
   await fetch(`http://127.0.0.1:${backendPort}/api/preview-browser/result`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: requestId, result })
+    body: JSON.stringify({ id: requestId, command_id: requestId, result })
   })
 }
 
@@ -1736,11 +1898,13 @@ function startPreviewBridgeLoop() {
           continue
         }
         let result
+        emitPreviewState({ last_command_id: request.id })
         try {
           result = await handlePreviewBridgeRequest(request)
         } catch (error) {
           result = { ok: false, error: error?.message || String(error) }
         }
+        result = previewBridgeResultPayload(request.id, result)
         try {
           await postPreviewBridgeResult(request.id, result)
         } catch (error) {
@@ -2521,7 +2685,55 @@ async function savePreviewEvidence(payload = {}) {
     }
   }
   await fs.writeFile(result.savedPath, JSON.stringify(evidence, null, 2), 'utf8')
+  const artifact = await registerPreviewEvidenceArtifact(result, payload)
+  if (artifact?.artifact_id) {
+    result.artifactId = artifact.artifact_id
+  }
   return result
+}
+
+async function registerPreviewEvidenceArtifact(result, payload = {}) {
+  if (!backendPort || !result?.savedPath) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 1800)
+  try {
+    const response = await fetch(`http://127.0.0.1:${backendPort}/artifacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'preview_evidence',
+        title: result.title || 'Preview evidence',
+        path: result.savedPath,
+        url: result.url || '',
+        mime: 'application/json',
+        run_id: payload.runId || payload.run_id || '',
+        session_id: payload.sessionId || payload.session_id || '',
+        turn_id: payload.turnId || payload.turn_id || '',
+        source_event_id: payload.sourceEventId || payload.source_event_id || '',
+        source_tool_call_id: payload.sourceToolCallId || payload.source_tool_call_id || '',
+        metadata: {
+          status: result.status || '',
+          reason: result.reason || '',
+          screenshot_path: result.screenshotPath || '',
+          screenshot_available: Boolean(result.screenshotAvailable),
+          captured_at: result.capturedAt || '',
+          preview_evidence_schema: 'metis.preview_evidence.v1'
+        }
+      }),
+      signal: controller.signal
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok || !data?.artifact) {
+      log(`[artifacts] preview evidence registration failed: ${response.status}`)
+      return null
+    }
+    return data.artifact
+  } catch (error) {
+    log(`[artifacts] preview evidence registration skipped: ${error?.message || error}`)
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function startBackendWithEvents({ reset = false } = {}) {
@@ -3325,14 +3537,29 @@ ipcMain.handle('metis:dev-server-start', (_event, payload = {}) => startDevServe
 ipcMain.handle('metis:dev-server-stop', (_event, payload = {}) => stopDevServer(payload))
 ipcMain.handle('metis:dev-server-status', (_event, payload = {}) => devServerStatus(payload))
 ipcMain.handle('metis:save-preview-evidence', (_event, payload = {}) => savePreviewEvidence(payload))
-ipcMain.handle('metis:preview-set-bounds', (_event, payload = {}) => {
+function previewVisibleLayoutState() {
+  if (previewRuntimeState.error) return 'error'
+  if (previewRuntimeState.loading) return 'loading'
+  if (!previewRuntimeState.url) return 'mounting'
+  return 'ready'
+}
+
+function applyPreviewLayoutIntent(payload = {}) {
   // 有 DOM 浮层挡着时，不移动原生视图（否则 ResizeObserver 会把它又显示到弹窗上面），
   // 但仍要记录渲染端的最新意图——否则遮挡期间关掉预览，解除遮挡后会用旧位置把网页又恢复出来（残留）。
-  const intent = previewBoundsIntent(payload)
+  const intent = previewLayoutIntent(payload)
+  const tabId = intent.tabId
   if (previewOccluded) {
-    lastPreviewBounds = intent.bounds
+    lastPreviewBounds = intent.visible ? intent.bounds : null
     if (!intent.visible) hidePreviewView()
-    return { ok: true, occluded: true }
+    const state = emitPreviewState({
+      bounds: lastPreviewBounds,
+      occluded: true,
+      state: lastPreviewBounds ? 'occluded' : 'hidden',
+      tab_id: tabId || previewTabId,
+      visible: false
+    })
+    return { ok: true, occluded: true, preview_state: state }
   }
   if (!intent.visible) {
     // Renderer explicitly closed/hidden Preview (tab/card/mode switch). Treat
@@ -3341,40 +3568,77 @@ ipcMain.handle('metis:preview-set-bounds', (_event, payload = {}) => {
     // background or an overlay closes.
     lastPreviewBounds = null
     hidePreviewView()
-    if (intent.hiddenBounds) return { ok: true, bounds: intent.hiddenBounds, hidden: true }
-    return { ok: true }
+    const state = emitPreviewState({
+      bounds: null,
+      loading: false,
+      state: 'hidden',
+      tab_id: tabId || previewTabId,
+      visible: false
+    })
+    if (intent.hiddenBounds) return { ok: true, bounds: intent.hiddenBounds, hidden: true, preview_state: state }
+    return { ok: true, hidden: true, preview_state: state }
   }
-  const tabId = String(payload.tabId || '')
-  if (tabId && tabId !== previewTabId) {
-    return { ok: true, skipped: true, tabId, activeTabId: previewTabId }
+  if (tabId && previewTabId && tabId !== previewTabId) {
+    return { ok: true, skipped: true, tabId, activeTabId: previewTabId, preview_state: previewStatePayload() }
   }
+  if (tabId && !previewTabId) previewTabId = tabId
   const view = ensurePreviewView()
-  if (!view) return { ok: false, error: 'preview view unavailable' }
+  if (!view) {
+    const state = emitPreviewState({
+      error: 'preview view unavailable',
+      loading: false,
+      state: 'error',
+      tab_id: tabId || previewTabId,
+      visible: false
+    })
+    return { ok: false, error: 'preview view unavailable', preview_state: state }
+  }
   const bounds = intent.bounds
   // 去重：渲染端一次同步会连发多帧/定时器调用，位置没变就别重定位原生视图（消除闪烁）。
   const key = intent.key
   if (key === lastPreviewBoundsKey) {
-    return { ok: true, bounds, deduped: true }
+    const state = emitPreviewState({
+      bounds,
+      state: previewVisibleLayoutState(),
+      tab_id: tabId || previewTabId,
+      visible: true
+    })
+    return { ok: true, bounds, deduped: true, preview_state: state }
   }
   lastPreviewBoundsKey = key
   lastPreviewBounds = bounds
   view.setBounds(bounds)
   try { view.setVisible?.(true) } catch {}
-  return { ok: true, bounds }
-})
+  const state = emitPreviewState({
+    bounds,
+    state: previewVisibleLayoutState(),
+    tab_id: tabId || previewTabId,
+    visible: true
+  })
+  return { ok: true, bounds, preview_state: state }
+}
+
+ipcMain.handle('metis:preview-set-layout-intent', (_event, payload = {}) => applyPreviewLayoutIntent(payload))
+ipcMain.handle('metis:preview-set-bounds', (_event, payload = {}) => applyPreviewLayoutIntent(payload))
 ipcMain.handle('metis:preview-set-occluded', (_event, value) => {
   setPreviewOccluded(value)
-  return { ok: true, occluded: previewOccluded }
+  return { ok: true, occluded: previewOccluded, preview_state: previewStatePayload() }
 })
 ipcMain.handle('metis:preview-load', (_event, payload = {}) => loadPreviewUrl(payload.url, payload.tabId))
 ipcMain.handle('metis:preview-command', (_event, command) => {
   const webContents = previewView?.webContents
-  if (!webContents || webContents.isDestroyed()) return { ok: false }
+  if (!webContents || webContents.isDestroyed()) return { ok: false, preview_state: previewStatePayload() }
   if (command === 'back' && webContents.canGoBack()) webContents.goBack()
   if (command === 'forward' && webContents.canGoForward()) webContents.goForward()
-  if (command === 'reload') webContents.reload()
-  if (command === 'stop') webContents.stop()
-  return { ok: true }
+  if (command === 'reload') {
+    emitPreviewState({ error: '', loading: true, state: 'loading' })
+    webContents.reload()
+  }
+  if (command === 'stop') {
+    webContents.stop()
+    emitPreviewState({ loading: false })
+  }
+  return { ok: true, preview_state: previewStatePayload() }
 })
 ipcMain.handle('metis:preview-set-zoom', (_event, zoom) => {
   const webContents = previewView?.webContents

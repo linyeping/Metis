@@ -1,3 +1,7 @@
+const PREVIEW_STATE_SCHEMA = 'metis.preview_state.v1'
+const PREVIEW_STATE_VERSION = 1
+const PREVIEW_STATES = new Set(['hidden', 'mounting', 'loading', 'ready', 'occluded', 'error'])
+
 function normalizePreviewBounds(payload = {}) {
   return {
     x: Math.max(0, Math.round(Number(payload.x) || 0)),
@@ -17,7 +21,8 @@ function isValidPreviewBounds(bounds) {
 }
 
 function previewBoundsIntent(payload = {}) {
-  const bounds = normalizePreviewBounds(payload)
+  const rawBounds = payload && typeof payload.bounds === 'object' ? payload.bounds : payload
+  const bounds = normalizePreviewBounds(rawBounds)
   if (!Boolean(payload.visible)) {
     return { visible: false, bounds: null, hiddenBounds: null, reason: 'hidden-intent' }
   }
@@ -25,6 +30,18 @@ function previewBoundsIntent(payload = {}) {
     return { visible: false, bounds: null, hiddenBounds: bounds, reason: 'invalid-bounds' }
   }
   return { visible: true, bounds, hiddenBounds: null, key: previewBoundsKey(bounds), reason: 'visible-intent' }
+}
+
+function previewLayoutIntent(payload = {}) {
+  const base = previewBoundsIntent(payload)
+  const reason = String(payload.reason || base.reason || '').trim()
+  const tabId = String(payload.tabId || payload.tab_id || '').trim()
+  return {
+    ...base,
+    tabId,
+    tab_id: tabId,
+    reason: reason || base.reason
+  }
 }
 
 function previewOcclusionRestoreIntent(lastPreviewBounds) {
@@ -39,10 +56,19 @@ function previewOcclusionRestoreIntent(lastPreviewBounds) {
   }
 }
 
+function normalizePreviewStateName(value, fallback = 'hidden') {
+  const state = String(value || '').trim().toLowerCase()
+  return PREVIEW_STATES.has(state) ? state : fallback
+}
+
 module.exports = {
+  PREVIEW_STATE_SCHEMA,
+  PREVIEW_STATE_VERSION,
   isValidPreviewBounds,
+  normalizePreviewStateName,
   normalizePreviewBounds,
   previewBoundsIntent,
   previewBoundsKey,
+  previewLayoutIntent,
   previewOcclusionRestoreIntent
 }

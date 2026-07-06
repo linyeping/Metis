@@ -33,8 +33,9 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState } from
 import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { apiBase, cancelChatRun, getAgentRuntimeProfile, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth } from '../../lib/api';
+import { DOCUMENT_LIBRARY_EVENT, listDocumentLibraryItems, syncDocumentLibraryFromArtifacts, upsertDocumentLibraryItem, type DocumentLibraryItem } from '../../lib/documentLibrary';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { AgentRuntimeProfilePayload, BrowserActivityItem, BrowserActivityPayload, ChatRunPayload, ChatTodoItem, ContextLedger, DevServerStatus, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import type { AgentRuntimeProfilePayload, BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatTodoItem, ContextLedger, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -57,13 +58,14 @@ const workspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: ty
   { id: 'activity', label: 'Background tasks', icon: Network },
   { id: 'plan', label: 'Plan', icon: StickyNote },
   { id: 'research', label: 'Research', icon: ScanSearch },
+  { id: 'session', label: '会话文件', icon: Folder },
   { id: 'tool', label: 'Tool output', icon: Wrench },
 ];
 
 const workspaceCardColumns: Array<{ id: WorkspaceCardColumnId; cards: WorkspaceCardId[] }> = [
   { id: 'left', cards: ['web', 'terminal'] },
   { id: 'middle', cards: ['files', 'diff'] },
-  { id: 'right', cards: ['activity', 'plan', 'research'] },
+  { id: 'right', cards: ['activity', 'plan', 'research', 'session'] },
 ];
 
 type PlanTodoStatus = 'done' | 'active' | 'pending' | 'blocked' | 'failed' | 'canceled';
@@ -153,6 +155,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const t = useT();
   const previewPath = useUiStore(state => state.previewPath);
   const previewFrozenSrc = useUiStore(state => state.previewFrozenSrc);
+  const setPreviewFrozenSrc = useUiStore(state => state.setPreviewFrozenSrc);
   const toolPreview = useUiStore(state => state.toolPreview);
   const diffPreview = useUiStore(state => state.diffPreview);
   const diffSummary = useUiStore(state => state.diffSummary);
@@ -165,6 +168,8 @@ export function RightRail({ backendReady }: RightRailProps) {
   const activeWebPreviewId = useUiStore(state => state.activeWebPreviewId);
   const webPreviewUrl = useUiStore(state => state.webPreviewUrl);
   const subagents = useChatStore(state => state.subagents);
+  const chatMessages = useChatStore(state => state.messages);
+  const pendingAttachments = useChatStore(state => state.attachments);
   const planTodos = useChatStore(state => state.planTodos);
   const streaming = useChatStore(state => state.streaming);
   const runtimeStatus = useChatStore(state => state.runtimeStatus);
@@ -204,6 +209,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const [devStatus, setDevStatus] = useState<DevServerStatus | null>(null);
   const [devBusy, setDevBusy] = useState(false);
   const [previewAudit, setPreviewAudit] = useState<PreviewAuditResult | null>(null);
+  const [previewState, setPreviewState] = useState<PreviewStatePayload | null>(null);
   const [browserActivity, setBrowserActivity] = useState<BrowserActivityPayload | null>(null);
   const [agentRuntimeProfile, setAgentRuntimeProfile] = useState<AgentRuntimeProfilePayload | null>(null);
   const [auditBusy, setAuditBusy] = useState(false);
@@ -225,6 +231,7 @@ export function RightRail({ backendReady }: RightRailProps) {
   const activeWebZoomPercent = Math.round(activeWebZoom * 100);
   const webCardVisible = workspaceCardVisibility.web;
   const canShowWebPreview = appMode !== 'chat' && rightRailOpen && webCardVisible;
+  const showFrozenPreview = Boolean(previewFrozenSrc && canShowWebPreview && webPreviewUrl);
   const researchCardVisible = workspaceCardVisibility.research;
   const activeDiffFile = useMemo(
     () => diffSummary?.files.find(file => file.preview.id === activeDiffFileId) || diffSummary?.files[0] || null,
@@ -362,11 +369,14 @@ export function RightRail({ backendReady }: RightRailProps) {
 
   useEffect(() => {
     return window.metis?.onPreviewState?.(payload => {
-      const tabId = payload.tabId || useUiStore.getState().activeWebPreviewId;
+      const tabId = payload.tab_id || payload.tabId || useUiStore.getState().activeWebPreviewId;
       if (!tabId || tabId !== useUiStore.getState().activeWebPreviewId) return;
+      setPreviewState(payload);
       const patch: Partial<WebPreviewTab> = {};
       if (payload.error !== undefined) patch.error = payload.error;
-      if (payload.loading !== undefined) patch.loading = Boolean(payload.loading);
+      if (payload.loading !== undefined || payload.state) {
+        patch.loading = payload.state === 'loading' || payload.state === 'mounting' || Boolean(payload.loading);
+      }
       if (payload.title) patch.title = payload.title;
       if (payload.url && /^https?:\/\//i.test(payload.url)) patch.url = payload.url;
       setWebNav({
@@ -394,6 +404,11 @@ export function RightRail({ backendReady }: RightRailProps) {
     return () => window.clearInterval(timer);
   }, [refreshBrowserActivity, rightRailOpen, webCardVisible]);
 
+  useEffect(() => {
+    if (!rightRailOpen || !webCardVisible || !previewState?.activity_seq) return;
+    void refreshBrowserActivity();
+  }, [previewState?.activity_seq, refreshBrowserActivity, rightRailOpen, webCardVisible]);
+
   const refreshResearchJobs = useCallback(async () => {
     if (!backendReady) {
       setResearchJobs([]);
@@ -403,10 +418,13 @@ export function RightRail({ backendReady }: RightRailProps) {
     }
     try {
       const payload = await getResearchJobs(40);
-      setResearchJobs(payload.jobs);
-      const jobId = activeResearchJobId || payload.jobs[0]?.id || '';
+      const railJobs = payload.jobs.filter(job => !isDeepResearchJob(job));
+      setResearchJobs(railJobs);
+      const activeRailJob = activeResearchJobId && railJobs.some(job => job.id === activeResearchJobId) ? activeResearchJobId : '';
+      const jobId = activeRailJob || railJobs[0]?.id || '';
       if (jobId) {
-        setResearchJob(await getResearchJob(jobId));
+        const nextJob = await getResearchJob(jobId);
+        setResearchJob(isDeepResearchJob(nextJob) ? null : nextJob);
       } else {
         setResearchJob(null);
       }
@@ -444,28 +462,42 @@ export function RightRail({ backendReady }: RightRailProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [researchJob?.id, researchSourceFocusId]);
 
-  const hidePreviewView = useCallback(() => {
-    void window.metis?.previewSetBounds?.({ visible: false });
+  const sendPreviewLayoutIntent = useCallback((payload: PreviewLayoutIntentPayload) => {
+    const api = window.metis;
+    if (api?.previewSetLayoutIntent) return api.previewSetLayoutIntent(payload);
+    if (api?.previewSetBounds) return api.previewSetBounds(payload);
+    return Promise.resolve({ ok: false, error: 'preview ipc unavailable' });
   }, []);
+
+  const hidePreviewView = useCallback((reason = 'right-rail-hidden') => {
+    void sendPreviewLayoutIntent({ visible: false, reason });
+  }, [sendPreviewLayoutIntent]);
+
+  const showPreviewAtHost = useCallback((node: HTMLDivElement, tabId: string, reason: string, visibleOverride?: boolean) => {
+    const rect = node.getBoundingClientRect();
+    const visible = visibleOverride ?? (rect.width > 4 && rect.height > 4 && !workspaceSettling);
+    void sendPreviewLayoutIntent({
+      bounds: {
+        height: rect.height,
+        width: rect.width,
+        x: rect.left,
+        y: rect.top,
+      },
+      reason,
+      tabId,
+      visible,
+    });
+  }, [sendPreviewLayoutIntent, workspaceSettling]);
 
   const syncPreviewBounds = useCallback(() => {
     const node = previewHostRef.current;
     const canShowPreview = canShowWebPreview && Boolean(webPreviewUrl && activeWebPreviewId);
-    if (!window.metis?.previewSetBounds || !node || !canShowPreview) {
-      hidePreviewView();
+    if (!node || !canShowPreview) {
+      hidePreviewView('right-rail-sync-hidden');
       return;
     }
-    const rect = node.getBoundingClientRect();
-    const visible = rect.width > 4 && rect.height > 4 && !workspaceSettling;
-    void window.metis.previewSetBounds({
-      height: rect.height,
-      tabId: activeWebPreviewId,
-      visible,
-      width: rect.width,
-      x: rect.left,
-      y: rect.top,
-    });
-  }, [activeWebPreviewId, canShowWebPreview, hidePreviewView, webPreviewUrl, workspaceSettling]);
+    showPreviewAtHost(node, activeWebPreviewId, 'right-rail-sync');
+  }, [activeWebPreviewId, canShowWebPreview, hidePreviewView, showPreviewAtHost, webPreviewUrl]);
 
   const schedulePreviewBoundsSync = useCallback(() => {
     const frames: number[] = [];
@@ -491,7 +523,7 @@ export function RightRail({ backendReady }: RightRailProps) {
 
   useEffect(() => {
     if (!canShowWebPreview || !webPreviewUrl || !activeWebPreviewId) {
-      void window.metis?.previewSetBounds?.({ visible: false });
+      hidePreviewView('right-rail-no-preview');
       return;
     }
     const tabId = activeWebPreviewId;
@@ -505,7 +537,7 @@ export function RightRail({ backendReady }: RightRailProps) {
     const syncLoadedPreviewBounds = () => {
       if (disposed) return;
       const node = previewHostRef.current;
-      if (!window.metis?.previewSetBounds || !node) return;
+      if (!node) return;
       const state = useUiStore.getState();
       const rect = node.getBoundingClientRect();
       const visible =
@@ -516,14 +548,7 @@ export function RightRail({ backendReady }: RightRailProps) {
         state.webPreviewUrl === webPreviewUrl &&
         rect.width > 4 &&
         rect.height > 4;
-      void window.metis.previewSetBounds({
-        height: rect.height,
-        tabId,
-        visible,
-        width: rect.width,
-        x: rect.left,
-        y: rect.top,
-      });
+      showPreviewAtHost(node, tabId, 'right-rail-load-sync', visible);
     };
     syncLoadedPreviewBounds();
     const frame = requestAnimationFrame(() => {
@@ -538,11 +563,16 @@ export function RightRail({ backendReady }: RightRailProps) {
       frames.forEach(cancelAnimationFrame);
       timers.forEach(window.clearTimeout);
     };
-  }, [activeWebPreviewId, canShowWebPreview, webPreviewUrl]);
+  }, [activeWebPreviewId, canShowWebPreview, hidePreviewView, showPreviewAtHost, t, webPreviewUrl]);
 
   useEffect(() => {
     if (!canShowWebPreview) hidePreviewView();
   }, [canShowWebPreview, hidePreviewView]);
+
+  useEffect(() => {
+    if (showFrozenPreview) return;
+    if (previewFrozenSrc && (!canShowWebPreview || !webPreviewUrl)) setPreviewFrozenSrc(null);
+  }, [canShowWebPreview, previewFrozenSrc, setPreviewFrozenSrc, showFrozenPreview, webPreviewUrl]);
 
   useEffect(() => {
     const node = previewHostRef.current;
@@ -903,6 +933,7 @@ export function RightRail({ backendReady }: RightRailProps) {
         error: activeWebTab?.error || '',
         zoom: activeWebZoom,
         screenshotDataUrl: image?.dataUrl || '',
+        sessionId: activeSessionId || '',
       });
       setPreviewAudit(result);
     } catch (err) {
@@ -933,8 +964,8 @@ export function RightRail({ backendReady }: RightRailProps) {
     .map(column => ({
       ...column,
       visibleCards: column.cards.filter(cardId => {
-        if (cardId === 'research' && appMode !== 'chat') return false;
-        if (appMode === 'chat' && cardId !== 'research') return false;
+        if ((cardId === 'research' || cardId === 'session') && appMode !== 'chat') return false;
+        if (appMode === 'chat' && cardId !== 'research' && cardId !== 'session') return false;
         return workspaceCardVisibility[cardId] && (cardId !== 'tool' || Boolean(toolPreview));
       }),
     }))
@@ -1393,8 +1424,8 @@ export function RightRail({ backendReady }: RightRailProps) {
       {webPreviewUrl ? (
         <div className="web-preview-frame" data-zoom={Math.round(activeWebZoom * 100)}>
           <div className="web-preview-host" data-preview-url={webPreviewUrl} ref={previewHostRef}>
-            {previewFrozenSrc && (
-              <img className="web-preview-frozen" src={previewFrozenSrc} alt="" draggable={false} />
+            {showFrozenPreview && (
+              <img className="web-preview-frozen" src={previewFrozenSrc || undefined} alt="" draggable={false} />
             )}
           </div>
         </div>
@@ -1573,12 +1604,6 @@ export function RightRail({ backendReady }: RightRailProps) {
                 <span>{job.title || job.query || researchKindLabel(job.kind, t)}</span>
               </div>
               <div className="research-source-card-head-actions">
-                {job.kind === 'research' && (
-                  <button type="button" onClick={() => setResearchReportView(job.id)}>
-                    <FileText size={11} />
-                    {t('报告')}
-                  </button>
-                )}
                 <em data-status={job.status}>
                   {job.status === 'running' && <LoaderCircle className="spin" size={11} />}
                   {sourceCount} {t('个')}
@@ -1595,7 +1620,8 @@ export function RightRail({ backendReady }: RightRailProps) {
               job={job}
               listRef={researchSourceListRef}
               onOpenSource={source => {
-                if (source.url) void window.metis?.openExternal?.(source.url);
+                const url = researchSourceUrl(source);
+                if (url) void window.metis?.openExternal?.(url);
               }}
               t={t}
             />
@@ -1616,6 +1642,16 @@ export function RightRail({ backendReady }: RightRailProps) {
     );
   };
 
+  const renderSessionPanel = () => (
+    <SessionWorkspacePanel
+      backendReady={backendReady}
+      messages={chatMessages}
+      pendingAttachments={pendingAttachments}
+      setResearchReportView={setResearchReportView}
+      t={t}
+    />
+  );
+
   const renderCardContent = (cardId: WorkspaceCardId) => {
     if (cardId === 'web') return renderWebPanel();
     if (cardId === 'terminal') return <TerminalPanel embedded onRequestClose={() => setWorkspaceCardVisible('terminal', false)} />;
@@ -1623,6 +1659,7 @@ export function RightRail({ backendReady }: RightRailProps) {
     if (cardId === 'diff') return renderDiffPanel();
     if (cardId === 'activity') return renderActivityPanel();
     if (cardId === 'research') return renderResearchPanel();
+    if (cardId === 'session') return renderSessionPanel();
     if (cardId === 'tool') return renderToolPanel();
     return renderPlanPanel();
   };
@@ -1744,7 +1781,9 @@ function BrowserActivityPanel({ activity, t }: { activity: BrowserActivityPayloa
             {activity.counts.blocked > 0 ? `${activity.counts.blocked} ${t('拦截')}` : activity.counts.errors > 0 ? `${activity.counts.errors} ${t('失败')}` : t('诊断')}
           </em>
         )}
-        <span className="browser-activity-caret">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+        <span className="browser-activity-caret">
+          <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
+        </span>
       </button>
       {open && (
         <div className="browser-activity-list">
@@ -1837,6 +1876,8 @@ function ResearchSourcesView({
       {sources.length > 0 ? sources.map((source, index) => {
         const sourceId = researchSourceId(source, index);
         const title = researchSourceTitle(source, t);
+        const url = researchSourceUrl(source);
+        const linkLabel = researchSourceLinkLabel(source, t);
         const statusLabel = researchSourceStatus(source, t);
         return (
           <button
@@ -1844,17 +1885,13 @@ function ResearchSourcesView({
             className="research-source-row"
             data-highlight={focusSourceId === sourceId}
             data-status={source.status || 'search_result'}
-            disabled={!source.url}
+            disabled={!url}
             id={researchSourceDomId(job.id, sourceId)}
             key={`${sourceId}-${source.url || source.title || ''}`}
             onClick={() => onOpenSource(source)}
           >
             <ResearchSourceLogo source={source} />
-            <div>
-              <strong title={title}>{title}</strong>
-              {source.snippet && <p>{source.snippet}</p>}
-              {source.error && <code>{source.error}</code>}
-            </div>
+            <span className="research-source-link" title={url || title}>{linkLabel}</span>
             {statusLabel && <em>{statusLabel}</em>}
           </button>
         );
@@ -1865,15 +1902,259 @@ function ResearchSourcesView({
   );
 }
 
+function SessionWorkspacePanel({
+  backendReady,
+  messages,
+  pendingAttachments,
+  setResearchReportView,
+  t,
+}: {
+  backendReady: boolean;
+  messages: ChatMessage[];
+  pendingAttachments: ParsedFile[];
+  setResearchReportView: (jobId?: string) => void;
+  t: (text: string) => string;
+}) {
+  const activeSessionId = useSessionStore(state => state.activeSessionId);
+  const [reports, setReports] = useState<ResearchJob[]>([]);
+  const [libraryItems, setLibraryItems] = useState<DocumentLibraryItem[]>([]);
+  const attachments = useMemo(() => {
+    const rows = new Map<string, ParsedFile>();
+    for (const attachment of pendingAttachments || []) {
+      if (attachment.path) rows.set(attachment.path, attachment);
+    }
+    for (const message of messages || []) {
+      for (const attachment of message.attachments || []) {
+        if (attachment.path) rows.set(attachment.path, attachment);
+      }
+    }
+    return Array.from(rows.values()).slice(-10).reverse();
+  }, [messages, pendingAttachments]);
+
+  useEffect(() => {
+    const refreshLibrary = () => setLibraryItems(listDocumentLibraryItems().slice(0, 12));
+    refreshLibrary();
+    window.addEventListener(DOCUMENT_LIBRARY_EVENT, refreshLibrary);
+    window.addEventListener('storage', refreshLibrary);
+    return () => {
+      window.removeEventListener(DOCUMENT_LIBRARY_EVENT, refreshLibrary);
+      window.removeEventListener('storage', refreshLibrary);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!backendReady) {
+      setReports([]);
+      return undefined;
+    }
+    let disposed = false;
+    const refresh = async () => {
+      let artifactSynced = false;
+      try {
+        const synced = await syncDocumentLibraryFromArtifacts({ sessionId: activeSessionId || '', includeUnscoped: true });
+        artifactSynced = true;
+        if (!disposed) setLibraryItems(synced.slice(0, 12));
+      } catch {
+        artifactSynced = false;
+      }
+      try {
+        const payload = await getResearchJobs(24);
+        if (disposed) return;
+        const reportJobs = payload.jobs.filter(job => isReportDocumentJob(job)).slice(0, 10);
+        if (!artifactSynced) for (const job of reportJobs) {
+          upsertDocumentLibraryItem(documentItemFromResearchJob(job, t));
+        }
+        setReports(reportJobs);
+      } catch {
+        if (!disposed) setReports([]);
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 6000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [activeSessionId, backendReady, t]);
+
+  const generatedItems = useMemo(
+    () => libraryItems.filter(item => item.artifactId || ['research_report', 'report', 'document', 'diff', 'file_change', 'preview_evidence', 'download', 'workspace_file'].includes(item.kind)),
+    [libraryItems],
+  );
+  const libraryReportIds = useMemo(() => new Set(generatedItems.map(item => item.jobId).filter(Boolean)), [generatedItems]);
+  const looseReports = useMemo(() => reports.filter(report => !libraryReportIds.has(report.id)), [libraryReportIds, reports]);
+  const hasContent = attachments.length > 0 || reports.length > 0 || libraryItems.length > 0;
+  const openGeneratedFile = (item: DocumentLibraryItem) => {
+    if (item.jobId && (item.kind === 'research_report' || item.kind === 'report')) {
+      setResearchReportView(item.jobId);
+      return;
+    }
+    if (item.path) {
+      void window.metis?.openPath?.(item.path);
+      return;
+    }
+    if (item.url) {
+      void window.metis?.openExternal?.(item.url);
+      return;
+    }
+    if (item.jobId) setResearchReportView(item.jobId);
+  };
+  const openGeneratedReport = (report: ResearchJob) => {
+    if (report.report_path) {
+      void window.metis?.openPath?.(report.report_path);
+      return;
+    }
+    setResearchReportView(report.id);
+  };
+  return (
+    <div className="session-workspace-pane">
+      <div className="session-workspace-head">
+        <div>
+          <strong>{t('会话文件')}</strong>
+          <span>{t('生成与上传')}</span>
+        </div>
+        <em>{t('本次会话')}</em>
+      </div>
+      {!hasContent && (
+        <div className="session-workspace-empty">
+          <Folder size={20} />
+          <strong>{t('会话文件')}</strong>
+          <span>{t('上传的文件、图片和生成的文件会出现在这里。')}</span>
+        </div>
+      )}
+      {attachments.length > 0 && (
+        <section className="session-workspace-section">
+          <header>{t('上传文件')}</header>
+          {attachments.map(file => (
+            <button type="button" key={file.path} onClick={() => file.path ? void window.metis?.openPath?.(file.path) : undefined}>
+              <Folder size={13} />
+              <span>
+                <strong>{attachmentName(file)}</strong>
+                <small>{file.path}</small>
+              </span>
+            </button>
+          ))}
+        </section>
+      )}
+      {generatedItems.length > 0 && (
+        <section className="session-workspace-section">
+          <header>{t('生成文件')}</header>
+          {generatedItems.map(item => (
+            <button type="button" key={item.id} onClick={() => openGeneratedFile(item)}>
+              <FileText size={13} />
+              <span>
+                <strong>{generatedFileName(item.title || item.path || item.jobId || t('生成文件'))}</strong>
+                <small>{item.path || item.subtitle || t('已生成')}</small>
+              </span>
+            </button>
+          ))}
+        </section>
+      )}
+      {looseReports.length > 0 && (
+        <section className="session-workspace-section">
+          <header>{t('生成文件')}</header>
+          {looseReports.map(report => (
+            <button type="button" key={report.id} onClick={() => openGeneratedReport(report)}>
+              <FileText size={13} />
+              <span>
+                <strong>{report.report_filename || generatedFileName(report.title || report.query || t('生成文件'))}</strong>
+                <small>{report.report_path || researchJobEntryMeta(report, t)}</small>
+              </span>
+            </button>
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function isReportDocumentJob(job: ResearchJob): boolean {
+  return Boolean(job.report_filename || job.report_path || String(job.report || '').trim());
+}
+
+function documentItemFromResearchJob(job: ResearchJob, t: (text: string) => string): DocumentLibraryItem {
+  return {
+    id: `research:${job.id}`,
+    jobId: job.id,
+    kind: 'research_report',
+    path: job.report_path || '',
+    source: 'research',
+    subtitle: researchJobEntryMeta(job, t),
+    title: job.title || job.query || job.report_filename || t('研究报告'),
+    createdAt: Number(job.created_at || Date.now()),
+    updatedAt: Number(job.updated_at || Date.now()),
+  };
+}
+
+function attachmentName(file: ParsedFile): string {
+  const path = String(file.path || '').replace(/\\/g, '/');
+  return path.split('/').pop() || path || 'file';
+}
+
+function generatedFileName(value: string): string {
+  const normalized = String(value || '').replace(/\\/g, '/').trim();
+  const filename = normalized.split('/').pop() || normalized || 'generated-file.md';
+  return /\.[A-Za-z0-9]{1,8}$/.test(filename) ? filename : `${filename}.md`;
+}
+
+function researchJobEntryMeta(job: ResearchJob, t: (text: string) => string): string {
+  const count = job.stats?.sources || job.sources?.length || 0;
+  const time = Number(job.updated_at || job.created_at || 0);
+  const when = Number.isFinite(time) && time > 0 ? new Date(time).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  return [when, count ? `${count} ${t('个来源')}` : ''].filter(Boolean).join(' · ') || t('已生成');
+}
+
 function ResearchSourceLogo({ source }: { source: ResearchJobSource }) {
-  const host = source.domain || researchHost(source.url || '');
-  const initial = host.replace(/^www\./i, '').charAt(0).toUpperCase();
+  const [iconIndex, setIconIndex] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const host = researchHost(researchSourceUrl(source)) || source.domain || '';
+  const candidates = sourceFaviconCandidates(host);
+  const faviconUrl = !failed && candidates.length > 0 ? candidates[Math.min(iconIndex, candidates.length - 1)] : '';
+  const brand = sourceLogoBrand(host);
 
   return (
-    <span className="research-source-logo" aria-hidden="true">
-      <span>{initial || <Globe size={12} />}</span>
+    <span className="research-source-logo" aria-hidden="true" style={{ '--source-logo-hue': sourceLogoHue(host) } as CSSProperties}>
+      {faviconUrl && !failed ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          onError={() => {
+            if (iconIndex < candidates.length - 1) setIconIndex(value => value + 1);
+            else setFailed(true);
+          }}
+        />
+      ) : (
+        <span className="research-source-logo-fallback" data-brand={brand} />
+      )}
     </span>
   );
+}
+
+function sourceFaviconCandidates(host: string): string[] {
+  const value = String(host || '').replace(/^www\./i, '').trim();
+  if (!value) return [];
+  const encoded = encodeURIComponent(value);
+  return [
+    `https://icons.duckduckgo.com/ip3/${value}.ico`,
+    `https://www.google.com/s2/favicons?domain=${encoded}&sz=64`,
+    `https://${value}/favicon.ico`,
+  ];
+}
+
+function sourceLogoBrand(host: string): string {
+  const value = String(host || '').toLowerCase();
+  if (/google|gemini|deepmind/.test(value)) return 'google';
+  if (/github/.test(value)) return 'github';
+  if (/youtube/.test(value)) return 'youtube';
+  return 'generic';
+}
+
+function sourceLogoHue(host: string): number {
+  const value = String(host || 'source');
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) % 360;
+  return hash;
 }
 
 function ResearchReportView({
@@ -1984,6 +2265,10 @@ function researchKindLabel(kind: string, t: (text: string) => string): string {
   return t('研究');
 }
 
+function isDeepResearchJob(job: Pick<ResearchJob, 'kind'> | null | undefined): boolean {
+  return String(job?.kind || '').toLowerCase() === 'deep_research';
+}
+
 function researchSourceStatus(source: ResearchJobSource, t: (text: string) => string): string {
   const status = String(source.status || '');
   if (status === 'opened') return source.evidence_status === 'partial' ? t('部分') : '';
@@ -1994,7 +2279,43 @@ function researchSourceStatus(source: ResearchJobSource, t: (text: string) => st
 function researchSourceTitle(source: ResearchJobSource, t: (text: string) => string): string {
   const title = String(source.title || '').trim();
   if (title && !/^\(?untitled\)?$/i.test(title) && !/r\.jina\.ai/i.test(title)) return title;
-  return source.domain || researchHost(source.url || '') || source.url || t('来源');
+  return researchHost(researchSourceUrl(source)) || source.domain || researchSourceUrl(source) || t('来源');
+}
+
+function researchSourceUrl(source: ResearchJobSource): string {
+  return unwrapReaderUrl(String(source.url || '').trim());
+}
+
+function researchSourceLinkLabel(source: ResearchJobSource, t: (text: string) => string): string {
+  const url = researchSourceUrl(source);
+  if (!url) return source.domain || researchSourceTitle(source, t);
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const path = `${parsed.pathname || ''}${parsed.search || ''}`.replace(/\/$/, '');
+    return `${host}${path || ''}` || url;
+  } catch {
+    return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '') || researchSourceTitle(source, t);
+  }
+}
+
+function unwrapReaderUrl(value: string): string {
+  let current = String(value || '').trim();
+  for (let index = 0; index < 4; index += 1) {
+    let parsed: URL;
+    try {
+      parsed = new URL(current);
+    } catch {
+      break;
+    }
+    if (parsed.hostname !== 'r.jina.ai') break;
+    let next = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+    next = next.replace(/^https?:\/\/(https?:\/\/)/i, '$1');
+    if (!/^https?:\/\//i.test(next)) next = next.replace(/^(https?:)\/+/i, '$1//');
+    if (!/^https?:\/\//i.test(next) || next === current) break;
+    current = next;
+  }
+  return current;
 }
 
 function researchHost(url: string): string {
@@ -2439,7 +2760,7 @@ function RunActivityCard({
           onClick={() => setOpen(value => !value)}
           aria-label={open ? t('收起详情') : t('展开详情')}
         >
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
         </button>
         <span className="run-status-dot" data-tone={dotTone} />
         <button className="run-card-open" type="button" onClick={() => void onJump(run)} title={t('跳转到会话')}>

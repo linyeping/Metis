@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Cpu, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
+import { ChevronRight, Cpu, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
 import type {
   Language,
   ModelCapabilities,
@@ -232,7 +232,7 @@ export const ModelTab = memo(function ModelTab({
                 aria-expanded={modelCatalogOpen}
                 onClick={() => onModelCatalogOpenChange(value => !value)}
               >
-                {modelCatalogOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <ChevronRight className="disclosure-chevron" data-open={modelCatalogOpen} size={14} />
                 <span>
                   <strong>{t(modelCatalog.message || '模型目录')}</strong>
                   {modelCatalog.hint && <em>{t(modelCatalog.hint)}</em>}

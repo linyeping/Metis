@@ -2164,7 +2164,8 @@ async function verifyRightRailWorkbench(checks: SmokeCheck[]): Promise<void> {
   record(
     checks,
     'new73-preview-view-ipc-enabled',
-    typeof window.metis.previewSetBounds === 'function' &&
+    typeof window.metis.previewSetLayoutIntent === 'function' &&
+      typeof window.metis.previewSetBounds === 'function' &&
       typeof window.metis.previewLoad === 'function' &&
       typeof window.metis.previewCommand === 'function',
     'preview IPC methods',

@@ -88,6 +88,7 @@ def request_preview_command(kind: str, payload: Dict[str, Any] | None = None, ti
             "error": "preview bridge timeout",
             "request_id": request_id,
             "connected": preview_bridge_status().get("connected", False),
+            "preview_bridge_connected": preview_bridge_status().get("connected", False),
         }
 
     result = record.get("result")
@@ -145,12 +146,18 @@ def preview_browser_result_route():
         return denied
 
     data = request.get_json(silent=True) or {}
-    request_id = str(data.get("id") or "")
+    request_id = str(data.get("id") or data.get("command_id") or "")
     result = data.get("result")
+    if result is None and any(key in data for key in ("ok", "error", "preview_state", "browser_activity")):
+        result = dict(data)
     if not request_id:
         return jsonify({"ok": False, "error": "missing request id"}), 400
     if not isinstance(result, dict):
         result = {"ok": False, "error": "invalid result payload"}
+    result_command_id = str(result.get("command_id") or result.get("id") or request_id)
+    if result_command_id != request_id:
+        return jsonify({"ok": False, "error": "result command_id does not match request id"}), 400
+    result["command_id"] = request_id
 
     global _LAST_RESULT_AT
     with _LOCK:

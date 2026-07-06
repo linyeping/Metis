@@ -11,6 +11,7 @@ const CARD_LABELS: Record<WorkspaceCardId, string> = {
   activity: 'Background tasks',
   plan: 'Plan',
   research: 'Research',
+  session: 'Session workspace',
   tool: 'Tool output',
 };
 

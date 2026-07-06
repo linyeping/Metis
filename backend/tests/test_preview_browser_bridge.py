@@ -45,7 +45,75 @@ def test_preview_bridge_round_trips_command_result() -> None:
         assert response.status_code == 200
 
     thread.join(timeout=2)
-    assert result_holder["result"] == {"ok": True, "title": "Preview"}
+    assert result_holder["result"] == {"ok": True, "title": "Preview", "command_id": request["id"]}
+
+
+def test_preview_bridge_accepts_command_id_and_preserves_preview_state() -> None:
+    _reset_preview_bridge_for_tests()
+    app = Flask(__name__)
+    app.register_blueprint(preview_bridge_bp)
+    result_holder: dict[str, object] = {}
+
+    def caller() -> None:
+        result_holder["result"] = request_preview_command("status", {}, timeout=2)
+
+    thread = threading.Thread(target=caller)
+    thread.start()
+
+    preview_state = {
+        "schema": "metis.preview_state.v1",
+        "version": 1,
+        "state": "ready",
+        "tab_id": "web-tab-1",
+        "url": "http://127.0.0.1:5174/",
+        "title": "Preview",
+        "bounds": {"x": 10, "y": 20, "width": 640, "height": 360},
+        "visible": True,
+        "loading": False,
+        "occluded": False,
+        "error": "",
+        "last_command_id": "",
+        "activity_seq": 7,
+        "updated_at": "2026-07-06T00:00:00.000Z",
+    }
+    browser_activity = {"ok": True, "items": [], "counts": {"total": 0}}
+
+    with app.test_client() as client:
+        response = client.get("/api/preview-browser/next?timeout=1")
+        assert response.status_code == 200
+        request = response.get_json()["request"]
+
+        response = client.post(
+            "/api/preview-browser/result",
+            json={
+                "command_id": request["id"],
+                "result": {
+                    "ok": True,
+                    "command_id": request["id"],
+                    "preview_state": preview_state,
+                    "browser_activity": browser_activity,
+                },
+            },
+        )
+        assert response.status_code == 200
+
+    thread.join(timeout=2)
+    assert result_holder["result"] == {
+        "ok": True,
+        "command_id": request["id"],
+        "preview_state": preview_state,
+        "browser_activity": browser_activity,
+    }
+
+
+def test_preview_bridge_timeout_reports_connection_key() -> None:
+    _reset_preview_bridge_for_tests()
+
+    result = request_preview_command("observe", {}, timeout=0.01)
+
+    assert result["ok"] is False
+    assert result["error"] == "preview bridge timeout"
+    assert result["preview_bridge_connected"] is False
 
 
 def test_preview_browser_tools_registered() -> None:

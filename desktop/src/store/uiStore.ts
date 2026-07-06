@@ -5,9 +5,9 @@ import { themeMode } from '../lib/themes';
 
 type AppearanceMode = 'light' | 'dark';
 
-type RightRailMode = 'files' | 'tool' | 'web' | 'diff' | 'activity' | 'research';
+type RightRailMode = 'files' | 'tool' | 'web' | 'diff' | 'activity' | 'research' | 'session';
 
-export type WorkspaceCardId = 'web' | 'terminal' | 'files' | 'diff' | 'activity' | 'plan' | 'tool' | 'research';
+export type WorkspaceCardId = 'web' | 'terminal' | 'files' | 'diff' | 'activity' | 'plan' | 'tool' | 'research' | 'session';
 export type WorkspaceCardColumnId = 'left' | 'middle' | 'right';
 export type WorkspaceCardVisibility = Record<WorkspaceCardId, boolean>;
 
@@ -258,6 +258,7 @@ const defaultWorkspaceCardVisibility: WorkspaceCardVisibility = {
   plan: true,
   tool: false,
   research: false,
+  session: false,
 };
 
 const defaultWorkspaceCardColumnWidths: WorkspaceCardColumnWidths = {
@@ -390,6 +391,7 @@ function cardForRightRailMode(mode: RightRailMode): WorkspaceCardId {
   if (mode === 'activity') return 'activity';
   if (mode === 'tool') return 'tool';
   if (mode === 'research') return 'research';
+  if (mode === 'session') return 'session';
   return 'files';
 }
 

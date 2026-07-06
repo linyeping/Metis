@@ -1,4 +1,4 @@
-import { ChevronDown, LoaderCircle, LockKeyhole, MessageCircle, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react';
+import { ChevronRight, LoaderCircle, LockKeyhole, MessageCircle, Pencil, Plus, Send, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -167,7 +167,7 @@ export function SideChatPanel({ defaultModel = '', floating = false, onClose }: 
               aria-expanded={historyOpen}
               onClick={() => setHistoryOpen(value => !value)}
             >
-              <ChevronDown size={13} />
+              <ChevronRight className="disclosure-chevron" data-open={historyOpen} size={13} />
             </button>
             <button
               type="button"

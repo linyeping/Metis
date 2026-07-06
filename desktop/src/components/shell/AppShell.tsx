@@ -29,6 +29,7 @@ export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, s
   const sideChatOpen = useUiStore(state => state.sideChatOpen);
   const sideChatWidth = useUiStore(state => state.sideChatWidth);
   const setSideChatWidth = useUiStore(state => state.setSideChatWidth);
+  const activeResearchReportJobId = useUiStore(state => state.activeResearchReportJobId);
   const sidebarResizeStart = useRef<{ x: number; width: number } | null>(null);
   const sideChatResizeStart = useRef<{ x: number; width: number } | null>(null);
   const [sidebarLayoutHold, setSidebarLayoutHold] = useState(sidebarOpen);
@@ -38,10 +39,10 @@ export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, s
     .filter(([cardId, visible]) => visible && (cardId !== 'tool' || Boolean(toolPreview)))
     .map(([cardId]) => cardId);
   const effectiveVisibleWorkspaceCards = appMode === 'chat'
-    ? visibleWorkspaceCards.filter(cardId => cardId === 'research')
-    : visibleWorkspaceCards.filter(cardId => cardId !== 'research');
+    ? visibleWorkspaceCards.filter(cardId => cardId === 'research' || cardId === 'session')
+    : visibleWorkspaceCards.filter(cardId => cardId !== 'research' && cardId !== 'session');
   const rightRailEffectiveOpen = rightRailOpen && effectiveVisibleWorkspaceCards.length > 0;
-  const researchPopoverOpen = rightRailEffectiveOpen && effectiveVisibleWorkspaceCards.length === 1 && effectiveVisibleWorkspaceCards[0] === 'research';
+  const researchPopoverOpen = rightRailEffectiveOpen && effectiveVisibleWorkspaceCards.length === 1 && ['research', 'session'].includes(effectiveVisibleWorkspaceCards[0]);
   const rightRailLayoutOpen = rightRailEffectiveOpen && !researchPopoverOpen;
   const panelSpring = { type: 'spring' as const, stiffness: 320, damping: 28 };
   const panelExit = { duration: 0.18, ease: [0.16, 1, 0.3, 1] as const };
@@ -51,13 +52,15 @@ export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, s
   }, [sidebarOpen]);
 
   useEffect(() => {
-    if (appMode === 'chat' || !workspaceCardVisibility.research) return;
+    if (appMode === 'chat') return;
+    if (!workspaceCardVisibility.research && !workspaceCardVisibility.session) return;
     setWorkspaceCardVisible('research', false);
-  }, [appMode, setWorkspaceCardVisible, workspaceCardVisibility.research]);
+    setWorkspaceCardVisible('session', false);
+  }, [appMode, setWorkspaceCardVisible, workspaceCardVisibility.research, workspaceCardVisibility.session]);
 
   useEffect(() => {
     if (appMode !== 'chat') return;
-    void window.metis?.previewSetBounds?.({ visible: false });
+    void window.metis?.previewSetLayoutIntent?.({ visible: false, reason: 'app-mode-chat' });
   }, [appMode]);
 
   const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -141,6 +144,7 @@ export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, s
       data-sidebar-layout={sidebarLayoutOpen}
       data-side-chat={sideChatOpen}
       data-side-chat-layout={sideChatLayoutOpen}
+      data-research-report-open={Boolean(activeResearchReportJobId)}
       style={
         {
           '--right-rail-width': `${rightRailWidth}px`,

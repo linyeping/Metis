@@ -23,6 +23,61 @@ import type {
 export {};
 
 declare global {
+  type PreviewRuntimeStateName = 'hidden' | 'mounting' | 'loading' | 'ready' | 'occluded' | 'error';
+
+  interface PreviewBoundsPayload {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+
+  interface PreviewStatePayload {
+    ok?: boolean;
+    schema: 'metis.preview_state.v1';
+    version: 1;
+    state: PreviewRuntimeStateName;
+    tab_id?: string;
+    tabId?: string;
+    url?: string;
+    title?: string;
+    bounds?: PreviewBoundsPayload | null;
+    visible?: boolean;
+    loading?: boolean;
+    occluded?: boolean;
+    error?: string;
+    last_command_id?: string;
+    lastCommandId?: string;
+    activity_seq?: number;
+    activitySeq?: number;
+    updated_at?: string;
+    updatedAt?: string;
+    canGoBack?: boolean;
+    canGoForward?: boolean;
+  }
+
+  interface PreviewLayoutIntentPayload {
+    visible: boolean;
+    tabId?: string;
+    tab_id?: string;
+    bounds?: Partial<PreviewBoundsPayload>;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    reason?: string;
+  }
+
+  interface PreviewCommandResultPayload {
+    ok: boolean;
+    bounds?: PreviewBoundsPayload;
+    hidden?: boolean;
+    skipped?: boolean;
+    occluded?: boolean;
+    preview_state?: PreviewStatePayload;
+    error?: string;
+  }
+
   interface Window {
     metis: {
       backendPort: () => Promise<number | null>;
@@ -40,10 +95,11 @@ declare global {
       devServerStop: (payload?: DevServerStartPayload) => Promise<DevServerStatus>;
       devServerStatus: (payload?: DevServerStartPayload) => Promise<DevServerStatus>;
       savePreviewEvidence: (payload: PreviewAuditInput) => Promise<PreviewAuditResult>;
-      previewSetBounds: (payload: { visible: boolean; x?: number; y?: number; width?: number; height?: number; tabId?: string }) => Promise<{ ok: boolean; bounds?: { x: number; y: number; width: number; height: number }; error?: string }>;
-      previewSetOccluded: (value: boolean) => Promise<{ ok: boolean; occluded?: boolean }>;
-      previewLoad: (payload: { url: string; tabId?: string }) => Promise<{ ok: boolean; error?: string }>;
-      previewCommand: (command: 'back' | 'forward' | 'reload' | 'stop') => Promise<{ ok: boolean }>;
+      previewSetLayoutIntent: (payload: PreviewLayoutIntentPayload) => Promise<PreviewCommandResultPayload>;
+      previewSetBounds: (payload: PreviewLayoutIntentPayload) => Promise<PreviewCommandResultPayload>;
+      previewSetOccluded: (value: boolean) => Promise<{ ok: boolean; occluded?: boolean; preview_state?: PreviewStatePayload }>;
+      previewLoad: (payload: { url: string; tabId?: string }) => Promise<{ ok: boolean; error?: string; preview_state?: PreviewStatePayload } & Partial<PreviewStatePayload>>;
+      previewCommand: (command: 'back' | 'forward' | 'reload' | 'stop') => Promise<{ ok: boolean; preview_state?: PreviewStatePayload }>;
       previewSetZoom: (zoom: number) => Promise<{ ok: boolean; zoom?: number }>;
       previewCapture: () => Promise<{ ok: boolean; dataUrl: string; width?: number; height?: number; url?: string; title?: string; error?: string }>;
       previewObserve: (payload?: { maxElements?: number; includeText?: boolean }) => Promise<Record<string, unknown>>;
@@ -87,15 +143,7 @@ declare global {
       onBootEvent: (callback: (payload: BootEvent) => void) => () => void;
       onDevServerEvent: (callback: (payload: DevServerEventPayload) => void) => () => void;
       onTerminalEvent: (callback: (payload: TerminalEventPayload) => void) => () => void;
-      onPreviewState: (callback: (payload: {
-        tabId?: string;
-        canGoBack?: boolean;
-        canGoForward?: boolean;
-        title?: string;
-        url?: string;
-        error?: string;
-        loading?: boolean;
-      }) => void) => () => void;
+      onPreviewState: (callback: (payload: PreviewStatePayload) => void) => () => void;
       onWindowState: (callback: (payload: { isMaximized: boolean; isFullScreen: boolean }) => void) => () => void;
       onUpdateEvent: (callback: (payload: {
         status: 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';

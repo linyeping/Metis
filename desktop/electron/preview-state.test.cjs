@@ -1,8 +1,11 @@
 const assert = require('node:assert/strict')
 const test = require('node:test')
 const {
+  PREVIEW_STATE_SCHEMA,
   previewBoundsIntent,
   previewBoundsKey,
+  previewLayoutIntent,
+  normalizePreviewStateName,
   previewOcclusionRestoreIntent
 } = require('./preview-state.cjs')
 
@@ -34,4 +37,25 @@ test('valid visible preview bounds can be restored after a temporary overlay occ
   assert.equal(restore.visible, true)
   assert.deepEqual(restore.bounds, intent.bounds)
   assert.equal(restore.key, intent.key)
+})
+
+test('preview layout intent accepts nested bounds and stable tab id', () => {
+  const intent = previewLayoutIntent({
+    visible: true,
+    tab_id: 'web-tab-1',
+    bounds: { x: 10.2, y: 20.8, width: 800.4, height: 600.6 },
+    reason: 'right-rail-sync'
+  })
+
+  assert.equal(PREVIEW_STATE_SCHEMA, 'metis.preview_state.v1')
+  assert.equal(intent.visible, true)
+  assert.equal(intent.tabId, 'web-tab-1')
+  assert.equal(intent.tab_id, 'web-tab-1')
+  assert.equal(intent.reason, 'right-rail-sync')
+  assert.deepEqual(intent.bounds, { x: 10, y: 21, width: 800, height: 601 })
+})
+
+test('unknown preview state names fall back to hidden', () => {
+  assert.equal(normalizePreviewStateName('ready'), 'ready')
+  assert.equal(normalizePreviewStateName('wat'), 'hidden')
 })

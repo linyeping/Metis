@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BarChart3, Cpu, Globe, HardDrive, Info, MessageSquare, Monitor, Palette, Plug, Terminal, Wrench, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, Cpu, Globe, HardDrive, Info, MessageSquare, Monitor, Palette, Plug, Search, Terminal, Wrench } from 'lucide-react';
 import {
   createPermissionWritableRoot,
   createPermissionRule,
@@ -54,7 +54,7 @@ import type {
 import { tr } from '../../lib/i18n';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
-import { sections, type PermissionRuleDraft } from './settingsShared';
+import { settingsNavGroups, type PermissionRuleDraft } from './settingsShared';
 import { AppearanceTab } from './tabs/AppearanceTab';
 import { ConversationTab } from './tabs/ConversationTab';
 import { ModelTab } from './tabs/ModelTab';
@@ -98,6 +98,20 @@ const sectionIcons: Record<SettingsSection, typeof Palette> = {
   connectors: Plug,
   desktop: Monitor,
   about: Info,
+};
+
+const sectionDescriptions: Record<SettingsSection, string> = {
+  appearance: '主题、语言、字体和界面密度。',
+  conversation: '记忆、自动技能和对话行为。',
+  model: '供应商、模型、API 地址和推理参数。',
+  usage: '模型额度、用量统计和供应商账单状态。',
+  network: '代理、网络访问和外部连接配置。',
+  terminal: '默认 shell、Python 路径和文档转换器。',
+  runtime: '本机运行时、VM 资产和诊断修复工具。',
+  tools: '工具权限、写入目录和自动审批规则。',
+  connectors: '外部服务、MCP 和桌面连接能力。',
+  desktop: '桌面接管、视觉能力和本机集成。',
+  about: '版本、更新、诊断包和应用状态。',
 };
 
 async function getProviderStatusCached(force = false): Promise<ProviderStatusPayload> {
@@ -174,6 +188,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateMessage, setUpdateMessage] = useState('');
   const [updateReady, setUpdateReady] = useState(false);
+  const [filter, setFilter] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -554,6 +569,22 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     [refreshRuntimeManager, t],
   );
 
+  const visibleNavGroups = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    return settingsNavGroups
+      .map(group => ({
+        ...group,
+        sections: group.sections.filter(section => {
+          if (!query) return true;
+          const label = tr(language, section).toLowerCase();
+          const description = sectionDescriptions[section].toLowerCase();
+          const groupLabel = (language === 'zh' ? group.labelZh : group.labelEn).toLowerCase();
+          return label.includes(query) || section.includes(query) || description.includes(query) || groupLabel.includes(query);
+        }),
+      }))
+      .filter(group => group.sections.length > 0);
+  }, [filter, language]);
+
   const renderSettingsLoading = () => (
     <div className="settings-placeholder">
       <h3>{tr(language, active)}</h3>
@@ -718,7 +749,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     <AnimatePresence initial={false}>
       {open && (
         <motion.div
-          className="modal-layer"
+          className="modal-layer settings-page-layer"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0, transition: { duration: 0.16 } }}
@@ -727,50 +758,81 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
           <motion.section
             className="settings-dialog"
             data-active-section={active}
-            initial={{ scale: 0.96, y: 8, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.97, y: 6, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
-            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={tr(language, 'settingsTitle')}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            <header>
-              <div>
-                <h2>{tr(language, 'settingsTitle')}</h2>
-                <p>Metis Desktop</p>
+            <aside className="settings-sidebar">
+              <div className="settings-sidebar-top">
+                <button type="button" className="settings-back-button" onClick={() => setOpen(false)}>
+                  <ArrowLeft size={17} />
+                  <span>{t('返回')}</span>
+                </button>
+                <div className="settings-brand">
+                  <strong>{tr(language, 'settingsTitle')}</strong>
+                  <small>Metis Desktop</small>
+                </div>
               </div>
-              <button type="button" onClick={() => setOpen(false)}>
-                <X size={18} />
-              </button>
-            </header>
-            <div className="settings-body">
-              <nav>
-                {sections.map(section => {
-                  const Icon = sectionIcons[section];
-                  return (
-                    <button
-                      type="button"
-                      key={section}
-                      data-active={active === section}
-                      onClick={() => {
-                        setActive(section);
-                        setSettingsSection(section);
-                      }}
-                    >
-                      <Icon size={15} />
-                      <span>{tr(language, section)}</span>
-                    </button>
-                  );
-                })}
+              <label className="settings-search">
+                <Search size={15} />
+                <input value={filter} onChange={event => setFilter(event.currentTarget.value)} placeholder={t('搜索设置')} />
+              </label>
+              <nav className="settings-nav" aria-label={t('设置分类')}>
+                {visibleNavGroups.map(group => (
+                  <section className="settings-nav-group" key={group.id}>
+                    <div className="settings-nav-group-label">{language === 'zh' ? group.labelZh : group.labelEn}</div>
+                    <div className="settings-nav-group-items">
+                      {group.sections.map(section => {
+                        const Icon = sectionIcons[section];
+                        return (
+                          <button
+                            type="button"
+                            key={section}
+                            data-active={active === section}
+                            onClick={() => {
+                              setActive(section);
+                              setSettingsSection(section);
+                            }}
+                          >
+                            <Icon size={16} />
+                            <span>{tr(language, section)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+                {visibleNavGroups.length === 0 && (
+                  <div className="settings-nav-empty">{t('没有匹配的设置项')}</div>
+                )}
               </nav>
-              <div className="settings-panel">{renderActiveTab()}</div>
+              <div className="settings-sidebar-footer">
+                <span>{t('设置会应用到当前桌面环境。')}</span>
+              </div>
+            </aside>
+            <div className="settings-body">
+              <main className="settings-main">
+                <header className="settings-main-header">
+                  <div className="settings-title-block">
+                    <h2>{tr(language, active)}</h2>
+                    <p>{sectionDescriptions[active]}</p>
+                  </div>
+                  <div className="settings-main-actions">
+                    <button type="button" onClick={() => setOpen(false)}>
+                      {t('取消')}
+                    </button>
+                    <button type="button" className="primary" disabled={saving || !settings} onClick={() => void save()}>
+                      {saving ? t('保存中...') : tr(language, 'saveSettings')}
+                    </button>
+                  </div>
+                </header>
+                <div className="settings-panel">{renderActiveTab()}</div>
+              </main>
             </div>
-            <footer>
-              <button type="button" onClick={() => setOpen(false)}>
-                {t('取消')}
-              </button>
-              <button type="button" className="primary" disabled={saving || !settings} onClick={() => void save()}>
-                {saving ? t('保存中...') : tr(language, 'saveSettings')}
-              </button>
-            </footer>
           </motion.section>
         </motion.div>
       )}

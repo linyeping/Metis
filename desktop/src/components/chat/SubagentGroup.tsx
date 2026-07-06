@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, LoaderCircle, Network, PanelRightOpen, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, LoaderCircle, Network, PanelRightOpen, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ChatSubagentEvent } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
@@ -94,7 +94,7 @@ function SubagentCard({ item }: { item: ChatSubagentEvent }) {
   return (
     <article className="subagent-card" data-status={item.status}>
       <button className="subagent-open-button" type="button" onClick={() => setOpen(value => !value)}>
-        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
         <StatusIcon className={item.status === 'running' ? 'spin' : undefined} size={14} />
         <span>{item.name}</span>
         {elapsed && <small>{elapsed}</small>}

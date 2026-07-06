@@ -19,9 +19,9 @@ import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
 
 type NavItem =
-  | { kind: 'section'; id: SectionId; icon: ComponentType<{ size?: number }>; zh: string; en: string; disabled?: boolean; beta?: boolean }
-  | { kind: 'terminal'; icon: ComponentType<{ size?: number }>; zh: string; en: string; disabled?: boolean; beta?: boolean }
-  | { kind: 'settings'; icon: ComponentType<{ size?: number }>; zh: string; en: string; disabled?: boolean; beta?: boolean };
+  | { kind: 'section'; id: SectionId; icon: ComponentType<{ size?: number }>; zh: string; en: string; disabled?: boolean; beta?: boolean; progress?: boolean }
+  | { kind: 'terminal'; icon: ComponentType<{ size?: number }>; zh: string; en: string; disabled?: boolean; beta?: boolean; progress?: boolean }
+  | { kind: 'settings'; icon: ComponentType<{ size?: number }>; zh: string; en: string; disabled?: boolean; beta?: boolean; progress?: boolean };
 
 const SETTINGS_ITEM: NavItem = { kind: 'settings', icon: Settings, zh: '设置', en: 'Customize' };
 
@@ -30,7 +30,7 @@ const SETTINGS_ITEM: NavItem = { kind: 'settings', icon: Settings, zh: '设置',
 const NAV_BY_MODE: Record<AppMode, NavItem[]> = {
   chat: [
     { kind: 'section', id: 'projects' as SectionId, icon: Folder, zh: '项目', en: 'Projects', disabled: true },
-    { kind: 'section', id: 'artifacts' as SectionId, icon: NotebookPen, zh: '文档库', en: 'Artifacts', disabled: true },
+    { kind: 'section', id: 'artifacts' as SectionId, icon: NotebookPen, zh: '会话文件', en: 'Session files', disabled: true, progress: true },
   ],
   cowork: [
     { kind: 'section', id: 'cron', icon: CalendarCheck2, zh: '定时任务', en: 'Scheduled' },
@@ -101,9 +101,11 @@ export function SidebarNav() {
       {items.map(item => {
         const Icon = item.icon;
         const label = language === 'zh' ? item.zh : item.en;
-        const statusBadge = item.disabled
-          ? language === 'zh' ? '未开放' : 'Not open'
-          : item.beta ? 'Beta' : '';
+        const statusBadge = item.progress
+          ? language === 'zh' ? '正在完善' : 'In progress'
+          : item.disabled
+            ? language === 'zh' ? '未开放' : 'Not open'
+            : item.beta ? 'Beta' : '';
         const active =
           (item.kind === 'section' && activeSection === item.id) ||
           (item.kind === 'terminal' && terminalOpen);
@@ -118,13 +120,14 @@ export function SidebarNav() {
             type="button"
             className="sidebar-nav-item"
             data-active={active}
+            data-progress={item.progress || undefined}
             disabled={item.disabled}
             onClick={onClick}
           >
             <Icon size={16} />
             <span>{label}</span>
             {statusBadge && (
-              <em className="sidebar-nav-beta" data-state={item.disabled ? 'unavailable' : 'beta'}>
+              <em className="sidebar-nav-beta" data-state={item.progress ? 'progress' : item.disabled ? 'unavailable' : 'beta'}>
                 {statusBadge}
               </em>
             )}
