@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from backend.runtime import runtime_job
+from backend.tools.coding.foundation.core_mechanisms.execution_boundary_context import workspace_root_override
 
 
 def _json(data: dict) -> str:
@@ -142,3 +144,35 @@ def test_metis_runtime_job_can_require_strict_sandbox(tmp_path: Path, monkeypatc
     assert result["status"] == "failed"
     assert calls[0][1]["strict_sandbox"] is True
     assert any(check["id"] == "session_created" and not check["ok"] for check in result["verifier"]["checks"])
+
+
+def test_metis_runtime_job_preserves_workspace_context_for_non_default_root(tmp_path: Path, monkeypatch) -> None:
+    parent = tmp_path / "parent"
+    workspace = parent / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "app.txt").write_text("before\n", encoding="utf-8")
+    monkeypatch.setenv("METIS_PYTHON", sys.executable)
+
+    command = (
+        f'"{sys.executable}" -c "from pathlib import Path; '
+        "Path('app.txt').write_text('after\\n', encoding='utf-8'); "
+        "print('JOB_ROOT_OK')\""
+    )
+    with workspace_root_override(str(parent)):
+        result = json.loads(
+            runtime_job.metis_runtime_job(
+                task="non-default root smoke",
+                command=command,
+                root="workspace",
+                backend="local",
+                mode="copy",
+                timeout=30,
+                expected_stdout_contains="JOB_ROOT_OK",
+            )
+        )
+
+    assert result["ok"] is True
+    assert result["status"] == "done"
+    assert result["created"]["source_root"] == str(workspace)
+    assert result["run"]["cwd"].startswith(str(workspace / ".metis" / "runtime"))
+    assert any(item.get("relative_path") == "app.txt" for item in result["changed_files"])

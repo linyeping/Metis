@@ -13,7 +13,10 @@ from backend.runtime.isolated_runtime import (
     metis_runtime_export_patch,
     metis_runtime_run,
 )
-from backend.tools.coding.foundation.core_mechanisms.execution_boundary_context import get_effective_sub_allow
+from backend.tools.coding.foundation.core_mechanisms.execution_boundary_context import (
+    get_effective_sub_allow,
+    workspace_root_override,
+)
 from backend.tools.coding.foundation.core_mechanisms.path_security import safe_path_for_read
 
 
@@ -114,24 +117,28 @@ def metis_runtime_job(
             ),
         )
 
-        run = _loads(
-            metis_runtime_run(
-                session_id=session_id,
-                command=command_text,
-                cwd=cwd,
-                timeout=max(1, int(timeout or 120)),
-                allow_network=bool(allow_network),
-            )
-        )
-        if (collect_artifacts or bool(artifact_patterns)) and session_id:
-            collected = _loads(
-                metis_runtime_collect_artifacts(
+        runtime_context_root = _runtime_context_root(root, created)
+        with workspace_root_override(runtime_context_root):
+            run = _loads(
+                metis_runtime_run(
                     session_id=session_id,
-                    patterns=artifact_patterns or None,
+                    command=command_text,
+                    cwd=cwd,
+                    timeout=max(1, int(timeout or 120)),
+                    allow_network=bool(allow_network),
                 )
             )
+        if (collect_artifacts or bool(artifact_patterns)) and session_id:
+            with workspace_root_override(runtime_context_root):
+                collected = _loads(
+                    metis_runtime_collect_artifacts(
+                        session_id=session_id,
+                        patterns=artifact_patterns or None,
+                    )
+                )
         if export_patch and session_id:
-            patch = _loads(metis_runtime_export_patch(session_id=session_id))
+            with workspace_root_override(runtime_context_root):
+                patch = _loads(metis_runtime_export_patch(session_id=session_id))
 
         artifacts = _combined_artifacts(run, collected, patch)
         verifier = _verifier_payload(
@@ -148,7 +155,8 @@ def metis_runtime_job(
             diagnostics_mode in {"on_failure", "failure", "failed"} and status != "done"
         )
         if should_export_diagnostics and session_id:
-            diagnostics = _loads(metis_runtime_export_diagnostics(session_id=session_id))
+            with workspace_root_override(runtime_context_root):
+                diagnostics = _loads(metis_runtime_export_diagnostics(session_id=session_id))
 
         payload = _job_payload(
             job_id=job_id,
@@ -174,7 +182,8 @@ def metis_runtime_job(
     except Exception as exc:
         if session_id:
             try:
-                diagnostics = _loads(metis_runtime_export_diagnostics(session_id=session_id))
+                with workspace_root_override(_runtime_context_root(root, created)):
+                    diagnostics = _loads(metis_runtime_export_diagnostics(session_id=session_id))
             except Exception:
                 diagnostics = {}
         payload = _job_payload(
@@ -286,6 +295,10 @@ def _job_payload(
         "patch": patch,
         "diagnostics": diagnostics,
     }
+
+
+def _runtime_context_root(root: str, created: Dict[str, Any]) -> str:
+    return str(created.get("source_root") or root or ".")
 
 
 def _verifier_payload(
