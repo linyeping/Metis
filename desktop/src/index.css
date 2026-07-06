@@ -398,7 +398,7 @@ button {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border-right: 1px solid var(--border);
+  border-right: 0;
   background: var(--panel);
   opacity: 1;
   transform: translateX(0);
@@ -406,9 +406,18 @@ button {
   will-change: opacity, transform;
 }
 
-.side-chat-rail,
-.right-rail {
+.secondary-panel {
+  box-sizing: border-box;
+  margin: 6px 0;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   border-right: 0;
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in srgb, var(--panel) 96%, var(--bg) 4%);
+  box-shadow: 0 10px 20px color-mix(in srgb, #000 9%, transparent);
+}
+
+.side-chat-rail {
   border-left: 1px solid var(--border);
 }
 
@@ -427,6 +436,11 @@ button {
   pointer-events: none;
   border-color: transparent;
   transition: border-color 180ms ease;
+}
+
+.secondary-panel[data-open='false'] {
+  margin: 0;
+  box-shadow: none;
 }
 
 .sidebar-resizer {
@@ -7443,6 +7457,8 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 
 .right-rail {
   position: relative;
+  border-left: 0;
+  background: transparent;
 }
 
 .app-shell[data-right-rail-popover='true'] .right-rail {
@@ -7693,7 +7709,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   min-width: 0;
   min-height: 0;
   gap: 0;
-  padding: 4px 8px 8px;
+  padding: 2px 4px 6px 6px;
   overflow: hidden;
 }
 
