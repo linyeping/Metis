@@ -113,6 +113,18 @@ describe('normalizeChatStreamEvent', () => {
     expect(event.callId).toBe('call-read');
   });
 
+  it('does not synthesize call ids for malformed tool events', () => {
+    const event = normalizeChatStreamEvent({
+      type: 'tool_result',
+      payload: {
+        tool: 'read_file',
+        result: 'ok',
+      },
+    });
+
+    expect(event.callId).toBe('');
+  });
+
   it('normalizes permission explainer metadata', () => {
     const event = normalizeChatStreamEvent({
       type: 'permission_request',
@@ -137,5 +149,38 @@ describe('normalizeChatStreamEvent', () => {
 
     expect(event.permission?.explainer?.riskLevel).toBe('HIGH');
     expect(event.permission?.explainer?.autoguard?.shouldBlock).toBe(true);
+  });
+
+  it('normalizes permission request protocol choices', () => {
+    const event = normalizeChatStreamEvent({
+      type: 'permission_request',
+      payload: {
+        tool: 'write_file',
+        call_id: 'call-write',
+        request_id: 'permission-2',
+        permission: {
+          schema: 'metis.permission_request.v1',
+          version: 1,
+          request_id: 'permission-2',
+          call_id: 'call-write',
+          status: 'requested',
+          default_choice: 'once',
+          choices: [
+            { value: 'once', label: '仅本次允许', approved: true },
+            { value: 'always_deny', label: '本工作区总是拒绝', approved: false, remember: 'deny' },
+          ],
+        },
+      },
+    });
+
+    expect(event.permission?.schema).toBe('metis.permission_request.v1');
+    expect(event.permission?.requestId).toBe('permission-2');
+    expect(event.permission?.status).toBe('requested');
+    expect(event.permission?.defaultChoice).toBe('once');
+    expect(event.permission?.choices?.[1]).toMatchObject({
+      value: 'always_deny',
+      approved: false,
+      remember: 'deny',
+    });
   });
 });

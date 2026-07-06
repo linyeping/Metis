@@ -26,6 +26,22 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
+function sseResponse(chunks: string[], status = 200) {
+  return Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    body: new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    }),
+  });
+}
+
 // Import after mocks are set up
 const api = await import('../api');
 
@@ -106,6 +122,195 @@ describe('createSession', () => {
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toContain('/sessions');
     expect(opts.method).toBe('POST');
+  });
+});
+
+describe('createRun', () => {
+  it('posts to /runs and parses stable run fields', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      ok: true,
+      run_id: 'run-1',
+      turn_id: 'turn-run-1',
+      session_id: 'session-1',
+      assistant_id: 'assistant-1',
+      mode: 'code',
+      surface_mode: 'code',
+      schema_version: 1,
+      status: 'queued',
+      last_seq: 0,
+    }));
+
+    const result = await api.createRun({
+      message: 'hello',
+      session_id: 'session-1',
+      assistant_id: 'assistant-1',
+      surface_mode: 'code',
+    });
+
+    expect(result.runId).toBe('run-1');
+    expect(result.turnId).toBe('turn-run-1');
+    expect(result.surfaceMode).toBe('code');
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toContain('/runs');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(String(opts.body))).toMatchObject({ surface_mode: 'code' });
+  });
+});
+
+describe('streamRunEvents', () => {
+  it('requests agent_event v2 and adapts events before invoking the callback', async () => {
+    fetchMock.mockReturnValueOnce(sseResponse([
+      `data: ${JSON.stringify({
+        schema: 'metis.agent_event.v2',
+        version: 2,
+        run_id: 'run-1',
+        session_id: 'session-1',
+        turn_id: 'turn-run-1',
+        message_id: 'assistant-1',
+        seq: 1,
+        event_id: 'evt_run-1_000001',
+        timestamp: '2026-07-06T00:00:00.000Z',
+        kind: 'message_delta',
+        payload: { text: 'hello' },
+      })}\n\n`,
+      'data: [DONE]\n\n',
+    ]));
+
+    const events: Array<{ type: string; seq?: number; payload?: Record<string, unknown> }> = [];
+    await api.streamRunEvents('run-1', event => events.push(event as (typeof events)[number]));
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/runs/run-1/events?');
+    expect(String(url)).toContain('schema=v2');
+    expect(String(url)).toContain('after=0');
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe('content_delta');
+    expect(events[0].seq).toBe(1);
+    expect(events[0].payload?.text).toBe('hello');
+  });
+});
+
+describe('permission request protocol', () => {
+  it('marks a permission request displayed', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      ok: true,
+      request: {
+        schema: 'metis.permission_request.v1',
+        request_id: 'perm-1',
+        call_id: 'call-1',
+        status: 'displayed',
+        choices: [{ value: 'once', label: '仅本次允许', approved: true }],
+      },
+    }));
+
+    const request = await api.markPermissionDisplayed('perm-1', { surface: 'desktop' });
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toContain('/permissions/requests/perm-1/displayed');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(String(opts.body))).toMatchObject({ surface: 'desktop' });
+    expect(request.requestId).toBe('perm-1');
+    expect(request.status).toBe('displayed');
+    expect(request.choices?.[0].value).toBe('once');
+  });
+
+  it('answers permission requests through the new API', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      ok: true,
+      approved: true,
+      request: {
+        schema: 'metis.permission_request.v1',
+        request_id: 'perm-2',
+        call_id: 'call-2',
+        status: 'audited',
+      },
+    }));
+
+    const request = await api.answerPermissionRequest('perm-2', {
+      approved: true,
+      choice: 'once',
+      tool: 'write_file',
+      callId: 'call-2',
+    });
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toContain('/permissions/requests/perm-2/answer');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(String(opts.body))).toMatchObject({
+      approved: true,
+      choice: 'once',
+      tool: 'write_file',
+      call_id: 'call-2',
+    });
+    expect(request.status).toBe('audited');
+  });
+});
+
+describe('artifact registry API', () => {
+  it('lists artifacts with stable v1 fields', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      ok: true,
+      artifacts: [
+        {
+          schema: 'metis.artifact.v1',
+          version: 1,
+          artifact_id: 'art_1',
+          run_id: 'run_1',
+          session_id: 'sess_1',
+          kind: 'report',
+          title: 'Report',
+          path: 'D:/workspace/report.md',
+          mime: 'text/markdown',
+          created_at: '2026-07-06T00:00:00.000Z',
+          updated_at: '2026-07-06T00:01:00.000Z',
+          source_tool_call_id: 'call_1',
+          metadata: { job_id: 'job_1' },
+        },
+      ],
+    }));
+
+    const result = await api.listArtifacts({ sessionId: 'sess_1', kind: 'report', limit: 10 });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/artifacts?');
+    expect(String(url)).toContain('session_id=sess_1');
+    expect(result.artifacts[0].artifact_id).toBe('art_1');
+    expect(result.artifacts[0].metadata.job_id).toBe('job_1');
+  });
+
+  it('registers artifacts through the backend registry endpoint', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      ok: true,
+      artifact: {
+        schema: 'metis.artifact.v1',
+        version: 1,
+        artifact_id: 'art_2',
+        kind: 'preview_evidence',
+        title: 'Preview',
+        path: 'D:/data/evidence.json',
+        created_at: '2026-07-06T00:00:00.000Z',
+        updated_at: '2026-07-06T00:00:00.000Z',
+      },
+    }));
+
+    const artifact = await api.registerArtifact({
+      kind: 'preview_evidence',
+      title: 'Preview',
+      path: 'D:/data/evidence.json',
+      sessionId: 'sess_2',
+      metadata: { status: 'ok' },
+    });
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toContain('/artifacts');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(String(opts.body))).toMatchObject({
+      kind: 'preview_evidence',
+      session_id: 'sess_2',
+      metadata: { status: 'ok' },
+    });
+    expect(artifact.artifact_id).toBe('art_2');
   });
 });
 

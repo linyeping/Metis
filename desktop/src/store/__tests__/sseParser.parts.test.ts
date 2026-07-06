@@ -53,7 +53,7 @@ describe('sseParser ordered message parts', () => {
     ]);
   });
 
-  it('merges a desktop_expert result without call_id into the running desktop_expert card', () => {
+  it('does not merge a terminal tool event without call_id into a running card by tool name', () => {
     const state = bindParserState();
     const persistSnapshot = () => undefined;
     const persistRecovery = () => undefined;
@@ -77,11 +77,47 @@ describe('sseParser ordered message parts', () => {
     expect(state.messages[0].tools?.[0]).toMatchObject({
       callId: 'desktop-call-1',
       toolName: 'desktop_expert',
-      status: 'success',
-      result: '[Expert: desktop_expert]\nDone',
+      status: 'running',
     });
+    expect(state.messages[0].tools?.[0].result).toBeUndefined();
     expect(state.messages[0].parts).toEqual([
       { type: 'tool', toolId: 'assistant-1-desktop-call-1', callId: 'desktop-call-1' },
+    ]);
+  });
+
+  it('keeps concurrent same-name tool calls separate by call_id', () => {
+    const state = bindParserState();
+    const persistSnapshot = () => undefined;
+    const persistRecovery = () => undefined;
+
+    applyChatEvent(
+      { type: 'tool_call', payload: { tool: 'read_file', args: { path: 'a.ts' }, call_id: 'call-a' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+    applyChatEvent(
+      { type: 'tool_call', payload: { tool: 'read_file', args: { path: 'b.ts' }, call_id: 'call-b' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+    applyChatEvent(
+      { type: 'tool_result', payload: { tool: 'read_file', call_id: 'call-b', result: 'b done' } },
+      'assistant-1',
+      'session-1',
+      persistSnapshot,
+      persistRecovery,
+    );
+
+    expect(state.messages[0].tools).toHaveLength(2);
+    expect(state.messages[0].tools?.[0]).toMatchObject({ callId: 'call-a', status: 'running' });
+    expect(state.messages[0].tools?.[1]).toMatchObject({ callId: 'call-b', status: 'success', result: 'b done' });
+    expect(state.messages[0].parts).toEqual([
+      { type: 'tool', toolId: 'assistant-1-call-a', callId: 'call-a' },
+      { type: 'tool', toolId: 'assistant-1-call-b', callId: 'call-b' },
     ]);
   });
 

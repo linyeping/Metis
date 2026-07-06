@@ -19,6 +19,12 @@ from .event_contract import (
     ToolResultEvent,
 )
 from .event_serializer import agent_event_payload, normalize_agent_event_payload, sse_data
+from .event_contract_v2 import (
+    EVENT_SCHEMA_V2,
+    EVENT_VERSION_V2,
+    agent_event_contract_payload_v2,
+)
+from .event_serializer_v2 import agent_event_v2_payload, legacy_business_payload
 from .provider_contract import (
     ChatMessage,
     FakeProvider,
@@ -71,6 +77,8 @@ __all__ = [
     "DoneEvent",
     "ErrorEvent",
     "EVENT_SCHEMA",
+    "EVENT_SCHEMA_V2",
+    "EVENT_VERSION_V2",
     "EventKind",
     "FakeProvider",
     "MetisEvent",
@@ -97,6 +105,8 @@ __all__ = [
     "ToolResultEvent",
     "WorkspaceId",
     "agent_event_payload",
+    "agent_event_contract_payload_v2",
+    "agent_event_v2_payload",
     "available_provider_ids",
     "build_backend_kwargs",
     "classify_provider_error",
@@ -108,6 +118,7 @@ __all__ = [
     "infer_toolset",
     "is_destructive_tool",
     "is_safe_tool",
+    "legacy_business_payload",
     "normalize_agent_event_payload",
     "profiles_from_runtime_registry",
     "sse_data",

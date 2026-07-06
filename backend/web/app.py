@@ -107,6 +107,11 @@ from backend.web.sessions import get_session_manager  # noqa: E402
 from backend.web.workspaces import get_workspace_manager  # noqa: E402
 from backend.web.runtime_state import RuntimeState  # noqa: E402
 from backend.web.preview_bridge import preview_bridge_bp  # noqa: E402
+from backend.web.permission_requests import (  # noqa: E402
+    DEFAULT_PERMISSION_TIMEOUT_SECONDS,
+    PermissionRequestStore,
+)
+from backend.tools.coding.foundation.core_mechanisms.execution_boundary_context import workspace_root_override  # noqa: E402
 from backend.web.file_extractors import (  # noqa: E402
     MissingParserDependency,
     UnsupportedFileType,
@@ -117,9 +122,13 @@ from backend.web.file_extractors import (  # noqa: E402
 try:
     from backend.bridges.event_contract import agent_event_contract_payload  # noqa: E402
     from backend.bridges.event_serializer import agent_event_payload, sse_data  # noqa: E402
+    from backend.bridges.event_contract_v2 import agent_event_contract_payload_v2  # noqa: E402
+    from backend.bridges.event_serializer_v2 import agent_event_v2_payload, legacy_business_payload  # noqa: E402
 except ImportError:  # pragma: no cover - supports running from inside miro/
     from backend.bridges.event_contract import agent_event_contract_payload  # noqa: E402
     from backend.bridges.event_serializer import agent_event_payload, sse_data  # noqa: E402
+    from backend.bridges.event_contract_v2 import agent_event_contract_payload_v2  # noqa: E402
+    from backend.bridges.event_serializer_v2 import agent_event_v2_payload, legacy_business_payload  # noqa: E402
 
 
 def _configure_logging() -> None:
@@ -198,6 +207,7 @@ _perm_dict_lock = threading.Lock()
 _permission_locks: Dict[str, threading.Event] = {}
 _permission_results: Dict[str, bool] = {}
 _permission_contexts: Dict[str, Dict[str, Any]] = {}
+_permission_request_store = PermissionRequestStore()
 _permission_ephemeral_writable_roots: Dict[str, Dict[str, Any]] = {}
 _URL_TRAILING_MARKERS = ("，", "。", "！", "？", "；", "：", "、", "）", "】", "》", "」", "』")
 _SUBAGENT_TOOLS = {
@@ -905,6 +915,112 @@ def _permission_request_metadata(
         "can_grant_full_access": bool(tool_name in WRITE_TOOLS),
         "workspace_root": os.path.abspath(workspace_root or _active_workspace_root()),
     }
+
+
+def _permission_request_choices(permission: Dict[str, Any], *, tool_name: str) -> List[Dict[str, Any]]:
+    suggested_root = str(permission.get("suggested_writable_root") or "")
+    path_safety = permission.get("path_safety") if isinstance(permission.get("path_safety"), dict) else {}
+    if not suggested_root:
+        suggested_root = str(path_safety.get("suggested_root") or "")
+    can_grant_root = bool(permission.get("can_grant_writable_root") and suggested_root)
+    can_full_access = bool(permission.get("can_grant_full_access") and tool_name in WRITE_TOOLS)
+    if can_grant_root:
+        choices = [
+            {
+                "value": "temporary_root",
+                "label": "仅本次允许此文件夹",
+                "description": f"本次运行可写入 {suggested_root}，不保存到规则文件。",
+                "approved": True,
+                "grant": "temporary_root",
+                "remember": "",
+            },
+            {
+                "value": "writable_root",
+                "label": "以后允许此文件夹",
+                "description": f"把 {suggested_root} 加入当前工作区授权目录。",
+                "approved": True,
+                "grant": "writable_root",
+                "remember": "",
+            },
+            {
+                "value": "pick_root",
+                "label": "选择文件夹授权",
+                "description": "打开系统文件夹选择器，不需要手动输入路径。",
+                "approved": True,
+                "grant": "selected_root",
+                "remember": "",
+                "requires_root_picker": True,
+            },
+        ]
+        if can_full_access:
+            choices.append(
+                {
+                    "value": "full_access",
+                    "label": "完全访问权限",
+                    "description": "信任本工作区，减少后续路径审批。",
+                    "approved": True,
+                    "grant": "full_access",
+                    "remember": "",
+                }
+            )
+        choices.append(
+            {
+                "value": "always_deny",
+                "label": "本工作区总是拒绝",
+                "description": "保存 deny 规则，下次同工具直接拒绝。",
+                "approved": False,
+                "grant": "",
+                "remember": "deny",
+            }
+        )
+        return choices
+    choices = [
+        {
+            "value": "once",
+            "label": "仅本次允许",
+            "description": "允许这一次工具调用，不保存规则。",
+            "approved": True,
+            "grant": "",
+            "remember": "",
+        },
+        {
+            "value": "always_allow",
+            "label": "本工作区总是允许",
+            "description": "保存 allow 规则，下次同工具自动放行。",
+            "approved": True,
+            "grant": "",
+            "remember": "allow",
+        },
+    ]
+    if can_full_access:
+        choices.append(
+            {
+                "value": "full_access",
+                "label": "完全访问权限",
+                "description": "信任本工作区，减少后续路径审批。",
+                "approved": True,
+                "grant": "full_access",
+                "remember": "",
+            }
+        )
+    choices.append(
+        {
+            "value": "always_deny",
+            "label": "本工作区总是拒绝",
+            "description": "保存 deny 规则，下次同工具直接拒绝。",
+            "approved": False,
+            "grant": "",
+            "remember": "deny",
+        }
+    )
+    return choices
+
+
+def _permission_default_choice(choices: List[Dict[str, Any]]) -> str:
+    for preferred in ("temporary_root", "once"):
+        if any(str(choice.get("value") or "") == preferred for choice in choices):
+            return preferred
+    return str((choices[0] if choices else {}).get("value") or "")
 
 
 def _tool_boundary_overrides(tool_name: str, arguments: Dict[str, Any], workspace_root: str = "") -> Dict[str, bool]:
@@ -1710,7 +1826,11 @@ def _create_run_state(
         "model_context": list(model_context if model_context is not None else history),
         "checkpoint": checkpoint,
         "events": [],
+        "events_v2": [],
         "next_seq": 1,
+        "next_seq_v2": 1,
+        "tool_lifecycle": {},
+        "pending_tool_running": {},
         "cancel_requested": False,
         "cancel_event": threading.Event(),
         "created_at": now,
@@ -1816,6 +1936,317 @@ def _set_run_status(run: Dict[str, Any], status: str, *, phase: str = "", error:
         run["condition"].notify_all()
 
 
+def _append_run_v2_event_locked(
+    run: Dict[str, Any],
+    kind: str,
+    payload: Dict[str, Any],
+    *,
+    timestamp: Any = None,
+    source_event_id: str = "",
+) -> Dict[str, Any]:
+    seq = int(run.get("next_seq_v2") or 1)
+    run["next_seq_v2"] = seq + 1
+    event = agent_event_v2_payload(
+        run_id=str(run.get("id") or ""),
+        session_id=str(run.get("session_id") or ""),
+        turn_id=str(run.get("turn_id") or "") or f"turn_{run.get('id', '')}",
+        message_id=str(run.get("assistant_id") or ""),
+        seq=seq,
+        kind=kind,
+        payload=payload,
+        timestamp=timestamp,
+        source_event_id=source_event_id,
+    )
+    run.setdefault("events_v2", []).append(event)
+    return event
+
+
+def _append_run_v2_events_from_legacy_locked(run: Dict[str, Any], source: Dict[str, Any]) -> None:
+    kind = str(source.get("kind") or source.get("type") or "")
+    timestamp = source.get("timestamp")
+    source_event_id = str(source.get("event_id") or "")
+    if kind in {"text_delta", "content_delta"}:
+        _append_run_v2_event_locked(
+            run,
+            "message_delta",
+            {"text": str(_legacy_event_value(source, "text") or "")},
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "content":
+        _append_run_v2_event_locked(
+            run,
+            "message_completed",
+            {"text": str(_legacy_event_value(source, "text") or "")},
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "thinking":
+        _append_run_v2_event_locked(
+            run,
+            "thinking_delta",
+            {"text": str(_legacy_event_value(source, "text") or "")},
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "tool_call":
+        call_id = _tool_event_call_id(source)
+        if not call_id:
+            _append_run_protocol_warning_locked(run, source, "tool_call missing call_id")
+            return
+        tool_name = _tool_event_name(source) or "tool"
+        arguments = _tool_event_arguments(source)
+        run.setdefault("tool_lifecycle", {})[call_id] = {
+            "tool_name": tool_name,
+            "arguments": arguments,
+        }
+        _append_run_v2_event_locked(
+            run,
+            "tool_requested",
+            {
+                "call_id": call_id,
+                "tool_name": tool_name,
+                "display_name": _display_tool_name(tool_name),
+                "arguments": arguments,
+                "arguments_preview": _truncate_preview(arguments),
+                "summary": str(_legacy_event_value(source, "summary", "label") or ""),
+            },
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "permission_request":
+        call_id = _tool_event_call_id(source)
+        if not call_id:
+            _append_run_protocol_warning_locked(run, source, "permission_request missing call_id")
+            return
+        tool_name = _tool_event_name(source) or "tool"
+        permission = _legacy_event_record_value(source, "permission")
+        request_id = str(_legacy_event_value(source, "request_id", "requestId") or "")
+        if permission:
+            permission.setdefault("schema", "metis.permission_request.v1")
+            permission.setdefault("status", "requested")
+        else:
+            permission = {"schema": "metis.permission_request.v1", "status": "requested"}
+        _append_run_v2_event_locked(
+            run,
+            "permission_required",
+            {
+                "call_id": call_id,
+                "request_id": request_id,
+                "tool_name": tool_name,
+                "arguments": _tool_event_arguments(source),
+                "permission": permission,
+            },
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "runtime_status":
+        phase = str(_legacy_event_value(source, "phase") or "")
+        call_id = _tool_event_call_id(source)
+        if phase == "tool_running" and call_id:
+            run.setdefault("pending_tool_running", {})[call_id] = {
+                "call_id": call_id,
+                "tool_name": _tool_event_name(source) or "tool",
+                "started_at": timestamp,
+                "summary": str(_legacy_event_value(source, "message") or ""),
+            }
+            return
+        _append_run_v2_event_locked(
+            run,
+            "runtime_status",
+            legacy_business_payload(source),
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "tool_result":
+        call_id = _tool_event_call_id(source)
+        if not call_id:
+            _append_run_protocol_warning_locked(run, source, "tool_result missing call_id")
+            return
+        result = _legacy_event_value(source, "result")
+        if _tool_result_represents_execution(result):
+            _flush_pending_tool_running_locked(run, call_id, timestamp=timestamp, source_event_id=source_event_id)
+        else:
+            run.setdefault("pending_tool_running", {}).pop(call_id, None)
+        terminal_kind = _tool_terminal_kind(result)
+        tool_name = _tool_event_name(source) or str((run.get("tool_lifecycle") or {}).get(call_id, {}).get("tool_name") or "")
+        terminal_payload: Dict[str, Any] = {
+            "call_id": call_id,
+            "tool_name": tool_name,
+            "status": _tool_terminal_status(terminal_kind),
+            "result": result,
+            "result_preview": _truncate_preview(result),
+            "summary": str(_legacy_event_value(source, "summary", "label") or ""),
+            "completed_at": timestamp,
+        }
+        if terminal_kind in {"tool_failed", "tool_canceled", "tool_timed_out"}:
+            terminal_payload["error"] = _tool_terminal_error(result, terminal_kind)
+        _append_run_v2_event_locked(
+            run,
+            terminal_kind,
+            terminal_payload,
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "done":
+        _append_run_v2_event_locked(
+            run,
+            "run_completed",
+            legacy_business_payload(source),
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind == "error":
+        error_payload = legacy_business_payload(source)
+        code = str(_legacy_event_value(source, "code") or "")
+        _append_run_v2_event_locked(
+            run,
+            "run_canceled" if code == "RUN_CANCELLED" else "run_failed",
+            error_payload,
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+        return
+    if kind:
+        _append_run_v2_event_locked(
+            run,
+            kind,
+            legacy_business_payload(source),
+            timestamp=timestamp,
+            source_event_id=source_event_id,
+        )
+
+
+def _append_run_protocol_warning_locked(run: Dict[str, Any], source: Dict[str, Any], message: str) -> None:
+    _append_run_v2_event_locked(
+        run,
+        "runtime_status",
+        {
+            "phase": "protocol_warning",
+            "message": message,
+            "source_kind": str(source.get("kind") or source.get("type") or ""),
+            "recoverable": True,
+        },
+        timestamp=source.get("timestamp"),
+        source_event_id=str(source.get("event_id") or ""),
+    )
+
+
+def _flush_pending_tool_running_locked(
+    run: Dict[str, Any],
+    call_id: str,
+    *,
+    timestamp: Any = None,
+    source_event_id: str = "",
+) -> None:
+    pending = run.setdefault("pending_tool_running", {}).pop(call_id, None)
+    if not isinstance(pending, dict):
+        lifecycle = run.get("tool_lifecycle") or {}
+        tool = lifecycle.get(call_id) if isinstance(lifecycle, dict) else {}
+        pending = {
+            "call_id": call_id,
+            "tool_name": str(tool.get("tool_name") or ""),
+        }
+    pending["started_at"] = pending.get("started_at") or timestamp
+    _append_run_v2_event_locked(
+        run,
+        "tool_running",
+        pending,
+        timestamp=timestamp,
+        source_event_id=source_event_id,
+    )
+
+
+def _legacy_event_value(source: Dict[str, Any], *keys: str) -> Any:
+    payload = source.get("payload")
+    payload_map = payload if isinstance(payload, dict) else {}
+    for key in keys:
+        if key in payload_map:
+            return payload_map[key]
+    for key in keys:
+        if key in source:
+            return source[key]
+    return None
+
+
+def _legacy_event_record_value(source: Dict[str, Any], *keys: str) -> Dict[str, Any]:
+    value = _legacy_event_value(source, *keys)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _tool_event_call_id(source: Dict[str, Any]) -> str:
+    return str(_legacy_event_value(source, "call_id", "callId") or "")
+
+
+def _tool_event_name(source: Dict[str, Any]) -> str:
+    return str(_legacy_event_value(source, "tool", "toolName", "tool_name", "name") or "")
+
+
+def _tool_event_arguments(source: Dict[str, Any]) -> Any:
+    value = _legacy_event_value(source, "args", "arguments")
+    return value if value is not None else {}
+
+
+def _display_tool_name(tool_name: str) -> str:
+    return str(tool_name or "tool").replace("_", " ").strip().title() or "Tool"
+
+
+def _truncate_preview(value: Any, limit: int = 500) -> str:
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            text = str(value)
+    text = text.replace("\r\n", "\n").strip()
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _tool_result_represents_execution(result: Any) -> bool:
+    text = str(result or "").lstrip()
+    return not text.startswith("[Permission denied]")
+
+
+def _tool_terminal_kind(result: Any) -> str:
+    text = str(result or "").lstrip().lower()
+    if text.startswith("[cancelled]") or text.startswith("[canceled]"):
+        return "tool_canceled"
+    if "timed out" in text[:500] or "timeout" in text[:500]:
+        return "tool_timed_out"
+    return "tool_failed" if _tool_result_is_error(result) else "tool_succeeded"
+
+
+def _tool_terminal_status(kind: str) -> str:
+    if kind == "tool_succeeded":
+        return "success"
+    if kind == "tool_canceled":
+        return "canceled"
+    if kind == "tool_timed_out":
+        return "timed_out"
+    return "error"
+
+
+def _tool_terminal_error(result: Any, kind: str) -> Dict[str, Any]:
+    code = {
+        "tool_canceled": "TOOL_CANCELED",
+        "tool_timed_out": "TOOL_TIMED_OUT",
+    }.get(kind, "TOOL_FAILED")
+    return {
+        "code": code,
+        "message": _truncate_preview(result, limit=1000),
+        "recoverable": True,
+    }
+
+
 def _append_run_event(run: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
     with run["condition"]:
         seq = int(run.get("next_seq") or 1)
@@ -1823,20 +2254,30 @@ def _append_run_event(run: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str,
         event = dict(payload)
         event["run_id"] = run["id"]
         event["runId"] = run["id"]
+        event["turn_id"] = run.get("turn_id", "") or f"turn_{run['id']}"
+        event["turnId"] = event["turn_id"]
         event["session_id"] = run["session_id"]
         event["sessionId"] = run["session_id"]
         event["assistant_id"] = run["assistant_id"]
         event["assistantId"] = run["assistant_id"]
+        event["message_id"] = run["assistant_id"]
+        event["messageId"] = run["assistant_id"]
+        event["surface_mode"] = run.get("surface_mode", "chat")
+        event["surfaceMode"] = event["surface_mode"]
         event["seq"] = seq
         if isinstance(event.get("payload"), dict):
             event["payload"] = {
                 **event["payload"],
                 "run_id": run["id"],
+                "turn_id": event["turn_id"],
                 "session_id": run["session_id"],
                 "assistant_id": run["assistant_id"],
+                "message_id": run["assistant_id"],
+                "surface_mode": event["surface_mode"],
                 "seq": seq,
             }
         run["events"].append(event)
+        _append_run_v2_events_from_legacy_locked(run, event)
         run["updated_at"] = time.time()
         if event.get("kind") == "runtime_status":
             phase = str(event.get("phase") or event.get("payload", {}).get("phase") or "")
@@ -1938,6 +2379,12 @@ def _sse(payload: Any) -> str:
     return sse_data(payload)
 
 
+def _sse_raw_json(payload: Any) -> str:
+    if payload == "[DONE]":
+        return "data: [DONE]\n\n"
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
 def _sse_comment(comment: str) -> str:
     return f": {comment}\n\n"
 
@@ -2011,6 +2458,9 @@ def _stream_agent_response(
     mode: str = "auto",
     cancel_event: Optional[threading.Event] = None,
     checkpoint: Optional[CheckpointRecorder] = None,
+    run_id: str = "",
+    turn_id: str = "",
+    message_id: str = "",
 ) -> Any:
     """Stream a normal agent response with shared permission and compact handling."""
     if session_id:
@@ -2120,22 +2570,45 @@ def _stream_agent_response(
                     registry_requires_approval=True,
                 )
                 with _perm_dict_lock:
+                    permission_meta = _permission_request_metadata(
+                        tool_name=event.tool_name,
+                        arguments=event.arguments or {},
+                        workspace_root=config.workspace_root,
+                        safety=safety,
+                        decision=permission_decision.to_dict(),
+                    )
+                    choices = _permission_request_choices(permission_meta, tool_name=event.tool_name)
+                    permission_meta["choices"] = choices
+                    permission_meta["default_choice"] = _permission_default_choice(choices)
+                    request_payload = _permission_request_store.create(
+                        request_id=event.request_id,
+                        call_id=event.call_id,
+                        run_id=run_id,
+                        session_id=session_id or "",
+                        turn_id=turn_id,
+                        tool_name=event.tool_name,
+                        arguments_preview=_sanitize_permission_args(event.arguments or {}),
+                        decision=permission_decision.to_dict(),
+                        path_safety=permission_meta.get("path_safety") if isinstance(permission_meta.get("path_safety"), dict) else {},
+                        choices=choices,
+                        workspace_root=config.workspace_root,
+                        timeout_seconds=DEFAULT_PERMISSION_TIMEOUT_SECONDS,
+                    )
+                    permission_payload = {**permission_meta, **request_payload, "choices": choices}
                     _permission_locks[event.request_id] = lock
                     _permission_contexts[event.request_id] = {
                         "request_id": event.request_id,
                         "call_id": event.call_id,
+                        "run_id": run_id,
+                        "turn_id": turn_id,
+                        "session_id": session_id or "",
+                        "message_id": message_id,
                         "tool": event.tool_name,
                         "arguments": event.arguments,
                         "workspace_root": config.workspace_root,
                         "mode": mode,
                         "decision": permission_decision.to_dict(),
-                        "permission": _permission_request_metadata(
-                            tool_name=event.tool_name,
-                            arguments=event.arguments or {},
-                            workspace_root=config.workspace_root,
-                            safety=safety,
-                            decision=permission_decision.to_dict(),
-                        ),
+                        "permission": permission_payload,
                         "created_at": time.time(),
                     }
 
@@ -2296,19 +2769,9 @@ def _stream_agent_response(
                     _permission_contexts.pop(event.request_id, None)
                     _permission_results.pop(event.request_id, None)
                 if context:
-                    _append_permission_audit(
-                        {
-                            **context,
-                            "action": "deny",
-                            "approved": False,
-                            "remember": "",
-                            "source": "permission_timeout",
-                            "decision_source": (context.get("decision") or {}).get("source") if isinstance(context.get("decision"), dict) else "",
-                            "decision_reason": (context.get("decision") or {}).get("reason") if isinstance(context.get("decision"), dict) else "",
-                            "risk_level": (context.get("decision") or {}).get("risk_level") if isinstance(context.get("decision"), dict) else "",
-                        },
-                        workspace_root=config.workspace_root,
-                    )
+                    _expire_pending_permission(event.request_id, context, workspace_root=config.workspace_root)
+                else:
+                    _mark_permission_tool_outcome(event.request_id, approved=bool(send_value))
     except (GeneratorExit, Exception) as exc:
         try:
             close_fn = getattr(gen, "close", None)
@@ -2360,43 +2823,47 @@ def _run_registry_worker(run_id: str) -> None:
             checkpoint.finalize("failed")
         return
 
-    generator = _stream_agent_response(
-        list(run.get("model_context") or run["history"]),
-        config,
-        session_id=str(run["session_id"]),
-        history=list(run["history"]),
-        compact_state=dict(run.get("compact_state") or {}),
-        mode=str(run.get("mode") or "auto"),
-        cancel_event=run.get("cancel_event"),
-        checkpoint=run.get("checkpoint") if isinstance(run.get("checkpoint"), CheckpointRecorder) else None,
-    )
     saw_done = False
     try:
-        for chunk in generator:
-            if run.get("cancel_requested"):
-                _append_run_event(run, _run_cancel_event())
-                _set_run_status(run, "canceled", phase="canceled")
-                close = getattr(generator, "close", None)
-                if callable(close):
-                    close()
-                return
-            for payload in _sse_payloads_from_chunk(chunk):
-                if payload == "[DONE]":
-                    saw_done = True
-                    continue
-                if isinstance(payload, dict):
-                    _append_run_event(run, payload)
-                    if payload.get("kind") == "error":
-                        run["error"] = str(payload.get("message") or payload.get("payload", {}).get("message") or "")
-                    if payload.get("kind") == "done":
+        with workspace_root_override(config.workspace_root):
+            generator = _stream_agent_response(
+                list(run.get("model_context") or run["history"]),
+                config,
+                session_id=str(run["session_id"]),
+                history=list(run["history"]),
+                compact_state=dict(run.get("compact_state") or {}),
+                mode=str(run.get("mode") or "auto"),
+                cancel_event=run.get("cancel_event"),
+                checkpoint=run.get("checkpoint") if isinstance(run.get("checkpoint"), CheckpointRecorder) else None,
+                run_id=str(run.get("id") or ""),
+                turn_id=str(run.get("turn_id") or ""),
+                message_id=str(run.get("assistant_id") or ""),
+            )
+            for chunk in generator:
+                if run.get("cancel_requested"):
+                    _append_run_event(run, _run_cancel_event())
+                    _set_run_status(run, "canceled", phase="canceled")
+                    close = getattr(generator, "close", None)
+                    if callable(close):
+                        close()
+                    return
+                for payload in _sse_payloads_from_chunk(chunk):
+                    if payload == "[DONE]":
                         saw_done = True
-            if run.get("cancel_requested"):
-                _append_run_event(run, _run_cancel_event())
-                _set_run_status(run, "canceled", phase="canceled")
-                close = getattr(generator, "close", None)
-                if callable(close):
-                    close()
-                return
+                        continue
+                    if isinstance(payload, dict):
+                        _append_run_event(run, payload)
+                        if payload.get("kind") == "error":
+                            run["error"] = str(payload.get("message") or payload.get("payload", {}).get("message") or "")
+                        if payload.get("kind") == "done":
+                            saw_done = True
+                if run.get("cancel_requested"):
+                    _append_run_event(run, _run_cancel_event())
+                    _set_run_status(run, "canceled", phase="canceled")
+                    close = getattr(generator, "close", None)
+                    if callable(close):
+                        close()
+                    return
     except OperationCancelled:
         _append_run_event(run, _run_cancel_event())
         _set_run_status(run, "canceled", phase="canceled")
@@ -2427,14 +2894,17 @@ def _start_run_thread(run: Dict[str, Any]) -> None:
     thread.start()
 
 
-def _run_events_response(run: Dict[str, Any], after_seq: int = 0) -> Response:
+def _run_events_response(run: Dict[str, Any], after_seq: int = 0, *, schema: str = "v1") -> Response:
+    events_key = "events_v2" if schema == "v2" else "events"
+    sse_writer = _sse_raw_json if schema == "v2" else _sse
+
     def stream() -> Any:
         last_seq = max(0, int(after_seq or 0))
         while True:
             with run["condition"]:
                 events = [
                     event
-                    for event in list(run.get("events") or [])
+                    for event in list(run.get(events_key) or [])
                     if int(event.get("seq") or 0) > last_seq
                 ]
                 status = str(run.get("status") or "")
@@ -2442,7 +2912,7 @@ def _run_events_response(run: Dict[str, Any], after_seq: int = 0) -> Response:
                     run["condition"].wait(timeout=15)
                     events = [
                         event
-                        for event in list(run.get("events") or [])
+                        for event in list(run.get(events_key) or [])
                         if int(event.get("seq") or 0) > last_seq
                     ]
                     status = str(run.get("status") or "")
@@ -2452,13 +2922,13 @@ def _run_events_response(run: Dict[str, Any], after_seq: int = 0) -> Response:
 
             for event in events:
                 last_seq = max(last_seq, int(event.get("seq") or 0))
-                yield _sse(event)
+                yield sse_writer(event)
 
             with run["condition"]:
                 status = str(run.get("status") or "")
-                has_more = any(int(event.get("seq") or 0) > last_seq for event in run.get("events") or [])
+                has_more = any(int(event.get("seq") or 0) > last_seq for event in run.get(events_key) or [])
             if status in _RUN_TERMINAL_STATES and not has_more:
-                yield _sse("[DONE]")
+                yield sse_writer("[DONE]")
                 return
 
     return _sse_response(stream())
@@ -2508,6 +2978,9 @@ def health() -> Any:
 @app.route("/contract/agent-events", methods=["GET"])
 def agent_events_contract() -> Any:
     """Return the stream event contract consumed by the desktop app."""
+    version = str(request.args.get("version") or request.args.get("schema") or "").strip().lower()
+    if version in {"2", "v2", "metis.agent_event.v2"}:
+        return jsonify(agent_event_contract_payload_v2())
     return jsonify(agent_event_contract_payload())
 
 
@@ -2644,7 +3117,10 @@ def run_events(run_id: str) -> Any:
     if run is None:
         return jsonify({"error": "run not found"}), 404
     after_seq = int(request.args.get("after") or request.args.get("after_seq") or 0)
-    return _run_events_response(run, after_seq)
+    requested_schema = str(request.args.get("schema") or request.args.get("version") or "").strip().lower()
+    accept = str(request.headers.get("Accept") or "").lower()
+    schema = "v2" if requested_schema in {"2", "v2", "metis.agent_event.v2"} or "metis.agent-event.v2" in accept else "v1"
+    return _run_events_response(run, after_seq, schema=schema)
 
 
 @app.route("/runs/<run_id>/cancel", methods=["POST", "DELETE"])
@@ -3553,46 +4029,165 @@ def set_mode() -> Any:
     return jsonify({"mode": _runtime_state.execution_mode})
 
 
-@app.route("/permission", methods=["POST"])
-def handle_permission() -> Any:
-    """Approve or deny a pending tool execution."""
-    data = request.get_json(silent=True) or {}
-    request_id = str(data.get("request_id", ""))
-    approved = bool(data.get("approved", False))
-    remember = str(data.get("remember") or "").strip().lower()
-    if remember not in {"", "allow", "deny"}:
-        return jsonify({"error": "remember must be allow, deny, or empty"}), 400
-    grant = str(data.get("grant") or "").strip().lower()
-    if grant not in {"", "temporary_root", "writable_root", "selected_root", "full_access"}:
-        return jsonify({"error": "grant must be empty, temporary_root, writable_root, selected_root, or full_access"}), 400
+def _ensure_permission_request_from_context(request_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    existing = _permission_request_store.get(request_id)
+    if existing:
+        return existing
+    permission = context.get("permission") if isinstance(context.get("permission"), dict) else {}
+    tool_name = str(context.get("tool") or permission.get("tool_name") or "")
+    decision = context.get("decision") if isinstance(context.get("decision"), dict) else permission.get("decision")
+    path_safety = permission.get("path_safety") if isinstance(permission.get("path_safety"), dict) else {}
+    choices = permission.get("choices") if isinstance(permission.get("choices"), list) else []
+    if not choices:
+        choices = _permission_request_choices(permission, tool_name=tool_name)
+    request_payload = _permission_request_store.create(
+        request_id=request_id,
+        call_id=str(context.get("call_id") or permission.get("call_id") or ""),
+        run_id=str(context.get("run_id") or permission.get("run_id") or ""),
+        session_id=str(context.get("session_id") or permission.get("session_id") or ""),
+        turn_id=str(context.get("turn_id") or permission.get("turn_id") or ""),
+        tool_name=tool_name,
+        arguments_preview=_sanitize_permission_args(context.get("arguments") or {}),
+        decision=decision if isinstance(decision, dict) else {},
+        path_safety=path_safety,
+        choices=choices if all(isinstance(choice, dict) for choice in choices) else [],
+        workspace_root=str(context.get("workspace_root") or permission.get("workspace_root") or ""),
+    )
+    merged = {**permission, **request_payload, "choices": choices}
+    context["permission"] = merged
+    return merged
 
+
+def _permission_choice(permission: Dict[str, Any], choice_value: str) -> Dict[str, Any]:
+    choices = permission.get("choices") if isinstance(permission.get("choices"), list) else []
+    for choice in choices:
+        if isinstance(choice, dict) and str(choice.get("value") or "") == choice_value:
+            return dict(choice)
+    return {}
+
+
+def _permission_answer_from_payload(data: Dict[str, Any], permission: Dict[str, Any]) -> Dict[str, Any]:
+    choice_value = str(data.get("choice") or "").strip()
+    approved_provided = "approved" in data
+    selected = _permission_choice(permission, choice_value)
+    approved = bool(data.get("approved", selected.get("approved", False)))
+    remember = str(data.get("remember") if data.get("remember") is not None else selected.get("remember") or "").strip().lower()
+    grant = str(data.get("grant") if data.get("grant") is not None else selected.get("grant") or "").strip().lower()
+    root_path = str(data.get("root_path") or data.get("rootPath") or "").strip()
+    if choice_value == "once":
+        approved = True if not approved_provided else approved
+        remember = ""
+        grant = ""
+    elif choice_value == "always_allow":
+        approved = True if not approved_provided else approved
+        remember = "allow"
+        grant = ""
+    elif choice_value == "always_deny":
+        approved = False
+        remember = "deny"
+        grant = ""
+    elif choice_value == "temporary_root":
+        approved = True if not approved_provided else approved
+        grant = "temporary_root"
+        remember = ""
+    elif choice_value == "writable_root":
+        approved = True if not approved_provided else approved
+        grant = "writable_root"
+        remember = ""
+    elif choice_value == "pick_root":
+        grant = "selected_root"
+        remember = ""
+        approved = bool(root_path)
+    elif choice_value == "full_access":
+        approved = True if not approved_provided else approved
+        grant = "full_access"
+        remember = ""
+    if remember not in {"", "allow", "deny"}:
+        raise ValueError("remember must be allow, deny, or empty")
+    if grant not in {"", "temporary_root", "writable_root", "selected_root", "full_access"}:
+        raise ValueError("grant must be empty, temporary_root, writable_root, selected_root, or full_access")
+    return {
+        "approved": approved,
+        "choice": choice_value,
+        "remember": remember,
+        "grant": grant,
+        "root_path": root_path,
+    }
+
+
+def _emit_permission_run_event(kind: str, permission: Dict[str, Any], extra: Dict[str, Any] | None = None) -> None:
+    run_id = str(permission.get("run_id") or "")
+    if not run_id:
+        return
+    run = _get_run(run_id)
+    if run is None:
+        return
+    payload = {
+        "request_id": str(permission.get("request_id") or ""),
+        "call_id": str(permission.get("call_id") or ""),
+        "tool_name": str(permission.get("tool_name") or ""),
+        "permission": permission,
+        **(extra or {}),
+    }
+    with run["condition"]:
+        _append_run_v2_event_locked(run, kind, payload, timestamp=time.time())
+        run["updated_at"] = time.time()
+        run["condition"].notify_all()
+
+
+def _answer_pending_permission(data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
+    request_id = str(data.get("request_id") or data.get("requestId") or "").strip()
+    if not request_id:
+        return {"error": "request_id required"}, 400
     with _perm_dict_lock:
         lock = _permission_locks.get(request_id)
         context = dict(_permission_contexts.get(request_id, {}))
     if not lock:
-        return jsonify({"error": "no pending permission request"}), 404
+        return {"error": "no pending permission request"}, 404
+    permission = _ensure_permission_request_from_context(request_id, context)
+    try:
+        answer = _permission_answer_from_payload(data, permission)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
-    tool_name = str(context.get("tool") or data.get("tool") or "")
+    tool_name = str(context.get("tool") or data.get("tool") or permission.get("tool_name") or "")
     arguments = context.get("arguments")
     if not isinstance(arguments, dict):
         raw_args = data.get("args", data.get("arguments", {}))
         arguments = raw_args if isinstance(raw_args, dict) else {}
-    call_id = str(context.get("call_id") or data.get("call_id") or "")
-    workspace_root = str(context.get("workspace_root") or "")
-    decision = context.get("decision") if isinstance(context.get("decision"), dict) else {}
-    permission_meta = context.get("permission") if isinstance(context.get("permission"), dict) else {}
+    call_id = str(context.get("call_id") or data.get("call_id") or permission.get("call_id") or "")
+    workspace_root = str(context.get("workspace_root") or permission.get("workspace_root") or "")
+    decision = context.get("decision") if isinstance(context.get("decision"), dict) else permission.get("decision") if isinstance(permission.get("decision"), dict) else {}
+    permission_meta = context.get("permission") if isinstance(context.get("permission"), dict) else permission
     path_safety = permission_meta.get("path_safety") if isinstance(permission_meta.get("path_safety"), dict) else {}
     root_path = str(
-        data.get("root_path")
-        or data.get("rootPath")
+        answer.get("root_path")
         or permission_meta.get("suggested_writable_root")
         or path_safety.get("suggested_root")
         or ""
     ).strip()
+    approved = bool(answer["approved"])
+    remember = str(answer["remember"])
+    grant = str(answer["grant"])
+    if approved and grant in {"temporary_root", "writable_root", "selected_root"} and not root_path:
+        return {"error": "root_path required for writable root grant"}, 400
+
+    answered = _permission_request_store.answer(
+        request_id,
+        approved=approved,
+        choice=str(answer.get("choice") or ""),
+        remember=remember,
+        grant=grant,
+        root_path=root_path,
+    ) or permission
+    _emit_permission_run_event(
+        "permission_answered",
+        {**permission_meta, **answered},
+        {"approved": approved, "choice": str(answer.get("choice") or ""), "remember": remember, "grant": grant, "root_path": root_path},
+    )
+
     rule_id = ""
     if approved and grant in {"temporary_root", "writable_root", "selected_root"}:
-        if not root_path:
-            return jsonify({"error": "root_path required for writable root grant"}), 400
         if grant == "temporary_root":
             entry = _add_ephemeral_writable_root(root_path, workspace_root=workspace_root, source="permission_dialog_once")
             rule_id = str(entry.get("id") or "")
@@ -3620,7 +4215,14 @@ def handle_permission() -> Any:
         )
         rule_id = str(rule.get("id") or "")
 
-    _append_permission_audit(
+    if approved:
+        applied = _permission_request_store.mark_applied(request_id, rule_id=rule_id, root_path=root_path) or answered
+        _emit_permission_run_event("permission_applied", {**permission_meta, **applied}, {"rule_id": rule_id, "root_path": root_path})
+    else:
+        rejected = _permission_request_store.mark_rejected(request_id, rule_id=rule_id) or answered
+        _emit_permission_run_event("permission_rejected", {**permission_meta, **rejected}, {"rule_id": rule_id})
+
+    audit = _append_permission_audit(
         {
             "request_id": request_id,
             "call_id": call_id,
@@ -3640,13 +4242,107 @@ def handle_permission() -> Any:
         },
         workspace_root=workspace_root,
     )
+    audited = _permission_request_store.mark_audited(request_id, audit_id=str(audit.get("id") or ""), rule_id=rule_id) or answered
+    _emit_permission_run_event("permission_audited", {**permission_meta, **audited}, {"audit_id": str(audit.get("id") or "")})
+
     with _perm_dict_lock:
         current_lock = _permission_locks.get(request_id)
         if not current_lock:
-            return jsonify({"error": "no pending permission request"}), 404
+            return {"error": "no pending permission request"}, 404
         _permission_results[request_id] = approved
         current_lock.set()
-    return jsonify({"ok": True, "approved": approved, "remember": remember, "grant": grant, "root_path": root_path, "rule_id": rule_id})
+        _permission_contexts[request_id] = {**context, "permission": {**permission_meta, **audited}}
+    return {
+        "ok": True,
+        "approved": approved,
+        "remember": remember,
+        "grant": grant,
+        "root_path": root_path,
+        "rule_id": rule_id,
+        "request": {**permission_meta, **audited},
+    }, 200
+
+
+def _expire_pending_permission(request_id: str, context: Dict[str, Any], *, workspace_root: str = "") -> None:
+    permission = _ensure_permission_request_from_context(request_id, context)
+    expired = _permission_request_store.mark_expired(request_id, expired_at=time.time()) or permission
+    permission_payload = {**permission, **expired}
+    _emit_permission_run_event("permission_expired", permission_payload, {"source": "permission_timeout"})
+    audit = _append_permission_audit(
+        {
+            **context,
+            "action": "deny",
+            "approved": False,
+            "remember": "",
+            "source": "permission_timeout",
+            "decision_source": (context.get("decision") or {}).get("source") if isinstance(context.get("decision"), dict) else "",
+            "decision_reason": (context.get("decision") or {}).get("reason") if isinstance(context.get("decision"), dict) else "",
+            "risk_level": (context.get("decision") or {}).get("risk_level") if isinstance(context.get("decision"), dict) else "",
+        },
+        workspace_root=workspace_root,
+    )
+    audited = _permission_request_store.mark_audited(request_id, audit_id=str(audit.get("id") or "")) or expired
+    _emit_permission_run_event("permission_audited", {**permission, **audited}, {"audit_id": str(audit.get("id") or "")})
+
+
+def _mark_permission_tool_outcome(request_id: str, *, approved: bool) -> None:
+    if not request_id:
+        return
+    request_payload = (
+        _permission_request_store.mark_tool_resumed(request_id)
+        if approved
+        else _permission_request_store.mark_tool_denied(request_id)
+    )
+    if request_payload:
+        _emit_permission_run_event(
+            "runtime_status",
+            request_payload,
+            {
+                "phase": "permission_tool_resumed" if approved else "permission_tool_denied",
+                "message": "Permission applied; tool may continue" if approved else "Permission denied; tool will not run",
+                "recoverable": True,
+            },
+        )
+
+
+@app.route("/permission", methods=["POST"])
+def handle_permission() -> Any:
+    """Approve or deny a pending tool execution."""
+    payload, status = _answer_pending_permission(request.get_json(silent=True) or {})
+    return jsonify(payload), status
+
+
+@app.route("/permissions/requests/<request_id>", methods=["GET"])
+def get_permission_request(request_id: str) -> Any:
+    request_payload = _permission_request_store.get(request_id)
+    if request_payload is None:
+        return jsonify({"error": "permission request not found"}), 404
+    return jsonify({"ok": True, "request": request_payload})
+
+
+@app.route("/permissions/requests/<request_id>/displayed", methods=["POST"])
+def mark_permission_request_displayed(request_id: str) -> Any:
+    data = request.get_json(silent=True) or {}
+    with _perm_dict_lock:
+        context = dict(_permission_contexts.get(request_id, {}))
+    if context and _permission_request_store.get(request_id) is None:
+        _ensure_permission_request_from_context(request_id, context)
+    request_payload = _permission_request_store.mark_displayed(
+        request_id,
+        surface=str(data.get("surface") or "desktop"),
+        displayed_at=data.get("displayed_at") or data.get("displayedAt"),
+    )
+    if request_payload is None:
+        return jsonify({"error": "permission request not found"}), 404
+    return jsonify({"ok": True, "request": request_payload})
+
+
+@app.route("/permissions/requests/<request_id>/answer", methods=["POST"])
+def answer_permission_request(request_id: str) -> Any:
+    data = dict(request.get_json(silent=True) or {})
+    data["request_id"] = request_id
+    payload, status = _answer_pending_permission(data)
+    return jsonify(payload), status
 
 
 @app.route("/permissions", methods=["GET"])

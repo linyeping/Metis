@@ -5,6 +5,7 @@ vi.mock('../../lib/api', () => ({
   cancelChatRun: vi.fn(async () => runPayload({ status: 'canceled' })),
   chatStream: vi.fn(async () => undefined),
   compactConversation: vi.fn(async () => ({})),
+  createRun: vi.fn(async () => runPayload()),
   createSession: vi.fn(async () => sessionMeta('session-new')),
   deleteSession: vi.fn(async () => undefined),
   getActiveSessionRun: vi.fn(async () => ({ ok: false, run: null })),
@@ -34,6 +35,7 @@ vi.mock('../../lib/api', () => ({
 const api = await import('../../lib/api');
 const { useChatStore } = await import('../chatStore');
 const { useSessionStore } = await import('../sessionStore');
+const { useUiStore } = await import('../uiStore');
 const { clearActiveRunController, processedRunSeq } = await import('../runManager');
 
 describe('chatStore loadSession runtime correctness', () => {
@@ -51,6 +53,7 @@ describe('chatStore loadSession runtime correctness', () => {
       loading: false,
       error: null,
     });
+    useUiStore.setState({ appMode: 'chat' });
     useChatStore.setState({
       messages: [],
       composerText: '',
@@ -74,7 +77,7 @@ describe('chatStore loadSession runtime correctness', () => {
 
   it('send creates a session, then passive loadSession does not wipe optimistic messages', async () => {
     const start = deferred<ChatRunPayload>();
-    vi.mocked(api.startChatRun).mockReturnValueOnce(start.promise);
+    vi.mocked(api.createRun).mockReturnValueOnce(start.promise);
     vi.mocked(api.getSession).mockResolvedValue(sessionPayload('session-new', []));
 
     const sendPromise = useChatStore.getState().send('first hello');
@@ -96,11 +99,21 @@ describe('chatStore loadSession runtime correctness', () => {
 
     await useChatStore.getState().send('research this');
 
-    expect(api.startChatRun).toHaveBeenCalledWith(expect.objectContaining({
+    expect(api.createRun).toHaveBeenCalledWith(expect.objectContaining({
       message: 'research this',
       session_id: 'session-new',
+      surface_mode: 'chat',
       deep_research: true,
     }));
+  });
+
+  it('does not fall back to /chat when creating a run fails', async () => {
+    vi.mocked(api.createRun).mockRejectedValueOnce(new Error('HTTP 404'));
+
+    await useChatStore.getState().send('no fallback');
+
+    expect(api.chatStream).not.toHaveBeenCalled();
+    expect(useChatStore.getState().error).toContain('HTTP 404');
   });
 
   it('loadSession skips destructive overwrite when streaming in the same session', async () => {
@@ -123,7 +136,7 @@ describe('chatStore loadSession runtime correctness', () => {
     const start = deferred<ChatRunPayload>();
     useSessionStore.setState({ activeSessionId: 'session-1' });
     vi.mocked(api.getSession).mockReturnValueOnce(session.promise);
-    vi.mocked(api.startChatRun).mockReturnValueOnce(start.promise);
+    vi.mocked(api.createRun).mockReturnValueOnce(start.promise);
 
     const loadPromise = useChatStore.getState().loadSession('session-1');
     await waitUntil(() => vi.mocked(api.getSession).mock.calls.length > 0);
@@ -144,7 +157,7 @@ describe('chatStore loadSession runtime correctness', () => {
     const created = deferred<{ id: string; workspaceId: string }>();
     const start = deferred<ChatRunPayload>();
     vi.mocked(api.createSession).mockReturnValueOnce(created.promise);
-    vi.mocked(api.startChatRun).mockReturnValueOnce(start.promise);
+    vi.mocked(api.createRun).mockReturnValueOnce(start.promise);
 
     const sendPromise = useChatStore.getState().send('first message');
     await waitUntil(() => useChatStore.getState().pendingSendSessionId === '__pending_send_session__');
@@ -226,8 +239,19 @@ function runPayload(overrides: Partial<ChatRunPayload> = {}): ChatRunPayload {
     ok: true,
     runId: 'run-1',
     id: 'run-1',
+    turnId: 'turn-run-1',
     sessionId: 'session-new',
     assistantId: 'assistant-test',
+    mode: 'chat',
+    surfaceMode: 'chat',
+    executionProfile: 'local_direct',
+    workspaceRoot: '',
+    sourceWorkspaceRoot: '',
+    worktreeId: '',
+    worktreePath: '',
+    worktreeWorkspaceRoot: '',
+    worktree: null,
+    schemaVersion: 1,
     status: 'running',
     phase: 'running',
     cancelRequested: false,

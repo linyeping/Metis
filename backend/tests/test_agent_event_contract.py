@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 
 from backend.bridges.event_contract import EVENT_SCHEMA, agent_event_contract_payload
+from backend.bridges.event_contract_v2 import EVENT_SCHEMA_V2, agent_event_contract_payload_v2
 from backend.bridges.event_serializer import agent_event_payload, sse_data
+from backend.bridges.event_serializer_v2 import agent_event_v2_payload
 from backend.runtime.agent_loop import (
     CompactEvent,
     ContentDeltaEvent,
@@ -204,3 +206,61 @@ def test_agent_event_contract_payload_lists_supported_kinds() -> None:
         assert kind in payload["legacy_compat_fields"]
     assert "context_ledger" in payload["legacy_compat_fields"]["done"]
     assert "payload" in payload["envelope_required"]
+
+
+def test_agent_event_contract_v2_payload_lists_stable_envelope() -> None:
+    payload = agent_event_contract_payload_v2()
+    assert payload["schema"] == EVENT_SCHEMA_V2
+    assert payload["version"] == 2
+    for field in ("run_id", "session_id", "turn_id", "message_id", "seq", "event_id", "timestamp", "kind", "payload"):
+        assert field in payload["envelope_required"]
+    for kind in (
+        "message_delta",
+        "tool_requested",
+        "permission_required",
+        "permission_answered",
+        "permission_applied",
+        "permission_rejected",
+        "permission_expired",
+        "permission_audited",
+        "tool_running",
+        "tool_succeeded",
+        "run_completed",
+    ):
+        assert kind in payload["event_kinds"]
+
+
+def test_agent_event_v2_payload_uses_backend_identity_and_payload_only_business_fields() -> None:
+    payload = agent_event_v2_payload(
+        run_id="run-abc",
+        session_id="sess-1",
+        turn_id="turn-run-abc",
+        message_id="assistant-1",
+        seq=12,
+        kind="tool_requested",
+        timestamp=0,
+        source_event_id="evt_legacy",
+        payload={
+            "tool_name": "read_file",
+            "call_id": "call-1",
+            "arguments": {"path": "x.py"},
+            "run_id": "legacy-run",
+            "seq": 99,
+        },
+    )
+
+    assert payload["schema"] == EVENT_SCHEMA_V2
+    assert payload["version"] == 2
+    assert payload["run_id"] == "run-abc"
+    assert payload["session_id"] == "sess-1"
+    assert payload["turn_id"] == "turn-run-abc"
+    assert payload["message_id"] == "assistant-1"
+    assert payload["seq"] == 12
+    assert payload["event_id"] == "evt_run-abc_000012"
+    assert payload["timestamp"] == "1970-01-01T00:00:00.000Z"
+    assert payload["kind"] == "tool_requested"
+    assert payload["payload"]["call_id"] == "call-1"
+    assert payload["payload"]["tool_name"] == "read_file"
+    assert payload["payload"]["source_event_id"] == "evt_legacy"
+    assert "run_id" not in payload["payload"]
+    assert "seq" not in payload["payload"]

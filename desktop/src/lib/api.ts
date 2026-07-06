@@ -3,6 +3,8 @@ import type {
   AgentRuntimeProfilePayload,
   ActiveChatRunPayload,
   AppMode,
+  ArtifactRecord,
+  ArtifactsPayload,
   AutoTitlePayload,
   AwaySummaryPayload,
   ChatRunPayload,
@@ -24,6 +26,7 @@ import type {
   ParsedFile,
   PermissionAccessMode,
   PermissionAuditEntry,
+  PermissionRequestMetadata,
   PromptSuggestionsPayload,
   PermissionRule,
   PermissionStatePayload,
@@ -57,9 +60,14 @@ import type {
   SkillDetail,
   SkillSummary,
   WorkspaceFile,
+  WorktreeDiffPayload,
+  WorktreePromotePayload,
+  WorktreeRecord,
+  WorktreeRegistryPayload,
   WorkspacesPayload,
   WorkspaceTreeNode,
 } from './types';
+import { adaptAgentEventForReducer } from './agentEventV2';
 import type { FileChangeSummary } from './diffPreview';
 
 let cachedBase: string | null = null;
@@ -253,9 +261,31 @@ function researchJobFromRecord(row: Record<string, unknown>): ResearchJob {
     report: stringValue(row.report),
     report_filename: stringValue(row.report_filename ?? row.reportFilename),
     report_path: stringValue(row.report_path ?? row.reportPath),
+    artifact_id: stringValue(row.artifact_id ?? row.artifactId),
     stats: Object.fromEntries(Object.entries(recordValue(row.stats)).map(([key, value]) => [key, numberValue(value)])),
     created_at: numberValue(row.created_at ?? row.createdAt),
     updated_at: numberValue(row.updated_at ?? row.updatedAt),
+  };
+}
+
+function artifactFromRecord(row: Record<string, unknown>): ArtifactRecord {
+  return {
+    schema: stringValue(row.schema) || 'metis.artifact.v1',
+    version: numberValue(row.version) || 1,
+    artifact_id: stringValue(row.artifact_id ?? row.artifactId),
+    run_id: stringValue(row.run_id ?? row.runId),
+    session_id: stringValue(row.session_id ?? row.sessionId),
+    turn_id: stringValue(row.turn_id ?? row.turnId),
+    kind: stringValue(row.kind) || 'workspace_file',
+    title: stringValue(row.title) || 'Artifact',
+    path: stringValue(row.path),
+    url: stringValue(row.url),
+    mime: stringValue(row.mime),
+    created_at: stringValue(row.created_at ?? row.createdAt),
+    updated_at: stringValue(row.updated_at ?? row.updatedAt),
+    source_event_id: stringValue(row.source_event_id ?? row.sourceEventId),
+    source_tool_call_id: stringValue(row.source_tool_call_id ?? row.sourceToolCallId),
+    metadata: recordValue(row.metadata),
   };
 }
 
@@ -1458,6 +1488,60 @@ export async function getResearchJob(jobId: string): Promise<ResearchJob> {
   return researchJobFromRecord(recordValue(data.job));
 }
 
+export async function listArtifacts(filters: {
+  sessionId?: string;
+  runId?: string;
+  kind?: string;
+  limit?: number;
+} = {}): Promise<ArtifactsPayload> {
+  const query = new URLSearchParams();
+  if (filters.sessionId) query.set('session_id', filters.sessionId);
+  if (filters.runId) query.set('run_id', filters.runId);
+  if (filters.kind) query.set('kind', filters.kind);
+  if (filters.limit) query.set('limit', String(filters.limit));
+  const suffix = query.size ? `?${query.toString()}` : '';
+  const data = await requestJson<Record<string, unknown>>(`/artifacts${suffix}`);
+  const artifacts = Array.isArray(data.artifacts) ? data.artifacts.map(item => artifactFromRecord(recordValue(item))) : [];
+  return { artifacts };
+}
+
+export async function getArtifact(artifactId: string): Promise<ArtifactRecord> {
+  const data = await requestJson<Record<string, unknown>>(`/artifacts/${encodeURIComponent(artifactId)}`);
+  return artifactFromRecord(recordValue(data.artifact));
+}
+
+export async function registerArtifact(payload: {
+  kind: string;
+  title: string;
+  path?: string;
+  url?: string;
+  mime?: string;
+  runId?: string;
+  sessionId?: string;
+  turnId?: string;
+  sourceEventId?: string;
+  sourceToolCallId?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<ArtifactRecord> {
+  const data = await requestJson<Record<string, unknown>>('/artifacts', {
+    method: 'POST',
+    body: JSON.stringify({
+      kind: payload.kind,
+      title: payload.title,
+      path: payload.path || '',
+      url: payload.url || '',
+      mime: payload.mime || '',
+      run_id: payload.runId || '',
+      session_id: payload.sessionId || '',
+      turn_id: payload.turnId || '',
+      source_event_id: payload.sourceEventId || '',
+      source_tool_call_id: payload.sourceToolCallId || '',
+      metadata: payload.metadata || {},
+    }),
+  });
+  return artifactFromRecord(recordValue(data.artifact));
+}
+
 export async function exportResearchJob(jobId: string, format: 'markdown' | 'json' = 'markdown'): Promise<string> {
   const base = await apiBase();
   const response = await fetch(`${base}/research/jobs/${encodeURIComponent(jobId)}/export?format=${format}`);
@@ -1563,6 +1647,57 @@ function skillSummaryFromRecord(row: Record<string, unknown>): SkillSummary {
     disallowedTools: stringArray(row.disallowed_tools ?? row.disallowedTools),
     preview: stringValue(row.preview),
     files: skillFilesFromValue(row.files),
+  };
+}
+
+function permissionRequestFromRecord(row: Record<string, unknown>): PermissionRequestMetadata {
+  const choicesRaw = Array.isArray(row.choices) ? row.choices : [];
+  const pathSafety = recordValue(row.path_safety ?? row.pathSafety);
+  return {
+    schema: stringValue(row.schema),
+    version: numberValue(row.version),
+    requestId: stringValue(row.request_id ?? row.requestId),
+    callId: stringValue(row.call_id ?? row.callId),
+    runId: stringValue(row.run_id ?? row.runId),
+    sessionId: stringValue(row.session_id ?? row.sessionId),
+    turnId: stringValue(row.turn_id ?? row.turnId),
+    toolName: stringValue(row.tool_name ?? row.toolName),
+    status: stringValue(row.status),
+    createdAt: stringValue(row.created_at ?? row.createdAt),
+    expiresAt: stringValue(row.expires_at ?? row.expiresAt),
+    argumentsPreview: row.arguments_preview ?? row.argumentsPreview,
+    choices: choicesRaw
+      .map(item => {
+        const choice = recordValue(item);
+        return {
+          value: stringValue(choice.value),
+          label: stringValue(choice.label),
+          description: stringValue(choice.description),
+          approved: typeof choice.approved === 'boolean' ? choice.approved : undefined,
+          remember: stringValue(choice.remember) as 'allow' | 'deny' | '',
+          grant: stringValue(choice.grant) as '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access',
+          requiresRootPicker: Boolean(choice.requires_root_picker ?? choice.requiresRootPicker),
+        };
+      })
+      .filter(choice => choice.value && choice.label),
+    defaultChoice: stringValue(row.default_choice ?? row.defaultChoice),
+    auditId: stringValue(row.audit_id ?? row.auditId),
+    decision: recordValue(row.decision),
+    pathSafety: Object.keys(pathSafety).length
+      ? {
+          allowed: Boolean(pathSafety.allowed),
+          code: stringValue(pathSafety.code),
+          message: stringValue(pathSafety.message),
+          path: stringValue(pathSafety.path),
+          suggestedRoot: stringValue(pathSafety.suggested_root ?? pathSafety.suggestedRoot),
+          outsideWorkspace: Boolean(pathSafety.outside_workspace ?? pathSafety.outsideWorkspace),
+        }
+      : undefined,
+    suggestedWritableRoot: stringValue(row.suggested_writable_root ?? row.suggestedWritableRoot),
+    suggestedWritableRoots: [],
+    canGrantWritableRoot: Boolean(row.can_grant_writable_root ?? row.canGrantWritableRoot),
+    canGrantFullAccess: Boolean(row.can_grant_full_access ?? row.canGrantFullAccess),
+    workspaceRoot: stringValue(row.workspace_root ?? row.workspaceRoot),
   };
 }
 
@@ -1942,6 +2077,7 @@ export async function answerToolPermission(
   requestId: string,
   approved: boolean,
   options: {
+    choice?: string;
     remember?: 'allow' | 'deny' | '';
     grant?: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access';
     rootPath?: string;
@@ -1950,11 +2086,55 @@ export async function answerToolPermission(
     callId?: string;
   } = {},
 ): Promise<void> {
-  await requestJson('/permission', {
+  await answerPermissionRequest(requestId, {
+    approved,
+    choice: options.choice,
+    remember: options.remember,
+    grant: options.grant,
+    rootPath: options.rootPath,
+    tool: options.tool,
+    args: options.args,
+    callId: options.callId,
+  });
+}
+
+export async function getPermissionRequest(requestId: string): Promise<PermissionRequestMetadata> {
+  const data = await requestJson<Record<string, unknown>>(`/permissions/requests/${encodeURIComponent(requestId)}`);
+  return permissionRequestFromRecord(recordValue(data.request ?? data));
+}
+
+export async function markPermissionDisplayed(
+  requestId: string,
+  options: { surface?: string; displayedAt?: string } = {},
+): Promise<PermissionRequestMetadata> {
+  const data = await requestJson<Record<string, unknown>>(`/permissions/requests/${encodeURIComponent(requestId)}/displayed`, {
     method: 'POST',
     body: JSON.stringify({
-      request_id: requestId,
-      approved,
+      surface: options.surface || 'desktop',
+      displayed_at: options.displayedAt,
+    }),
+  });
+  return permissionRequestFromRecord(recordValue(data.request ?? data));
+}
+
+export async function answerPermissionRequest(
+  requestId: string,
+  options: {
+    approved: boolean;
+    choice?: string;
+    remember?: 'allow' | 'deny' | '';
+    grant?: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access';
+    rootPath?: string;
+    tool?: string;
+    args?: unknown;
+    callId?: string;
+  },
+): Promise<PermissionRequestMetadata> {
+  const data = await requestJson<Record<string, unknown>>(`/permissions/requests/${encodeURIComponent(requestId)}/answer`, {
+    method: 'POST',
+    body: JSON.stringify({
+      approved: options.approved,
+      choice: options.choice || '',
       remember: options.remember || '',
       grant: options.grant || '',
       root_path: options.rootPath || '',
@@ -1963,6 +2143,7 @@ export async function answerToolPermission(
       call_id: options.callId,
     }),
   });
+  return permissionRequestFromRecord(recordValue(data.request ?? data));
 }
 
 export async function getPermissions(): Promise<PermissionStatePayload> {
@@ -2420,7 +2601,7 @@ export async function sideChatStream(
   }
 }
 
-export async function startChatRun(body: unknown): Promise<ChatRunPayload> {
+export async function createRun(body: unknown): Promise<ChatRunPayload> {
   const data = await requestJson<Record<string, unknown>>('/runs', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -2428,19 +2609,99 @@ export async function startChatRun(body: unknown): Promise<ChatRunPayload> {
   return chatRunFromRecord(data);
 }
 
-export async function getChatRun(runId: string): Promise<ChatRunPayload> {
+export async function listWorktrees(): Promise<WorktreeRegistryPayload> {
+  const data = await requestJson<Record<string, unknown>>('/worktrees');
+  const rows = Array.isArray(data.worktrees) ? data.worktrees : [];
+  return {
+    schema: stringValue(data.schema),
+    workspaceRoot: stringValue(data.workspace_root ?? data.workspaceRoot),
+    worktrees: rows.map(item => worktreeFromRecord(recordValue(item))),
+  };
+}
+
+export async function createWorktree(body: {
+  workspaceRoot?: string;
+  runId?: string;
+  sessionId?: string;
+  label?: string;
+} = {}): Promise<{ ok: boolean; worktree: WorktreeRecord | null }> {
+  const data = await requestJson<Record<string, unknown>>('/worktrees', {
+    method: 'POST',
+    body: JSON.stringify({
+      workspace_root: body.workspaceRoot,
+      run_id: body.runId,
+      session_id: body.sessionId,
+      label: body.label,
+    }),
+  });
+  return { ok: Boolean(data.ok), worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null };
+}
+
+export async function archiveWorktree(worktreeId: string): Promise<{ ok: boolean; worktree: WorktreeRecord | null }> {
+  const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}/archive`, { method: 'POST' });
+  return { ok: Boolean(data.ok), worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null };
+}
+
+export async function removeWorktree(worktreeId: string, force = false): Promise<{ ok: boolean; worktree: WorktreeRecord | null }> {
+  const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}${force ? '?force=1' : ''}`, { method: 'DELETE' });
+  return { ok: Boolean(data.ok), worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null };
+}
+
+export async function getWorktreeDiff(worktreeId: string): Promise<WorktreeDiffPayload> {
+  const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}/diff`);
+  return {
+    ok: Boolean(data.ok),
+    schema: stringValue(data.schema),
+    worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null,
+    status: stringValue(data.status),
+    stat: stringValue(data.stat),
+    patch: stringValue(data.patch),
+    truncated: Boolean(data.truncated),
+    baseRef: stringValue(data.base_ref ?? data.baseRef),
+    error: stringValue(data.error) || undefined,
+  };
+}
+
+export async function promoteWorktree(worktreeId: string, dryRun = false): Promise<WorktreePromotePayload> {
+  const data = await requestJson<Record<string, unknown>>(`/worktrees/${encodeURIComponent(worktreeId)}/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ dry_run: dryRun }),
+  });
+  return {
+    ok: Boolean(data.ok),
+    schema: stringValue(data.schema),
+    dryRun: Boolean(data.dry_run ?? data.dryRun),
+    worktree: Object.keys(recordValue(data.worktree)).length ? worktreeFromRecord(recordValue(data.worktree)) : null,
+    message: stringValue(data.message),
+    error: stringValue(data.error),
+  };
+}
+
+export async function startChatRun(body: unknown): Promise<ChatRunPayload> {
+  return createRun(body);
+}
+
+export async function getRun(runId: string): Promise<ChatRunPayload> {
   const data = await requestJson<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}`);
   return chatRunFromRecord(data);
 }
 
-export async function getChatRuns(sessionId = ''): Promise<ChatRunsPayload> {
+export async function getChatRun(runId: string): Promise<ChatRunPayload> {
+  return getRun(runId);
+}
+
+export async function listRuns(sessionId = ''): Promise<ChatRunsPayload> {
   const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
   const data = await requestJson<Record<string, unknown>>(`/runs${query}`);
   const runs = Array.isArray(data.runs) ? data.runs.map(item => chatRunFromRecord(recordValue(item))) : [];
   return { runs };
 }
 
-export async function getActiveSessionRun(sessionId: string): Promise<ActiveChatRunPayload> {
+export async function getChatRuns(sessionId = ''): Promise<ChatRunsPayload> {
+  return listRuns(sessionId);
+}
+
+export async function getActiveRun(sessionId: string): Promise<ActiveChatRunPayload> {
   if (!sessionId) return { ok: false, run: null };
   const data = await requestJson<Record<string, unknown>>(`/sessions/${encodeURIComponent(sessionId)}/runs/active`);
   const run = recordValue(data.run);
@@ -2450,9 +2711,17 @@ export async function getActiveSessionRun(sessionId: string): Promise<ActiveChat
   };
 }
 
-export async function cancelChatRun(runId: string): Promise<ChatRunPayload> {
+export async function getActiveSessionRun(sessionId: string): Promise<ActiveChatRunPayload> {
+  return getActiveRun(sessionId);
+}
+
+export async function cancelRun(runId: string): Promise<ChatRunPayload> {
   const data = await requestJson<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
   return chatRunFromRecord(data);
+}
+
+export async function cancelChatRun(runId: string): Promise<ChatRunPayload> {
+  return cancelRun(runId);
 }
 
 class StreamHttpError extends Error {
@@ -2508,7 +2777,11 @@ async function runEventStreamOnce(
   onSeq: (seq: number) => void,
 ): Promise<void> {
   const base = await apiBase();
-  const response = await fetch(`${base}/runs/${encodeURIComponent(runId)}/events?after=${Math.max(0, Math.floor(afterSeq))}`, {
+  const query = new URLSearchParams({
+    after: String(Math.max(0, Math.floor(afterSeq))),
+    schema: 'v2',
+  });
+  const response = await fetch(`${base}/runs/${encodeURIComponent(runId)}/events?${query.toString()}`, {
     method: 'GET',
     signal,
   });
@@ -2537,7 +2810,7 @@ async function runEventStreamOnce(
           const payload = line.slice(6);
           if (payload === '[DONE]') return;
           try {
-            const parsed = JSON.parse(payload) as ChatStreamEvent;
+            const parsed = adaptAgentEventForReducer(JSON.parse(payload));
             if (typeof parsed.seq === 'number' && Number.isFinite(parsed.seq)) {
               onSeq(parsed.seq);
             }
@@ -2553,7 +2826,7 @@ async function runEventStreamOnce(
   }
 }
 
-export async function runEventStream(
+export async function streamRunEvents(
   runId: string,
   onEvent: (event: ChatStreamEvent) => void,
   signal?: AbortSignal,
@@ -2580,13 +2853,34 @@ export async function runEventStream(
   }
 }
 
+export async function runEventStream(
+  runId: string,
+  onEvent: (event: ChatStreamEvent) => void,
+  signal?: AbortSignal,
+  afterSeq = 0,
+): Promise<void> {
+  return streamRunEvents(runId, onEvent, signal, afterSeq);
+}
+
 function chatRunFromRecord(data: Record<string, unknown>): ChatRunPayload {
+  const worktree = recordValue(data.worktree);
   return {
     ok: data.ok === undefined ? undefined : Boolean(data.ok),
     runId: stringValue(data.run_id ?? data.runId ?? data.id),
     id: stringValue(data.id ?? data.run_id ?? data.runId),
+    turnId: stringValue(data.turn_id ?? data.turnId),
     sessionId: stringValue(data.session_id ?? data.sessionId),
     assistantId: stringValue(data.assistant_id ?? data.assistantId),
+    mode: stringValue(data.mode),
+    surfaceMode: (stringValue(data.surface_mode ?? data.surfaceMode) as AppMode | string) || 'chat',
+    executionProfile: stringValue(data.execution_profile ?? data.executionProfile) || 'local_direct',
+    workspaceRoot: stringValue(data.workspace_root ?? data.workspaceRoot),
+    sourceWorkspaceRoot: stringValue(data.source_workspace_root ?? data.sourceWorkspaceRoot),
+    worktreeId: stringValue(data.worktree_id ?? data.worktreeId),
+    worktreePath: stringValue(data.worktree_path ?? data.worktreePath),
+    worktreeWorkspaceRoot: stringValue(data.worktree_workspace_root ?? data.worktreeWorkspaceRoot),
+    worktree: Object.keys(worktree).length ? worktreeFromRecord(worktree) : null,
+    schemaVersion: numberValue(data.schema_version ?? data.schemaVersion) || 1,
     status: stringValue(data.status),
     phase: stringValue(data.phase),
     cancelRequested: Boolean(data.cancel_requested ?? data.cancelRequested),
@@ -2597,5 +2891,31 @@ function chatRunFromRecord(data: Record<string, unknown>): ChatRunPayload {
     eventCount: numberValue(data.event_count ?? data.eventCount),
     lastSeq: numberValue(data.last_seq ?? data.lastSeq),
     error: stringValue(data.error),
+  };
+}
+
+function worktreeFromRecord(row: Record<string, unknown>): WorktreeRecord {
+  return {
+    schema: stringValue(row.schema),
+    worktreeId: stringValue(row.worktree_id ?? row.worktreeId ?? row.id),
+    workspaceRoot: stringValue(row.workspace_root ?? row.workspaceRoot),
+    repoRoot: stringValue(row.repo_root ?? row.repoRoot),
+    worktreePath: stringValue(row.worktree_path ?? row.worktreePath),
+    worktreeWorkspaceRoot: stringValue(row.worktree_workspace_root ?? row.worktreeWorkspaceRoot),
+    branch: stringValue(row.branch),
+    baseRef: stringValue(row.base_ref ?? row.baseRef),
+    status: stringValue(row.status),
+    runId: stringValue(row.run_id ?? row.runId),
+    sessionId: stringValue(row.session_id ?? row.sessionId),
+    label: stringValue(row.label),
+    sourceProfile: stringValue(row.source_profile ?? row.sourceProfile) || 'local_worktree',
+    dirtyAtCreation: Boolean(row.dirty_at_creation ?? row.dirtyAtCreation),
+    createdAt: numberValue(row.created_at ?? row.createdAt),
+    updatedAt: numberValue(row.updated_at ?? row.updatedAt),
+    archivedAt: numberValue(row.archived_at ?? row.archivedAt),
+    removedAt: numberValue(row.removed_at ?? row.removedAt),
+    promotedAt: numberValue(row.promoted_at ?? row.promotedAt),
+    error: stringValue(row.error),
+    metadata: recordValue(row.metadata),
   };
 }

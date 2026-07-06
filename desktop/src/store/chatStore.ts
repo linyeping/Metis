@@ -8,8 +8,8 @@ import { create } from 'zustand';
 import {
   autoTitleSession,
   cancelChatRun,
-  chatStream,
   compactConversation,
+  createRun,
   getActiveSessionRun,
   getAwaySummary,
   getCompactStatus,
@@ -20,7 +20,6 @@ import {
   parseUpload,
   rewindSession,
   runEventStream,
-  startChatRun,
   undoTurn,
 } from '../lib/api';
 import { buildUserContent } from '../lib/chatUtils';
@@ -36,6 +35,7 @@ import type {
   ChatTokenUsage,
   ContextLedger,
   ParsedFile,
+  RunExecutionProfile,
   RuntimeStatus,
   SessionCheckpoint,
 } from '../lib/types';
@@ -48,7 +48,6 @@ import {
   compactStatusFromError,
   formatError,
   isBackendBootingError,
-  isRunApiUnavailable,
   messagesFromSession,
   normalizedSnapshotEvent,
   runtimeStatusFromError,
@@ -85,6 +84,11 @@ import {
 const PENDING_SEND_SESSION = '__pending_send_session__';
 
 type RewindMode = 'conversation' | 'files' | 'both';
+
+function executionProfileForSurface(surfaceMode: string): RunExecutionProfile {
+  if (surfaceMode === 'code') return 'local_worktree';
+  return 'local_direct';
+}
 
 interface ChatState {
   messages: ChatMessage[];
@@ -463,17 +467,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const deepResearch = await getComposerDeepResearchEnabled().catch(() => false);
-      try {
-        const run = await startChatRun({ message: userContent, session_id: sessionId, assistant_id: assistantId, deep_research: deepResearch });
-        setActiveRunController(sessionId, { assistantId, controller, runId: run.runId });
-        await runEventStream(run.runId, event => handleRunEvent(run.runId, event, assistantId, sessionId, processedRunSeq, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
-      } catch (runError) {
-        if (isRunApiUnavailable(runError)) {
-          await chatStream({ message: userContent, session_id: sessionId, deep_research: deepResearch }, event => applyChatEvent(event, assistantId, sessionId, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
-        } else {
-          throw runError;
-        }
-      }
+      const surfaceMode = useUiStore.getState().appMode;
+      const executionProfile = executionProfileForSurface(surfaceMode);
+      const run = await createRun({
+        message: userContent,
+        session_id: sessionId,
+        assistant_id: assistantId,
+        surface_mode: surfaceMode,
+        execution_profile: executionProfile,
+        deep_research: deepResearch,
+      });
+      setActiveRunController(sessionId, { assistantId, controller, runId: run.runId });
+      await runEventStream(run.runId, event => handleRunEvent(run.runId, event, assistantId, sessionId, processedRunSeq, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
       await autoTitleSession(sessionId).catch(() => null);
       await useSessionStore.getState().load();

@@ -34,6 +34,8 @@ export type SectionId = 'chat' | 'chat-list' | 'skills' | 'mcp' | 'computer' | '
 // Each mode reframes the home screen and (Stage 2) the default agent behavior.
 export type AppMode = 'chat' | 'cowork' | 'code';
 
+export type RunExecutionProfile = 'local_direct' | 'local_worktree' | 'local_vm';
+
 export type SettingsSection =
   | 'appearance'
   | 'conversation'
@@ -171,6 +173,11 @@ export interface PreviewAuditInput {
   error: string;
   zoom: number;
   screenshotDataUrl?: string;
+  runId?: string;
+  sessionId?: string;
+  turnId?: string;
+  sourceEventId?: string;
+  sourceToolCallId?: string;
 }
 
 export interface PreviewAuditResult {
@@ -183,6 +190,7 @@ export interface PreviewAuditResult {
   screenshotPath?: string;
   capturedAt: string;
   screenshotAvailable: boolean;
+  artifactId?: string;
 }
 
 export interface BrowserActivityItem {
@@ -281,6 +289,7 @@ export interface ResearchJob {
   report: string;
   report_filename?: string;
   report_path?: string;
+  artifact_id?: string;
   stats: Record<string, number>;
   created_at: number;
   updated_at: number;
@@ -288,6 +297,39 @@ export interface ResearchJob {
 
 export interface ResearchJobsPayload {
   jobs: ResearchJob[];
+}
+
+export type ArtifactKind =
+  | 'file_change'
+  | 'diff'
+  | 'report'
+  | 'document'
+  | 'preview_evidence'
+  | 'download'
+  | 'workspace_file'
+  | string;
+
+export interface ArtifactRecord {
+  schema: 'metis.artifact.v1' | string;
+  version: number;
+  artifact_id: string;
+  run_id: string;
+  session_id: string;
+  turn_id: string;
+  kind: ArtifactKind;
+  title: string;
+  path: string;
+  url: string;
+  mime: string;
+  created_at: string;
+  updated_at: string;
+  source_event_id: string;
+  source_tool_call_id: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ArtifactsPayload {
+  artifacts: ArtifactRecord[];
 }
 
 export interface Workspace {
@@ -612,8 +654,19 @@ export interface ChatRunPayload {
   ok?: boolean;
   runId: string;
   id: string;
+  turnId: string;
   sessionId: string;
   assistantId: string;
+  mode: string;
+  surfaceMode: AppMode | string;
+  executionProfile: RunExecutionProfile | string;
+  workspaceRoot: string;
+  sourceWorkspaceRoot: string;
+  worktreeId: string;
+  worktreePath: string;
+  worktreeWorkspaceRoot: string;
+  worktree: WorktreeRecord | null;
+  schemaVersion: number;
   status: ChatRunStatus;
   phase: string;
   cancelRequested: boolean;
@@ -633,6 +686,59 @@ export interface ChatRunsPayload {
 export interface ActiveChatRunPayload {
   ok: boolean;
   run: ChatRunPayload | null;
+}
+
+export type WorktreeStatus = 'active' | 'archived' | 'removed' | 'promoted' | 'failed' | string;
+
+export interface WorktreeRecord {
+  schema: string;
+  worktreeId: string;
+  workspaceRoot: string;
+  repoRoot: string;
+  worktreePath: string;
+  worktreeWorkspaceRoot: string;
+  branch: string;
+  baseRef: string;
+  status: WorktreeStatus;
+  runId: string;
+  sessionId: string;
+  label: string;
+  sourceProfile: RunExecutionProfile | string;
+  dirtyAtCreation: boolean;
+  createdAt: number;
+  updatedAt: number;
+  archivedAt: number;
+  removedAt: number;
+  promotedAt: number;
+  error: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface WorktreeRegistryPayload {
+  schema: string;
+  workspaceRoot: string;
+  worktrees: WorktreeRecord[];
+}
+
+export interface WorktreeDiffPayload {
+  ok: boolean;
+  schema: string;
+  worktree: WorktreeRecord | null;
+  status: string;
+  stat: string;
+  patch: string;
+  truncated: boolean;
+  baseRef: string;
+  error?: string;
+}
+
+export interface WorktreePromotePayload {
+  ok: boolean;
+  schema: string;
+  dryRun: boolean;
+  worktree: WorktreeRecord | null;
+  message: string;
+  error: string;
 }
 
 export interface ProviderProfile {
@@ -898,7 +1004,32 @@ export interface PermissionExplainer {
   };
 }
 
+export interface PermissionRequestChoice {
+  value: string;
+  label: string;
+  description?: string;
+  approved?: boolean;
+  remember?: 'allow' | 'deny' | '';
+  grant?: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access';
+  requiresRootPicker?: boolean;
+}
+
 export interface PermissionRequestMetadata {
+  schema?: 'metis.permission_request.v1' | string;
+  version?: number;
+  requestId?: string;
+  callId?: string;
+  runId?: string;
+  sessionId?: string;
+  turnId?: string;
+  toolName?: string;
+  status?: string;
+  createdAt?: string;
+  expiresAt?: string;
+  argumentsPreview?: unknown;
+  choices?: PermissionRequestChoice[];
+  defaultChoice?: string;
+  auditId?: string;
   decision?: {
     action?: string;
     source?: string;
@@ -1326,10 +1457,16 @@ export interface ChatStreamEvent {
   taskId?: string;
   run_id?: string;
   runId?: string;
+  turn_id?: string;
+  turnId?: string;
   session_id?: string;
   sessionId?: string;
   assistant_id?: string;
   assistantId?: string;
+  message_id?: string;
+  messageId?: string;
+  surface_mode?: string;
+  surfaceMode?: string;
   seq?: number;
   name?: string;
   progress?: number;

@@ -21,6 +21,9 @@ def isolated_permissions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any
     monkeypatch.setattr(web_app, "_permission_results", {})
     monkeypatch.setattr(web_app, "_permission_contexts", {})
     monkeypatch.setattr(web_app, "_permission_ephemeral_writable_roots", {})
+    web_app._permission_request_store.clear()
+    with web_app._runs_lock:
+        web_app._runs.clear()
     return web_app.app.test_client()
 
 
@@ -75,6 +78,90 @@ def test_permission_remember_writes_rule_and_audit(isolated_permissions: Any) ->
     assert payload["audit"][0]["tool"] == "delete_file"
     assert payload["audit"][0]["approved"] is False
     assert payload["audit"][0]["remember"] == "deny"
+
+
+def test_permission_request_protocol_displayed_and_answer(isolated_permissions: Any) -> None:
+    client = isolated_permissions
+    request_id = "perm-protocol-1"
+    lock = threading.Event()
+    web_app._permission_locks[request_id] = lock
+    web_app._permission_contexts[request_id] = {
+        "request_id": request_id,
+        "call_id": "call-protocol-1",
+        "tool": "write_file",
+        "arguments": {"path": "notes.md"},
+        "decision": {"source": "registry", "reason": "requires approval", "risk_level": "medium"},
+        "permission": {
+            "schema": "metis.permission_request.v1",
+            "request_id": request_id,
+            "call_id": "call-protocol-1",
+            "tool_name": "write_file",
+            "status": "requested",
+            "choices": [
+                {"value": "once", "label": "仅本次允许", "approved": True},
+                {"value": "always_deny", "label": "本工作区总是拒绝", "approved": False, "remember": "deny"},
+            ],
+        },
+    }
+
+    displayed = client.post(f"/permissions/requests/{request_id}/displayed", json={"surface": "desktop"})
+    assert displayed.status_code == 200
+    assert displayed.get_json()["request"]["status"] == "displayed"
+
+    fetched = client.get(f"/permissions/requests/{request_id}")
+    assert fetched.status_code == 200
+    assert fetched.get_json()["request"]["schema"] == "metis.permission_request.v1"
+
+    answered = client.post(f"/permissions/requests/{request_id}/answer", json={"choice": "always_deny"})
+    assert answered.status_code == 200
+    payload = answered.get_json()
+    assert payload["approved"] is False
+    assert payload["request"]["status"] == "audited"
+    assert lock.is_set()
+    assert web_app._permission_results[request_id] is False
+    assert client.get("/permissions").get_json()["audit"][0]["request_id"] == request_id
+
+
+def test_permission_answer_emits_run_v2_permission_events(isolated_permissions: Any) -> None:
+    client = isolated_permissions
+    run = web_app._create_run_state(
+        session_id="session-permission-smoke",
+        assistant_id="assistant-permission",
+        history=[],
+        mode="code",
+    )
+    request_id = "perm-run-events"
+    lock = threading.Event()
+    web_app._permission_locks[request_id] = lock
+    web_app._permission_contexts[request_id] = {
+        "request_id": request_id,
+        "call_id": "call-run-events",
+        "run_id": run["id"],
+        "turn_id": run["turn_id"],
+        "session_id": run["session_id"],
+        "message_id": run["assistant_id"],
+        "tool": "write_file",
+        "arguments": {"path": "notes.md"},
+        "permission": {
+            "schema": "metis.permission_request.v1",
+            "request_id": request_id,
+            "call_id": "call-run-events",
+            "run_id": run["id"],
+            "session_id": run["session_id"],
+            "turn_id": run["turn_id"],
+            "tool_name": "write_file",
+            "choices": [{"value": "once", "label": "仅本次允许", "approved": True}],
+        },
+    }
+
+    response = client.post(f"/permissions/requests/{request_id}/answer", json={"choice": "once"})
+
+    assert response.status_code == 200
+    events = run["events_v2"]
+    permission_kinds = [event["kind"] for event in events if event["kind"].startswith("permission_")]
+    assert permission_kinds == ["permission_answered", "permission_applied", "permission_audited"]
+    assert all(event["payload"]["request_id"] == request_id for event in events)
+    assert all(event["payload"]["permission"]["schema"] == "metis.permission_request.v1" for event in events)
 
 
 def test_permission_audit_redacts_and_truncates_arguments(isolated_permissions: Any) -> None:

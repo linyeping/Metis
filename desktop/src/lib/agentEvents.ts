@@ -102,7 +102,7 @@ export function normalizeChatStreamEvent(event: ChatStreamEvent): NormalizedChat
     args: value(payload, eventRecord, 'args', 'arguments'),
     result: value(payload, eventRecord, 'result'),
     summary: stringValue(value(payload, eventRecord, 'summary', 'label')),
-    callId: stringValue(value(payload, eventRecord, 'call_id', 'callId')) || `call-${Date.now()}`,
+    callId: stringValue(value(payload, eventRecord, 'call_id', 'callId')),
     requestId: stringValue(value(payload, eventRecord, 'request_id', 'requestId')),
     error: {
       code: stringValue(value(errorInfo, payload, 'code')) || stringValue(value(payload, eventRecord, 'code')),
@@ -200,6 +200,7 @@ function permissionMetadataValue(payload: UnknownRecord): PermissionRequestMetad
   const autoguard = recordValue(value(payload, {}, 'autoguard'));
   const toolContract = recordValue(value(payload, {}, 'tool_contract', 'toolContract'));
   const rootsRaw = value(payload, {}, 'suggested_writable_roots', 'suggestedWritableRoots');
+  const choicesRaw = value(payload, {}, 'choices');
   const suggestedWritableRoots: PermissionSuggestedWritableRoot[] = Array.isArray(rootsRaw)
     ? rootsRaw.map(item => {
         const row = recordValue(item);
@@ -211,6 +212,36 @@ function permissionMetadataValue(payload: UnknownRecord): PermissionRequestMetad
       })
     : [];
   return {
+    schema: stringValue(value(payload, {}, 'schema')),
+    version: numberValue(value(payload, {}, 'version')),
+    requestId: stringValue(value(payload, {}, 'request_id', 'requestId')),
+    callId: stringValue(value(payload, {}, 'call_id', 'callId')),
+    runId: stringValue(value(payload, {}, 'run_id', 'runId')),
+    sessionId: stringValue(value(payload, {}, 'session_id', 'sessionId')),
+    turnId: stringValue(value(payload, {}, 'turn_id', 'turnId')),
+    toolName: stringValue(value(payload, {}, 'tool_name', 'toolName')),
+    status: stringValue(value(payload, {}, 'status')),
+    createdAt: stringValue(value(payload, {}, 'created_at', 'createdAt')),
+    expiresAt: stringValue(value(payload, {}, 'expires_at', 'expiresAt')),
+    argumentsPreview: value(payload, {}, 'arguments_preview', 'argumentsPreview'),
+    choices: Array.isArray(choicesRaw)
+      ? choicesRaw
+          .map(item => {
+            const row = recordValue(item);
+            return {
+              value: stringValue(value(row, {}, 'value')),
+              label: stringValue(value(row, {}, 'label')),
+              description: stringValue(value(row, {}, 'description')),
+              approved: booleanOrUndefined(value(row, {}, 'approved')),
+              remember: stringValue(value(row, {}, 'remember')) as 'allow' | 'deny' | '',
+              grant: stringValue(value(row, {}, 'grant')) as '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access',
+              requiresRootPicker: booleanValue(value(row, {}, 'requires_root_picker', 'requiresRootPicker')),
+            };
+          })
+          .filter(choice => choice.value && choice.label)
+      : [],
+    defaultChoice: stringValue(value(payload, {}, 'default_choice', 'defaultChoice')),
+    auditId: stringValue(value(payload, {}, 'audit_id', 'auditId')),
     decision: Object.keys(decision).length ? decision : undefined,
     pathSafety: Object.keys(pathSafety).length
       ? {
@@ -269,6 +300,10 @@ function permissionMetadataValue(payload: UnknownRecord): PermissionRequestMetad
     canGrantFullAccess: booleanValue(value(payload, {}, 'can_grant_full_access', 'canGrantFullAccess')),
     workspaceRoot: stringValue(value(payload, {}, 'workspace_root', 'workspaceRoot')),
   };
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 function eventKind(event: ChatStreamEvent): AgentEventKind {

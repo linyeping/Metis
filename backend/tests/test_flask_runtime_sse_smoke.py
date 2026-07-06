@@ -137,6 +137,8 @@ def isolated_flask_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     web_app._runtime_state.learning_nudged_sessions.clear()
     monkeypatch.setattr(web_app, "_permission_locks", {})
     monkeypatch.setattr(web_app, "_permission_results", {})
+    monkeypatch.setattr(web_app, "_permission_contexts", {})
+    web_app._permission_request_store.clear()
     monkeypatch.setattr(web_app, "_generate_smart_title", lambda *args, **kwargs: None)
     monkeypatch.setattr(web_app, "should_auto_compact", lambda *args, **kwargs: False)
     monkeypatch.setattr(web_app, "_maybe_record_learning", lambda *args, **kwargs: None)
@@ -201,6 +203,13 @@ def _post_chat(
 
 def _run_events(client: Any, run_id: str) -> Tuple[List[Dict[str, Any]], bool]:
     response = client.get(f"/runs/{run_id}/events", buffered=False)
+    assert response.status_code == 200
+    assert response.content_type.startswith("text/event-stream")
+    return _collect_sse(response)
+
+
+def _run_events_v2(client: Any, run_id: str, after: int = 0) -> Tuple[List[Dict[str, Any]], bool]:
+    response = client.get(f"/runs/{run_id}/events?schema=v2&after={after}", buffered=False)
     assert response.status_code == 200
     assert response.content_type.startswith("text/event-stream")
     return _collect_sse(response)
@@ -378,10 +387,15 @@ def test_run_registry_streams_replayable_events_to_target_session(isolated_flask
                 "message": "background registry run",
                 "session_id": target.id,
                 "assistant_id": "assistant-run-smoke",
+                "surface_mode": "code",
             },
         )
         assert created.status_code == 200
-        run_id = created.get_json()["run_id"]
+        created_payload = created.get_json()
+        run_id = created_payload["run_id"]
+        assert created_payload["turn_id"] == f"turn_{run_id}"
+        assert created_payload["surface_mode"] == "code"
+        assert created_payload["last_seq"] == 0
         events, saw_done_marker = _run_events(client, run_id)
         replay, replay_done_marker = _run_events(client, run_id)
         status = client.get(f"/runs/{run_id}").get_json()
@@ -393,7 +407,12 @@ def test_run_registry_streams_replayable_events_to_target_session(isolated_flask
     assert any(event["kind"] == "content_delta" for event in events)
     assert events[-1]["kind"] == "done"
     assert all(event["run_id"] == run_id and event["session_id"] == target.id for event in events)
+    assert all(event["turn_id"] == f"turn_{run_id}" and event["surface_mode"] == "code" for event in events)
+    assert all(event.get("payload", {}).get("message_id") == "assistant-run-smoke" for event in events if isinstance(event.get("payload"), dict))
     assert status["status"] == "done"
+    assert status["turn_id"] == f"turn_{run_id}"
+    assert status["surface_mode"] == "code"
+    assert status["last_seq"] == len(events)
     assert active_run["ok"] is False
     saved_target = session_manager.get_session(target.id)
     saved_active = session_manager.get_session(active.id)
@@ -402,6 +421,170 @@ def test_run_registry_streams_replayable_events_to_target_session(isolated_flask
     assert [item.get("role") for item in saved_target.history] == ["user", "assistant"]
     assert saved_active.history == []
     assert web_app._runtime_state.active_session_id == active.id
+
+
+def test_run_registry_streams_agent_event_v2_envelopes(isolated_flask_app: Any) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    target = session_manager.create_session(title="Target run v2", workspace_id=workspace_id)
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={
+                "message": "background registry run v2",
+                "session_id": target.id,
+                "assistant_id": "assistant-run-v2",
+                "surface_mode": "code",
+            },
+        )
+        assert created.status_code == 200
+        run_id = created.get_json()["run_id"]
+        events, saw_done_marker = _run_events_v2(client, run_id)
+        replay_tail, replay_done_marker = _run_events_v2(client, run_id, after=1)
+
+    assert saw_done_marker is True
+    assert replay_done_marker is True
+    assert events
+    assert [event["seq"] for event in events] == list(range(1, len(events) + 1))
+    assert all(event["schema"] == "metis.agent_event.v2" for event in events)
+    assert all(event["version"] == 2 for event in events)
+    assert all(event["event_id"] == f"evt_{run_id}_{event['seq']:06d}" for event in events)
+    assert all("type" not in event for event in events)
+    assert all(
+        all(field in event for field in ("run_id", "session_id", "turn_id", "message_id", "timestamp", "kind", "payload"))
+        for event in events
+    )
+    assert any(event["kind"] == "message_delta" for event in events)
+    assert events[-1]["kind"] == "run_completed"
+    assert all(event["run_id"] == run_id and event["session_id"] == target.id for event in events)
+    assert all(event["turn_id"] == f"turn_{run_id}" and event["message_id"] == "assistant-run-v2" for event in events)
+    assert replay_tail[0]["seq"] == 2
+
+
+def test_run_registry_accepts_local_worktree_execution_profile(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    target = session_manager.create_session(title="Target worktree run", workspace_id=workspace_id)
+    source_root = web_app._active_workspace_root()
+    fake_worktree = tmp_path / "fake-worktree"
+    fake_worktree.mkdir()
+
+    class FakeWorktree:
+        def to_dict(self) -> Dict[str, Any]:
+            return {
+                "schema": "metis.worktree.v1",
+                "worktree_id": "wt_test",
+                "workspace_root": source_root,
+                "repo_root": source_root,
+                "worktree_path": str(fake_worktree),
+                "worktree_workspace_root": str(fake_worktree),
+                "branch": "metis/run/test",
+                "base_ref": "HEAD",
+                "status": "active",
+            }
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> FakeWorktree:
+        assert workspace_root == source_root
+        assert run_id
+        assert session_id == target.id
+        assert label == "code-run"
+        return FakeWorktree()
+
+    monkeypatch.setattr(web_app, "create_worktree", fake_create_worktree)
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={
+                "message": "worktree registry run",
+                "session_id": target.id,
+                "assistant_id": "assistant-run-worktree",
+                "surface_mode": "code",
+                "execution_profile": "local_worktree",
+            },
+        )
+        assert created.status_code == 200
+        payload = created.get_json()
+
+    assert payload["execution_profile"] == "local_worktree"
+    assert payload["source_workspace_root"] == source_root
+    assert payload["workspace_root"] == str(fake_worktree)
+    assert payload["worktree_id"] == "wt_test"
+    assert payload["worktree_workspace_root"] == str(fake_worktree)
+
+
+def test_run_registry_agent_event_v2_tool_lifecycle_uses_call_id(isolated_flask_app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    class OneToolBackend(CrashingStreamBackend):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat_stream(
+            self,
+            messages: List[Dict[str, Any]],
+            tools: Optional[List[Dict[str, Any]]] = None,
+            *,
+            temperature: float = 0.3,
+            max_tokens: int = 4096,
+            timeout: float = 120.0,
+            cancel_event: Optional[Any] = None,
+        ) -> Generator[str, None, LLMResponse]:
+            if False:
+                yield ""
+            self.calls += 1
+            if self.calls == 1:
+                return LLMResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="slow-tool-call",
+                            name="slow_cancel_tool",
+                            arguments={},
+                        )
+                    ]
+                )
+            return LLMResponse(content="done")
+
+    def patched_run_stream(messages: List[Dict[str, Any]], config: AgentConfig, registry: Optional[ToolRegistry] = None, **kwargs: Any):
+        return real_run_stream(messages, config, registry=registry, backend=OneToolBackend(), **kwargs)
+
+    monkeypatch.setattr(web_app, "run_stream", patched_run_stream)
+    app, session_manager = isolated_flask_app
+    registry = web_app.get_registry()
+    code_session = session_manager.create_session(
+        title="Tool lifecycle v2",
+        workspace_id=web_app._runtime_state.active_workspace_id,
+        mode="code",
+    )
+    registry.register(
+        ToolDefinition(
+            name="slow_cancel_tool",
+            description="Smoke tool that returns successfully.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_fn=lambda: "tool ok",
+            source="test",
+            requires_approval=False,
+        )
+    )
+
+    with app.test_client() as client:
+        created = client.post(
+            "/runs",
+            json={"message": "run one tool", "session_id": code_session.id},
+        )
+        assert created.status_code == 200
+        run_id = created.get_json()["run_id"]
+        events, saw_done_marker = _run_events_v2(client, run_id)
+
+    assert saw_done_marker is True
+    lifecycle = [event for event in events if str(event.get("kind", "")).startswith("tool_")]
+    assert [event["kind"] for event in lifecycle] == ["tool_requested", "tool_running", "tool_succeeded"]
+    assert [event["payload"]["call_id"] for event in lifecycle] == ["slow-tool-call"] * 3
+    assert [event["payload"]["tool_name"] for event in lifecycle] == ["slow_cancel_tool"] * 3
+    assert all("tool" not in event and "call_id" not in event and "callId" not in event for event in lifecycle)
 
 
 def test_run_registry_cancel_endpoint_marks_active_run_canceling(isolated_flask_app: Any) -> None:
@@ -454,6 +637,8 @@ def test_run_registry_preserves_chat_surface_mode_for_active_session(
 def test_chat_surface_blocks_workspace_tool_calls() -> None:
     registry = ToolRegistry()
     registry.register(ToolDefinition(name="todo_write", description="", parameters={}, execute_fn=lambda **_: ""))
+    registry.register(ToolDefinition(name="deep_research_plan", description="", parameters={}, execute_fn=lambda **_: ""))
+    registry.register(ToolDefinition(name="deep_research_run", description="", parameters={}, execute_fn=lambda **_: ""))
     call = ToolCall(id="call-1", name="todo_write", arguments={})
     config = AgentConfig(surface_mode="chat")
 
@@ -461,6 +646,9 @@ def test_chat_surface_blocks_workspace_tool_calls() -> None:
     result = _chat_surface_blocked_tool_result(call, registry)
     assert "not available in Chat or Research" in result
     assert "web_research" in result
+    assert "deep_research_plan" in result
+    assert _chat_surface_blocks_tool(ToolCall(id="call-2", name="deep_research_plan", arguments={}), registry, config) is False
+    assert _chat_surface_blocks_tool(ToolCall(id="call-3", name="deep_research_run", arguments={}), registry, config) is False
 
 
 def test_run_registry_rejects_second_active_run_for_same_session(isolated_flask_app: Any) -> None:

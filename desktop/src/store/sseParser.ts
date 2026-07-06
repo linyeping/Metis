@@ -5,7 +5,7 @@
  * 但只在函数运行时引用，不在模块初始化时。
  */
 import { normalizeChatStreamEvent, type NormalizedChatEvent } from '../lib/agentEvents';
-import { answerToolPermission } from '../lib/api';
+import { answerPermissionRequest, markPermissionDisplayed } from '../lib/api';
 import { findSafeLocalPreviewUrl } from '../lib/webPreview';
 import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoNotice, ChatToolEvent, RuntimeStatus } from '../lib/types';
 import { useUiStore } from './uiStore';
@@ -110,6 +110,7 @@ export function applyChatEvent(
     persistRecovery(assistantId);
   } else if (normalized.kind === 'tool_call') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
+    if (!normalized.callId) return;
     const now = Date.now();
     upsertTool(assistantId, {
       id: toolId(normalized, assistantId),
@@ -124,6 +125,7 @@ export function applyChatEvent(
     persistRecovery(assistantId);
   } else if (normalized.kind === 'permission_request') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
+    if (!normalized.callId) return;
     const now = Date.now();
     upsertTool(assistantId, {
       id: toolId(normalized, assistantId),
@@ -140,6 +142,7 @@ export function applyChatEvent(
     void requestToolPermission(normalized, assistantId);
   } else if (normalized.kind === 'tool_result') {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
+    if (!normalized.callId) return;
     const resultStatus = toolResultStatus(normalized.result);
     upsertTool(assistantId, {
       id: toolId(normalized, assistantId),
@@ -333,38 +336,24 @@ function finalizeAssistantTextSegment(messageId: string, text: string): void {
 // ---------------------------------------------------------------------------
 
 function upsertTool(messageId: string, tool: ChatToolEvent): void {
+  if (!tool.callId) return;
   updateAssistant(messageId, message => {
     const tools = message.tools ?? [];
     const exactIndex = tools.findIndex(item => item.callId === tool.callId);
-    const fallbackIndex = exactIndex === -1 ? findRunningToolByName(tools, tool) : -1;
-    const index = exactIndex === -1 ? fallbackIndex : exactIndex;
-    if (index === -1) {
+    if (exactIndex === -1) {
       const nextTools = [...tools, tool];
       return { ...message, tools: nextTools, parts: appendToolPart(ensureParts(message), tool) };
     }
     const next = tools.slice();
-    next[index] = mergeToolEvent(next[index], tool, exactIndex === -1);
+    next[exactIndex] = mergeToolEvent(next[exactIndex], tool);
     return { ...message, tools: next };
   });
 }
 
-function findRunningToolByName(tools: ChatToolEvent[], tool: ChatToolEvent): number {
-  if (tool.status !== 'success' && tool.status !== 'error') return -1;
-  for (let index = tools.length - 1; index >= 0; index -= 1) {
-    const previous = tools[index];
-    if (previous.toolName !== tool.toolName) continue;
-    if (previous.status === 'running' || previous.status === 'waiting_approval') return index;
-  }
-  return -1;
-}
-
-function mergeToolEvent(previous: ChatToolEvent, incoming: ChatToolEvent, preserveIdentity: boolean): ChatToolEvent {
-  const merged = { ...previous, ...incoming };
-  if (!preserveIdentity) return merged;
+function mergeToolEvent(previous: ChatToolEvent, incoming: ChatToolEvent): ChatToolEvent {
   return {
-    ...merged,
-    id: previous.id,
-    callId: previous.callId,
+    ...previous,
+    ...incoming,
     requestId: incoming.requestId || previous.requestId,
     startedAt: incoming.startedAt || previous.startedAt,
   };
@@ -559,55 +548,11 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
 
   try {
     const rootSuggestion = event.permission?.suggestedWritableRoot || event.permission?.pathSafety?.suggestedRoot || '';
-    const canGrantRoot = Boolean(event.permission?.canGrantWritableRoot && rootSuggestion);
-    const choices = canGrantRoot
-      ? [
-          {
-            value: 'temporary_root',
-            label: '仅本次允许此文件夹',
-            description: `本次运行可写入 ${rootSuggestion}，不保存到规则文件。`,
-          },
-          {
-            value: 'writable_root',
-            label: '以后允许此文件夹',
-            description: `把 ${rootSuggestion} 加入当前工作区授权目录。`,
-          },
-          {
-            value: 'pick_root',
-            label: '选择文件夹授权',
-            description: '打开系统文件夹选择器，不需要手动输入路径。',
-          },
-          {
-            value: 'full_access',
-            label: '完全访问权限',
-            description: '对齐 Codex full access：信任本工作区，减少后续路径审批。',
-          },
-          {
-            value: 'always_deny',
-            label: '本工作区总是拒绝',
-            description: '保存 deny 规则，下次同工具直接拒绝。',
-          },
-        ]
-      : [
-          {
-            value: 'once',
-            label: '仅本次允许',
-            description: '允许这一次工具调用，不保存规则。',
-          },
-          {
-            value: 'always_allow',
-            label: '本工作区总是允许',
-            description: '保存 allow 规则，下次同工具自动放行。',
-          },
-          {
-            value: 'always_deny',
-            label: '本工作区总是拒绝',
-            description: '保存 deny 规则，下次同工具直接拒绝。',
-          },
-        ];
+    const choices = permissionDialogChoices(event);
+    await markPermissionDisplayed(event.requestId, { surface: 'desktop' }).catch(() => null);
     const decision = await useUiStore.getState().requestChoice({
       title: '允许工具执行？',
-      message: canGrantRoot
+      message: rootSuggestion
         ? `Metis 想要写入工作区外目录。请选择是否授权 ${rootSuggestion}。`
         : `Metis 想要运行工具 ${event.toolName}。请选择本次如何处理。`,
       details: permissionDetails(event),
@@ -615,30 +560,38 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
       cancelLabel: '仅本次拒绝',
       tone: 'danger',
       icon: 'warning',
-      defaultChoice: canGrantRoot ? 'temporary_root' : 'once',
-      choices,
+      defaultChoice: event.permission?.defaultChoice || choices[0]?.value || 'once',
+      choices: choices.map(choice => ({
+        value: choice.value,
+        label: choice.label,
+        description: choice.description,
+      })),
     });
+    const selectedChoice = choices.find(choice => choice.value === decision.choice);
     let selectedRoot = rootSuggestion;
-    if (decision.confirmed && decision.choice === 'pick_root') {
+    if (decision.confirmed && (selectedChoice?.requiresRootPicker || decision.choice === 'pick_root')) {
       selectedRoot = (await window.metis?.pickFolder?.()) || '';
     }
     const approved =
-      decision.confirmed && decision.choice !== 'always_deny' && decision.choice !== 'pick_root'
-        ? true
-        : Boolean(decision.confirmed && decision.choice === 'pick_root' && selectedRoot);
+      decision.confirmed && (selectedChoice?.requiresRootPicker || decision.choice === 'pick_root')
+        ? Boolean(selectedRoot)
+        : Boolean(decision.confirmed && (selectedChoice?.approved ?? decision.choice !== 'always_deny'));
     const remember: 'allow' | 'deny' | '' =
-      decision.confirmed && decision.choice === 'always_allow'
-        ? 'allow'
-        : decision.confirmed && decision.choice === 'always_deny'
-          ? 'deny'
-          : '';
+      decision.confirmed && selectedChoice?.remember !== undefined
+        ? selectedChoice.remember || ''
+        : decision.confirmed && decision.choice === 'always_allow'
+          ? 'allow'
+          : decision.confirmed && decision.choice === 'always_deny'
+            ? 'deny'
+            : '';
     let grant: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access' = '';
+    if (approved && selectedChoice?.grant) grant = selectedChoice.grant;
     if (approved && decision.choice === 'temporary_root') grant = 'temporary_root';
     if (approved && decision.choice === 'writable_root') grant = 'writable_root';
     if (approved && decision.choice === 'pick_root') grant = 'selected_root';
     if (approved && decision.choice === 'full_access') grant = 'full_access';
     const approvalSummary = approved
-      ? permissionApprovalSummary(grant, remember)
+      ? '已提交权限答复，等待后端确认'
       : remember === 'deny'
         ? '已保存拒绝规则，等待后端确认'
         : decision.choice === 'pick_root'
@@ -651,11 +604,13 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
       requestId: event.requestId,
       toolName: event.toolName,
       args: event.args,
-      status: approved ? 'running' : 'waiting_approval',
+      status: 'waiting_approval',
       summary: approvalSummary,
     });
 
-    await answerToolPermission(event.requestId, approved, {
+    await answerPermissionRequest(event.requestId, {
+      approved,
+      choice: decision.confirmed ? decision.choice : '',
       remember,
       grant,
       rootPath: selectedRoot,
@@ -681,15 +636,34 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
   }
 }
 
-function permissionApprovalSummary(
-  grant: '' | 'temporary_root' | 'writable_root' | 'selected_root' | 'full_access',
-  remember: 'allow' | 'deny' | '',
-): string {
-  if (grant === 'temporary_root') return '已临时授权目录，等待工具结果';
-  if (grant === 'writable_root' || grant === 'selected_root') return '已授权目录，等待工具结果';
-  if (grant === 'full_access') return '已开启完全访问，等待工具结果';
-  if (remember === 'allow') return '已保存允许规则，等待工具结果';
-  return '已允许，等待工具结果';
+function permissionDialogChoices(event: NormalizedChatEvent): NonNullable<NonNullable<NormalizedChatEvent['permission']>['choices']> {
+  if (event.permission?.choices?.length) return event.permission.choices;
+  return [
+    {
+      value: 'once',
+      label: '仅本次允许',
+      description: '允许这一次工具调用，不保存规则。',
+      approved: true,
+      remember: '',
+      grant: '',
+    },
+    {
+      value: 'always_allow',
+      label: '本工作区总是允许',
+      description: '保存 allow 规则，下次同工具自动放行。',
+      approved: true,
+      remember: 'allow',
+      grant: '',
+    },
+    {
+      value: 'always_deny',
+      label: '本工作区总是拒绝',
+      description: '保存 deny 规则，下次同工具直接拒绝。',
+      approved: false,
+      remember: 'deny',
+      grant: '',
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
