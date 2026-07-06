@@ -48,11 +48,14 @@ def test_worktree_manager_create_diff_promote_archive_remove(tmp_path: Path, mon
     assert not wm._is_within(Path(record.worktree_path), repo)
 
     (Path(record.worktree_path) / "app.txt").write_text("hello from worktree\n", encoding="utf-8")
+    (Path(record.worktree_path) / "new-report.md").write_text("# New report\n", encoding="utf-8")
     diff = wm.diff_worktree(str(repo), record.worktree_id)
 
     assert diff["worktree"]["worktree_id"] == record.worktree_id
     assert "app.txt" in diff["stat"]
+    assert "new-report.md" in diff["stat"]
     assert "hello from worktree" in diff["patch"]
+    assert "new-report.md" in diff["patch"]
 
     dry_run = wm.promote_worktree(str(repo), record.worktree_id, dry_run=True)
     assert dry_run["ok"] is True
@@ -62,6 +65,7 @@ def test_worktree_manager_create_diff_promote_archive_remove(tmp_path: Path, mon
     promoted = wm.promote_worktree(str(repo), record.worktree_id)
     assert promoted["ok"] is True
     assert (repo / "app.txt").read_text(encoding="utf-8") == "hello from worktree\n"
+    assert (repo / "new-report.md").read_text(encoding="utf-8") == "# New report\n"
 
     archived = wm.archive_worktree(str(repo), record.worktree_id)
     assert archived.status == "archived"

@@ -198,8 +198,8 @@ def diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = _MA
     if not worktree_path.is_dir():
         raise WorktreeError(f"worktree path no longer exists: {worktree_path}")
     status = _git_stdout(["status", "--short"], cwd=worktree_path)
-    stat = _git_stdout(["diff", "--stat", record.base_ref], cwd=worktree_path)
-    patch = _git_stdout(["diff", "--binary", record.base_ref], cwd=worktree_path, timeout=60)
+    stat = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=True)
+    patch = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=False)
     truncated = len(patch) > max_chars
     if truncated:
         patch = patch[:max_chars] + "\n[diff truncated]"
@@ -220,7 +220,7 @@ def promote_worktree(workspace_root: str, worktree_id: str, *, dry_run: bool = F
     worktree_path = Path(record.worktree_path)
     if not source_repo.is_dir() or not worktree_path.is_dir():
         raise WorktreeError("source repo or worktree path no longer exists")
-    patch = _git_stdout(["diff", "--binary", record.base_ref], cwd=worktree_path, timeout=60)
+    patch = _diff_worktree_with_untracked(worktree_path, record.base_ref, stat=False)
     if not patch.strip():
         return {
             "schema": "metis.worktree_promote.v1",
@@ -266,6 +266,23 @@ def promote_worktree(workspace_root: str, worktree_id: str, *, dry_run: bool = F
         "worktree": record.to_dict(),
         "message": "patch promoted to source workspace",
     }
+
+
+def _diff_worktree_with_untracked(worktree_path: Path, base_ref: str, *, stat: bool) -> str:
+    untracked = _untracked_files(worktree_path)
+    if untracked:
+        _git_stdout(["add", "-N", "--", *untracked], cwd=worktree_path, timeout=60)
+    try:
+        args = ["diff", "--stat" if stat else "--binary", base_ref]
+        return _git_stdout(args, cwd=worktree_path, timeout=60)
+    finally:
+        if untracked:
+            _git_stdout(["reset", "--", *untracked], cwd=worktree_path, timeout=60)
+
+
+def _untracked_files(worktree_path: Path) -> List[str]:
+    out = _git_stdout(["ls-files", "--others", "--exclude-standard"], cwd=worktree_path)
+    return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def registry_payload(workspace_root: str) -> Dict[str, Any]:

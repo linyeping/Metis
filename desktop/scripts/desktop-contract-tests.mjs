@@ -615,6 +615,9 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(coworkActivity, /cowork-plan-list/);
   assert.match(coworkActivity, /worktreeId/);
   assert.match(coworkActivity, /artifactRows/);
+  assert.match(coworkActivity, /getWorktreeDiff/);
+  assert.match(coworkActivity, /promoteWorktree/);
+  assert.match(coworkActivity, /cowork-diff-actions/);
   assert.match(rightRail, /renderActivityPanel/);
   assert.match(rightRail, /cards:\s*\['activity', 'plan', 'research', 'session'\]/);
   assert.match(rightRail, /activity-inline-tool-output/);
@@ -624,6 +627,7 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(css, /\.activity-pane/);
   assert.match(css, /\.cowork-activity-panel/);
   assert.match(css, /\.cowork-subrun-card/);
+  assert.match(css, /\.cowork-diff-actions/);
   assert.match(css, /\.subagent-strip-main/);
   assert.match(css, /\.subagent-activity-panel/);
   assert.match(css, /width:\s*min\(var\(--chat-column-width\),\s*100%\)/);

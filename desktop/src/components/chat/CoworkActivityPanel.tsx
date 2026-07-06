@@ -10,9 +10,10 @@ import {
   ScrollText,
   SquareTerminal,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useT } from '../../hooks/useT';
-import type { ChatSubagentEvent, CoworkPlanSnapshot, CoworkPlanSubrun, RuntimeStatus } from '../../lib/types';
+import { getWorktreeDiff, promoteWorktree } from '../../lib/api';
+import type { ChatSubagentEvent, CoworkPlanSnapshot, CoworkPlanSubrun, RuntimeStatus, WorktreeDiffPayload, WorktreePromotePayload } from '../../lib/types';
 
 type UnknownRecord = Record<string, unknown>;
 type CoworkRowStatus = 'planned' | 'running' | 'done' | 'error';
@@ -139,17 +140,77 @@ export function CoworkActivityPanel({ items, plan, runtimeStatus }: CoworkActivi
 
 function CoworkSubrunCard({ row }: { row: CoworkRow }) {
   const t = useT();
+  const [reviewDiff, setReviewDiff] = useState<WorktreeDiffPayload | null>(null);
+  const [promoteCheck, setPromoteCheck] = useState<WorktreePromotePayload | null>(null);
+  const [promoteResult, setPromoteResult] = useState<WorktreePromotePayload | null>(null);
+  const [actionError, setActionError] = useState('');
+  const [busyAction, setBusyAction] = useState<'diff' | 'check' | 'promote' | ''>('');
   const StatusIcon = row.status === 'error' ? AlertTriangle : row.status === 'done' ? CheckCircle2 : LoaderCircle;
-  const diffStat = stringValue(row.diff.stat);
-  const diffStatus = stringValue(row.diff.status);
-  const patchPreview = stringValue(row.diff.patch_preview);
-  const diffError = stringValue(row.diff.error);
+  const displayedDiff = reviewDiff
+    ? {
+        stat: reviewDiff.stat,
+        status: reviewDiff.status,
+        patch_preview: reviewDiff.patch,
+        truncated: reviewDiff.truncated,
+        error: reviewDiff.error || '',
+      }
+    : row.diff;
+  const diffStat = stringValue(displayedDiff.stat);
+  const diffStatus = stringValue(displayedDiff.status);
+  const patchPreview = stringValue(displayedDiff.patch_preview);
+  const diffError = stringValue(displayedDiff.error);
   const localVmBackend = stringValue(row.localVm.backend);
   const localVmStdout = stringValue(row.localVm.stdout);
   const localVmStderr = stringValue(row.localVm.stderr);
   const localVmChangedFiles = stringArray(row.localVm.changed_files);
   const localVmArtifacts = artifactRows(row.localVm.artifacts);
   const elapsed = elapsedText(row.startedAt, row.finishedAt);
+  const canPromote = Boolean(row.worktreeId && promoteCheck?.ok && !promoteResult?.ok);
+
+  const loadDiff = async () => {
+    if (!row.worktreeId || busyAction) return;
+    setBusyAction('diff');
+    setActionError('');
+    try {
+      const payload = await getWorktreeDiff(row.worktreeId);
+      setReviewDiff(payload);
+    } catch (error) {
+      setActionError(formatActionError(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const checkPromote = async () => {
+    if (!row.worktreeId || busyAction) return;
+    setBusyAction('check');
+    setActionError('');
+    setPromoteResult(null);
+    try {
+      const payload = await promoteWorktree(row.worktreeId, true);
+      setPromoteCheck(payload);
+      if (!payload.ok) setActionError(payload.error || t('Diff 无法干净应用。'));
+    } catch (error) {
+      setActionError(formatActionError(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const applyPromote = async () => {
+    if (!canPromote || busyAction) return;
+    setBusyAction('promote');
+    setActionError('');
+    try {
+      const payload = await promoteWorktree(row.worktreeId, false);
+      setPromoteResult(payload);
+      if (!payload.ok) setActionError(payload.error || t('Promote 失败。'));
+    } catch (error) {
+      setActionError(formatActionError(error));
+    } finally {
+      setBusyAction('');
+    }
+  };
 
   return (
     <article className="cowork-subrun-card" data-status={row.status}>
@@ -200,13 +261,27 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
 
         <div className="cowork-detail-cell cowork-detail-wide">
           <span><FileCode size={13} />{t('Diff')}</span>
-          {Object.keys(row.diff).length ? (
+          <div className="cowork-diff-actions">
+            <button type="button" disabled={!row.worktreeId || Boolean(busyAction)} onClick={() => void loadDiff()}>
+              {busyAction === 'diff' ? t('加载中') : t('完整 Diff')}
+            </button>
+            <button type="button" disabled={!row.worktreeId || Boolean(busyAction)} onClick={() => void checkPromote()}>
+              {busyAction === 'check' ? t('检查中') : t('检查可应用')}
+            </button>
+            <button type="button" data-danger="true" disabled={!canPromote || Boolean(busyAction)} onClick={() => void applyPromote()}>
+              {busyAction === 'promote' ? t('Promote 中') : t('Promote')}
+            </button>
+          </div>
+          {actionError && <p className="cowork-error-line">{actionError}</p>}
+          {promoteCheck?.ok && !promoteResult?.ok && <small>{promoteCheck.message || t('Patch 可以干净应用。')}</small>}
+          {promoteResult?.ok && <small>{promoteResult.message || t('已 promote 到主 workspace。')}</small>}
+          {Object.keys(displayedDiff).length ? (
             <>
               {diffError && <p className="cowork-error-line">{diffError}</p>}
               {diffStat && <pre>{diffStat}</pre>}
               {diffStatus && <pre>{diffStatus}</pre>}
               {patchPreview && <pre>{compactText(patchPreview, 2400)}</pre>}
-              {row.diff.truncated === true && <small>{t('Diff 已截断，完整内容在 artifact/worktree 中查看。')}</small>}
+              {displayedDiff.truncated === true && <small>{t('Diff 已截断，完整内容在 artifact/worktree 中查看。')}</small>}
             </>
           ) : (
             <small>{t('暂无 diff')}</small>
@@ -432,4 +507,9 @@ function createdAtText(value: unknown): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
   const date = new Date(timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000);
   return date.toLocaleString();
+}
+
+function formatActionError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error || 'Action failed');
 }

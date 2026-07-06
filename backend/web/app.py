@@ -2899,6 +2899,20 @@ def _run_cowork_registry_worker(run: Dict[str, Any]) -> None:
     try:
         goal = _last_user_message_text(history)
         source_root = str(run.get("source_workspace_root") or run.get("workspace_root") or "")
+        base_config = _load_config_for_workspace(source_root)
+        base_config = _config_for_session_mode(
+            base_config,
+            mode,
+            deep_research=bool(run.get("deep_research")),
+        )
+        base_config = replace(
+            base_config,
+            session_id=session_id,
+            surface_mode="cowork",
+            execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
+            workspace_root=source_root,
+            source_workspace_root=source_root,
+        )
         with workspace_root_override(source_root):
             for payload in iter_local_cowork_events(
                 goal,
@@ -2907,6 +2921,7 @@ def _run_cowork_registry_worker(run: Dict[str, Any]) -> None:
                 run_id=str(run.get("id") or ""),
                 session_id=session_id,
                 execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
+                base_config=base_config,
                 cancelled=lambda: bool(run.get("cancel_requested")),
             ):
                 if run.get("cancel_requested"):
