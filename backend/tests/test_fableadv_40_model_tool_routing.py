@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import threading
 from typing import Any, Dict, Generator, List, Optional
 
 from backend.runtime import agent_loop
 from backend.runtime.agent_loop import AgentConfig, ContentEvent, RuntimeStatusEvent
-from backend.runtime.llm_backends import LLMBackend, LLMResponse
+from backend.runtime.llm_backends import LLMBackend, LLMResponse, ToolCall
 from backend.runtime.model_router import ROUTE_MARKER, build_task_route, runtime_policy_for_task
 from backend.runtime.tool_registry import ToolRegistry, register_desktop_tools
 
@@ -57,7 +58,7 @@ def test_router_prioritizes_preview_browser_for_local_page_tasks() -> None:
     ]
 
 
-def test_router_prioritizes_web_research_when_deep_research_is_enabled() -> None:
+def test_router_prioritizes_deep_research_plan_when_deep_research_is_enabled() -> None:
     route = build_task_route(
         [{"role": "user", "content": "查一下 Claude Code 最近更新了什么，要多来源核实"}],
         llm_backend="openai",
@@ -67,8 +68,7 @@ def test_router_prioritizes_web_research_when_deep_research_is_enabled() -> None
     )
 
     assert route.task_type == "external_lookup"
-    assert route.preferred_tools[0] == "web_research"
-    assert route.preferred_tools[1] == "web_search"
+    assert route.preferred_tools[:3] == ["deep_research_plan", "deep_research_run", "web_research"]
     assert "Deep research is explicitly enabled" in route.tool_guidance
 
 
@@ -110,7 +110,7 @@ def test_deep_research_toggle_rescues_keyword_free_comparison_request() -> None:
         deep_research=True,
     )
     assert route_on.task_type == "external_lookup"
-    assert route_on.preferred_tools[0] == "web_research"
+    assert route_on.preferred_tools[0] == "deep_research_plan"
 
 
 def test_deep_research_toggle_overrides_chat_classification_with_no_keywords_at_all() -> None:
@@ -134,7 +134,29 @@ def test_deep_research_toggle_overrides_chat_classification_with_no_keywords_at_
         deep_research=True,
     )
     assert route_on.task_type == "external_lookup"
-    assert "web_research" in route_on.preferred_tools
+    assert route_on.preferred_tools[:2] == ["deep_research_plan", "deep_research_run"]
+
+
+def test_confirmed_deep_research_plan_prioritizes_run_tool() -> None:
+    route = build_task_route(
+        [
+            {
+                "role": "user",
+                "content": (
+                    "开始深度研究：Metis Deep Research 对标 Gemini\n\n"
+                    "使用这个已确认的研究计划执行，不要重新规划：\n"
+                    '{"brief":"对标体验","subquestions":["计划卡","实时来源","报告视图"]}'
+                ),
+            }
+        ],
+        llm_backend="openai",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
+        deep_research=True,
+    )
+
+    assert route.task_type == "external_lookup"
+    assert route.preferred_tools[:2] == ["deep_research_run", "deep_research_plan"]
 
 
 def test_explicit_search_command_forces_external_lookup_even_over_code_keywords() -> None:
@@ -173,7 +195,7 @@ def test_explicit_search_command_combines_with_deep_research_toggle() -> None:
     )
 
     assert route.task_type == "external_lookup"
-    assert route.preferred_tools[0] == "web_research"
+    assert route.preferred_tools[0] == "deep_research_plan"
 
 
 def test_deep_research_toggle_does_not_hijack_a_code_task() -> None:
@@ -187,6 +209,36 @@ def test_deep_research_toggle_does_not_hijack_a_code_task() -> None:
 
     assert route.task_type == "code"
     assert "web_research" not in route.preferred_tools
+
+
+def test_deep_research_plan_stops_for_user_confirmation() -> None:
+    result = '<!-- METIS_RESEARCH_PLAN {"brief":"研究目标","subquestions":["问题A","问题B"]} -->'
+    call = ToolCall(id="call-plan", name="deep_research_plan", arguments={"question": "研究一下"})
+    config = AgentConfig(deep_research=True, surface_mode="chat")
+
+    assert agent_loop._should_close_deep_research_tool_loop(config, [(call, result)]) is True
+    hint = agent_loop._deep_research_final_answer_hint([(call, result)])
+    assert "Do not call deep_research_run yet" in hint
+    assert "Subquestions: 2" in hint
+
+
+def test_deep_research_run_stops_after_durable_report() -> None:
+    payload = {
+        "schema": "metis.research_activity.v1",
+        "kind": "deep_research",
+        "job_id": "deep_research_1",
+        "job_status": "complete",
+        "title": "研究报告",
+        "stats": {"sources": 3},
+    }
+    result = f"<!-- METIS_RESEARCH_JSON {json.dumps(payload, ensure_ascii=False)} -->"
+    call = ToolCall(id="call-run", name="deep_research_run", arguments={"question": "研究一下"})
+    config = AgentConfig(deep_research=True, surface_mode="chat")
+
+    assert agent_loop._should_close_deep_research_tool_loop(config, [(call, result)]) is True
+    hint = agent_loop._deep_research_final_answer_hint([(call, result)])
+    assert "durable research job" in hint
+    assert "deep_research_1" in hint
 
 
 def test_router_uses_background_artifact_workflow_for_report_code_tasks() -> None:

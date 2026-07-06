@@ -294,6 +294,52 @@ def test_metis_search_research_returns_report_metadata(monkeypatch: pytest.Monke
     assert Path(activity["report_path"]).is_file()
     assert job is not None
     assert job["report_filename"] == activity["report_filename"]
+    assert "Evidence Opened" not in job["report"]
+    assert "Status:" not in job["report"]
+    assert "Evidence body" in job["report"]
+
+
+def test_research_job_sanitizes_legacy_raw_report_dump() -> None:
+    job = save_research_activity_job(
+        {
+            "kind": "research",
+            "title": "Google Gemini",
+            "query": "Google Gemini",
+            "sources": [
+                {
+                    "id": "s1",
+                    "title": "Official Gemini update",
+                    "url": "https://blog.google/technology/google-deepmind/gemini-model-updates/",
+                    "domain": "blog.google",
+                    "snippet": "Official model update.",
+                    "status": "opened",
+                }
+            ],
+        },
+        report="\n".join(
+            [
+                "# Google Gemini",
+                "- Status: complete",
+                "- Providers: ddgs",
+                "",
+                "## Evidence Opened",
+                "### Sign in - Google Accounts",
+                "- URL: https://accounts.google.com/signin",
+                "- Status: ok",
+                "Use your Google Account",
+                "Gemini Omni 多模态创作模型： Go",
+            ]
+        ),
+    )
+
+    saved = get_research_job(str(job["id"]))
+
+    assert saved is not None
+    assert "Evidence Opened" not in saved["report"]
+    assert "Status:" not in saved["report"]
+    assert "Google Accounts" not in saved["report"]
+    assert "： Go" not in saved["report"]
+    assert "初步证据" in saved["report"]
 
 
 def test_format_research_response_flags_partial_and_blocked_evidence() -> None:

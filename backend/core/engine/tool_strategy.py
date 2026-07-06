@@ -69,6 +69,11 @@ _STRATEGY_RULES: list[tuple[set[str], str]] = [
         "Web browsing: Use browse_and_extract when you already know the URL and what to extract. "
         "Use browse_web only when interactive navigation or form-filling is required.",
     ),
+    (
+        {"deep_research_plan", "deep_research_run"},
+        "Deep Research: Use deep_research_plan first to produce a user-confirmable plan. "
+        "After the user confirms or provides plan_json, use deep_research_run and stop after the durable report job is created.",
+    ),
 ]
 
 

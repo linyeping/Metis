@@ -26,7 +26,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { useChatStore } from '../../store/chatStore';
 import { useUiStore } from '../../store/uiStore';
-import { apiBase, getResearchJobs, getWorkspaceFile } from '../../lib/api';
+import { apiBase, getResearchJob, getResearchJobs, getWorkspaceFile } from '../../lib/api';
 import { isCompactBoundary, parseCompactBoundary } from '../../lib/compactBoundary';
 import { chatLinkActionFromHref } from '../../lib/metisLinks';
 import type { ParsedFile, ResearchJob } from '../../lib/types';
@@ -72,10 +72,12 @@ export function AssistantMessage() {
   const toolStats = useMemo(() => messageToolStats(content), [content]);
   const completedResearchReport = useMemo(() => completedResearchReportFromContent(content, t), [content, t]);
   const longResearchReportText = useMemo(() => isLongResearchReportText(text), [text]);
-  const latestResearchReport = useLatestResearchReport(longResearchReportText && !completedResearchReport, text, t);
-  const effectiveResearchReport = completedResearchReport || latestResearchReport || (longResearchReportText ? placeholderResearchReport(text, t) : null);
+  const textResearchReport = useTextResearchReport(!completedResearchReport, text, t);
+  const latestResearchReport = useLatestResearchReport(longResearchReportText && !completedResearchReport && !textResearchReport, text, t);
+  const effectiveResearchReport = completedResearchReport || textResearchReport || latestResearchReport || (longResearchReportText ? placeholderResearchReport(text, t) : null);
   const suppressLongResearchReport = Boolean(longResearchReportText && effectiveResearchReport);
-  const showStandaloneResearchReportEntry = Boolean(suppressLongResearchReport && effectiveResearchReport && !toolStats.hasTools);
+  const showToolResearchReportEntry = Boolean(effectiveResearchReport && toolStats.hasTools);
+  const showStandaloneResearchReportEntry = Boolean(effectiveResearchReport && !toolStats.hasTools && (suppressLongResearchReport || textResearchReport));
   const openFileLink = async (path: string) => {
     try {
       await getWorkspaceFile(path);
@@ -153,11 +155,13 @@ export function AssistantMessage() {
     >
       <div className="assistant-message-stack" data-has-tools={toolStats.hasTools}>
         <AssistantMessageParts
-          completedResearchReport={effectiveResearchReport}
           fileChangeSummary={fileChangeSummary}
           lastToolIndex={toolStats.lastToolIndex}
           suppressLongResearchReport={suppressLongResearchReport}
         />
+        {showToolResearchReportEntry && effectiveResearchReport && (
+          <CompletedResearchReportEntry report={effectiveResearchReport} />
+        )}
         {showStandaloneResearchReportEntry && effectiveResearchReport && (
           <CompletedResearchReportEntry report={effectiveResearchReport} />
         )}
@@ -175,12 +179,10 @@ export function AssistantMessage() {
 }
 
 function AssistantMessageParts({
-  completedResearchReport,
   fileChangeSummary,
   lastToolIndex,
   suppressLongResearchReport,
 }: {
-  completedResearchReport: CompletedResearchReportSummary | null;
   fileChangeSummary: FileChangeSummary | null;
   lastToolIndex: number;
   suppressLongResearchReport: boolean;
@@ -254,6 +256,44 @@ function isLongResearchReportText(text: string): boolean {
   return reportCue && (headingCount >= 3 || urlCount >= 4);
 }
 
+function useTextResearchReport(enabled: boolean, text: string, t: (zh: string) => string): CompletedResearchReportSummary | null {
+  const jobId = useMemo(() => extractResearchReportJobId(text), [text]);
+  const [report, setReport] = useState<CompletedResearchReportSummary | null>(null);
+  const fallbackReport = useMemo(() => {
+    if (!jobId) return null;
+    const title = extractResearchReportTitle(text) || t('研究报告');
+    return {
+      fileName: `${safeReportFilename(title)}.md`,
+      jobId,
+      reportPath: '',
+      summary: t('正在加载 Markdown 报告入口'),
+      title,
+    };
+  }, [jobId, text, t]);
+
+  useEffect(() => {
+    if (!enabled || !jobId || !fallbackReport) {
+      setReport(null);
+      return undefined;
+    }
+    let disposed = false;
+    setReport(previous => (previous?.jobId === jobId ? previous : fallbackReport));
+    void getResearchJob(jobId)
+      .then(job => {
+        if (!disposed) setReport(researchReportFromJob(job, t));
+      })
+      .catch(() => {
+        if (!disposed) setReport(fallbackReport);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [enabled, fallbackReport, jobId, t]);
+
+  if (!enabled || !jobId) return null;
+  return report?.jobId === jobId ? report : fallbackReport;
+}
+
 function useLatestResearchReport(enabled: boolean, text: string, t: (zh: string) => string): CompletedResearchReportSummary | null {
   const [report, setReport] = useState<CompletedResearchReportSummary | null>(null);
   useEffect(() => {
@@ -285,7 +325,7 @@ function useLatestResearchReport(enabled: boolean, text: string, t: (zh: string)
 function pickLikelyResearchJob(jobs: ResearchJob[], text: string): ResearchJob | null {
   const candidates = jobs.filter(job => {
     const status = String(job.status || '').toLowerCase();
-    return String(job.kind || '') === 'research' && ['complete', 'partial', 'running'].includes(status);
+    return ['research', 'deep_research'].includes(String(job.kind || '')) && ['complete', 'partial', 'running'].includes(status);
   });
   if (!candidates.length) return null;
   const normalizedText = normalizeResearchMatchText(text);
@@ -339,6 +379,27 @@ function extractResearchReportTitle(text: string): string {
   if (heading.trim()) return stripInlineMarkdown(heading).slice(0, 90);
   const bold = String(text || '').match(/\*\*([^*\n]{6,90})\*\*/)?.[1] || '';
   return stripInlineMarkdown(bold).slice(0, 90);
+}
+
+function extractResearchReportJobId(text: string): string {
+  const value = String(text || '');
+  const explicitPatterns = [
+    /(?:研究报告入口|报告入口|报告\s*id|report\s*(?:job|id)?|job[_\s-]*id)\s*[:：=]\s*`?([A-Za-z][A-Za-z0-9_-]{8,})`?/i,
+    /\b(?:research|deep_research|web_research)[_-][A-Za-z0-9][A-Za-z0-9_-]{5,}\b/i,
+  ];
+  for (const pattern of explicitPatterns) {
+    const match = value.match(pattern);
+    const id = cleanupResearchJobId(match?.[1] || match?.[0] || '');
+    if (id && /\d/.test(id)) return id;
+  }
+  return '';
+}
+
+function cleanupResearchJobId(value: string): string {
+  return String(value || '')
+    .trim()
+    .replace(/^[`'"]+/, '')
+    .replace(/[`'",.;，。:：)）\]\s]+$/g, '');
 }
 
 function normalizeResearchMatchText(value: string): string {

@@ -587,25 +587,35 @@ def _search_report(query: str, provider: str, results: list[dict[str, str | int]
 
 
 def _research_report(question: str, pages: list[dict[str, Any]], failures: list[dict[str, str]]) -> str:
-    lines = [f"# {question or 'Research Report'}", "", "## Evidence Opened", ""]
+    title = question or "Research Report"
+    lines = [
+        f"# {title}",
+        "",
+        "## 摘要",
+        "",
+    ]
     if pages:
+        lines.append(f"本次 Web Research 已读取 {len(pages)} 个来源。这里保留可复查的来源摘要，完整来源链接由报告视图的来源面板统一展示。")
+        lines.extend(["", "## 已读取来源", ""])
         for page in pages:
             title = _source_title(page.get("title") or (page.get("search_result") or {}).get("title"), page.get("final_url") or page.get("url"))
             url = _source_url(page.get("final_url") or page.get("url"))
             status = page.get("status") or "ok"
+            text = str(page.get("text") or "").strip()
+            excerpt = _truncate(_normalize_page_text(text), 360)
+            status_note = "（内容可能不完整）" if status == "partial" else ""
             lines.append(f"### {title}")
             lines.append("")
-            lines.append(f"- URL: {url}")
-            lines.append(f"- Status: {status}")
-            text = str(page.get("text") or "").strip()
-            if text:
-                lines.extend(["", _truncate(_normalize_page_text(text), 1600), ""])
+            lines.append(excerpt or f"该来源已读取{status_note}。")
+            if status_note and excerpt:
+                lines.append("")
+                lines.append(status_note)
+            lines.append("")
     else:
-        lines.append("No readable evidence pages were opened.")
+        lines.append("未能读取到可用网页正文。建议换一个更具体的问题，或尝试打开动态/受限页面的原始链接。")
     if failures:
-        lines.extend(["", "## Read Failures", ""])
-        for failure in failures:
-            lines.append(f"- {_source_url(failure.get('url'))} [{failure.get('status')}]: {failure.get('error')}")
+        lines.extend(["", "## 读取限制", ""])
+        lines.append(f"{len(failures)} 个来源读取失败或受限，已从正文证据中排除。")
     return "\n".join(lines).strip()
 
 

@@ -140,7 +140,7 @@ _ARTIFACT_WORKFLOW_TOOLS = [
     "todo_write",
 ]
 _EXTERNAL_WEB_TOOLS = ["web_search", "fetch_content", "web_fetch", "web_research", "browse_web", "browse_and_extract"]
-_DEEP_RESEARCH_WEB_TOOLS = ["web_research", "web_search", "fetch_content"]
+_DEEP_RESEARCH_WEB_TOOLS = ["deep_research_plan", "deep_research_run", "web_research", "web_search", "fetch_content"]
 _LONG_CONTEXT_TOOLS = [
     "read_file_chunk",
     "semantic_search",
@@ -165,7 +165,9 @@ def build_task_route(
 ) -> TaskRoute:
     text = _latest_user_text(messages)
     task_type, reason = classify_task(text)
-    if deep_research and task_type in {"chat", "external_lookup"}:
+    if deep_research and _looks_like_confirmed_deep_research_run(text) and task_type in {"chat", "external_lookup", "long_context"}:
+        task_type, reason = "external_lookup", "confirmed deep research plan for this turn"
+    elif deep_research and task_type in {"chat", "external_lookup"}:
         # The deep-research toggle is an explicit, unambiguous user signal —
         # it should win over the keyword classifier guessing "chat" for a
         # research/comparison request that happens not to contain any of
@@ -183,7 +185,7 @@ def build_task_route(
         llm_base_url=llm_base_url,
         current_model=llm_model,
     )
-    preferred_tools = _preferred_tools_for_task(task_type, deep_research=deep_research)
+    preferred_tools = _preferred_tools_for_task(task_type, deep_research=deep_research, text=text)
     return TaskRoute(
         task_type=task_type,
         model_role=model_role,
@@ -602,7 +604,7 @@ def _model_role_for_task(task_type: str, text: str) -> str:
     return "fast"
 
 
-def _preferred_tools_for_task(task_type: str, *, deep_research: bool = False) -> List[str]:
+def _preferred_tools_for_task(task_type: str, *, deep_research: bool = False, text: str = "") -> List[str]:
     if task_type == "artifact_workflow":
         return list(_ARTIFACT_WORKFLOW_TOOLS) + list(_DESKTOP_OBSERVE_TOOLS)
     if task_type == "desktop":
@@ -613,6 +615,8 @@ def _preferred_tools_for_task(task_type: str, *, deep_research: bool = False) ->
         return list(_CODE_TOOLS)
     if task_type == "external_lookup":
         if deep_research:
+            if _looks_like_confirmed_deep_research_run(text):
+                return ["deep_research_run", "deep_research_plan", "web_research", "web_search", "fetch_content"]
             return list(_DEEP_RESEARCH_WEB_TOOLS)
         return list(_EXTERNAL_WEB_TOOLS)
     if task_type == "long_context":
@@ -638,8 +642,10 @@ def _tool_guidance_for_task(task_type: str, *, deep_research: bool = False) -> s
     if task_type == "external_lookup":
         if deep_research:
             return (
-                "Deep research is explicitly enabled for this turn. Call web_research first and treat its saved research job/report as the primary artifact. "
-                "After web_research returns a usable job, stop searching and write a concise final answer; do not chain extra web_search/fetch_content calls unless the user explicitly asks to verify a specific URL or missing source. "
+                "Deep research is explicitly enabled for this turn. First call deep_research_plan for complex/systematic questions so the user can confirm or revise the plan. "
+                "After the user confirms a plan, call deep_research_run with the confirmed plan_json and treat its saved Markdown research job/report as the primary artifact. "
+                "For a simple fact check, web_search is enough; for a single multi-source evidence check, web_research is the fallback. "
+                "After deep_research_run returns a usable job, stop searching and write a concise final answer; do not chain extra web_search/fetch_content calls unless the user explicitly asks to verify a specific URL or missing source. "
                 "Do not use web_fetch, browse_web, or browse_and_extract in deep research unless the user explicitly asks for an interactive browser task."
             )
         return (
@@ -650,6 +656,20 @@ def _tool_guidance_for_task(task_type: str, *, deep_research: bool = False) -> s
     if task_type == "long_context":
         return "Use chunked reading and semantic/repo search. Avoid loading huge documents into one tool result."
     return "Answer directly unless a tool is clearly needed."
+
+
+def _looks_like_confirmed_deep_research_run(text: str) -> bool:
+    return _has_any(
+        _normalized(text),
+        {
+            "已确认的研究计划",
+            "确认的研究计划",
+            "不要重新规划",
+            "plan_json",
+            '"subquestions"',
+            "开始深度研究",
+        },
+    )
 
 
 def _select_models(

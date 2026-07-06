@@ -10,10 +10,35 @@ from typing import Any
 from urllib.parse import unquote, urlparse, urlunparse
 
 from backend.core.paths import metis_dir
+from backend.runtime.artifact_registry import ArtifactRegistryError, register_artifact
 
 _SCHEMA = "metis.research_job.v1"
 _LOCK = threading.RLock()
 _MAX_JOBS = 120
+_TRUNCATED_MARKER_RE = re.compile(r"\[\s*\.{3}\s*truncated\s+\d+\s+chars\s*\.{3}\s*\]", flags=re.IGNORECASE)
+_REPORT_NOISE_LINE_PATTERNS = [
+    r"^\s*(?:On This Page|In this article|Table of contents|Back to Blog|Sign In|Log In|Subscribe|Newsletter|Previous|Next|Top)\s*$",
+    r"^\s*(?:Jump to content|Main menu|Navigation|Contribute|Personal tools|Appearance|Search|Share|Copy link|Mail)\s*$",
+    r"^\s*(?:Get API key|Cookbook|Community|Docs|API reference|Overview|Get Started|Pricing|Coding agent setup)\s*$",
+    r"^\s*(?:Use your Google Account|Email or phone|Forgot email\?|Not your computer\?|Create account|Next)\s*$",
+    r"^\s*\d+\s+sections?\s*$",
+    r"^\s*(?:x|go|open|read|more)\s*$",
+    r"^\s*(?:首页\s*[»>]|Tags?:|标签[:：])",
+    r"^[^\n]{0,120}(?:Gemini|Claude|OpenAI|Google|谷歌|模型|教程|创作|新闻)[^\n]{0,120}[：:]\s*(?:Go|Open|Read|More)\s*$",
+    r"^\s*[-*]?\s*(?:Status|Provider|Providers|Query|Search query|Report status|Chat output policy|Search results|Evidence pages opened|Read failures|Partial evidence|URL)\s*[:：]",
+    r"Afrikaans.+English.+Español.+Français",
+    r"MCP ServersMCP Servers|Agent SkillsAgent Skills|DocumentationDocumentation",
+    r"(?:\[.{2,80}\]\([^)]+\)\s*){2,}",
+    r"\bConnection(?:Aborted)?Error\b",
+    r"\bHTTPS?ConnectionPool\b",
+    r"\bMax retries exceeded\b",
+    r"\bSSLError\b",
+    r"\bUNEXPECTED_EOF_WHILE_READING\b",
+    r"\bCERTIFICATE_VERIFY_FAILED\b",
+    r"页面读取失败",
+    r"你的主机中的软件中止了一个已建立的连接",
+    r"会员\s*充值|客服\s*微信|微信号|请添加客服|代充|出售\s*账号|账号\s*出售|gpthuiyuan",
+]
 
 
 def save_research_activity_job(
@@ -54,8 +79,10 @@ def save_research_activity_job(
             "created_at": int((previous or {}).get("created_at") or now),
             "updated_at": now,
         }
+        job["report"] = _sanitize_report_body(str(job.get("report") or ""), job)
         if str(job.get("report") or "").strip():
             job.update(_write_report_markdown_file(job))
+            job.update(_register_report_artifact(job, payload))
         path = _job_path(job_id)
         path.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
         _prune_old_jobs()
@@ -91,43 +118,24 @@ def export_research_job_markdown(job_id: str) -> str:
 
 
 def _job_markdown(job: dict[str, Any]) -> str:
-    lines = [
-        f"# {job.get('title') or 'Research Report'}",
-        "",
-        f"- Status: {job.get('status') or 'unknown'}",
-        f"- Query: {job.get('query') or ''}",
-        f"- Providers: {', '.join(_list_of_strings(job.get('providers'))) or 'unknown'}",
-        "",
-    ]
+    title = str(job.get("title") or job.get("query") or "Research Report").strip()
     report = str(job.get("report") or "").strip()
+    lines: list[str] = []
     if report:
-        lines.extend(["## Report", "", report, ""])
+        if re.match(r"^\s*#\s+", report):
+            lines.extend([report, ""])
+        else:
+            lines.extend([f"# {title}", "", report, ""])
+    else:
+        lines.extend([f"# {title}", ""])
     sources = _list_of_dicts(job.get("sources"))
     if sources:
-        lines.extend(["## Sources", ""])
+        lines.extend(["## 来源", ""])
         for source in sources:
             title = source.get("title") or source.get("domain") or source.get("url") or "Untitled"
             url = source.get("url") or ""
-            status = source.get("status") or ""
             lines.append(f"- [{title}]({url})" if url else f"- {title}")
-            if status:
-                lines.append(f"  - Status: {status}")
-            if source.get("error"):
-                lines.append(f"  - Error: {source.get('error')}")
         lines.append("")
-    evidence = _list_of_dicts(job.get("evidence"))
-    if evidence:
-        lines.extend(["## Evidence", ""])
-        for item in evidence:
-            title = item.get("title") or item.get("url") or "Evidence"
-            lines.append(f"### {title}")
-            if item.get("url"):
-                lines.append(str(item.get("url")))
-            text = str(item.get("text") or item.get("snippet") or "").strip()
-            if text:
-                lines.append("")
-                lines.append(text)
-            lines.append("")
     return "\n".join(lines).strip() + "\n"
 
 
@@ -156,6 +164,7 @@ def _compact_job(job: dict[str, Any]) -> dict[str, Any]:
         "stats": stats,
         "report_filename": job.get("report_filename") or "",
         "report_path": job.get("report_path") or "",
+        "artifact_id": job.get("artifact_id") or "",
         "created_at": int(job.get("created_at") or 0),
         "updated_at": int(job.get("updated_at") or 0),
     }
@@ -274,12 +283,26 @@ def _sanitize_job(job: dict[str, Any]) -> dict[str, Any]:
     row["failures"] = _sanitize_sources(row.get("failures"), keep_status=True)
     row["attempts"] = _sanitize_attempts(row.get("attempts"))
     row["evidence"] = _sanitize_evidence(row.get("evidence"))
-    row["report"] = _sanitize_report_links(str(row.get("report") or ""))
+    row["report"] = _sanitize_report_body(_sanitize_report_links(str(row.get("report") or "")), row)
     if str(row.get("title") or "").strip().lower() in {"", "(untitled)", "untitled", "untitled research"}:
         row["title"] = str(row.get("query") or "Research Report")
     row["report_filename"] = str((row.get("report_filename") or _report_filename(row)) if row.get("report") else "")
     row["report_path"] = str(row.get("report_path") or "")
+    row["artifact_id"] = str(row.get("artifact_id") or "")
+    if str(row.get("report") or "").strip() and _report_file_missing(row):
+        row.update(_write_report_markdown_file(row))
+        row.update(_register_report_artifact(row, row))
     return row
+
+
+def _report_file_missing(job: dict[str, Any]) -> bool:
+    path = str(job.get("report_path") or "").strip()
+    if not path:
+        return True
+    try:
+        return not Path(path).is_file()
+    except OSError:
+        return True
 
 
 def _sanitize_sources(value: Any, *, keep_status: bool = False) -> list[dict[str, Any]]:
@@ -381,6 +404,99 @@ def _sanitize_report_links(report: str) -> str:
     return re.sub(r"https?://r\.jina\.ai/[^\s)>\]]+", lambda match: clean_user_source_url(match.group(0)), text)
 
 
+def _sanitize_report_body(report: str, job: dict[str, Any] | None = None) -> str:
+    """Keep durable reports user-facing; strip crawler/tool logs and legacy raw evidence dumps."""
+    original = str(report or "")
+    text = _TRUNCATED_MARKER_RE.sub("", original)
+    if not text.strip():
+        return ""
+    output: list[str] = []
+    skip_level = 0
+    removed_raw_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        heading = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", stripped)
+        if heading and skip_level:
+            level = len(heading.group(1))
+            if level <= skip_level:
+                skip_level = 0
+        if skip_level:
+            continue
+        if heading and _is_report_noise_heading(heading.group(2)):
+            removed_raw_section = True
+            skip_level = len(heading.group(1))
+            continue
+        if _is_report_noise_line(stripped):
+            removed_raw_section = True
+            continue
+        output.append(line)
+    cleaned = _normalize_markdown_spacing("\n".join(output))
+    if _report_body_too_thin(cleaned) and (removed_raw_section or _looks_like_legacy_raw_report(original)):
+        fallback = _fallback_report_body(job or {})
+        if fallback:
+            return fallback
+    return cleaned
+
+
+def _is_report_noise_heading(value: str) -> bool:
+    text = str(value or "").strip()
+    if re.fullmatch(r"(?:目录|目錄|table\s+of\s+contents|contents|toc|report|evidence\s+opened|raw\s+evidence)", text, flags=re.IGNORECASE):
+        return True
+    return bool(re.search(r"read\s+failures|读取失败|连接错误|错误来源|抓取失败|failed\s+reads?", text, flags=re.IGNORECASE))
+
+
+def _is_report_noise_line(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in _REPORT_NOISE_LINE_PATTERNS)
+
+
+def _looks_like_legacy_raw_report(value: str) -> bool:
+    text = str(value or "")
+    return bool(re.search(r"Evidence Opened|Read Failures|^\s*-\s*Providers?\s*:", text, flags=re.IGNORECASE | re.MULTILINE))
+
+
+def _report_body_too_thin(value: str) -> bool:
+    body = "\n".join(line for line in str(value or "").splitlines() if line.strip() and not line.lstrip().startswith("#"))
+    return len(body.strip()) < 80
+
+
+def _normalize_markdown_spacing(value: str) -> str:
+    lines = [line.rstrip() for line in str(value or "").splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _fallback_report_body(job: dict[str, Any]) -> str:
+    title = str(job.get("title") or job.get("query") or "研究报告").strip()
+    sources = _list_of_dicts(job.get("sources"))
+    evidence = _list_of_dicts(job.get("evidence"))
+    if not sources and not evidence:
+        return ""
+    opened = len(sources) or len(evidence)
+    lines = [
+        f"# {title}",
+        "",
+        "## 摘要",
+        "",
+        f"本次研究已整理 {opened} 个可复查来源。旧版原始抓取日志已被清理，避免把网页导航、登录页、工具状态和抓取错误混入报告正文。",
+        "",
+        "## 初步证据",
+        "",
+    ]
+    evidence_rows = evidence or sources
+    for item in evidence_rows[:8]:
+        label = _display_source_title(item.get("title"), item.get("url") or item.get("domain"))
+        snippet = str(item.get("snippet") or item.get("text") or "").strip()
+        snippet = re.sub(r"\s+", " ", snippet)[:220].strip()
+        if snippet:
+            lines.append(f"- **{label}**：{snippet}")
+        else:
+            lines.append(f"- **{label}**：该来源已收录，可在来源列表中打开复查。")
+    lines.extend(["", "## 后续处理", "", "建议重新运行 Deep Research 以生成完整长文报告；当前文档保留为干净的来源索引和复查入口。"])
+    return "\n".join(lines).strip()
+
+
 def _write_report_markdown_file(job: dict[str, Any]) -> dict[str, str]:
     filename = _report_filename(job)
     path = _reports_dir() / filename
@@ -389,6 +505,35 @@ def _write_report_markdown_file(job: dict[str, Any]) -> dict[str, str]:
     except OSError:
         return {"report_filename": filename, "report_path": ""}
     return {"report_filename": filename, "report_path": str(path)}
+
+
+def _register_report_artifact(job: dict[str, Any], context: dict[str, Any]) -> dict[str, str]:
+    path = str(job.get("report_path") or "").strip()
+    if not path:
+        return {}
+    metadata = {
+        "job_id": str(job.get("id") or ""),
+        "research_kind": str(job.get("kind") or "research"),
+        "query": str(job.get("query") or ""),
+        "providers": _list_of_strings(job.get("providers")),
+        "source_count": len(_list_of_dicts(job.get("sources"))),
+    }
+    try:
+        artifact = register_artifact(
+            kind="report",
+            title=str(job.get("title") or job.get("query") or job.get("report_filename") or "Research report"),
+            path=path,
+            mime="text/markdown",
+            run_id=str(context.get("run_id") or context.get("runId") or ""),
+            session_id=str(context.get("session_id") or context.get("sessionId") or ""),
+            turn_id=str(context.get("turn_id") or context.get("turnId") or ""),
+            source_event_id=str(context.get("source_event_id") or context.get("sourceEventId") or ""),
+            source_tool_call_id=str(context.get("source_tool_call_id") or context.get("sourceToolCallId") or ""),
+            metadata=metadata,
+        )
+    except (ArtifactRegistryError, OSError, ValueError):
+        return {"artifact_id": str(job.get("artifact_id") or "")}
+    return {"artifact_id": str(artifact.get("artifact_id") or "")}
 
 
 def _report_filename(job: dict[str, Any]) -> str:

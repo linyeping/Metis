@@ -10,21 +10,24 @@ import {
 } from '@assistant-ui/react';
 import {
   Activity,
-  BookOpenText,
-  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   FileDiff,
   FileText,
+  ListChecks,
   Search,
+  ScrollText,
   PackageCheck,
+  PencilLine,
+  Play,
 } from 'lucide-react';
 import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactNode } from 'react';
-import { apiBase, getResearchJob, getResearchJobs } from '../../lib/api';
+import { apiBase, getResearchJob, getResearchJobs, setComposerDeepResearchEnabled } from '../../lib/api';
 import { buildFileChangePreview, countDiffLines } from '../../lib/diffPreview';
 import type { FileChangePreview } from '../../lib/diffPreview';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
+import { useChatStore } from '../../store/chatStore';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
 import type { ChatToolEvent, ResearchJob } from '../../lib/types';
@@ -114,6 +117,12 @@ type ResearchActivityCardSummary = {
   title: string;
 };
 
+type DeepResearchPlanSummary = {
+  brief: string;
+  question: string;
+  subquestions: string[];
+};
+
 export type CompletedResearchReportSummary = {
   fileName?: string;
   jobId: string;
@@ -153,16 +162,16 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
   const activitySnapshot = useAuiState(state => toolActivitySnapshot(state.message.content, startIndex, endIndex));
   const activity = useMemo(() => summarizeToolActivity(activitySnapshot, t), [activitySnapshot, t]);
   const searchActivity = useMemo(() => summarizeSearchToolActivity(activitySnapshot, t), [activitySnapshot, t]);
-  const completedResearchReport = useMemo(() => completedResearchReportFromSnapshot(activitySnapshot, t), [activitySnapshot, t]);
+  const deepResearchPlan = useMemo(() => deepResearchPlanFromSnapshot(activitySnapshot), [activitySnapshot]);
   const longList = steps > 12;
 
   if (searchActivity?.allSearchTools) {
-    if (completedResearchReport && searchActivity.running === 0) {
-      return <CompletedResearchReportEntry report={completedResearchReport} />;
+    if (deepResearchPlan && searchActivity.running === 0 && searchActivity.errors === 0) {
+      return <DeepResearchPlanCard plan={deepResearchPlan} />;
     }
     if (searchActivity.running === 0 && searchActivity.errors === 0) {
       if (messageRunning) return <SearchActivityStrip activity={searchActivity} />;
-      return completedResearchReport ? <CompletedResearchReportEntry report={completedResearchReport} /> : null;
+      return null;
     }
     return <SearchActivityStrip activity={searchActivity} />;
   }
@@ -181,7 +190,7 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
     <section className="tool-activity-group" data-open={open} data-running={messageRunning}>
       <div className="tool-activity-group-head">
         <button className="tool-activity-toggle" type="button" onClick={toggleOpen}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
           <Activity size={13} />
           <span>{t('工具活动')}</span>
           <small>{steps}{t(' 步')}</small>
@@ -222,6 +231,7 @@ export function ToolActivityGroup({ children, endIndex, startIndex }: PropsWithC
 export function CompletedResearchReportEntry({ report }: { report: CompletedResearchReportSummary }) {
   const t = useT();
   const setResearchReportView = useUiStore(state => state.setResearchReportView);
+  const activeResearchReportJobId = useUiStore(state => state.activeResearchReportJobId);
   const [resolvedReport, setResolvedReport] = useState(report);
   useEffect(() => {
     let disposed = false;
@@ -234,7 +244,7 @@ export function CompletedResearchReportEntry({ report }: { report: CompletedRese
           fileName: job.report_filename || report.fileName,
           jobId: job.id || report.jobId,
           reportPath: job.report_path || report.reportPath,
-          summary: report.summary || researchJobEntrySummary(job, t),
+          summary: researchJobEntrySummary(job, t) || report.summary,
           title: job.title || job.query || report.title,
         });
       })
@@ -246,26 +256,104 @@ export function CompletedResearchReportEntry({ report }: { report: CompletedRese
     };
   }, [report.fileName, report.jobId, report.reportPath, report.summary, report.title, t]);
   const fileName = resolvedReport.fileName || researchReportFileName(resolvedReport.title || resolvedReport.summary || t('研究报告'));
+  const active = Boolean(resolvedReport.jobId && activeResearchReportJobId === resolvedReport.jobId);
   return (
-    <div className="research-report-entry">
+    <button
+      type="button"
+      className="research-report-entry"
+      data-active={active}
+      disabled={!resolvedReport.jobId}
+      onClick={() => resolvedReport.jobId && setResearchReportView(resolvedReport.jobId)}
+    >
       <span className="research-report-entry-icon">
-        <FileText size={15} />
+        <ScrollText size={17} />
       </span>
       <div>
-        <strong title={fileName}>{fileName}</strong>
-        <small>{resolvedReport.summary || t('研究报告已生成')}</small>
+        <strong title={resolvedReport.title || fileName}>{resolvedReport.title || fileName}</strong>
+        <small>{resolvedReport.summary || fileName || t('研究报告已生成')}</small>
       </div>
-      <button type="button" disabled={!resolvedReport.jobId} onClick={() => resolvedReport.jobId && setResearchReportView(resolvedReport.jobId)}>
-        <BookOpenText size={12} />
-        {t('打开')}
-      </button>
-    </div>
+    </button>
+  );
+}
+
+function DeepResearchPlanCard({ plan }: { plan: DeepResearchPlanSummary }) {
+  const t = useT();
+  const send = useChatStore(state => state.send);
+  const setComposerText = useChatStore(state => state.setComposerText);
+  const [busy, setBusy] = useState(false);
+  const planJson = useMemo(() => JSON.stringify({ brief: plan.brief, subquestions: plan.subquestions }), [plan.brief, plan.subquestions]);
+  const runPrompt = useMemo(
+    () => [
+      `开始深度研究：${plan.question}`,
+      '',
+      '使用这个已确认的研究计划执行，不要重新规划：',
+      planJson,
+    ].join('\n'),
+    [plan.question, planJson],
+  );
+  const startResearch = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await setComposerDeepResearchEnabled(true);
+      await send(runPrompt);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const editPlan = () => {
+    setComposerText([
+      `修改这个深度研究计划：${plan.question}`,
+      '',
+      `研究目标：${plan.brief}`,
+      '',
+      '子问题：',
+      ...plan.subquestions.map((item, index) => `${index + 1}. ${item}`),
+    ].join('\n'));
+  };
+  return (
+    <section className="deep-research-plan-card">
+      <header>
+        <span className="deep-research-plan-icon"><ListChecks size={17} /></span>
+        <div>
+          <strong>{t('研究计划')}</strong>
+          <small>{plan.question}</small>
+        </div>
+      </header>
+      <p>{plan.brief}</p>
+      <ol>
+        {plan.subquestions.slice(0, 6).map((item, index) => (
+          <li key={`${index}-${item}`}>{item}</li>
+        ))}
+      </ol>
+      <footer>
+        <button type="button" className="deep-research-plan-primary" disabled={busy} onClick={() => void startResearch()}>
+          <Play size={13} />
+          {busy ? t('正在启动') : t('开始研究')}
+        </button>
+        <button type="button" onClick={editPlan}>
+          <PencilLine size={13} />
+          {t('修改建议')}
+        </button>
+      </footer>
+    </section>
   );
 }
 
 function researchJobEntrySummary(job: ResearchJob, t: (zh: string) => string): string {
   const sourceCount = job.stats?.sources || job.sources?.length || 0;
-  return sourceCount > 0 ? `${t('Markdown 报告')} · ${sourceCount} ${t('个来源')}` : t('Markdown 报告已生成');
+  const time = researchReportEntryTime(Number(job.updated_at || job.created_at || 0));
+  const sourceText = sourceCount > 0 ? `${sourceCount} ${t('个来源')}` : '';
+  return [time, sourceText].filter(Boolean).join(' · ') || t('Markdown 报告已生成');
+}
+
+function researchReportEntryTime(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+  try {
+    return new Date(timestamp).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
 }
 
 type SearchToolActivitySummary = {
@@ -394,7 +482,6 @@ export function ToolCard({
   const setDiffPreview = useUiStore(state => state.setDiffPreview);
   const setWebPreviewUrl = useUiStore(state => state.setWebPreviewUrl);
   const setResearchJobPreview = useUiStore(state => state.setResearchJobPreview);
-  const setResearchReportView = useUiStore(state => state.setResearchReportView);
   const appMode = useUiStore(state => state.appMode);
   const status = metisStatus || (result === undefined ? 'running' : isToolError(result) ? 'error' : 'success');
   const commandPreview = useMemo(() => toolCommandPreview(toolName, args, result), [args, result, toolName]);
@@ -407,6 +494,7 @@ export function ToolCard({
   const fileChangeCounts = useMemo(() => (fileChangePreview ? countDiffLines(fileChangePreview) : null), [fileChangePreview]);
   const browserActivity = useMemo(() => browserActivitySummaryFromResult(result, t), [result, t]);
   const researchActivity = useMemo(() => researchActivitySummaryFromResult(result, t), [result, t]);
+  const researchPlan = useMemo(() => deepResearchPlanFromResult(result, args), [args, result]);
   const evidenceChain = useMemo(() => evidenceChainSummaryFromResult(result, t), [result, t]);
   const autoOpenedDiffRef = useRef('');
   const autoOpenedWebRef = useRef('');
@@ -456,7 +544,7 @@ export function ToolCard({
   }, [fileChangePreview, setDiffPreview, setWebPreviewUrl, status]);
 
   useEffect(() => {
-    if (appMode === 'chat' || !isResearchActivityTool(toolName) || status !== 'running') return;
+    if (appMode === 'chat' || isDeepResearchActivityTool(toolName) || !isResearchActivityTool(toolName) || status !== 'running') return;
     const marker = `running:${toolName}:${toolCallId || cardId}`;
     if (autoOpenedResearchRef.current === marker) return;
     autoOpenedResearchRef.current = marker;
@@ -465,14 +553,17 @@ export function ToolCard({
 
   useEffect(() => {
     const jobId = researchActivity?.jobId || '';
-    if (appMode === 'chat' || !jobId || status === 'running' || status === 'waiting_approval') return;
+    if (appMode === 'chat' || isDeepResearchActivityTool(toolName) || !jobId || status === 'running' || status === 'waiting_approval') return;
     if (autoOpenedResearchRef.current === jobId) return;
     autoOpenedResearchRef.current = jobId;
     setResearchJobPreview(jobId);
-  }, [appMode, researchActivity?.jobId, setResearchJobPreview, status]);
+  }, [appMode, researchActivity?.jobId, setResearchJobPreview, status, toolName]);
 
   if (isResearchActivityTool(toolName)) {
     const failedResearchActivity = status === 'error' && researchActivityIsFailedResult(result);
+    if (toolName === 'deep_research_plan' && status !== 'running' && status !== 'waiting_approval' && researchPlan) {
+      return <DeepResearchPlanCard plan={researchPlan} />;
+    }
     if (status === 'running' || status === 'waiting_approval' || failedResearchActivity) {
       return (
         <SearchActivityStrip
@@ -524,7 +615,9 @@ export function ToolCard({
   return (
     <div className="tool-card tool-activity-row" data-open={open} data-status={status} data-call-id={toolCallId || cardId}>
       <button className="tool-card-head tool-activity-head" type="button" onClick={() => setToolCardExpanded(cardId, !open)}>
-        <span className="tool-activity-caret">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+        <span className="tool-activity-caret">
+          <ChevronRight className="disclosure-chevron" data-open={open} size={13} />
+        </span>
         <span className="tool-activity-status">{toolStatusIcon(toolName, status)}</span>
         <span className="tool-kind-logo" aria-hidden="true">{toolKindGlyph(toolName)}</span>
         <span className="tool-title">{toolDisplayName(toolName)}</span>
@@ -693,7 +786,13 @@ function stableToolCardId(toolCallId: unknown, toolName: string, args: unknown):
 }
 
 function isResearchActivityTool(toolName: string): boolean {
-  return ['web_search', 'web_research', 'fetch_content'].includes(String(toolName || '').trim());
+  return ['web_search', 'web_research', 'fetch_content', 'deep_research_run', 'deep_research_plan'].includes(
+    String(toolName || '').trim(),
+  );
+}
+
+function isDeepResearchActivityTool(toolName: string): boolean {
+  return ['deep_research_run', 'deep_research_plan'].includes(String(toolName || '').trim());
 }
 
 function summarizeSearchToolActivity(snapshot: string, t: (zh: string) => string = (s) => s): SearchToolActivitySummary | null {
@@ -722,6 +821,10 @@ function completedResearchReportFromSnapshot(snapshot: string, t: (zh: string) =
   return completedResearchReportFromTools(toolPartsFromSnapshot(snapshot), t);
 }
 
+function deepResearchPlanFromSnapshot(snapshot: string): DeepResearchPlanSummary | null {
+  return deepResearchPlanFromTools(toolPartsFromSnapshot(snapshot));
+}
+
 function completedResearchReportFromTools(tools: ToolActivityPart[], t: (zh: string) => string): CompletedResearchReportSummary | null {
   for (const tool of [...tools].reverse()) {
     if (toolNameToResearchKind(tool.toolName) !== 'research') continue;
@@ -736,6 +839,16 @@ function completedResearchReportFromTools(tools: ToolActivityPart[], t: (zh: str
       summary: activity.summary,
       title: activity.title,
     };
+  }
+  return null;
+}
+
+function deepResearchPlanFromTools(tools: ToolActivityPart[]): DeepResearchPlanSummary | null {
+  for (const tool of [...tools].reverse()) {
+    if (tool.toolName !== 'deep_research_plan') continue;
+    if (tool.metisStatus === 'running' || tool.metisStatus === 'waiting_approval' || tool.metisStatus === 'error') continue;
+    const plan = deepResearchPlanFromResult(tool.result, tool.args);
+    if (plan) return plan;
   }
   return null;
 }
@@ -762,7 +875,7 @@ function pickLiveResearchJob(jobs: ResearchJob[], activity: SearchToolActivitySu
 function toolNameToResearchKind(value: string): string {
   const name = String(value || '').toLowerCase();
   if (name.includes('fetch_content') || name === 'fetch') return 'fetch';
-  if (name.includes('web_research') || name === 'research') return 'research';
+  if (name.includes('deep_research') || name.includes('web_research') || name === 'research') return 'research';
   if (name.includes('web_search') || name === 'search') return 'search';
   return '';
 }
@@ -779,7 +892,8 @@ function normalizeSearchText(value: string): string {
 
 function researchRunningLabel(toolName: string, t: (zh: string) => string): string {
   const name = String(toolName || '').toLowerCase();
-  if (name === 'web_research') return t('正在深度研究');
+  if (name === 'deep_research_run' || name === 'web_research') return t('正在深度研究');
+  if (name === 'deep_research_plan') return t('正在规划研究');
   if (name === 'fetch_content') return t('正在读取来源');
   return t('正在搜索');
 }
@@ -977,6 +1091,32 @@ function researchActivitySummaryFromResult(result: unknown, t: (text: string) =>
     summary: `${kind === 'fetch_content' ? t('来源读取') : t('研究活动')} · ${parts.length > 0 ? parts.join(' · ') : t('暂无来源')}`,
     title,
   };
+}
+
+function deepResearchPlanFromResult(result: unknown, args: unknown): DeepResearchPlanSummary | null {
+  const payload = planPayloadFromText(typeof result === 'string' ? result : formatTool(result));
+  if (!payload) return null;
+  const brief = String(payload.brief || '').trim();
+  const subquestions = Array.isArray(payload.subquestions)
+    ? payload.subquestions.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  if (!brief || subquestions.length === 0) return null;
+  return {
+    brief,
+    question: firstToolString(args, ['question', 'query', 'prompt']) || brief,
+    subquestions,
+  };
+}
+
+function planPayloadFromText(text: string): Record<string, unknown> | null {
+  const match = String(text || '').match(/<!--\s*METIS_RESEARCH_PLAN\s+([\s\S]*?)\s*-->/);
+  if (!match?.[1]) return null;
+  try {
+    const parsed = JSON.parse(match[1]) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 function researchActivityIsFailedResult(result: unknown): boolean {

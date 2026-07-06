@@ -65,9 +65,10 @@ _STRONG_MODEL_DIRECTIVE = (
 _WEB_STRATEGY_RULES = (
     "\n\n---\n[Web Tool Strategy]\n"
     "1. Use fetch_content first for known URLs, docs, titles, article text, GitHub blobs/repos/trees/commits, and static news pages; it returns cleaned Markdown plus structured source metadata.\n"
-    "2. Use web_search for cheap discovery and web_research for multi-source evidence, disputed facts, or source-backed reports.\n"
-    "3. Use browse_web only when fetch_content looks incomplete, the page is a JavaScript app, or the task needs clicks, forms, login state, or visual browser interaction.\n"
-    "4. Use legacy web_fetch(raw=true) only when raw HTML itself is the target.\n"
+    "2. Use web_search for cheap discovery and web_research for single-turn multi-source evidence or disputed facts.\n"
+    "3. Use deep_research_plan first, then deep_research_run after user confirmation, for Gemini-style saved research reports.\n"
+    "4. Use browse_web only when fetch_content looks incomplete, the page is a JavaScript app, or the task needs clicks, forms, login state, or visual browser interaction.\n"
+    "5. Use legacy web_fetch(raw=true) only when raw HTML itself is the target.\n"
 )
 _USER_MEMORY_TOKEN_BUDGET = 1000
 _STABILITY_ORDER = {"static": 0, "session": 1, "request": 2}

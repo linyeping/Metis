@@ -2390,6 +2390,8 @@ def _tool_schemas_for_config(
 
 CHAT_SURFACE_TOOLS = frozenset(
     {
+        "deep_research_plan",
+        "deep_research_run",
         "web_search",
         "web_research",
         "fetch_content",
@@ -2445,6 +2447,7 @@ def _chat_surface_blocked_tool_result(tool_call: ToolCall, registry: ToolRegistr
     return (
         f"[Tool unavailable] '{canonical}' is not available in Chat or Research. "
         "Use web_search for quick lookup, web_research for multi-source research, "
+        "deep_research_plan/deep_research_run for confirmed Deep Research reports, "
         "or fetch_content for a known URL. Do not call workspace tools in this surface."
     )
 
@@ -2458,7 +2461,10 @@ def _should_close_deep_research_tool_loop(
     if _surface_mode_for_config(config) not in {"chat", ""}:
         return False
     for tool_call, result in results:
-        if str(tool_call.name or "").strip() != "web_research":
+        name = str(tool_call.name or "").strip()
+        if name == "deep_research_plan" and _deep_research_plan_from_tool_result(result):
+            return True
+        if name not in {"web_research", "deep_research_run"}:
             continue
         activity = _research_activity_from_tool_result(result)
         if not activity:
@@ -2474,7 +2480,18 @@ def _should_close_deep_research_tool_loop(
 def _deep_research_final_answer_hint(results: List[Tuple[ToolCall, str]]) -> str:
     activity: Dict[str, Any] = {}
     for tool_call, result in results:
-        if str(tool_call.name or "").strip() == "web_research":
+        if str(tool_call.name or "").strip() == "deep_research_plan":
+            plan = _deep_research_plan_from_tool_result(result)
+            if plan:
+                brief = str(plan.get("brief") or "").strip()
+                subquestions = plan.get("subquestions") if isinstance(plan.get("subquestions"), list) else []
+                return (
+                    "[System hint] A Deep Research plan has been generated and rendered as a confirmation card. "
+                    "Do not call deep_research_run yet. Ask the user to review the plan and use the card to start or revise it. "
+                    "Keep the answer short; do not paste JSON. "
+                    f"Plan brief: {brief}. Subquestions: {len(subquestions)}."
+                )
+        if str(tool_call.name or "").strip() in {"web_research", "deep_research_run"}:
             activity = _research_activity_from_tool_result(result)
             if activity:
                 break
@@ -2490,6 +2507,20 @@ def _deep_research_final_answer_hint(results: List[Tuple[ToolCall, str]]) -> str
         "summarize the key conclusion in 3-6 bullets, and do not paste long source excerpts. "
         f"Research title: {title}. Job id: {job_id}. Report file: {report_filename or '(pending)'}. Sources: {sources}."
     )
+
+
+def _deep_research_plan_from_tool_result(result: str) -> Dict[str, Any]:
+    marker = "<!-- METIS_RESEARCH_PLAN"
+    text = str(result or "")
+    if marker not in text:
+        return {}
+    try:
+        start = text.index(marker) + len(marker)
+        end = text.index("-->", start)
+        payload = json.loads(text[start:end].strip())
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _research_activity_from_tool_result(result: str) -> Dict[str, Any]:
@@ -3458,7 +3489,7 @@ _SEARCH_TOOLS = {"search_in_file", "search_in_codebase", "find_files"}
 _SHELL_TOOLS = {"execute_bash_command", "execute_command"}
 _LIST_TOOLS = {"list_directory"}
 _BROWSER_TOOLS = {"browser_navigate", "browser_get_text", "browser_extract_text",
-                  "browser_read_page", "web_search", "web_research", "fetch_content"}
+                  "browser_read_page", "web_search", "web_research", "deep_research_plan", "deep_research_run", "fetch_content"}
 
 _MAX_RESULT_CHARS = 24_000  # ~6K tokens
 
