@@ -13,17 +13,18 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
-from backend.core.paths import legacy_miro_path, metis_path
-from backend.runtime.agent_loop import AgentConfig
+
 from backend.bridges.model_capability import detect_from_model_name, tier_compact_thresholds
 from backend.core.engine.prompt_runtime import compile_prompt_runtime
+from backend.core.paths import legacy_miro_path, metis_path
+from backend.runtime.agent_loop import AgentConfig
 from backend.runtime.provider_conformance import run_provider_conformance_probe
 
 try:
     from backend.bridges.provider_registry import (
         list_provider_payloads,
-        normalize_provider_model,
         normalize_openai_api_base_url,
+        normalize_provider_model,
         resolve_provider_for_config,
         validate_provider_config,
     )
@@ -41,8 +42,8 @@ try:
 except ImportError:  # pragma: no cover - supports running from inside miro/
     from backend.bridges.provider_registry import (
         list_provider_payloads,
-        normalize_provider_model,
         normalize_openai_api_base_url,
+        normalize_provider_model,
         resolve_provider_for_config,
         validate_provider_config,
     )
@@ -780,7 +781,7 @@ def check_network_settings(data: Dict[str, Any]) -> Dict[str, Any]:
                 "provider_id": backend,
                 "base_url": base_url,
                 "model": model,
-                "api_key": incoming_key,
+                "api_key": context["api_key"],
                 "deep_probe": False,
             }
         )
