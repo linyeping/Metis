@@ -9,7 +9,7 @@ import type {
   RuntimeSettings,
 } from '../../../lib/types';
 import { tr } from '../../../lib/i18n';
-import { formatSettingsTokenCount } from '../settingsShared';
+import { formatSettingsTokenCount, stripConfigWhitespace } from '../settingsShared';
 import { ProviderRegistryManager } from '../ProviderRegistryManager';
 import { useT } from '../../../hooks/useT';
 
@@ -156,7 +156,7 @@ export const ModelTab = memo(function ModelTab({
             className="settings-base-url-input"
             value={settings.baseUrl}
             spellCheck={false}
-            onChange={event => onSettingsChange({ ...settings, baseUrl: event.target.value })}
+            onChange={event => onSettingsChange({ ...settings, baseUrl: stripConfigWhitespace(event.target.value) })}
           />
         </label>
         <label>
@@ -166,7 +166,7 @@ export const ModelTab = memo(function ModelTab({
             value={apiKey}
             placeholder={settings.apiKey || (settings.providerId === 'custom-openai' ? '' : 'sk-...')}
             spellCheck={false}
-            onChange={event => onApiKeyChange(event.target.value)}
+            onChange={event => onApiKeyChange(stripConfigWhitespace(event.target.value))}
           />
         </label>
         <div className="provider-check-panel" data-ok={providerCheck?.ok ?? false}>

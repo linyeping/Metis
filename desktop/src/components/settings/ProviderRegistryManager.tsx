@@ -11,6 +11,7 @@ import {
 import type { ProviderRegistryProbeResult } from '../../lib/types';
 import type { ProviderRegistryEntry, ProviderRegistryInput } from '../../lib/types';
 import { useT } from '../../hooks/useT';
+import { stripConfigWhitespace } from './settingsShared';
 
 // FABLEADV-15: config-driven provider management. Lets the user add/remove
 // custom providers (internal relays, new models) without editing code.
@@ -61,7 +62,7 @@ export function ProviderRegistryManager() {
       await updateSettings({
         backend: entry.providerId,
         providerId: entry.providerId,
-        baseUrl: entry.baseUrl,
+        baseUrl: stripConfigWhitespace(entry.baseUrl),
         model: entry.defaultModel || entry.fallbackModels[0] || '',
       });
       setActiveProviderId(entry.providerId);
@@ -78,7 +79,8 @@ export function ProviderRegistryManager() {
   }, [refresh]);
 
   const onSave = async () => {
-    if (!form.id.trim() || !form.baseUrl.trim()) {
+    const cleanBaseUrl = stripConfigWhitespace(form.baseUrl);
+    if (!form.id.trim() || !cleanBaseUrl) {
       setError(t('供应商 ID 和 Base URL 必填'));
       return;
     }
@@ -88,7 +90,7 @@ export function ProviderRegistryManager() {
       id: form.id.trim(),
       display_name: form.displayName.trim() || form.id.trim(),
       backend_type: 'openai',
-      base_url: form.baseUrl.trim(),
+      base_url: cleanBaseUrl,
       api_key_env: form.apiKeyEnv.trim() || undefined,
       default_model: form.defaultModel.trim() || undefined,
       models: form.models
@@ -143,7 +145,7 @@ export function ProviderRegistryManager() {
     setProbing(entry.providerId);
     try {
       const result = await probeProviderRegistry(entry.providerId, {
-        baseUrl: entry.baseUrl,
+        baseUrl: stripConfigWhitespace(entry.baseUrl),
         model: entry.defaultModel || entry.fallbackModels[0],
       });
       if (!result.ok) {
@@ -159,7 +161,9 @@ export function ProviderRegistryManager() {
   };
 
   const onProbeForm = async () => {
-    if (!form.id.trim() || !form.baseUrl.trim()) {
+    const cleanBaseUrl = stripConfigWhitespace(form.baseUrl);
+    const cleanApiKey = stripConfigWhitespace(form.apiKey);
+    if (!form.id.trim() || !cleanBaseUrl) {
       setError(t('供应商 ID 和 Base URL 必填'));
       return;
     }
@@ -170,7 +174,7 @@ export function ProviderRegistryManager() {
         id: form.id.trim(),
         display_name: form.displayName.trim() || form.id.trim(),
         backend_type: 'openai',
-        base_url: form.baseUrl.trim(),
+        base_url: cleanBaseUrl,
         api_key_env: form.apiKeyEnv.trim() || undefined,
         default_model: form.defaultModel.trim() || undefined,
         models: form.models
@@ -185,9 +189,9 @@ export function ProviderRegistryManager() {
         return;
       }
       const result = await probeProviderRegistry(form.id.trim(), {
-        baseUrl: form.baseUrl.trim(),
+        baseUrl: cleanBaseUrl,
         model: form.defaultModel.trim(),
-        apiKey: form.apiKey.trim(),
+        apiKey: cleanApiKey,
       });
       if (!result.ok) {
         setError(result.error || result.modelsResult?.message || t('探测失败'));
@@ -276,13 +280,13 @@ export function ProviderRegistryManager() {
             <input value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} placeholder="my-relay" />
           </label>
           <label><span>Base URL</span>
-            <input value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://llm.internal.corp/v1" />
+            <input value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: stripConfigWhitespace(e.target.value) })} placeholder="https://llm.internal.corp/v1" />
           </label>
           <label><span>{t('API Key 环境变量名')}</span>
             <input value={form.apiKeyEnv} onChange={e => setForm({ ...form, apiKeyEnv: e.target.value })} placeholder="CORP_LLM_KEY" />
           </label>
           <label><span>{t('临时 API Key（仅探测）')}</span>
-            <input value={form.apiKey} onChange={e => setForm({ ...form, apiKey: e.target.value })} placeholder="sk-..." type="password" />
+            <input value={form.apiKey} onChange={e => setForm({ ...form, apiKey: stripConfigWhitespace(e.target.value) })} placeholder="sk-..." type="password" />
           </label>
           <label><span>{t('默认模型')}</span>
             <input value={form.defaultModel} onChange={e => setForm({ ...form, defaultModel: e.target.value })} placeholder="gpt-5.5" />

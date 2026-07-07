@@ -57,7 +57,7 @@ import type {
 import { tr } from '../../lib/i18n';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
-import { settingsNavGroups, type PermissionRuleDraft } from './settingsShared';
+import { settingsNavGroups, stripConfigWhitespace, type PermissionRuleDraft } from './settingsShared';
 import { AppearanceTab } from './tabs/AppearanceTab';
 import { ConversationTab } from './tabs/ConversationTab';
 import { ModelTab } from './tabs/ModelTab';
@@ -330,12 +330,13 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     if (!settings) return;
     setSaving(true);
     try {
-      const trimmedApiKey = apiKey.trim();
+      const cleanedApiKey = stripConfigWhitespace(apiKey);
+      const cleanedBaseUrl = stripConfigWhitespace(settings.baseUrl);
       const providerId = settings.providerId || settings.backend;
       await updateSettings({
         backend: providerId,
         providerId,
-        baseUrl: settings.baseUrl,
+        baseUrl: cleanedBaseUrl,
         model: settings.model,
         temperature: settings.temperature,
         reasoningEffort: settings.reasoningEffort,
@@ -349,7 +350,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
         proxyBypass: settings.proxyBypass,
         terminalShell: settings.terminalShell,
         pythonPath: settings.pythonPath,
-        ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
+        ...(cleanedApiKey ? { apiKey: cleanedApiKey } : {}),
       });
       if (memory) {
         await saveMemory(memory);
@@ -406,9 +407,9 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
       setProviderCheck(
         await verifyProviderConfig({
           backend: settings.providerId || settings.backend,
-          baseUrl: settings.baseUrl,
+          baseUrl: stripConfigWhitespace(settings.baseUrl),
           model: settings.model,
-          apiKey: apiKey.trim() || settings.apiKey,
+          apiKey: stripConfigWhitespace(apiKey) || stripConfigWhitespace(settings.apiKey),
           deepProbe,
         }),
       );
@@ -423,9 +424,9 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     try {
       const catalog = await getProviderModels({
         backend: settings.providerId || settings.backend,
-        baseUrl: settings.baseUrl,
+        baseUrl: stripConfigWhitespace(settings.baseUrl),
         model: settings.model,
-        apiKey: apiKey.trim() || settings.apiKey,
+        apiKey: stripConfigWhitespace(apiKey) || stripConfigWhitespace(settings.apiKey),
       });
       setModelCatalog(catalog);
       setModelCatalogOpen(true);
@@ -441,9 +442,9 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
       setProviderUsage(
         await getProviderUsage({
           backend: settings.providerId || settings.backend,
-          baseUrl: settings.baseUrl,
+          baseUrl: stripConfigWhitespace(settings.baseUrl),
           model: settings.model,
-          apiKey: apiKey.trim() || settings.apiKey,
+          apiKey: stripConfigWhitespace(apiKey) || stripConfigWhitespace(settings.apiKey),
         }),
       );
     } finally {

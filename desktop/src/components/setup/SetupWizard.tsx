@@ -4,6 +4,7 @@ import { completeFirstRun, getProviderStatus, verifyFirstRun } from '../../lib/a
 import type { ProviderProfile, ProviderValidation } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
+import { stripConfigWhitespace } from '../settings/settingsShared';
 
 interface SetupWizardProps {
   onDone: () => void;
@@ -40,7 +41,7 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
   const [verification, setVerification] = useState<VerificationState>(idleVerification);
   const [checking, setChecking] = useState(false);
   const zh = language === 'zh';
-  const trimmedApiKey = apiKey.trim();
+  const cleanedApiKey = stripConfigWhitespace(apiKey);
 
   useEffect(() => {
     void getProviderStatus().then(status => setProviders(status.providers));
@@ -55,8 +56,10 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
   };
 
   const verify = async () => {
-    const cleanApiKey = apiKey.trim();
+    const cleanApiKey = stripConfigWhitespace(apiKey);
+    const cleanBaseUrl = stripConfigWhitespace(baseUrl);
     setApiKey(cleanApiKey);
+    setBaseUrl(cleanBaseUrl);
     setChecking(true);
     setVerification({
       tone: 'checking',
@@ -66,7 +69,7 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
       warnings: [],
     });
     try {
-      const result = await verifyFirstRun({ backend, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: cleanApiKey });
+      const result = await verifyFirstRun({ backend, baseUrl: cleanBaseUrl, model: model.trim(), apiKey: cleanApiKey });
       setVerification(verificationFromResult(result, zh));
     } catch (error) {
       setVerification({
@@ -82,10 +85,12 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
   };
 
   const finish = async () => {
-    const cleanApiKey = apiKey.trim();
+    const cleanApiKey = stripConfigWhitespace(apiKey);
+    const cleanBaseUrl = stripConfigWhitespace(baseUrl);
     setApiKey(cleanApiKey);
+    setBaseUrl(cleanBaseUrl);
     if (cleanApiKey) {
-      await completeFirstRun({ backend, baseUrl: baseUrl.trim(), model: model.trim(), apiKey: cleanApiKey });
+      await completeFirstRun({ backend, baseUrl: cleanBaseUrl, model: model.trim(), apiKey: cleanApiKey });
     }
     onDone();
   };
@@ -129,7 +134,7 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
             <div className="setup-page form-page">
               <label>
                 <span>Base URL</span>
-                <input value={baseUrl} onChange={event => setBaseUrl(event.target.value)} />
+                <input value={baseUrl} onChange={event => setBaseUrl(stripConfigWhitespace(event.target.value))} />
               </label>
               <label>
                 <span>{zh ? '模型' : 'Model'}</span>
@@ -137,7 +142,7 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
               </label>
               <label>
                 <span>API key</span>
-                <input value={apiKey} onBlur={() => setApiKey(value => value.trim())} onChange={event => setApiKey(event.target.value)} />
+                <input value={apiKey} onBlur={() => setApiKey(stripConfigWhitespace)} onChange={event => setApiKey(stripConfigWhitespace(event.target.value))} />
                 <small>{apiKeyFormatHint(backend, zh)}</small>
               </label>
             </div>
@@ -151,7 +156,7 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
                 {verification.hint && <em>{verification.hint}</em>}
                 {Children.toArray(verification.warnings.map(warning => <em>{warning}</em>))}
               </div>
-              <button type="button" className="primary" disabled={checking || !trimmedApiKey} onClick={verify}>
+              <button type="button" className="primary" disabled={checking || !cleanedApiKey} onClick={verify}>
                 {checking ? (zh ? '检查中...' : 'Checking...') : zh ? '检查配置' : 'Check config'}
               </button>
             </div>

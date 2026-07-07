@@ -78,3 +78,22 @@ def test_network_check_uses_saved_api_key_when_request_omits_key(
 
     assert captured["api_key"] == "sk-saved"
     assert result["ok"] is True
+
+
+def test_update_runtime_settings_strips_endpoint_whitespace(isolated_metis_home) -> None:
+    isolated_metis_home.mkdir(parents=True, exist_ok=True)
+
+    updated = llm_state.update_runtime_settings(
+        {
+            "backend": "custom-openai",
+            "provider_id": "custom-openai",
+            "base_url": " https://relay.example /v1 \n",
+            "api_key": " sk-test 123\t",
+            "model": "gpt-5.5",
+        }
+    )
+
+    config = json.loads((isolated_metis_home / "config.json").read_text(encoding="utf-8"))
+    assert "base_url" in updated
+    assert config["base_url"] == "https://relay.example/v1"
+    assert config["api_key"] == "sk-test123"

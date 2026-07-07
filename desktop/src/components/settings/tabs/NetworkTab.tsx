@@ -3,6 +3,7 @@ import { CheckCircle2, Globe, Loader2, Router, ShieldCheck, WifiOff, XCircle } f
 import { checkNetworkSettings } from '../../../lib/api';
 import type { NetworkCheckPayload, RuntimeSettings } from '../../../lib/types';
 import { useT } from '../../../hooks/useT';
+import { stripConfigWhitespace } from '../settingsShared';
 
 interface NetworkTabProps {
   apiKey?: string;
@@ -54,7 +55,8 @@ export const NetworkTab = memo(function NetworkTab({ apiKey = '', onSettingsChan
     try {
       const result = await checkNetworkSettings({
         ...settings,
-        apiKey: apiKey.trim() || settings.apiKey,
+        baseUrl: stripConfigWhitespace(settings.baseUrl),
+        apiKey: stripConfigWhitespace(apiKey) || stripConfigWhitespace(settings.apiKey),
       });
       setCheckResult(result);
     } catch (error) {

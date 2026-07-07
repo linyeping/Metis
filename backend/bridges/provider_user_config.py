@@ -22,6 +22,14 @@ _VALID_BACKENDS = {"openai", "anthropic", "gemini", "ollama", "fake"}
 _PROVIDER_ID_RE = __import__("re").compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 
 
+def _strip_config_whitespace(value: str) -> str:
+    return "".join(
+        char
+        for char in str(value or "")
+        if not char.isspace() and char not in "\u200b\u200c\u200d\ufeff"
+    )
+
+
 def _global_providers_path() -> Path:
     from backend.core.paths import metis_home
 
@@ -46,7 +54,7 @@ def _coerce_profile(row: Any, *, source: str) -> Optional[ProviderProfile]:
     if backend_type not in _VALID_BACKENDS:
         logger.warning("providers.json: provider %s has unknown backend_type %r; skipping", pid, backend_type)
         return None
-    base_url = str(row.get("base_url") or "").strip()
+    base_url = _strip_config_whitespace(str(row.get("base_url") or ""))
     if base_url and not base_url.lower().startswith(("http://", "https://")):
         logger.warning("providers.json: provider %s base_url must be http(s); skipping", pid)
         return None
@@ -160,6 +168,7 @@ def save_user_provider(row: dict) -> ProviderProfile:
     profile = _coerce_profile(clean, source="user")
     if profile is None:
         raise ValueError("invalid provider definition (check id / backend_type / base_url)")
+    clean["base_url"] = profile.base_url
     pid = str(profile.provider_id)
     rows = [r for r in _read_raw_global() if str(r.get("id") or r.get("provider_id") or "") != pid]
     rows.append(clean)

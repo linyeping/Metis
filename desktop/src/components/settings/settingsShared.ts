@@ -98,6 +98,10 @@ export function terminalShellLabel(shell: TerminalShell): string {
   return terminalShellOptions.find(option => option.value === shell)?.label || 'PowerShell';
 }
 
+export function stripConfigWhitespace(value: string): string {
+  return value.replace(/[\s\u200B-\u200D\uFEFF]+/g, '');
+}
+
 export function actionLabel(action: string): string {
   if (action === 'allow') return '总是允许';
   if (action === 'deny') return '总是拒绝';

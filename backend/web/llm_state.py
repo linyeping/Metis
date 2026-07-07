@@ -239,8 +239,19 @@ def _runtime_keys(kind: str, backend: str) -> List[str]:
     return keys
 
 
+def _strip_config_whitespace(value: str) -> str:
+    return "".join(
+        char
+        for char in str(value or "")
+        if not char.isspace() and char not in "\u200b\u200c\u200d\ufeff"
+    )
+
+
 def _runtime_value(kind: str, backend: str, file_values: Dict[str, str], default: str = "") -> str:
-    return _configured(_runtime_keys(kind, backend), file_values, default)
+    value = _configured(_runtime_keys(kind, backend), file_values, default)
+    if kind in {"base_url", "api_key"}:
+        return _strip_config_whitespace(value)
+    return value
 
 
 def env_disabled(new_key: str, old_key: str = "") -> bool:
@@ -305,7 +316,7 @@ def default_model(backend: str) -> str:
 
 
 def normalize_base_url(backend: str, base_url: str) -> str:
-    return str(base_url or "").strip().rstrip("/")
+    return _strip_config_whitespace(str(base_url or "")).rstrip("/")
 
 
 def _resolved_provider_runtime_values(
@@ -338,12 +349,12 @@ def config_path(*, legacy: bool = False) -> str:
 
 
 def _is_masked_api_key(value: str) -> bool:
-    value = str(value or "").strip()
+    value = _strip_config_whitespace(str(value or ""))
     return value == "***" or "****" in value
 
 
 def _mask_api_key(value: str) -> str:
-    value = str(value or "").strip()
+    value = _strip_config_whitespace(str(value or ""))
     if not value:
         return ""
     suffix = value[-4:] if len(value) >= 4 else value
@@ -535,9 +546,10 @@ def update_runtime_settings(data: Dict[str, Any]) -> List[str]:
             value = data.get(key)
             if value in (None, ""):
                 continue
-            if key == "api_key" and _is_masked_api_key(str(value)):
+            text = _strip_config_whitespace(str(value)) if key in {"base_url", "api_key"} else str(value).strip()
+            if key == "api_key" and _is_masked_api_key(text):
                 continue
-            os.environ[env_var] = str(value).strip()
+            os.environ[env_var] = text
             updated.append(key)
         for key, env_var in proxy_mapping.items():
             if key not in data:
@@ -592,7 +604,7 @@ def persist_runtime_settings(data: Dict[str, Any]) -> None:
             or _configured(["METIS_LLM_BACKEND", "MIRO_LLM_BACKEND"], file_values, "openai")
         ).strip()
         existing_key = _runtime_value("api_key", backend, file_values, "")
-        incoming_key = str(data.get("api_key") or "").strip()
+        incoming_key = _strip_config_whitespace(str(data.get("api_key") or ""))
         base_url = normalize_base_url(
             backend,
             str(
@@ -754,7 +766,7 @@ def check_network_settings(data: Dict[str, Any]) -> Dict[str, Any]:
         )
         backend = str(profile.provider_id)
         file_values = _env_file_values()
-        incoming_key = str(normalized.get("api_key") or "").strip()
+        incoming_key = _strip_config_whitespace(str(normalized.get("api_key") or ""))
         if _is_masked_api_key(incoming_key):
             incoming_key = ""
         fallback_key = _runtime_value("api_key", backend, file_values, "")
@@ -963,7 +975,7 @@ def verify_provider_settings(data: Dict[str, Any]) -> Dict[str, Any]:
         model=str(data.get("model") or ""),
     )
     backend = str(profile.provider_id)
-    api_key = str(data.get("api_key") or "").strip()
+    api_key = _strip_config_whitespace(str(data.get("api_key") or ""))
     fallback_key = _runtime_value("api_key", backend, file_values, "")
     if not fallback_key and backend != provider:
         fallback_key = _runtime_value("api_key", provider, file_values, "")
@@ -1156,7 +1168,7 @@ def _provider_probe_context(data: Dict[str, Any]) -> Dict[str, Any]:
         model=str(data.get("model") or ""),
     )
     backend = str(profile.provider_id)
-    incoming_key = str(data.get("api_key") or "").strip()
+    incoming_key = _strip_config_whitespace(str(data.get("api_key") or ""))
     if _is_masked_api_key(incoming_key):
         incoming_key = ""
     fallback_key = _runtime_value("api_key", backend, file_values, "")
@@ -1626,11 +1638,11 @@ def _safe_error_message(exc: Exception) -> str:
 def save_first_run_config(data: Dict[str, Any]) -> Dict[str, Any]:
     with _PROVIDER_SETTINGS_LOCK:
         data = _normalized_runtime_settings_update(data)
-        api_key = str(data.get("api_key") or "").strip()
+        api_key = _strip_config_whitespace(str(data.get("api_key") or ""))
         if _is_masked_api_key(api_key):
             file_values = _env_file_values()
             backend = str(data.get("backend") or "openai")
-            api_key = _runtime_value("api_key", backend, file_values, "").strip()
+            api_key = _runtime_value("api_key", backend, file_values, "")
         if not api_key:
             raise ValueError("API key required")
         backend = str(data.get("backend") or "openai").strip()

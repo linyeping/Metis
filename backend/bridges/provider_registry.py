@@ -17,6 +17,14 @@ _ACTIVE_WORKSPACE_ROOT: str = ""
 _BUILTIN_PROVIDER_IDS = frozenset(str(profile.provider_id) for profile in builtin_provider_profiles())
 
 
+def _strip_config_whitespace(value: str) -> str:
+    return "".join(
+        char
+        for char in str(value or "")
+        if not char.isspace() and char not in "\u200b\u200c\u200d\ufeff"
+    )
+
+
 def _rebuild_registry(workspace_root: str = "") -> None:
     """FABLEADV-15: rebuild the provider registry by merging builtin defaults
     with user-defined providers.json (global + project). Later entries override
@@ -126,7 +134,7 @@ def normalize_chat_completions_url(
 
 def normalize_openai_api_base_url(base_url: str) -> str:
     """Normalize OpenAI-compatible API roots without breaking DeepSeek root URLs."""
-    base = str(base_url or "").strip().rstrip("/")
+    base = _strip_config_whitespace(str(base_url or "")).rstrip("/")
     if not base:
         return ""
 
@@ -263,13 +271,13 @@ def validate_provider_config(
 ) -> dict[str, Any]:
     """Validate provider settings locally without making a network request."""
     profile = resolve_provider_for_config(provider_id_or_alias, base_url=base_url, model=model)
-    resolved_base_url = str(base_url or profile.base_url or "").strip().rstrip("/")
+    resolved_base_url = _strip_config_whitespace(str(base_url or profile.base_url or "")).rstrip("/")
     raw_model = str(model or profile.default_model or "").strip()
     resolved_model, model_warning = normalize_provider_model(profile, raw_model)
-    provided_key = str(api_key or "").strip()
+    provided_key = _strip_config_whitespace(str(api_key or ""))
     has_api_key = bool(provided_key and not _is_masked_api_key(provided_key))
     if _is_masked_api_key(provided_key):
-        has_api_key = bool(str(masked_api_key_fallback or "").strip())
+        has_api_key = bool(_strip_config_whitespace(str(masked_api_key_fallback or "")))
 
     warnings: list[str] = []
     if model_warning:
@@ -358,13 +366,13 @@ def build_backend_kwargs(provider_id_or_alias: str, **kwargs: Any) -> tuple[str,
         normalized["model"] = model
 
     if profile.openai_compatible:
-        base_url = str(normalized.get("base_url") or profile.base_url or "").strip()
+        base_url = _strip_config_whitespace(str(normalized.get("base_url") or profile.base_url or ""))
         if not base_url:
             raise ProviderRegistryError(
                 f"Provider {profile.provider_id} requires base_url for OpenAI-compatible chat completions"
             )
         normalized["base_url"] = base_url.rstrip("/")
-        normalized.setdefault("api_key", "")
+        normalized["api_key"] = _strip_config_whitespace(str(normalized.get("api_key") or ""))
 
     if profile.api_key_required and "api_key" not in normalized:
         normalized["api_key"] = ""
