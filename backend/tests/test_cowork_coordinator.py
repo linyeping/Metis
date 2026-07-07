@@ -205,6 +205,211 @@ def test_cowork_summary_text_returns_user_facing_answer_from_report(tmp_path: Pa
     assert "art_summary" not in text
 
 
+def test_simple_question_fallback_uses_direct_answer_contract(tmp_path: Path) -> None:
+    plan = cowork_coordinator.build_cowork_plan(
+        "这个任务的意义是什么",
+        run_id="run_question",
+        session_id="session_question",
+        max_subruns=3,
+        execution_profile="local_worktree",
+        workspace_root=str(tmp_path),
+    )
+
+    assert len(plan["subruns"]) == 1
+    subrun = plan["subruns"][0]
+    assert subrun["title"] == "直接回答用户问题"
+    assert subrun["expected_artifacts"] == ["Natural final answer"]
+    assert "Do not create a report" in subrun["prompt"]
+    assert "Inspect current implementation" not in subrun["title"]
+
+
+def test_cowork_start_direct_answer_skips_subruns(tmp_path: Path) -> None:
+    events = list(
+        iter_local_cowork_events(
+            "这个任务的意义是什么",
+            workspace_root=str(tmp_path),
+            run_id="run_direct",
+            session_id="session_direct",
+            max_subruns=3,
+        )
+    )
+
+    kinds = [event["kind"] for event in events]
+    status = events[0]["payload"]
+    content = next(event for event in events if event["kind"] == "content")["payload"]["text"]
+
+    assert status["details"]["schema"] == cowork_coordinator.COWORK_START_DECISION_SCHEMA
+    assert status["details"]["decision"]["mode"] == "direct_answer"
+    assert "subrun_planned" not in kinds
+    assert "subrun_running" not in kinds
+    assert "artifact_created" not in kinds
+    assert "意义" in content
+    assert events[-1]["payload"]["tool_calls"] == 0
+
+
+def test_cowork_start_clarifies_underspecified_goal(tmp_path: Path) -> None:
+    events = list(
+        iter_local_cowork_events(
+            "做一下",
+            workspace_root=str(tmp_path),
+            run_id="run_clarify",
+            session_id="session_clarify",
+            max_subruns=3,
+        )
+    )
+
+    kinds = [event["kind"] for event in events]
+    status = events[0]["payload"]
+    content = next(event for event in events if event["kind"] == "content")["payload"]["text"]
+
+    assert status["details"]["decision"]["mode"] == "clarify"
+    assert "subrun_planned" not in kinds
+    assert "你想让我具体处理什么" in content
+    assert events[-1]["payload"]["tool_calls"] == 0
+
+
+def test_cowork_start_routes_project_questions_to_subruns() -> None:
+    project_decision = cowork_coordinator.decide_cowork_start("分析这个项目的架构是什么")
+    definition_decision = cowork_coordinator.decide_cowork_start("什么是单元测试？")
+
+    assert project_decision["mode"] == "cowork_plan"
+    assert project_decision["reason"] == "project_analysis_or_workspace_action_required"
+    assert definition_decision["mode"] == "direct_answer"
+
+
+def test_cowork_summary_text_does_not_dump_report_without_final_answer(tmp_path: Path) -> None:
+    worktree = tmp_path / "cowork-report"
+    report = worktree / "output" / "cowork" / "report.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "# 任务说明报告\n\n"
+        "## 变更摘要\n\n"
+        "- changed backend/runtime/cowork_coordinator.py\n\n"
+        "## 验证情况\n\n"
+        "- pytest passed\n",
+        encoding="utf-8",
+    )
+    summary = {
+        "goal": "这个任务的意义是什么",
+        "subruns": [
+            {
+                "title": "说明任务意义",
+                "status": "succeeded",
+                "worktree_workspace_root": str(worktree),
+                "diff": {"status": "?? output/cowork/report.md"},
+                "agent": {"final_text": "已完成该子任务的中文说明报告。"},
+            }
+        ],
+        "artifact": {"artifact_id": "art_summary"},
+    }
+
+    text = cowork_coordinator._cowork_summary_text(summary)
+
+    assert "changed backend/runtime/cowork_coordinator.py" not in text
+    assert "pytest passed" not in text
+    assert "没有形成可直接展示的自然回答" in text
+    assert "art_summary" not in text
+
+
+def test_answer_focused_subrun_succeeds_without_diff_or_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    worktree = tmp_path / "worktree"
+    source.mkdir()
+    worktree.mkdir()
+    plan = {
+        "schema": cowork_coordinator.COWORK_PLAN_SCHEMA,
+        "version": cowork_coordinator.COWORK_PLAN_VERSION,
+        "run_id": "run_answer",
+        "session_id": "session_answer",
+        "goal": "这个任务的意义是什么",
+        "status": "planned",
+        "created_at": time.time(),
+        "subruns": [
+            {
+                "subrun_id": "subrun_answer",
+                "title": "直接回答用户问题",
+                "objective": "Answer the user's question.",
+                "inputs": ["Parent Cowork goal"],
+                "expected_artifacts": ["Natural final answer"],
+                "acceptance_criteria": ["Final answer directly addresses the user's question."],
+                "dependencies": [],
+                "prompt": "Finish with 最终回答 only.",
+                "execution_profile": "local_worktree",
+            }
+        ],
+        "planner": {"mode": "test"},
+    }
+    record = WorktreeRecord(
+        worktree_id="wt_answer",
+        workspace_root=str(source),
+        repo_root=str(source),
+        worktree_path=str(worktree),
+        worktree_workspace_root=str(worktree),
+        branch="metis/run/cowork-answer",
+        base_ref="HEAD",
+        run_id="run_answer",
+        session_id="session_answer",
+        label="cowork-1",
+    )
+
+    def fake_create_worktree(workspace_root: str, *, run_id: str = "", session_id: str = "", label: str = "") -> WorktreeRecord:
+        assert workspace_root == str(source)
+        return record
+
+    def fake_diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = 200000) -> Dict[str, Any]:
+        return {
+            "schema": "metis.worktree_diff.v1",
+            "worktree": record.to_dict(),
+            "status": "",
+            "stat": "",
+            "patch": "",
+            "truncated": False,
+            "base_ref": "HEAD",
+        }
+
+    def fake_run_agent_loop(messages: List[Dict[str, Any]], config: AgentConfig):
+        assert config.enabled_tools == [
+            "read_file",
+            "read_multiple_files",
+            "list_directory",
+            "glob_search",
+            "grep_search",
+            "semantic_search",
+        ]
+        yield ContentEvent(text="## 最终回答\n\n这个任务的意义在于帮助用户把目标、价值和下一步判断说清楚。")
+        yield DoneEvent(total_turns=1, total_tool_calls=0, total_tokens=8)
+
+    monkeypatch.setattr(cowork_coordinator, "build_cowork_plan", lambda *_args, **_kwargs: plan)
+    monkeypatch.setattr(cowork_coordinator, "create_worktree", fake_create_worktree)
+    monkeypatch.setattr(cowork_coordinator, "diff_worktree", fake_diff_worktree)
+    monkeypatch.setattr(cowork_coordinator, "run_agent_loop", fake_run_agent_loop)
+
+    events = list(
+        iter_local_cowork_events(
+            "Run answer focused subrun with the supplied plan",
+            workspace_root=str(source),
+            run_id="run_answer",
+            session_id="session_answer",
+            max_subruns=1,
+            base_config=AgentConfig(llm_backend="fake", llm_model="fake", max_turns=4),
+        )
+    )
+
+    done = next(event for event in events if event["kind"] == "subrun_succeeded")
+    evidence = done["payload"]["result"]["evidence"]
+    content = next(event for event in events if event["kind"] == "content")["payload"]["text"]
+
+    assert evidence["success_evidence"] is True
+    assert evidence["counts"]["answer"] == 1
+    assert evidence["counts"]["diff"] == 0
+    assert "这个任务的意义在于" in content
+    assert "subrun" not in content.lower()
+    assert "artifact" not in content.lower()
+
+
 def test_local_cowork_runs_restricted_agent_inside_subrun_worktree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

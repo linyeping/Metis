@@ -45,10 +45,20 @@ COWORK_SUBRUN_EVENT_VERSION = 1
 COWORK_SUBRUN_EVIDENCE_SCHEMA = "metis.cowork_subrun_evidence.v1"
 COWORK_SUBRUN_EVIDENCE_VERSION = 1
 COWORK_PLANNER_SCHEMA = "metis.cowork_planner.v1"
+COWORK_START_DECISION_SCHEMA = "metis.cowork_start_decision.v1"
+COWORK_USER_ANSWER_SCHEMA = "metis.cowork_user_answer.v1"
 COWORK_SCHEDULER_SCHEMA = "metis.cowork_scheduler.v1"
 COWORK_VM_TASK_RUNNER_SCHEMA = "metis.cowork_vm_task_runner.v1"
 COWORK_VM_TASK_SCHEMA = "metis.cowork_vm_task.v1"
 
+COWORK_READ_ONLY_TOOLS = [
+    "read_file",
+    "read_multiple_files",
+    "list_directory",
+    "glob_search",
+    "grep_search",
+    "semantic_search",
+]
 COWORK_CODE_TOOLS = [
     "read_file",
     "read_multiple_files",
@@ -224,6 +234,7 @@ def summarize_cowork_results(
         "artifacts": _collect_subrun_artifacts(subruns),
         "diffs": _collect_subrun_diffs(subruns),
     }
+    payload["user_answer"] = _cowork_user_answer_payload(payload)
     path = out_dir / f"{summary_id}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     artifact = register_artifact(
@@ -237,6 +248,108 @@ def summarize_cowork_results(
         workspace_root=str(root),
     )
     return {**payload, "artifact": artifact}
+
+
+def decide_cowork_start(
+    goal: str,
+    *,
+    workspace_root: str = "",
+    base_config: Optional[AgentConfig] = None,
+) -> Dict[str, Any]:
+    """Classify a Cowork request before creating plans, worktrees, or subruns."""
+    goal_text = _clean_goal_text(goal)
+    if _cowork_goal_needs_clarification(goal_text):
+        return {
+            "schema": COWORK_START_DECISION_SCHEMA,
+            "mode": "clarify",
+            "reason": "goal_is_underspecified",
+            "message": "Cowork needs a clearer target before starting subruns.",
+            "question": _cowork_clarification_question(goal_text),
+            "confidence": 0.9,
+        }
+    if _cowork_goal_requires_project_analysis(goal_text):
+        return {
+            "schema": COWORK_START_DECISION_SCHEMA,
+            "mode": "cowork_plan",
+            "reason": "project_analysis_or_workspace_action_required",
+            "message": "Cowork will inspect the workspace with subruns.",
+            "confidence": 0.82,
+        }
+    if _is_direct_answer_goal(goal_text):
+        return {
+            "schema": COWORK_START_DECISION_SCHEMA,
+            "mode": "direct_answer",
+            "reason": "answerable_without_project_subruns",
+            "message": "Cowork can answer directly without creating subruns.",
+            "confidence": 0.78,
+        }
+    return {
+        "schema": COWORK_START_DECISION_SCHEMA,
+        "mode": "cowork_plan",
+        "reason": "specific_task_requires_cowork_execution",
+        "message": "Cowork will create a bounded plan.",
+        "confidence": 0.68,
+    }
+
+
+def _cowork_direct_answer_text(goal: str, *, base_config: Optional[AgentConfig], workspace_root: str) -> str:
+    goal_text = _clean_goal_text(goal)
+    if base_config is not None:
+        try:
+            answer = _call_direct_answer_model(goal=goal_text, workspace_root=workspace_root, base_config=base_config)
+            cleaned = _extract_cowork_answer_section(answer, allow_body_without_heading=True)
+            if cleaned:
+                return cleaned
+        except Exception:
+            pass
+    return _fallback_direct_answer(goal_text)
+
+
+def _call_direct_answer_model(*, goal: str, workspace_root: str, base_config: AgentConfig) -> str:
+    config = replace(
+        base_config,
+        enabled_tools=[],
+        temperature=min(max(float(base_config.temperature or 0.2), 0.0), 0.4),
+        max_tokens=min(max(256, int(base_config.max_tokens or 1024)), 1200),
+        timeout=max(1.0, min(float(base_config.timeout or 20.0), 20.0)),
+        max_turns=1,
+        system_prompt="",
+        surface_mode="cowork",
+        execution_mode="answer",
+        workspace_root=workspace_root or base_config.workspace_root,
+        source_workspace_root=workspace_root or base_config.source_workspace_root,
+    )
+    backend = _create_backend(config)
+    response = backend.chat(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You are Metis Cowork's startup gate. The request does not need workspace subruns. "
+                    "Answer the user directly in natural language. Do not write a report, task log, diff, evidence list, "
+                    "or markdown wrapper. If the user asks in Chinese, answer in Chinese. Keep it concise and useful."
+                ),
+            },
+            {
+                "role": "user",
+                "content": goal,
+            },
+        ],
+        tools=None,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        timeout=config.timeout,
+    )
+    return str(response.content or "")
+
+
+def _fallback_direct_answer(goal: str) -> str:
+    text = _clean_goal_text(goal)
+    if "意义" in text or "为什么" in text or "为何" in text:
+        return "这个任务的意义在于把模糊目标转成清晰判断：先确认为什么要做、做完能带来什么价值，再决定是否需要进一步拆解执行。"
+    if re.search(r"[\u4e00-\u9fff]", text):
+        return "这个问题可以直接回答，不需要启动 Cowork 子任务。我的判断是：先把问题本身说清楚，再决定是否需要项目分析、产物或代码修改。"
+    return "This can be answered directly without starting Cowork subruns. The useful next step is to clarify the goal, expected value, and whether project analysis or file changes are actually needed."
 
 
 def _planner_metadata(
@@ -264,6 +377,10 @@ def _planner_metadata(
         "optional_subrun_fields": [
             "vm_tasks",
         ],
+        "final_answer_contract": {
+            "main_chat": "user-facing natural answer only",
+            "details": "reports, diffs, evidence, and subrun markdown stay in artifacts or activity details",
+        },
     }
     if base_config is not None:
         payload.update(
@@ -351,7 +468,7 @@ def _planner_user_prompt(
         '      "title": "short task title",\n'
         '      "objective": "specific outcome for this subrun",\n'
         '      "inputs": ["needed source, file, context, or prior output"],\n'
-        '      "expected_artifacts": ["diff, report, document, stdout evidence, etc."],\n'
+        '      "expected_artifacts": ["natural final answer, diff, report, document, stdout evidence, etc."],\n'
         '      "acceptance_criteria": ["concrete check that proves completion"],\n'
         '      "execution_profile": "local_worktree or local_vm",\n'
         '      "dependencies": ["1-based prior subrun numbers only, e.g. 1"],\n'
@@ -372,9 +489,12 @@ def _planner_user_prompt(
         "Rules:\n"
         "- Use 1 to the maximum subruns only.\n"
         "- Dependencies may reference only earlier subrun numbers; use [] when independent.\n"
+        "- For a simple question or conceptual request, use one answer-focused subrun.\n"
+        "- Do not create a report/document/diff unless the user explicitly asks for that artifact or the task truly changes files.\n"
         "- Use local_vm only for test/build/data/command-heavy validation when it is allowed.\n"
         "- When execution_profile is local_vm, include vm_tasks with concrete commands to run inside MetisRuntime.\n"
-        "- Every subrun must produce either diff evidence, artifact evidence, stdout/test evidence, or a report.\n"
+        "- Every subrun must produce either a natural final answer, diff evidence, artifact evidence, stdout/test evidence, or a report.\n"
+        "- The coordinator will show only the final natural answer in chat; report/diff/evidence belongs in artifacts or activity details.\n"
         "- Acceptance criteria must be observable and specific."
     )
 
@@ -451,7 +571,7 @@ def _normalize_planner_subruns(
             vm_tasks = _default_vm_tasks(goal, title, profile)
         inputs = inputs or _default_subrun_inputs(goal, index)
         expected_artifacts = expected_artifacts or _default_expected_artifacts(goal, title)
-        acceptance_criteria = acceptance_criteria or _default_acceptance_criteria(title)
+        acceptance_criteria = acceptance_criteria or _default_acceptance_criteria(title, goal=goal)
         row = CoworkSubrunPlan(
             subrun_id=f"subrun_{uuid.uuid4().hex[:10]}",
             title=title,
@@ -493,7 +613,7 @@ def _deterministic_subruns(goal: str, *, max_subruns: int, default_profile: str)
         objective = _deterministic_objective(goal, title)
         inputs = _default_subrun_inputs(goal, index)
         expected_artifacts = _default_expected_artifacts(goal, title)
-        acceptance_criteria = _default_acceptance_criteria(title)
+        acceptance_criteria = _default_acceptance_criteria(title, goal=goal)
         vm_tasks = _default_vm_tasks(goal, title, profile)
         rows.append(
             CoworkSubrunPlan(
@@ -539,16 +659,48 @@ def iter_local_cowork_events(
     source_root = Path(source_workspace_root or workspace_root or ".").expanduser().resolve()
     default_subrun_profile = _subrun_execution_profile(execution_profile)
     resume_payload = resume_state if isinstance(resume_state, dict) else {}
-    plan = _plan_from_resume_state(resume_payload, run_id=run_id, session_id=session_id) or build_cowork_plan(
-        goal,
-        run_id=run_id,
-        session_id=session_id,
-        max_subruns=max_subruns,
-        execution_profile=execution_profile,
-        base_config=base_config,
-        workspace_root=str(source_root),
-    )
     resumed = bool(resume_payload)
+    plan = _plan_from_resume_state(resume_payload, run_id=run_id, session_id=session_id) if resumed else None
+    if plan is None:
+        decision = decide_cowork_start(goal, workspace_root=str(source_root), base_config=base_config)
+        if decision["mode"] in {"direct_answer", "clarify"}:
+            phase = "answering" if decision["mode"] == "direct_answer" else "clarifying"
+            yield _runtime_status(
+                phase,
+                str(decision.get("message") or ""),
+                details={
+                    "schema": COWORK_START_DECISION_SCHEMA,
+                    "decision": decision,
+                },
+            )
+            _raise_if_cancelled(cancelled)
+            if decision["mode"] == "direct_answer":
+                text = _cowork_direct_answer_text(goal, base_config=base_config, workspace_root=str(source_root))
+            else:
+                text = str(decision.get("question") or _cowork_clarification_question(goal))
+            yield {"type": "content", "kind": "content", "payload": {"text": text}}
+            yield {
+                "type": "done",
+                "kind": "done",
+                "payload": {
+                    "turns": 1,
+                    "tool_calls": 0,
+                    "context_ledger": {
+                        "cowork_start_decision": decision["mode"],
+                        "cowork_start_reason": str(decision.get("reason") or ""),
+                    },
+                },
+            }
+            return
+        plan = build_cowork_plan(
+            goal,
+            run_id=run_id,
+            session_id=session_id,
+            max_subruns=max_subruns,
+            execution_profile=execution_profile,
+            base_config=base_config,
+            workspace_root=str(source_root),
+        )
 
     yield _runtime_status(
         "resuming" if resumed else "planning",
@@ -991,7 +1143,7 @@ def _execute_cowork_subrun(
             failure_reasons.append(
                 _failure_reason(
                     "SUBRUN_MISSING_EVIDENCE",
-                    "Subrun produced no diff, artifact, stdout/test evidence, or failure reason.",
+                    "Subrun produced no final answer, diff, artifact, stdout/test evidence, or failure reason.",
                     source="cowork_coordinator",
                 )
             )
@@ -1430,6 +1582,8 @@ def _safe_filename_fragment(value: str) -> str:
 
 def _task_candidates(goal: str, *, max_subruns: int) -> List[str]:
     limit = _bounded_subrun_limit(max_subruns)
+    if _is_direct_answer_goal(goal) and not _cowork_goal_requires_project_analysis(goal):
+        return [_direct_answer_task_title(goal)]
     raw_lines = [line.strip() for line in goal.splitlines() if line.strip()]
     numbered = [_strip_numbered_task_marker(line) for line in raw_lines]
     numbered = [line for line in numbered if line]
@@ -1487,6 +1641,12 @@ def _compact_title(text: str, index: int) -> str:
     return title or f"Subtask {index}"
 
 
+def _direct_answer_task_title(goal: str) -> str:
+    if re.search(r"[\u4e00-\u9fff]", str(goal or "")):
+        return "直接回答用户问题"
+    return "Answer the user directly"
+
+
 def _subrun_prompt(
     goal: str,
     title: str,
@@ -1497,6 +1657,20 @@ def _subrun_prompt(
     acceptance_criteria: List[str],
     dependencies: List[str],
 ) -> str:
+    direct_answer = _expects_direct_answer(goal=goal, title=title, expected_artifacts=expected_artifacts)
+    if direct_answer:
+        return (
+            f"Parent cowork goal:\n{goal}\n\n"
+            f"Subrun title:\n{title}\n\n"
+            f"Objective:\n{objective}\n\n"
+            f"Inputs:\n{_bullet_lines(inputs)}\n\n"
+            f"Expected output:\n{_bullet_lines(expected_artifacts)}\n\n"
+            f"Acceptance criteria:\n{_bullet_lines(acceptance_criteria)}\n\n"
+            f"Dependencies:\n{_bullet_lines(dependencies) if dependencies else '- none'}\n\n"
+            "Answer the user directly in natural language. Do not create a report, document, diff, or file unless "
+            "the user explicitly asked for one. Finish with a section titled '最终回答' that contains only the "
+            "user-facing answer; keep reasoning notes, evidence, and implementation details out of that section."
+        )
     return (
         f"Parent cowork goal:\n{goal}\n\n"
         f"Subrun title:\n{title}\n\n"
@@ -1506,7 +1680,9 @@ def _subrun_prompt(
         f"Acceptance criteria:\n{_bullet_lines(acceptance_criteria)}\n\n"
         f"Dependencies:\n{_bullet_lines(dependencies) if dependencies else '- none'}\n\n"
         "Work in an isolated local worktree. Return the artifacts produced, changed files, "
-        "validation evidence, and a concise diff summary. Do not promote changes to the source workspace."
+        "validation evidence, and a concise diff summary. Do not promote changes to the source workspace. "
+        "If there is a conclusion for the user, finish with a '最终回答' section that contains only that conclusion; "
+        "do not paste reports, diffs, or evidence into the final answer."
     )
 
 
@@ -1918,6 +2094,8 @@ def _default_workspace_scan_command(label: str) -> str:
 
 
 def _default_subrun_inputs(goal: str, index: int) -> List[str]:
+    if _is_direct_answer_goal(goal) and not _cowork_goal_requires_project_analysis(goal):
+        return ["Parent Cowork goal"]
     items = ["Parent Cowork goal", "Current source workspace"]
     if index > 1:
         items.append("Earlier subrun summaries and artifacts")
@@ -1927,6 +2105,8 @@ def _default_subrun_inputs(goal: str, index: int) -> List[str]:
 
 
 def _default_expected_artifacts(goal: str, title: str) -> List[str]:
+    if _is_direct_answer_goal(goal) and not _cowork_goal_requires_project_analysis(goal):
+        return ["Natural final answer"]
     if _is_artifact_text(f"{goal} {title}"):
         return ["Registered document/report artifact", "Rendered or inspected artifact evidence", "Concise artifact summary"]
     if "test" in f"{goal} {title}".lower() or "验证" in f"{goal} {title}":
@@ -1934,7 +2114,12 @@ def _default_expected_artifacts(goal: str, title: str) -> List[str]:
     return ["worktree diff or investigation notes", "concise result summary", "validation evidence"]
 
 
-def _default_acceptance_criteria(title: str) -> List[str]:
+def _default_acceptance_criteria(title: str, *, goal: str = "") -> List[str]:
+    if _is_direct_answer_goal(goal or title) and not _cowork_goal_requires_project_analysis(goal or title):
+        return [
+            "Final answer directly addresses the user's question in natural language.",
+            "No report, document, diff, or file is created unless explicitly requested.",
+        ]
     return [
         f"{title} has a clear result summary.",
         "Changed files, artifacts, or stdout evidence are attached to the subrun result.",
@@ -1948,6 +2133,221 @@ def _deterministic_objective(goal: str, title: str) -> str:
 
 def _is_artifact_text(text: str) -> bool:
     return any(token in str(text or "").lower() for token in ["report", "报告", "docx", "document", "pdf", "xlsx", "spreadsheet", "pptx", "presentation", "office"])
+
+
+def _clean_goal_text(value: str) -> str:
+    return " ".join(str(value or "").replace("\x00", "").split()).strip()
+
+
+def _cowork_goal_needs_clarification(goal: str) -> bool:
+    text = _clean_goal_text(goal)
+    if not text:
+        return True
+    lower = text.lower()
+    exact = {
+        "做一下",
+        "处理一下",
+        "优化一下",
+        "改一下",
+        "看看",
+        "看一下",
+        "继续",
+        "下一步",
+        "这个任务",
+        "任务",
+        "帮我做",
+        "do it",
+        "continue",
+        "next",
+        "fix it",
+        "make it better",
+        "handle this",
+    }
+    if lower in exact:
+        return True
+    if _is_direct_answer_goal(text):
+        return False
+    vague_actions = ["做", "处理", "优化", "改", "弄", "搞", "继续", "do", "fix", "handle", "improve", "continue"]
+    vague_targets = ["这个", "这个任务", "它", "这里", "this", "it", "that"]
+    has_vague_action = any(token in lower for token in vague_actions)
+    has_vague_target = any(token in lower for token in vague_targets)
+    if has_vague_action and has_vague_target and len(text) <= 28:
+        return True
+    if has_vague_action and not _cowork_goal_requires_project_analysis(text) and len(text) <= 12:
+        return True
+    return False
+
+
+def _cowork_goal_requires_project_analysis(goal: str) -> bool:
+    text = _clean_goal_text(goal)
+    if not text:
+        return False
+    lower = text.lower()
+    project_markers = [
+        "this project",
+        "current project",
+        "repo",
+        "repository",
+        "codebase",
+        "workspace",
+        "current implementation",
+        "current code",
+        "this file",
+        "this function",
+        "test failure",
+        "build failure",
+        "error log",
+        "stack trace",
+        "当前项目",
+        "这个项目",
+        "本项目",
+        "当前仓库",
+        "这个仓库",
+        "代码库",
+        "当前实现",
+        "当前代码",
+        "这个文件",
+        "这个函数",
+        "这段代码",
+        "报错",
+        "错误日志",
+        "测试失败",
+        "构建失败",
+    ]
+    action_markers = [
+        "fix",
+        "implement",
+        "change",
+        "edit",
+        "refactor",
+        "debug",
+        "test",
+        "validate",
+        "build",
+        "inspect current",
+        "analyze current",
+        "修复",
+        "实现",
+        "修改",
+        "重构",
+        "调试",
+        "测试",
+        "验证",
+        "构建",
+        "检查当前",
+        "分析当前",
+    ]
+    if any(marker in lower for marker in project_markers):
+        return True
+    if _looks_like_general_definition_question(text):
+        return False
+    return any(marker in lower for marker in action_markers)
+
+
+def _cowork_clarification_question(goal: str) -> str:
+    if re.search(r"[\u4e00-\u9fff]", str(goal or "")):
+        return "你想让我具体处理什么？请补充目标对象和期望产出：是直接解释、分析项目，还是修改/验证某个文件或功能？"
+    return "What exactly should I do? Please add the target and expected outcome: a direct explanation, project analysis, or a file/code change with validation."
+
+
+def _looks_like_general_definition_question(goal: str) -> bool:
+    text = _clean_goal_text(goal)
+    lower = text.lower()
+    if re.search(r"\b(what is|what are|why is|why are|how does|how do)\b", lower):
+        return True
+    return any(marker in text for marker in ["什么是", "是什么", "为什么", "为何", "怎么理解", "如何理解", "意义"])
+
+
+def _expects_direct_answer(*, goal: str, title: str, expected_artifacts: List[str]) -> bool:
+    text = " ".join([goal, title, " ".join(str(item) for item in expected_artifacts if item)])
+    return _is_direct_answer_goal(goal) or _contains_direct_answer_marker(text)
+
+
+def _subrun_expects_direct_answer(subrun: Dict[str, Any]) -> bool:
+    expected = " ".join(str(item) for item in subrun.get("expected_artifacts", []) if item) if isinstance(subrun.get("expected_artifacts"), list) else ""
+    text = " ".join(
+        [
+            str(subrun.get("title") or ""),
+            str(subrun.get("objective") or ""),
+            str(subrun.get("prompt") or ""),
+            expected,
+        ]
+    )
+    return _contains_direct_answer_marker(text)
+
+
+def _contains_direct_answer_marker(text: str) -> bool:
+    normalized = str(text or "").lower()
+    return any(
+        marker in normalized
+        for marker in [
+            "natural final answer",
+            "final answer",
+            "direct answer",
+            "user-facing answer",
+            "answer the user",
+            "最终回答",
+            "直接回答",
+            "自然回答",
+            "用户可读回答",
+        ]
+    )
+
+
+def _is_direct_answer_goal(text: str) -> bool:
+    source = " ".join(str(text or "").split()).strip()
+    if not source:
+        return False
+    lower = source.lower()
+    if _is_artifact_text(source):
+        return False
+    if len([line for line in str(text or "").splitlines() if line.strip()]) > 2:
+        return False
+    action_tokens = [
+        "fix",
+        "implement",
+        "change",
+        "edit",
+        "create",
+        "build",
+        "test",
+        "validate",
+        "commit",
+        "push",
+        "diff",
+        "artifact",
+        "修复",
+        "实现",
+        "修改",
+        "创建",
+        "生成",
+        "构建",
+        "测试",
+        "验证",
+        "提交",
+        "推送",
+        "产物",
+    ]
+    if any(token in lower for token in action_tokens) and not _looks_like_general_definition_question(source):
+        return False
+    question_like = bool(re.search(r"[?？]\s*$", source)) or bool(
+        re.search(r"\b(what|why|how|when|where|whether|should|can|could|is|are|do|does)\b", lower)
+    )
+    chinese_question_markers = [
+        "是什么",
+        "为什么",
+        "为何",
+        "意义",
+        "怎么理解",
+        "如何理解",
+        "怎么看",
+        "是否",
+        "可以吗",
+        "好吗",
+        "对吗",
+        "吗",
+    ]
+    return question_like or any(marker in source for marker in chinese_question_markers)
 
 
 def _bullet_lines(items: List[str]) -> str:
@@ -2043,6 +2443,13 @@ def _run_subrun_agent(
     subrun_id = str(subrun.get("subrun_id") or record.worktree_id)
     title = str(subrun.get("title") or subrun_id)
     prompt = str(subrun.get("prompt") or title)
+    finish_instruction = (
+        "Finish with a section titled '最终回答' containing only the natural answer for the user. "
+        "Do not create or paste reports, diffs, evidence lists, or file-change summaries unless explicitly requested."
+        if _subrun_expects_direct_answer(subrun)
+        else "Finish with a concise summary of files changed, artifacts produced, validation performed, and unresolved risks. "
+        "If there is a user-facing conclusion, put only that conclusion in a section titled '最终回答'."
+    )
     config = replace(
         base_config,
         system_prompt=_cowork_subrun_system_prompt(base_config.system_prompt),
@@ -2068,8 +2475,7 @@ def _run_subrun_agent(
                 f"Subrun title: {title}\n\n"
                 f"Subrun task:\n{prompt}\n\n"
                 "Work only inside this subrun worktree. Make focused changes or produce requested artifacts. "
-                "Do not promote changes to the source workspace. Finish with a concise summary of files changed, "
-                "artifacts produced, and validation performed."
+                f"Do not promote changes to the source workspace. {finish_instruction}"
             ),
         }
     ]
@@ -2174,13 +2580,18 @@ def _cowork_subrun_system_prompt(base: str) -> str:
         "- Do not edit, delete, or promote files in the source workspace directly.\n"
         "- Keep changes focused on the assigned subtask.\n"
         "- If producing reports/documents, save them under output/ or .metis/cowork/ inside the worktree.\n"
-        "- Finish with a concise summary of changed files, artifacts, tests, and unresolved risks."
+        "- The main chat receives only the coordinator's final natural answer.\n"
+        "- Do not paste reports, diffs, or evidence into a final answer section; those details belong in artifacts or activity details.\n"
+        "- For answer-focused subruns, finish with '最终回答' and only the user-facing answer.\n"
+        "- For code/artifact subruns, summarize changed files, artifacts, tests, and unresolved risks outside any final answer section."
     )
     text = str(base or "").strip()
     return f"{text}\n\n---\n\n{guard}" if text else guard
 
 
 def _subrun_enabled_tools(goal: str, subrun: Dict[str, Any]) -> List[str]:
+    if _subrun_expects_direct_answer(subrun) and not _is_artifact_subrun(goal, subrun):
+        return list(COWORK_READ_ONLY_TOOLS)
     tools = list(COWORK_CODE_TOOLS)
     if _is_artifact_subrun(goal, subrun):
         tools.extend(name for name in COWORK_ARTIFACT_TOOLS if name not in tools)
@@ -2625,8 +3036,9 @@ def _collect_subrun_evidence(
     artifact_evidence = _evidence_artifacts(artifacts)
     artifact_evidence.extend(_local_vm_artifact_evidence(vm_result))
     stdout_test = _stdout_test_evidence(agent_result=agent_result, vm_result=vm_result)
+    answer_evidence = _answer_evidence(subrun=subrun, agent_result=agent_result)
     clean_failure_reasons = _clean_failure_reasons(failure_reasons)
-    success_evidence = bool(diff_evidence.get("has_changes")) or bool(artifact_evidence) or bool(stdout_test)
+    success_evidence = bool(diff_evidence.get("has_changes")) or bool(artifact_evidence) or bool(stdout_test) or bool(answer_evidence)
     has_evidence = success_evidence or bool(clean_failure_reasons)
     return {
         "schema": COWORK_SUBRUN_EVIDENCE_SCHEMA,
@@ -2640,11 +3052,13 @@ def _collect_subrun_evidence(
             "diff": 1 if diff_evidence.get("has_changes") else 0,
             "artifacts": len(artifact_evidence),
             "stdout_test": len(stdout_test),
+            "answer": len(answer_evidence),
             "failure_reasons": len(clean_failure_reasons),
         },
         "diff": diff_evidence,
         "artifacts": artifact_evidence,
         "stdout_test": stdout_test,
+        "answer": answer_evidence,
         "failure_reasons": clean_failure_reasons,
     }
 
@@ -2853,6 +3267,22 @@ def _stdout_test_evidence(*, agent_result: Dict[str, Any], vm_result: Dict[str, 
     return rows[:100]
 
 
+def _answer_evidence(*, subrun: Dict[str, Any], agent_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if not _subrun_expects_direct_answer(subrun) or not isinstance(agent_result, dict):
+        return []
+    answer = _extract_cowork_answer_section(str(agent_result.get("final_text") or ""), allow_body_without_heading=True)
+    if not answer:
+        return []
+    return [
+        {
+            "source": "agent_final_answer",
+            "kind": "natural_answer",
+            "chars": len(answer),
+            "preview": _truncate(_plain_answer_preview(answer), 500),
+        }
+    ]
+
+
 def _write_subrun_artifact(
     *,
     subrun: Dict[str, Any],
@@ -2968,47 +3398,60 @@ def _cowork_summary_text(summary: Dict[str, Any]) -> str:
     subruns = summary.get("subruns") if isinstance(summary.get("subruns"), list) else []
     done = sum(1 for item in subruns if isinstance(item, dict) and item.get("status") in {"done", "succeeded", "promoted"})
     failed = sum(1 for item in subruns if isinstance(item, dict) and item.get("status") == "failed")
-    answer = _cowork_answer_text(summary, subruns)
+    user_answer = summary.get("user_answer") if isinstance(summary.get("user_answer"), dict) else {}
+    answer = str(user_answer.get("text") or "").strip() or _cowork_answer_text(summary, subruns)
     if answer:
         if failed:
-            return f"{answer}\n\n注意：Cowork 有 {failed} 个子任务失败，上面只汇总已完成子任务中的可用结论。"
+            return f"{answer}\n\n注意：Cowork 有 {failed} 个子任务失败，细节已放在右栏活动和汇总 artifact。"
         return answer
-    artifact = summary.get("artifact") if isinstance(summary.get("artifact"), dict) else {}
-    lines = [
-        "Cowork 已完成，但没有抽取到可直接展示的回答正文。",
-        f"子任务：共 {len(subruns)} 个，完成 {done} 个，失败 {failed} 个。",
-    ]
-    if artifact.get("artifact_id"):
-        lines.append(f"汇总 artifact: {artifact.get('artifact_id')}")
-    return "\n".join(lines)
+    if done:
+        return "Cowork 已完成，但没有形成可直接展示的自然回答；报告、diff 和 evidence 已放在右栏活动和汇总 artifact。"
+    return "Cowork 没有得到可用回答；错误、diff 和 evidence 已放在右栏活动和汇总 artifact。"
+
+
+def _cowork_user_answer_payload(summary: Dict[str, Any]) -> Dict[str, Any]:
+    subruns = summary.get("subruns") if isinstance(summary.get("subruns"), list) else []
+    text = _cowork_answer_text(summary, subruns)
+    return {
+        "schema": COWORK_USER_ANSWER_SCHEMA,
+        "text": text,
+        "style": "natural_answer",
+        "detail_policy": "reports_diffs_evidence_in_artifacts_or_activity_details",
+        "available": bool(text),
+    }
 
 
 def _cowork_answer_text(summary: Dict[str, Any], subruns: List[Any]) -> str:
-    for subrun in reversed([item for item in subruns if _subrun_terminal_success(item)]):
-        for text in _cowork_subrun_markdown_texts(subrun):
-            section = _extract_cowork_answer_section(text)
-            if section:
-                return section
-        final_text = _subrun_final_text(subrun)
-        section = _extract_cowork_answer_section(final_text)
-        if section:
-            return section
-
-    excerpts = []
+    candidates: List[str] = []
     for subrun in [item for item in subruns if _subrun_terminal_success(item)]:
-        final_text = _strip_cowork_status_noise(_subrun_final_text(subrun))
-        if not final_text:
+        final_text = _subrun_final_text(subrun)
+        section = _extract_cowork_answer_section(final_text, allow_body_without_heading=_subrun_expects_direct_answer(subrun))
+        if section:
+            candidates.append(section)
+        for text in _cowork_subrun_markdown_texts(subrun):
+            section = _extract_cowork_answer_section(text, allow_body_without_heading=False)
+            if section:
+                candidates.append(section)
+    return _merge_user_answer_candidates(candidates)
+
+
+def _merge_user_answer_candidates(candidates: List[str]) -> str:
+    clean: List[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = _sanitize_user_answer(candidate)
+        key = " ".join(text.lower().split())
+        if not text or key in seen:
             continue
-        title = _clean_plan_text(subrun.get("title") if isinstance(subrun, dict) else "", 80)
-        excerpt = _truncate(final_text, 360)
-        excerpts.append(f"- {title}: {excerpt}" if title else f"- {excerpt}")
-        if len(excerpts) >= 3:
+        seen.add(key)
+        clean.append(text)
+        if len(clean) >= 3:
             break
-    if excerpts:
-        goal = _clean_plan_text(summary.get("goal") if isinstance(summary, dict) else "", 120)
-        prefix = f"关于“{goal}”，Cowork 汇总到的结论是：" if goal else "Cowork 汇总到的结论是："
-        return "\n".join([prefix, *excerpts])
-    return ""
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return _truncate(clean[0], 2200)
+    return _truncate("\n\n".join(clean), 2600)
 
 
 def _subrun_terminal_success(item: Any) -> bool:
@@ -3092,7 +3535,7 @@ def _cowork_markdown_paths_from_patch_preview(patch: str) -> List[str]:
     return paths
 
 
-def _extract_cowork_answer_section(text: str) -> str:
+def _extract_cowork_answer_section(text: str, *, allow_body_without_heading: bool = True) -> str:
     source = str(text or "").replace("\r\n", "\n").strip()
     if not source:
         return ""
@@ -3116,10 +3559,14 @@ def _extract_cowork_answer_section(text: str) -> str:
             section = source[match.end():end].strip()
             cleaned = _strip_cowork_status_noise(section)
             if cleaned:
-                return _truncate(cleaned, 2200)
+                return _truncate(_sanitize_user_answer(cleaned), 2200)
+    if headings:
+        return ""
+    if not allow_body_without_heading:
+        return ""
     cleaned = _strip_cowork_status_noise(source)
-    if cleaned and not _looks_like_cowork_completion_only(cleaned):
-        return _truncate(cleaned, 1400)
+    if cleaned and not _looks_like_cowork_completion_only(cleaned) and not _looks_like_detail_report(cleaned):
+        return _truncate(_sanitize_user_answer(cleaned), 1400)
     return ""
 
 
@@ -3134,8 +3581,15 @@ def _strip_cowork_status_noise(text: str) -> str:
         "## 变更摘要",
         "## 验证情况",
         "## 未解决风险",
+        "Changed files",
+        "Files changed",
+        "Validation",
+        "Artifacts",
+        "Evidence",
     )
     if lines and any(lines[0].strip().startswith(prefix) for prefix in noise_prefixes):
+        return ""
+    if len(lines) == 1 and _looks_like_cowork_completion_only(lines[0]):
         return ""
     return "\n".join(lines).strip()
 
@@ -3144,7 +3598,84 @@ def _looks_like_cowork_completion_only(text: str) -> bool:
     normalized = " ".join(str(text or "").lower().split())
     if not normalized:
         return True
-    return normalized.startswith("cowork local run complete") or normalized.startswith("cowork 已完成")
+    return normalized in {"done", "finished", "completed", "success", "succeeded", "完成", "已完成"} or normalized.startswith("cowork local run complete") or normalized.startswith("cowork 已完成")
+
+
+def _sanitize_user_answer(text: str) -> str:
+    source = str(text or "").replace("\r\n", "\n").strip()
+    if not source:
+        return ""
+    source = re.sub(r"(?m)^#{1,6}\s*(最终回答|直接回答|final answer|answer)\s*$", "", source, flags=re.IGNORECASE).strip()
+    sections = list(re.finditer(r"(?m)^(#{1,6})\s*(.+?)\s*$", source))
+    if not sections:
+        return source
+    kept: List[str] = []
+    cursor = 0
+    for index, match in enumerate(sections):
+        if match.start() > cursor:
+            kept.append(source[cursor:match.start()].strip())
+        title = match.group(2).strip()
+        end = sections[index + 1].start() if index + 1 < len(sections) else len(source)
+        body = source[match.end():end].strip()
+        cursor = end
+        if _is_detail_heading(title):
+            continue
+        kept.append(f"{match.group(0).strip()}\n\n{body}".strip())
+    if cursor < len(source):
+        kept.append(source[cursor:].strip())
+    return "\n\n".join(part for part in kept if part).strip()
+
+
+def _plain_answer_preview(text: str) -> str:
+    return re.sub(r"\s+", " ", _sanitize_user_answer(text)).strip()
+
+
+def _looks_like_detail_report(text: str) -> bool:
+    source = str(text or "")
+    headings = re.findall(r"(?m)^#{1,6}\s*(.+?)\s*$", source)
+    if any(_is_detail_heading(title) for title in headings):
+        return True
+    lower = source.lower()
+    markers = [
+        "diff",
+        "evidence",
+        "artifacts",
+        "changed files",
+        "files changed",
+        "validation",
+        "tests",
+        "变更摘要",
+        "验证情况",
+        "产物",
+        "证据",
+    ]
+    return sum(1 for marker in markers if marker in lower) >= 2
+
+
+def _is_detail_heading(title: str) -> bool:
+    lower = str(title or "").strip().lower()
+    return any(
+        marker in lower
+        for marker in [
+            "diff",
+            "evidence",
+            "artifact",
+            "changed file",
+            "file change",
+            "validation",
+            "test",
+            "risk",
+            "report",
+            "产物",
+            "证据",
+            "变更",
+            "验证",
+            "测试",
+            "风险",
+            "报告",
+            "文件",
+        ]
+    )
 
 
 def _raise_if_cancelled(cancelled: Callable[[], bool] | None) -> None:
@@ -3189,8 +3720,11 @@ __all__ = [
     "COWORK_SUBRUN_EVIDENCE_VERSION",
     "COWORK_SUBRUN_EVENT_SCHEMA",
     "COWORK_SUBRUN_EVENT_VERSION",
+    "COWORK_START_DECISION_SCHEMA",
     "COWORK_SUMMARY_SCHEMA",
+    "COWORK_USER_ANSWER_SCHEMA",
     "build_cowork_plan",
+    "decide_cowork_start",
     "has_cowork_scheduler_state",
     "iter_local_cowork_events",
     "load_cowork_scheduler_state",
