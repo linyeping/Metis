@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, BarChart3, Cpu, Globe, HardDrive, Info, MessageSquare, Monitor, Palette, Plug, Search, Terminal, Wrench } from 'lucide-react';
+import { ArrowLeft, BarChart3, Cpu, Globe, HardDrive, Info, Maximize2, MessageSquare, Minus, Monitor, Palette, Plug, Search, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionWritableRoot,
   createPermissionRule,
@@ -779,6 +779,20 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
+            <header className="titlebar settings-window-titlebar" aria-label={t('窗口控制')}>
+              <div className="titlebar-brand" aria-hidden="true" />
+              <div className="titlebar-actions settings-window-actions">
+                <button type="button" title={t('最小化')} onClick={() => void window.metis.window('minimize')}>
+                  <Minus size={15} />
+                </button>
+                <button type="button" title={t('最大化或还原')} onClick={() => void window.metis.window('toggle-maximize')}>
+                  <Maximize2 size={14} />
+                </button>
+                <button type="button" title={t('隐藏到托盘')} onClick={() => void window.metis.window('hide')}>
+                  <X size={15} />
+                </button>
+              </div>
+            </header>
             <aside className="settings-sidebar">
               <div className="settings-sidebar-top">
                 <button type="button" className="settings-back-button" onClick={() => setOpen(false)}>
