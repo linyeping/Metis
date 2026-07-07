@@ -400,6 +400,20 @@ describe('requestJson error handling', () => {
     fetchMock.mockReturnValueOnce(jsonResponse({}, 500));
     await expect(api.getSession('err')).rejects.toThrow('HTTP 500');
   });
+
+  it('bounds network checks with an abort signal and friendly timeout message', async () => {
+    fetchMock.mockRejectedValueOnce(new DOMException('Timed out', 'TimeoutError'));
+
+    await expect(api.checkNetworkSettings({
+      backend: 'custom-openai',
+      baseUrl: 'https://relay.example/v1',
+      model: 'gpt-5.5',
+      apiKey: 'sk-test',
+    })).rejects.toThrow('网络检查超时');
+
+    const [, opts] = fetchMock.mock.calls[0];
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
+  });
 });
 
 // ---------------------------------------------------------------------------

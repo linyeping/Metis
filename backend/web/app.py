@@ -9,7 +9,6 @@ import threading
 import time
 import uuid
 from dataclasses import replace
-from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
@@ -65,7 +64,7 @@ from backend.runtime.checkpoint_store import (  # noqa: E402
     load_latest as load_latest_runtime_checkpoint,
     save_checkpoint as save_runtime_checkpoint,
 )
-from backend.core.paths import legacy_miro_path, metis_dir, metis_path  # noqa: E402
+from backend.core.paths import legacy_miro_path, metis_path  # noqa: E402
 from backend.runtime.tool_registry import get_registry  # noqa: E402
 from backend.runtime.error_catalog import ErrorInfo, classify_llm_error  # noqa: E402
 from backend.runtime.path_safety import (  # noqa: E402
@@ -125,6 +124,7 @@ from backend.web.file_extractors import (  # noqa: E402
     extract_uploaded_file,
     truncate_text,
 )
+from backend.web.logging_utils import SafeRotatingFileHandler, backend_log_path  # noqa: E402
 try:
     from backend.bridges.event_contract import agent_event_contract_payload  # noqa: E402
     from backend.bridges.event_serializer import agent_event_payload, sse_data  # noqa: E402
@@ -141,8 +141,7 @@ def _configure_logging() -> None:
     level_name = os.environ.get("METIS_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    log_dir = str(metis_dir("logs"))
-    log_path = str(metis_path("logs", "metis-backend.log"))
+    log_path = backend_log_path(str(metis_path("logs", "metis-backend.log")))
 
     root = logging.getLogger()
     root.setLevel(level)
@@ -155,7 +154,7 @@ def _configure_logging() -> None:
         root.addHandler(stream_handler)
 
     if not any(getattr(handler, "_metis_file_handler", False) for handler in root.handlers):
-        file_handler = RotatingFileHandler(
+        file_handler = SafeRotatingFileHandler(
             log_path,
             maxBytes=10 * 1024 * 1024,
             backupCount=3,

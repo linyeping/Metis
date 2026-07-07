@@ -57,7 +57,10 @@ def test_network_check_uses_saved_api_key_when_request_omits_key(
         }
 
     monkeypatch.setattr(llm_state, "verify_provider_settings", fake_verify)
-    monkeypatch.setattr(llm_state, "run_provider_conformance_probe", lambda **_: {"ok": True})
+    def fail_conformance_probe(**_kwargs):
+        pytest.fail("settings network check should not run the heavyweight conformance probe")
+
+    monkeypatch.setattr(llm_state, "run_provider_conformance_probe", fail_conformance_probe)
     monkeypatch.setattr(
         llm_state,
         "_provider_get_first_json_uncached",

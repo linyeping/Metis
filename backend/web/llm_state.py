@@ -791,22 +791,8 @@ def check_network_settings(data: Dict[str, Any]) -> Dict[str, Any]:
         os.environ["METIS_PROXY_PORT"] = proxy["proxy_port"]
         os.environ["METIS_PROXY_BYPASS"] = proxy["proxy_bypass"]
         _apply_proxy_runtime(proxy)
-        if validation.get("ok") and context["api_key"] and profile.openai_compatible:
-            conformance = run_provider_conformance_probe(
-                provider_id=str(validation.get("provider_id") or backend),
-                base_url=str(validation.get("base_url") or base_url),
-                api_key=context["api_key"],
-                model=str(validation.get("model") or model),
-            )
-            validation["conformance"] = conformance
-            if conformance.get("ok"):
-                validation["title"] = "网络探测通过"
-                validation["message"] = "配置检查和 provider 一致性探测已完成。"
-                validation["hint"] = ""
-            else:
-                validation["title"] = "配置通过，真实请求失败"
-                validation["message"] = "本地配置格式有效，但真实小请求探测未完成。"
-                validation["hint"] = str(conformance.get("error") or "请检查代理、余额、模型权限或中转站协议兼容性。")
+        # Keep the settings-page network check interactive. The heavier provider
+        # conformance probe is available through the provider registry probe flow.
         models_result: Dict[str, Any]
         if not context["api_key"]:
             models_result = _provider_probe_result(
@@ -822,7 +808,7 @@ def check_network_settings(data: Dict[str, Any]) -> Dict[str, Any]:
         elif profile.openai_compatible:
             models_url = (_models_url_candidates(context) or [""])[0]
             try:
-                payload = _provider_get_first_json_uncached(_models_url_candidates(context), context["api_key"], timeout=15.0)
+                payload = _provider_get_first_json_uncached(_models_url_candidates(context), context["api_key"], timeout=8.0)
                 raw_models = payload.get("data") if isinstance(payload, dict) else []
                 if not isinstance(raw_models, list):
                     raw_models = payload.get("models") if isinstance(payload, dict) else []

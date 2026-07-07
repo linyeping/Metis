@@ -3114,6 +3114,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
 
 .message-row.user {
   justify-content: flex-end;
+  padding-bottom: 24px;
 }
 
 .message-row.system {
@@ -3318,6 +3319,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+  max-width: min(220px, calc(100vw - 44px));
   min-height: 30px;
   padding: 2px 3px;
   border-radius: 9px;

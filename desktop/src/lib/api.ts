@@ -78,6 +78,12 @@ import type { FileChangeSummary } from './diffPreview';
 
 let cachedBase: string | null = null;
 const MAX_JSON_RESPONSE_CHARS = 50 * 1024 * 1024;
+const NETWORK_CHECK_TIMEOUT_MS = 30000;
+
+interface RequestJsonOptions {
+  timeoutMessage?: string;
+  timeoutMs?: number;
+}
 
 function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -517,15 +523,49 @@ export async function pingHealth(timeoutMs = 4000): Promise<boolean> {
   }
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
+  const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (activeSignals.length === 0) return undefined;
+  if (activeSignals.length === 1) return activeSignals[0];
+  if (typeof AbortSignal.any === 'function') {
+    return AbortSignal.any(activeSignals);
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      controller.abort();
+      break;
+    }
+    signal.addEventListener('abort', abort, { once: true });
+  }
+  return controller.signal;
+}
+
+function requestAbortError(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
+async function requestJson<T>(path: string, init?: RequestInit, options: RequestJsonOptions = {}): Promise<T> {
   const base = await apiBase();
-  const response = await fetch(`${base}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...init?.headers,
-    },
-  });
+  const timeoutSignal = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
+  const signal = mergeAbortSignals([init?.signal, timeoutSignal]);
+  let response: Response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      ...init,
+      signal,
+      headers: {
+        ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    if (timeoutSignal?.aborted || requestAbortError(error)) {
+      throw new Error(options.timeoutMessage || '请求超时，请稍后重试。');
+    }
+    throw error;
+  }
   const text = await response.text();
   if (text.length > MAX_JSON_RESPONSE_CHARS) {
     throw new Error('Response too large (>50MB)');
@@ -849,6 +889,9 @@ export async function checkNetworkSettings(settings: Partial<RuntimeSettings> & 
       proxy_port: settings.proxyPort,
       proxy_bypass: settings.proxyBypass,
     }),
+  }, {
+    timeoutMs: NETWORK_CHECK_TIMEOUT_MS,
+    timeoutMessage: '网络检查超时：后端或供应商探测没有在 30 秒内返回。请检查代理、Base URL、API Key 或稍后重试。',
   });
   const provider = recordValue(data.provider);
   const proxy = recordValue(data.proxy);
