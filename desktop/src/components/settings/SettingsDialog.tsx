@@ -145,6 +145,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const open = useUiStore(state => state.settingsOpen);
   const setOpen = useUiStore(state => state.setSettingsOpen);
   const settingsSection = useUiStore(state => state.settingsSection);
+  const setSettingsSection = useUiStore(state => state.setSettingsSection);
   const theme = useUiStore(state => state.theme);
   const setTheme = useUiStore(state => state.setTheme);
   const appearanceMode = useUiStore(state => state.appearanceMode);
@@ -218,7 +219,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   }, [open]);
 
   useEffect(() => {
-    if (!open || !settings) {
+    if (!open || active !== 'model' || !settings) {
       if (!open) {
         setModelCapabilities(null);
         setModelCapabilitiesError('');
@@ -239,7 +240,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     return () => {
       canceled = true;
     };
-  }, [open, settings?.backend, settings?.baseUrl, settings?.model, settings?.providerId]);
+  }, [active, open, settings?.backend, settings?.baseUrl, settings?.model, settings?.providerId]);
 
   useEffect(() => {
     if (!open) return;
@@ -278,24 +279,24 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || active !== 'model') return;
     void refreshProviderStatus(false);
-  }, [open, refreshProviderStatus]);
+  }, [active, open, refreshProviderStatus]);
 
   useEffect(() => {
-    if (!open || memory) return;
+    if (!open || active !== 'conversation' || memory) return;
     void refreshMemory();
-  }, [memory, open, refreshMemory]);
+  }, [active, memory, open, refreshMemory]);
 
   useEffect(() => {
-    if (!open || permissions) return;
+    if (!open || active !== 'tools' || permissions) return;
     void refreshPermissions(false);
-  }, [open, permissions, refreshPermissions]);
+  }, [active, open, permissions, refreshPermissions]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || active !== 'terminal') return;
     void getDocumentConverters().then(setDocumentConverters).catch(() => setDocumentConverters(null));
-  }, [open]);
+  }, [active, open]);
 
   const refreshRuntimeManager = useCallback(async () => {
     setRuntimeManagerBusy(current => current || 'refresh');
@@ -315,15 +316,15 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || active !== 'runtime') return;
     void refreshRuntimeManager();
-  }, [open, refreshRuntimeManager]);
+  }, [active, open, refreshRuntimeManager]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || active !== 'about') return;
     if (!appInfo) void window.metis.appInfo().then(setAppInfo);
     if (!diagnostics) void refreshDiagnostics();
-  }, [appInfo, diagnostics, open, refreshDiagnostics]);
+  }, [active, appInfo, diagnostics, open, refreshDiagnostics]);
 
   const save = useCallback(async () => {
     if (!settings) return;
@@ -590,26 +591,31 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     [metisRuntime?.repairRequiresDownload, runRuntimeAction],
   );
 
-  const visibleSections = useMemo(() => {
+  const visibleNavGroups = useMemo(() => {
     const query = filter.trim().toLowerCase();
-    return settingsNavGroups.flatMap(group =>
-      group.sections.filter(section => {
-        if (!query) return true;
-        const label = tr(language, section).toLowerCase();
-        const description = sectionDescriptions[section].toLowerCase();
-        const groupLabel = (language === 'zh' ? group.labelZh : group.labelEn).toLowerCase();
-        return label.includes(query) || section.includes(query) || description.includes(query) || groupLabel.includes(query);
-      }),
-    );
+    return settingsNavGroups
+      .map(group => ({
+        ...group,
+        sections: group.sections.filter(section => {
+          if (!query) return true;
+          const label = tr(language, section).toLowerCase();
+          const description = sectionDescriptions[section].toLowerCase();
+          const groupLabel = (language === 'zh' ? group.labelZh : group.labelEn).toLowerCase();
+          return label.includes(query) || section.includes(query) || description.includes(query) || groupLabel.includes(query);
+        }),
+      }))
+      .filter(group => group.sections.length > 0);
   }, [filter, language]);
 
   useEffect(() => {
-    if (!open) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      document.getElementById(`settings-section-${settingsSection}`)?.scrollIntoView({ block: 'start' });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [open, settingsSection]);
+    if (!open) return;
+    const hasActiveSection = visibleNavGroups.some(group => group.sections.includes(active));
+    if (!hasActiveSection && visibleNavGroups[0]?.sections[0]) {
+      const next = visibleNavGroups[0].sections[0];
+      setActive(next);
+      setSettingsSection(next);
+    }
+  }, [active, open, setSettingsSection, visibleNavGroups]);
 
   const renderSettingsLoading = (section: SettingsSection) => (
     <div className="settings-placeholder">
@@ -773,22 +779,6 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     }
   };
 
-  const renderSettingsSection = (section: SettingsSection) => {
-    const Icon = sectionIcons[section];
-    return (
-      <section className="settings-scroll-section" id={`settings-section-${section}`} key={section}>
-        <div className="settings-scroll-section-title">
-          <Icon size={17} className="section-icon" />
-          <div>
-            <h2>{tr(language, section)}</h2>
-            <p>{sectionDescriptions[section]}</p>
-          </div>
-        </div>
-        {renderSettingsContent(section)}
-      </section>
-    );
-  };
-
   return (
     <AnimatePresence initial={false}>
       {open && (
@@ -810,20 +800,58 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
+            <aside className="settings-sidebar">
+              <div className="settings-sidebar-top">
+                <button type="button" className="settings-back-button" onClick={() => setOpen(false)}>
+                  <ArrowLeft size={17} />
+                  <span>{t('返回应用')}</span>
+                </button>
+                <div className="settings-brand">
+                  <strong>{tr(language, 'settingsTitle')}</strong>
+                  <small>Metis Desktop</small>
+                </div>
+              </div>
+              <label className="settings-search">
+                <Search size={15} />
+                <input value={filter} onChange={event => setFilter(event.currentTarget.value)} placeholder={t('搜索设置')} />
+              </label>
+              <nav className="settings-nav" aria-label={t('设置分类')}>
+                {visibleNavGroups.map(group => (
+                  <section className="settings-nav-group" key={group.id}>
+                    <div className="settings-nav-group-label">{language === 'zh' ? group.labelZh : group.labelEn}</div>
+                    <div className="settings-nav-group-items">
+                      {group.sections.map(section => {
+                        const Icon = sectionIcons[section];
+                        return (
+                          <button
+                            type="button"
+                            key={section}
+                            data-active={active === section}
+                            onClick={() => {
+                              setActive(section);
+                              setSettingsSection(section);
+                            }}
+                          >
+                            <Icon size={16} />
+                            <span>{tr(language, section)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+                {visibleNavGroups.length === 0 && (
+                  <div className="settings-nav-empty">{t('没有匹配的设置项')}</div>
+                )}
+              </nav>
+            </aside>
             <div className="settings-body">
               <main className="settings-main">
                 <header className="settings-main-header">
-                  <button type="button" className="settings-back-button" onClick={() => setOpen(false)} title={t('返回')}>
-                    <ArrowLeft size={17} />
-                  </button>
                   <div className="settings-title-block">
-                    <h2>{tr(language, 'settingsTitle')}</h2>
-                    <p>Metis Desktop</p>
+                    <h2>{tr(language, active)}</h2>
+                    <p>{sectionDescriptions[active]}</p>
                   </div>
-                  <label className="settings-search">
-                    <Search size={15} />
-                    <input value={filter} onChange={event => setFilter(event.currentTarget.value)} placeholder={t('搜索设置')} />
-                  </label>
                   <div className="settings-main-actions">
                     <button type="button" onClick={() => setOpen(false)}>
                       {t('取消')}
@@ -834,8 +862,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
                   </div>
                 </header>
                 <div className="settings-panel">
-                  {visibleSections.map(renderSettingsSection)}
-                  {visibleSections.length === 0 && (
+                  {visibleNavGroups.length > 0 ? renderSettingsContent(active) : (
                     <div className="settings-panel-empty">{t('没有匹配的设置项')}</div>
                   )}
                 </div>
