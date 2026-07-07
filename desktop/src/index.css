@@ -13493,6 +13493,14 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   gap: 17px;
   overflow-y: auto;
   padding: 0 6px 4px;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.settings-nav::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .settings-nav-group {
@@ -13662,6 +13670,14 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   overflow-x: hidden;
   margin: 0 auto;
   padding: 0 var(--settings-content-gutter) 56px;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.settings-panel::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .settings-panel-empty {
