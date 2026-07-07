@@ -97,3 +97,25 @@ def test_update_runtime_settings_strips_endpoint_whitespace(isolated_metis_home)
     assert "base_url" in updated
     assert config["base_url"] == "https://relay.example/v1"
     assert config["api_key"] == "sk-test123"
+
+
+def test_provider_models_remote_only_does_not_use_local_presets(
+    isolated_metis_home,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    isolated_metis_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(llm_state, "_provider_get_first_json", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    result = llm_state.get_provider_models(
+        {
+            "backend": "deepseek",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-v4-flash",
+            "api_key": "sk-test",
+            "remote_only": True,
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "error"
+    assert result["models"] == []

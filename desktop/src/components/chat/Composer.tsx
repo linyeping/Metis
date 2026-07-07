@@ -39,7 +39,7 @@ import {
 import {
   getComposerDeepResearchEnabled,
   getComposerPermissionMode,
-  getProviderStatus,
+  getProviderModels,
   getSettings,
   getSkills,
   setComposerDeepResearchEnabled,
@@ -48,7 +48,7 @@ import {
 } from '../../lib/api';
 import { contextLimitForModel, contextWindowLevel, contextWindowPercent, estimateContextTokens, formatTokenCount } from '../../lib/contextWindow';
 import { filterSlashWorkflowCommands, moveSlashSelection } from '../../lib/slashCommands';
-import type { ContextLedger, ContextLedgerDetail, ParsedFile, PermissionAccessMode, ProviderProfile, RuntimeSettings, SkillSummary } from '../../lib/types';
+import type { ContextLedger, ContextLedgerDetail, ParsedFile, PermissionAccessMode, ProviderModel, RuntimeSettings, SkillSummary } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
@@ -65,39 +65,18 @@ function shortModelName(model: string): string {
 interface ComposerModelEntry {
   id: string;
   model: string;
-  providerId: string;
-  baseUrl: string;
-  provider: string;
   active: boolean;
 }
 
-function buildComposerModelList(providers: ProviderProfile[], settings: RuntimeSettings | null): ComposerModelEntry[] {
-  const activeProviderId = settings?.providerId || settings?.backend || '';
+function buildComposerModelList(models: ProviderModel[], settings: RuntimeSettings | null): ComposerModelEntry[] {
   const activeModel = settings?.model || '';
-  const out: ComposerModelEntry[] = [];
-  for (const provider of providers) {
-    if (provider.providerId === 'fake') continue;
-    const isActiveProvider = provider.providerId === activeProviderId;
-    const modelIds = Array.from(new Set([
-      provider.defaultModel,
-      ...provider.fallbackModels,
-      isActiveProvider ? activeModel : '',
-    ].filter(Boolean)));
-    for (const model of modelIds) {
-      out.push({
-        id: `${provider.providerId}:${model}`,
-        model,
-        providerId: provider.providerId,
-        baseUrl: provider.baseUrl || (isActiveProvider ? settings?.baseUrl || '' : ''),
-        provider: provider.displayName,
-        active: isActiveProvider && model === activeModel,
-      });
-    }
-  }
-  if (out.length === 0 && activeModel) {
-    out.push({ id: `current:${activeModel}`, model: activeModel, providerId: activeProviderId, baseUrl: settings?.baseUrl || '', provider: 'Current', active: true });
-  }
-  return out;
+  return models
+    .filter(model => model.chatCapable)
+    .map(model => ({
+      id: model.id,
+      model: model.id,
+      active: model.id === activeModel,
+    }));
 }
 
 const accessOptions: Array<{
@@ -823,20 +802,50 @@ function ComposerModelMenu() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
-  const [providers, setProviders] = useState<ProviderProfile[]>([]);
+  const [catalogModels, setCatalogModels] = useState<ProviderModel[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
 
-  const load = async () => {
+  const load = async (includeCatalog = false) => {
     try {
-      const [next, status] = await Promise.all([getSettings(), getProviderStatus()]);
+      const next = await getSettings();
       setSettings(next);
-      setProviders(status.providers);
+      setCatalogError('');
+      if (!includeCatalog) {
+        setCatalogModels([]);
+        return;
+      }
+      setCatalogModels([]);
+      if (!next.baseUrl && (next.providerId || next.backend) !== 'ollama') {
+        setCatalogModels([]);
+        return;
+      }
+      setCatalogLoading(true);
+      try {
+        const catalog = await getProviderModels({
+          backend: next.providerId || next.backend,
+          baseUrl: next.baseUrl,
+          model: next.model,
+          apiKey: next.apiKey,
+          remoteOnly: true,
+        });
+        setCatalogModels(catalog.models);
+        setCatalogError(catalog.ok || catalog.models.length > 0 ? '' : catalog.message || catalog.hint);
+      } catch (error) {
+        setCatalogModels([]);
+        setCatalogError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setCatalogLoading(false);
+      }
     } catch {
       try { setSettings(await getSettings()); } catch { /* ignore */ }
+      setCatalogModels([]);
+      setCatalogError(t('模型目录暂不可用'));
     }
   };
 
-  useEffect(() => { void load(); }, []);
-  useEffect(() => { if (open) void load(); }, [open]);
+  useEffect(() => { void load(false); }, []);
+  useEffect(() => { if (open) void load(true); }, [open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -854,21 +863,26 @@ function ComposerModelMenu() {
   // Only the tiers the *current* model actually supports, plus an off switch.
   const effortChoices = useMemo(() => ['off', ...effortLevelsFor(settings?.model || '')], [settings?.model]);
   const effortBadge = effort ? effortLabel(effort, zh) : '';
-  const models = useMemo(() => buildComposerModelList(providers, settings), [providers, settings]);
+  const models = useMemo(() => buildComposerModelList(catalogModels, settings), [catalogModels, settings]);
 
   const applyEffort = async (value: string) => {
     setSaving(true);
     try {
       await updateSettings({ reasoningEffort: value });
-      await load();
+      await load(open);
       window.dispatchEvent(new Event('metis:settings-refresh'));
     } finally { setSaving(false); }
   };
   const applyModel = async (entry: ComposerModelEntry) => {
     setSaving(true);
     try {
-      await updateSettings({ backend: entry.providerId, providerId: entry.providerId, baseUrl: entry.baseUrl, model: entry.model });
-      await load();
+      await updateSettings({
+        backend: settings?.providerId || settings?.backend,
+        providerId: settings?.providerId || settings?.backend,
+        baseUrl: settings?.baseUrl,
+        model: entry.model,
+      });
+      await load(true);
       window.dispatchEvent(new Event('metis:settings-refresh'));
       setOpen(false);
     } finally { setSaving(false); }
@@ -921,7 +935,9 @@ function ComposerModelMenu() {
                 {entry.active && <Check size={14} />}
               </button>
             ))}
-            {models.length === 0 && <p className="composer-model-empty">{t('暂无可用模型')}</p>}
+            {catalogLoading && <p className="composer-model-empty">{t('正在读取模型目录...')}</p>}
+            {!catalogLoading && catalogError && <p className="composer-model-empty">{t(catalogError)}</p>}
+            {!catalogLoading && !catalogError && models.length === 0 && <p className="composer-model-empty">{t('当前 API 没有返回可切换的聊天模型')}</p>}
           </div>
         </div>
       )}

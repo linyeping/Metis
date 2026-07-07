@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Cpu } from 'lucide-react';
-import { getProviderStatus, getSettings, updateSettings } from '../../lib/api';
-import { modelPresets } from '../../lib/commands';
-import type { ProviderProfile, RuntimeSettings } from '../../lib/types';
+import { getProviderModels, getSettings, updateSettings } from '../../lib/api';
+import type { ProviderModel, RuntimeSettings } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
 
 interface ModelPickerOverlayProps {
@@ -15,19 +14,34 @@ export function ModelPickerOverlay({ currentModel, settingsChanged }: ModelPicke
   const setOpen = useUiStore(state => state.setModelPickerOpen);
   const language = useUiStore(state => state.language);
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
-  const [providers, setProviders] = useState<ProviderProfile[]>([]);
+  const [models, setModels] = useState<ProviderModel[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
   const [savingId, setSavingId] = useState('');
 
   useEffect(() => {
     if (!open) return;
-    void Promise.all([getSettings(), getProviderStatus()])
-      .then(([nextSettings, status]) => {
+    setLoading(true);
+    setCatalogError('');
+    void getSettings()
+      .then(async nextSettings => {
         setSettings(nextSettings);
-        setProviders(status.providers);
+        const catalog = await getProviderModels({
+          backend: nextSettings.providerId || nextSettings.backend,
+          baseUrl: nextSettings.baseUrl,
+          model: nextSettings.model,
+          apiKey: nextSettings.apiKey,
+          remoteOnly: true,
+        });
+        setModels(catalog.models.filter(model => model.chatCapable));
+        setCatalogError(catalog.ok || catalog.models.length > 0 ? '' : catalog.message || catalog.hint);
       })
-      .catch(() => {
-        void getSettings().then(setSettings);
-        setProviders([]);
+      .catch(error => {
+        setModels([]);
+        setCatalogError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        setLoading(false);
       });
   }, [open]);
 
@@ -42,54 +56,14 @@ export function ModelPickerOverlay({ currentModel, settingsChanged }: ModelPicke
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [open, setOpen]);
 
-  const groups = useMemo(() => {
-    if (providers.length > 0) {
-      const activeProviderId = settings?.providerId || settings?.backend || '';
-      return providers
-        .filter(provider => provider.providerId !== 'fake')
-        .map(provider => {
-          const activeProvider = provider.providerId === activeProviderId;
-          const modelIds = Array.from(
-            new Set([
-              provider.defaultModel,
-              ...provider.fallbackModels,
-              activeProvider ? settings?.model || '' : '',
-            ].filter(Boolean)),
-          );
-          return {
-            provider: provider.displayName,
-            providerId: provider.providerId,
-            baseUrl: provider.baseUrl || (activeProvider ? settings?.baseUrl || '' : ''),
-            models: modelIds.map(model => ({
-              id: `${provider.providerId}:${model}`,
-              model,
-              note: providerModelNote(provider, model),
-            })),
-          };
-        })
-        .filter(group => group.models.length > 0);
-    }
-
-    const map = new Map<
-      string,
-      Array<{
-        id: string;
-        model: string;
-        note: string;
-        backend: string;
-        baseUrl: string;
-      }>
-    >();
-    for (const preset of modelPresets) {
-      map.set(preset.provider, [...(map.get(preset.provider) || []), preset]);
-    }
-    return Array.from(map.entries()).map(([provider, presets]) => ({
-      provider,
-      providerId: presets[0]?.backend || '',
-      baseUrl: presets[0]?.baseUrl || '',
-      models: presets,
-    }));
-  }, [providers, settings]);
+  const entries = useMemo(
+    () => models.map(model => ({
+      id: model.id,
+      model: model.id,
+      note: providerModelNote(model),
+    })),
+    [models],
+  );
 
   if (!open) return null;
 
@@ -109,12 +83,17 @@ export function ModelPickerOverlay({ currentModel, settingsChanged }: ModelPicke
           </button>
         </header>
         <div className="model-groups">
-          {groups.map(group => (
-            <section className="model-group" key={group.providerId || group.provider}>
-              <h3>{group.provider}</h3>
+          {loading && <p className="model-picker-empty">{zh ? '正在读取当前 API 的模型目录...' : 'Loading models from the current API...'}</p>}
+          {!loading && catalogError && <p className="model-picker-empty">{catalogError}</p>}
+          {!loading && !catalogError && entries.length === 0 && (
+            <p className="model-picker-empty">{zh ? '当前 API 没有返回可切换的聊天模型。' : 'The current API returned no switchable chat models.'}</p>
+          )}
+          {!loading && entries.length > 0 && (
+            <section className="model-group">
+              <h3>{settings?.providerId || settings?.backend || (zh ? '当前 API' : 'Current API')}</h3>
               <div>
-                {group.models.map(preset => {
-                  const active = activeModel === preset.model && (settings?.providerId || settings?.backend || group.providerId) === group.providerId;
+                {entries.map(preset => {
+                  const active = activeModel === preset.model;
                   return (
                     <button
                       key={preset.id}
@@ -125,9 +104,9 @@ export function ModelPickerOverlay({ currentModel, settingsChanged }: ModelPicke
                         setSavingId(preset.id);
                         try {
                           await updateSettings({
-                            backend: group.providerId,
-                            providerId: group.providerId,
-                            baseUrl: group.baseUrl,
+                            backend: settings?.providerId || settings?.backend,
+                            providerId: settings?.providerId || settings?.backend,
+                            baseUrl: settings?.baseUrl,
                             model: preset.model,
                           });
                           setSettings(await getSettings());
@@ -149,29 +128,26 @@ export function ModelPickerOverlay({ currentModel, settingsChanged }: ModelPicke
                 })}
               </div>
             </section>
-          ))}
+          )}
         </div>
       </section>
     </div>
   );
 }
 
-function providerModelNote(provider: ProviderProfile, model: string): string {
-  const limit = provider.modelContextWindows[model];
+function providerModelNote(model: ProviderModel): string {
+  const limit = model.contextLimit;
   const parts: string[] = [];
   if (limit > 0) {
     parts.push(formatContextLimit(limit));
   }
-  if (provider.capabilities.tools) {
-    parts.push('Tools');
-  }
-  if (provider.capabilities.vision) {
-    parts.push('Vision');
+  if (model.type) {
+    parts.push(model.type);
   }
   if (parts.length > 0) {
     return parts.join(' · ');
   }
-  return provider.openaiCompatible ? 'OpenAI-compatible' : provider.backendType;
+  return model.ownedBy || 'remote';
 }
 
 function formatContextLimit(limit: number): string {

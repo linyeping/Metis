@@ -1013,18 +1013,20 @@ def verify_provider_settings(data: Dict[str, Any]) -> Dict[str, Any]:
 def get_provider_models(data: Dict[str, Any]) -> Dict[str, Any]:
     context = _provider_probe_context(data)
     profile = context["profile"]
+    remote_only = _truthy(data.get("remote_only") or data.get("remoteOnly"))
     if str(profile.provider_id) == "ollama":
         return _ollama_provider_model_result(context)
     if not profile.openai_compatible:
-        preset = _provider_preset_model_result(
-            context,
-            status="preset",
-            ok=True,
-            message="当前供应商不支持远程模型目录，已显示本地预设模型。",
-            hint="可以选择预设模型，也可以继续手动填写模型名。",
-        )
-        if preset:
-            return preset
+        if not remote_only:
+            preset = _provider_preset_model_result(
+                context,
+                status="preset",
+                ok=True,
+                message="当前供应商不支持远程模型目录，已显示本地预设模型。",
+                hint="可以选择预设模型，也可以继续手动填写模型名。",
+            )
+            if preset:
+                return preset
         return _provider_probe_result(
             "models",
             status="unsupported",
@@ -1035,15 +1037,16 @@ def get_provider_models(data: Dict[str, Any]) -> Dict[str, Any]:
             models=[],
         )
     if not context["api_key"]:
-        preset = _provider_preset_model_result(
-            context,
-            status="preset",
-            ok=True,
-            message="尚未填写 API Key，已显示本地预设模型。",
-            hint="填入 API Key 后可再刷新远程模型目录；未保存的 Key 不会被持久化。",
-        )
-        if preset:
-            return preset
+        if not remote_only:
+            preset = _provider_preset_model_result(
+                context,
+                status="preset",
+                ok=True,
+                message="尚未填写 API Key，已显示本地预设模型。",
+                hint="填入 API Key 后可再刷新远程模型目录；未保存的 Key 不会被持久化。",
+            )
+            if preset:
+                return preset
         return _provider_probe_result(
             "models",
             status="error",
@@ -1061,16 +1064,17 @@ def get_provider_models(data: Dict[str, Any]) -> Dict[str, Any]:
         payload = _provider_get_first_json(models_urls, context["api_key"])
     except Exception as exc:
         last_error = _safe_error_message(exc)
-        preset = _provider_preset_model_result(
-            context,
-            status="fallback",
-            ok=True,
-            message="远程模型目录不可用，已使用本地预设模型。",
-            hint=f"{last_error}；请检查 Base URL、API Key、代理和模型平台分组。",
-            models_url=models_url,
-        )
-        if preset:
-            return preset
+        if not remote_only:
+            preset = _provider_preset_model_result(
+                context,
+                status="fallback",
+                ok=True,
+                message="远程模型目录不可用，已使用本地预设模型。",
+                hint=f"{last_error}；请检查 Base URL、API Key、代理和模型平台分组。",
+                models_url=models_url,
+            )
+            if preset:
+                return preset
         return _provider_probe_result(
             "models",
             status="error",
@@ -1088,16 +1092,17 @@ def get_provider_models(data: Dict[str, Any]) -> Dict[str, Any]:
     models = [_model_catalog_item(item) for item in raw_models if isinstance(item, dict)]
     models = [item for item in models if item["id"]]
     if not models:
-        preset = _provider_preset_model_result(
-            context,
-            status="fallback",
-            ok=True,
-            message="远程模型目录为空，已使用本地预设模型。",
-            hint="可以选择预设模型，也可以继续手动填写模型名。",
-            models_url=models_url,
-        )
-        if preset:
-            return preset
+        if not remote_only:
+            preset = _provider_preset_model_result(
+                context,
+                status="fallback",
+                ok=True,
+                message="远程模型目录为空，已使用本地预设模型。",
+                hint="可以选择预设模型，也可以继续手动填写模型名。",
+                models_url=models_url,
+            )
+            if preset:
+                return preset
     return _provider_probe_result(
         "models",
         status="ok",

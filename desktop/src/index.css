@@ -13153,6 +13153,15 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   padding: 12px;
 }
 
+.model-picker-empty {
+  margin: 0;
+  padding: 18px 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .model-group {
   display: grid;
   gap: 7px;

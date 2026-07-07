@@ -1605,6 +1605,7 @@ export async function getProviderModels(payload: {
   baseUrl: string;
   model: string;
   apiKey?: string;
+  remoteOnly?: boolean;
 }): Promise<ProviderModelCatalog> {
   const data = await requestJson<Record<string, unknown>>('/providers/models', {
     method: 'POST',
@@ -1613,6 +1614,7 @@ export async function getProviderModels(payload: {
       base_url: payload.baseUrl,
       model: payload.model,
       api_key: payload.apiKey,
+      remote_only: payload.remoteOnly,
     }),
   });
   return providerModelCatalogFromRecord(data);
