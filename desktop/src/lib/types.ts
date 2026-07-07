@@ -995,6 +995,37 @@ export interface ProviderUsagePayload {
   hint: string;
 }
 
+export interface NetworkCheckPayload {
+  ok: boolean;
+  status: string;
+  message: string;
+  hint: string;
+  elapsedMs: number;
+  provider: {
+    providerId: string;
+    displayName: string;
+    baseUrl: string;
+    apiBaseUrl: string;
+    model: string;
+    hasApiKey: boolean;
+  };
+  proxy: {
+    proxyMode: ProxyMode;
+    proxyScheme: string;
+    proxyHost: string;
+    proxyPort: string;
+    proxyBypass: string;
+  };
+  effectiveProxy: {
+    mode: string;
+    trustEnv: boolean;
+    proxyUrl: string;
+    bypassed: boolean;
+  };
+  validation: ProviderValidation;
+  models: ProviderModelCatalog;
+}
+
 export interface CompactStatusPayload {
   running: boolean;
   ok: boolean;

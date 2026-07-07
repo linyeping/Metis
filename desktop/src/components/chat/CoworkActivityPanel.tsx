@@ -1,9 +1,8 @@
 import {
   AlertTriangle,
   CheckCircle2,
-  FileCode,
+  ChevronRight,
   FileText,
-  GitBranch,
   LoaderCircle,
   Network,
   PackageCheck,
@@ -12,14 +11,14 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useT } from '../../hooks/useT';
-import { getWorktreeDiff, promoteWorktree, reviewWorktreePromote, rollbackWorktreePromotion } from '../../lib/api';
-import type { ChatSubagentEvent, CoworkPlanSnapshot, CoworkPlanSubrun, RuntimeStatus, WorktreeChangedFile, WorktreeDiffPayload, WorktreePromotePayload } from '../../lib/types';
+import type { ChatSubagentEvent, CoworkPlanSnapshot, CoworkPlanSubrun, RuntimeStatus } from '../../lib/types';
 
 type UnknownRecord = Record<string, unknown>;
 type CoworkRowStatus = 'planned' | 'running' | 'done' | 'error';
 
 interface CoworkActivityPanelProps {
   items: ChatSubagentEvent[];
+  onClear?: () => void;
   plan: CoworkPlanSnapshot | null;
   runtimeStatus: RuntimeStatus | null;
 }
@@ -60,23 +59,25 @@ interface CoworkResumeSummary {
   sourceRunId: string;
 }
 
-export function CoworkActivityPanel({ items, plan, runtimeStatus }: CoworkActivityPanelProps) {
+export function CoworkActivityPanel({ items, onClear, plan, runtimeStatus }: CoworkActivityPanelProps) {
   const t = useT();
   const rows = useMemo(() => buildCoworkRows(items, plan), [items, plan]);
   const stats = useMemo(() => coworkStats(rows), [rows]);
   const resume = useMemo(() => coworkResumeSummary(plan, rows), [plan, rows]);
-  const planRows = plan?.subruns?.length ? rows : rows.filter(row => row.title);
+  const activeRows = rows.filter(row => row.status === 'running' || row.status === 'planned');
+  const settledRows = rows.filter(row => row.status === 'done' || row.status === 'error');
+  const canClear = Boolean(onClear && rows.length > 0 && stats.running === 0 && stats.planned === 0);
   const goal = stringValue(plan?.goal);
-  const createdAt = createdAtText(plan?.created_at);
   const runtimeLine = runtimeStatus?.display || runtimeStatus?.message || '';
-  const titleLine = [goal || runtimeLine || t('本地 plan -> subruns -> diff/artifact 汇总'), resume.enabled ? `${t('恢复')}：${t('复用')} ${resume.reused} · ${t('重跑')} ${resume.rerun}` : ''].filter(Boolean).join(' · ');
+  const titleLine = goal || runtimeLine || t('Cowork 任务');
+  const showOverallProgress = stats.running > 0 || stats.planned > 0;
 
   if (rows.length === 0 && !plan) {
     return (
       <div className="cowork-activity-empty">
         <Network size={18} />
         <strong>{t('暂无 Cowork 任务')}</strong>
-        <span>{t('启动 Cowork 后，这里会展示 plan、subruns、worktree、diff 和 artifact。')}</span>
+        <span>{t('启动 Cowork 后，这里会展示任务进度。')}</span>
       </div>
     );
   }
@@ -84,103 +85,78 @@ export function CoworkActivityPanel({ items, plan, runtimeStatus }: CoworkActivi
   return (
     <section className="cowork-activity-panel" aria-label={t('Cowork 任务详情')}>
       <header className="cowork-activity-header">
-        <span className="cowork-activity-icon">
-          <Network size={16} />
-        </span>
         <div className="cowork-activity-title">
-          <strong>{t('Cowork 任务详情')}</strong>
+          <strong>{t('Cowork')}</strong>
           <span>{titleLine}</span>
         </div>
-        {resume.enabled && (
-          <div className="cowork-resume-chip" title={resume.sourceRunId ? `${t('来源 run')} ${resume.sourceRunId}` : undefined}>
-            <span>{t('Resume')}</span>
-            <b>{t('复用')} {resume.reused}</b>
-            <b>{t('重跑')} {resume.rerun}</b>
+        <div className="cowork-header-actions">
+          {resume.enabled && (
+            <div className="cowork-resume-chip" title={resume.sourceRunId ? `${t('来源 run')} ${resume.sourceRunId}` : undefined}>
+              <span>{t('Resume')}</span>
+              <b>{t('复用')} {resume.reused}</b>
+              <b>{t('重跑')} {resume.rerun}</b>
+            </div>
+          )}
+          <div className="cowork-activity-stats" aria-label={t('Cowork 状态统计')}>
+            <b>{showOverallProgress ? `${stats.progress}%` : `${stats.done}/${stats.total}`}</b>
+            <span>{showOverallProgress ? `${stats.done}/${stats.total} ${t('完成')}` : stats.error ? `${stats.error} ${t('失败')}` : t('完成')}</span>
           </div>
-        )}
-        <div className="cowork-activity-stats" aria-label={t('Cowork 状态统计')}>
-          <b>{stats.progress}%</b>
-          <span>{stats.done}/{stats.total} {t('完成')}</span>
+          {canClear && (
+            <button className="cowork-clear-button" type="button" onClick={onClear}>
+              {t('清理')}
+            </button>
+          )}
         </div>
       </header>
 
-      <div className="cowork-progress" aria-label={`${t('整体进度')} ${stats.progress}%`}>
-        <span style={{ width: `${stats.progress}%` }} />
-      </div>
-
-      <div className="cowork-stat-strip">
-        <Metric label={t('运行中')} value={String(stats.running)} />
-        <Metric label={t('待执行')} value={String(stats.planned)} />
-        <Metric label={t('错误')} value={String(stats.error)} tone={stats.error ? 'danger' : 'muted'} />
-        <Metric label={t('Artifacts')} value={String(stats.artifacts)} />
-      </div>
-
-      <section className="cowork-plan-block" aria-label={t('Plan')}>
-        <div className="cowork-section-head">
-          <div>
-            <strong>{t('Plan')}</strong>
-            <span>{createdAt || t('按后端 Cowork plan 展示')}</span>
-          </div>
-          <em>{profileLabel(rows[0]?.profile || stringValue(plan?.merge_policy?.execution_profile))}</em>
+      {showOverallProgress && (
+        <div className="cowork-progress" aria-label={`${t('整体进度')} ${stats.progress}%`}>
+          <span style={{ width: `${stats.progress}%` }} />
         </div>
-        {planRows.length ? (
-          <ol className="cowork-plan-list">
-            {planRows.map((row, index) => (
-              <li data-status={row.status} key={row.id || `${row.title}-${index}`}>
-                <span>{index + 1}</span>
-                <div>
-                  <strong>{row.title || `${t('Subrun')} ${index + 1}`}</strong>
-                  {row.prompt && <p>{compactText(row.prompt, 180)}</p>}
-                </div>
-                <em>{statusLabel(row.status, t)}</em>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="cowork-muted-line">{t('暂未收到 plan。')}</p>
-        )}
-      </section>
+      )}
 
       <section className="cowork-subruns-block" aria-label={t('Subruns')}>
         <div className="cowork-section-head">
           <div>
-            <strong>{t('Subruns')}</strong>
-            <span>{t('按依赖解锁并行执行；每个 subrun 绑定自己的 worktree。')}</span>
+            <strong>{t('任务')}</strong>
+            <span>
+              {stats.running ? `${stats.running} ${t('运行中')} · ` : ''}
+              {stats.done}/{stats.total} {t('完成')}
+              {stats.error ? ` · ${stats.error} ${t('失败')}` : ''}
+            </span>
           </div>
         </div>
-        <div className="cowork-subrun-list">
-          {rows.map(row => (
-            <CoworkSubrunCard key={row.id} row={row} />
-          ))}
-        </div>
+        {activeRows.length > 0 && (
+          <CoworkSubrunGroup rows={activeRows} title={t('进行中 / 待开始')} />
+        )}
+        {settledRows.length > 0 && (
+          <CoworkSubrunGroup rows={settledRows} title={t('已完成 / 失败')} />
+        )}
       </section>
     </section>
   );
 }
 
+function CoworkSubrunGroup({ rows, title }: { rows: CoworkRow[]; title: string }) {
+  return (
+    <div className="cowork-subrun-group">
+      <div className="cowork-subrun-group-head">
+        <span>{title}</span>
+        <em>{rows.length}</em>
+      </div>
+      <div className="cowork-subrun-list">
+        {rows.map(row => (
+          <CoworkSubrunCard key={row.id} row={row} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CoworkSubrunCard({ row }: { row: CoworkRow }) {
   const t = useT();
-  const [reviewDiff, setReviewDiff] = useState<WorktreeDiffPayload | null>(null);
-  const [promoteCheck, setPromoteCheck] = useState<WorktreePromotePayload | null>(null);
-  const [promoteResult, setPromoteResult] = useState<WorktreePromotePayload | null>(null);
-  const [rollbackResult, setRollbackResult] = useState<WorktreePromotePayload | null>(null);
-  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
-  const [actionError, setActionError] = useState('');
-  const [busyAction, setBusyAction] = useState<'diff' | 'check' | 'promote' | 'rollback' | ''>('');
+  const [open, setOpen] = useState(false);
   const StatusIcon = row.status === 'error' ? AlertTriangle : row.status === 'done' ? CheckCircle2 : LoaderCircle;
-  const displayedDiff = reviewDiff
-    ? {
-        stat: reviewDiff.stat,
-        status: reviewDiff.status,
-        patch_preview: reviewDiff.patch,
-        truncated: reviewDiff.truncated,
-        error: reviewDiff.error || '',
-      }
-    : row.diff;
-  const diffStat = stringValue(displayedDiff.stat);
-  const diffStatus = stringValue(displayedDiff.status);
-  const patchPreview = stringValue(displayedDiff.patch_preview);
-  const diffError = stringValue(displayedDiff.error);
   const localVmBackend = stringValue(row.localVm.backend);
   const localVmStdout = stringValue(row.localVm.stdout);
   const localVmStderr = stringValue(row.localVm.stderr);
@@ -188,244 +164,116 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
   const localVmArtifacts = artifactRows(row.localVm.artifacts);
   const evidenceCounts = recordValue(row.evidence.counts);
   const failureReasons = failureReasonRows(row.evidence.failure_reasons);
+  const hasVmOutput = Boolean(
+    Object.keys(row.localVm).length
+      && (localVmBackend || localVmStdout || localVmStderr || localVmChangedFiles.length || localVmArtifacts.length || row.localVm.returncode !== undefined),
+  );
   const evidenceStats = [
     { label: 'Diff', value: numberValue(evidenceCounts.diff) },
     { label: 'Artifacts', value: numberValue(evidenceCounts.artifacts) },
     { label: 'Stdout/Test', value: numberValue(evidenceCounts.stdout_test ?? evidenceCounts.stdoutTest) },
     { label: 'Failures', value: numberValue(evidenceCounts.failure_reasons ?? evidenceCounts.failureReasons) },
-  ];
+  ].filter(item => item.value > 0 && (item.label !== 'Failures' || failureReasons.length === 0));
+  const hasVisibleEvidenceCounts = evidenceStats.length > 0;
+  const hasDetails = Boolean(failureReasons.length > 0 || row.artifacts.length > 0 || hasVisibleEvidenceCounts || hasVmOutput || row.worktreeRoot);
+  const primaryFailure = failureReasons.find(reason => reason.message) || failureReasons[0] || null;
+  const inlineText = primaryFailure?.message || inlineSubrunText(row);
   const elapsed = elapsedText(row.startedAt, row.finishedAt);
-  const diffFiles = reviewDiff?.files?.length ? reviewDiff.files : changedFilesFromDiff(displayedDiff);
-  const selectedPromotePaths = reviewDiff ? selectedPaths : diffFiles.map(file => file.path);
-  const canReview = Boolean(row.worktreeId && (!reviewDiff || selectedPromotePaths.length > 0));
-  const canPromote = Boolean(row.worktreeId && promoteCheck?.ok && !promoteResult?.ok && selectedPromotePaths.length > 0);
-  const conflictFiles = promoteCheck?.conflicts?.files || [];
-  const rollbackPromotionId = promoteResult?.promotionId || '';
-
-  const loadDiff = async () => {
-    if (!row.worktreeId || busyAction) return;
-    setBusyAction('diff');
-    setActionError('');
-    try {
-      const payload = await getWorktreeDiff(row.worktreeId);
-      setReviewDiff(payload);
-      setPromoteCheck(null);
-      setPromoteResult(null);
-      setRollbackResult(null);
-      setSelectedPaths(payload.files.map(file => file.path));
-    } catch (error) {
-      setActionError(formatActionError(error));
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const checkPromote = async () => {
-    if (!row.worktreeId || busyAction) return;
-    setBusyAction('check');
-    setActionError('');
-    setPromoteResult(null);
-    setRollbackResult(null);
-    try {
-      const payload = await reviewWorktreePromote(row.worktreeId, selectedPromotePaths);
-      setPromoteCheck(payload);
-      if (!payload.ok) setActionError(payload.error || t('Diff 无法干净应用。'));
-    } catch (error) {
-      setActionError(formatActionError(error));
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const applyPromote = async () => {
-    if (!canPromote || busyAction) return;
-    setBusyAction('promote');
-    setActionError('');
-    try {
-      const payload = await promoteWorktree(row.worktreeId, false, selectedPromotePaths);
-      setPromoteResult(payload);
-      if (!payload.ok) setActionError(payload.error || t('Promote 失败。'));
-    } catch (error) {
-      setActionError(formatActionError(error));
-    } finally {
-      setBusyAction('');
-    }
-  };
-
-  const toggleSelectedPath = (path: string) => {
-    setPromoteCheck(null);
-    setPromoteResult(null);
-    setRollbackResult(null);
-    setSelectedPaths(current => {
-      if (current.includes(path)) return current.filter(item => item !== path);
-      return [...current, path];
-    });
-  };
-
-  const applyRollback = async () => {
-    if (!row.worktreeId || !rollbackPromotionId || busyAction) return;
-    setBusyAction('rollback');
-    setActionError('');
-    try {
-      const payload = await rollbackWorktreePromotion(row.worktreeId, rollbackPromotionId, false);
-      setRollbackResult(payload);
-      if (!payload.ok) setActionError(payload.error || t('Rollback 失败。'));
-    } catch (error) {
-      setActionError(formatActionError(error));
-    } finally {
-      setBusyAction('');
-    }
-  };
+  const showProgress = row.status === 'running' || row.status === 'planned';
 
   return (
-    <article className="cowork-subrun-card" data-status={row.status} data-resume={row.resumeAction || undefined}>
-      <div className="cowork-subrun-head">
-        <StatusIcon className={row.status === 'running' ? 'spin' : undefined} size={15} />
-        <div>
+    <article className="cowork-subrun-card" data-status={row.status} data-open={open} data-resume={row.resumeAction || undefined}>
+      <button
+        aria-expanded={open}
+        className="cowork-subrun-toggle"
+        disabled={!hasDetails}
+        type="button"
+        onClick={() => setOpen(value => !value)}
+      >
+        <StatusIcon className={row.status === 'running' ? 'spin' : undefined} size={14} />
+        <div className="cowork-subrun-text">
           <strong>{row.title}</strong>
-          <span>
-            {statusLabel(row.status, t)}
-            {elapsed ? ` · ${elapsed}` : ''}
-          </span>
+          <span>{statusLabel(row.status, t)}{elapsed ? ` · ${elapsed}` : ''}</span>
         </div>
         <div className="cowork-subrun-meta">
           {row.resumeAction && <span>{row.resumeAction === 'reused' ? t('复用') : t('重跑')}</span>}
           <em>{profileLabel(row.profile)}</em>
+          {hasDetails && <ChevronRight className="disclosure-chevron" data-open={open} size={13} />}
         </div>
-      </div>
+      </button>
 
-      <div className="cowork-progress" aria-label={`${row.title} ${row.progress}%`}>
-        <span style={{ width: `${row.progress}%` }} />
-      </div>
-
-      {row.summary && <p className="cowork-summary-line">{row.summary}</p>}
-
-      <div className="cowork-detail-grid">
-        <div className="cowork-detail-cell">
-          <span><GitBranch size={13} />{t('Worktree')}</span>
-          <strong>{row.worktreeId || t('等待创建')}</strong>
-          {row.worktreeRoot && <code>{row.worktreeRoot}</code>}
+      {showProgress && (
+        <div className="cowork-progress" aria-label={`${row.title} ${row.progress}%`}>
+          <span style={{ width: `${row.progress}%` }} />
         </div>
+      )}
 
-        <div className="cowork-detail-cell">
-          <span><PackageCheck size={13} />{t('Artifacts')}</span>
-          {row.artifacts.length ? (
-            <ul className="cowork-artifact-list">
-              {row.artifacts.map((artifact, index) => (
-                <li key={artifact.id || `${artifact.path}-${index}`}>
-                  <FileText size={12} />
-                  <div>
-                    <strong>{artifact.title || artifact.id || artifact.path || t('Artifact')}</strong>
-                    <span>{[artifact.validation, artifact.kind, artifact.mime].filter(Boolean).join(' · ') || artifact.id}</span>
-                    {(artifact.path || artifact.id) && <code>{artifact.path || artifact.id}</code>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <small>{t('暂无 artifact')}</small>
+      {inlineText && (
+        <p className={primaryFailure ? 'cowork-reason-inline' : 'cowork-summary-line'}>
+          {compactText(inlineText, 180)}
+        </p>
+      )}
+
+      {open && hasDetails && (
+        <div className="cowork-detail-grid">
+          {failureReasons.length > 0 && (
+            <div className="cowork-detail-cell cowork-detail-wide cowork-failure-cell">
+              <span><ScrollText size={13} />{t('失败原因')}</span>
+              <ul className="cowork-reason-list">
+                {failureReasons.map((reason, index) => (
+                  <li key={`${reason.code}-${index}`}>
+                    <strong>{reason.code}</strong>
+                    <span>{reason.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
-        </div>
 
-        <div className="cowork-detail-cell">
-          <span><ScrollText size={13} />{t('证据')}</span>
-          {Object.keys(row.evidence).length ? (
-            <>
+          {row.artifacts.length > 0 && (
+            <div className="cowork-detail-cell">
+              <span><PackageCheck size={13} />{t('Artifacts')}</span>
+              <ul className="cowork-artifact-list">
+                {row.artifacts.map((artifact, index) => (
+                  <li key={artifact.id || `${artifact.path}-${index}`}>
+                    <FileText size={12} />
+                    <div>
+                      <strong>{artifact.title || artifact.id || artifact.path || t('Artifact')}</strong>
+                      <span>{[artifact.validation, artifact.kind, artifact.mime].filter(Boolean).join(' · ') || artifact.id}</span>
+                      {(artifact.path || artifact.id) && <code>{artifact.path || artifact.id}</code>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {hasVisibleEvidenceCounts && (
+            <div className="cowork-detail-cell">
+              <span><ScrollText size={13} />{t('证据')}</span>
               <div className="cowork-evidence-pills">
                 {evidenceStats.map(item => (
-                  <b key={item.label} data-active={item.value > 0}>
+                  <b key={item.label} data-active="true">
                     {item.label} <em>{item.value}</em>
                   </b>
                 ))}
               </div>
-              {failureReasons.length > 0 && (
-                <ul className="cowork-reason-list">
-                  {failureReasons.map((reason, index) => (
-                    <li key={`${reason.code}-${index}`}>
-                      <strong>{reason.code}</strong>
-                      <span>{reason.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          ) : (
-            <small>{t('等待 evidence')}</small>
-          )}
-        </div>
-
-        <div className="cowork-detail-cell cowork-detail-wide">
-          <span><FileCode size={13} />{t('Diff')}</span>
-          <div className="cowork-diff-actions">
-            <button type="button" disabled={!row.worktreeId || Boolean(busyAction)} onClick={() => void loadDiff()}>
-              {busyAction === 'diff' ? t('加载中') : t('完整 Diff')}
-            </button>
-            <button type="button" disabled={!canReview || Boolean(busyAction)} onClick={() => void checkPromote()}>
-              {busyAction === 'check' ? t('检查中') : t('Review')}
-            </button>
-            <button type="button" data-danger="true" disabled={!canPromote || Boolean(busyAction)} onClick={() => void applyPromote()}>
-              {busyAction === 'promote' ? t('Promote 中') : t('Promote')}
-            </button>
-            <button type="button" disabled={!rollbackPromotionId || Boolean(busyAction) || rollbackResult?.ok} onClick={() => void applyRollback()}>
-              {busyAction === 'rollback' ? t('回滚中') : t('Rollback')}
-            </button>
-          </div>
-          {diffFiles.length > 0 && (
-            <div className="cowork-promote-file-list" aria-label={t('选择要 Promote 的文件')}>
-              {diffFiles.map(file => (
-                <label key={file.path}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPromotePaths.includes(file.path)}
-                    disabled={Boolean(busyAction) || Boolean(promoteResult?.ok)}
-                    onChange={() => toggleSelectedPath(file.path)}
-                  />
-                  <span>{file.status || 'M'}</span>
-                  <code>{file.path}</code>
-                </label>
-              ))}
             </div>
           )}
-          {actionError && <p className="cowork-error-line">{actionError}</p>}
-          {promoteCheck?.ok && !promoteResult?.ok && <small>{promoteCheck.message || t('Patch 可以干净应用。')}</small>}
-          {promoteCheck && !promoteCheck.ok && (
-            <div className="cowork-conflict-box">
-              <strong>{promoteCheck.conflicts?.summary || t('Patch 无法干净应用。')}</strong>
-              {conflictFiles.length > 0 && (
-                <ul>
-                  {conflictFiles.map(file => (
-                    <li key={file.path}>
-                      <code>{file.path}</code>
-                      <span>{file.reason || file.sourceStatus || t('上下文不匹配')}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {promoteCheck.conflicts?.raw && <pre data-tone="danger">{compactText(promoteCheck.conflicts.raw, 1200)}</pre>}
+
+          {row.worktreeRoot && (
+            <div className="cowork-detail-cell">
+              <span><Network size={13} />{t('Worktree')}</span>
+              <code>{row.worktreeRoot}</code>
             </div>
           )}
-          {promoteResult?.ok && <small>{promoteResult.message || t('已 promote 到主 workspace。')}</small>}
-          {rollbackResult?.ok && <small>{rollbackResult.message || t('已回滚本次 promote。')}</small>}
-          {Object.keys(displayedDiff).length ? (
-            <>
-              {diffError && <p className="cowork-error-line">{diffError}</p>}
-              {diffStat && <pre>{diffStat}</pre>}
-              {diffStatus && <pre>{diffStatus}</pre>}
-              {patchPreview && <pre>{compactText(patchPreview, 2400)}</pre>}
-              {displayedDiff.truncated === true && <small>{t('Diff 已截断，完整内容在 artifact/worktree 中查看。')}</small>}
-            </>
-          ) : (
-            <small>{t('暂无 diff')}</small>
-          )}
-        </div>
 
-        <div className="cowork-detail-cell cowork-detail-wide">
-          <span><SquareTerminal size={13} />{t('Local VM')}</span>
-          {Object.keys(row.localVm).length ? (
-            <>
+          {hasVmOutput && (
+            <div className="cowork-detail-cell cowork-detail-wide">
+              <span><SquareTerminal size={13} />{t('Local VM')}</span>
               <div className="cowork-vm-meta">
                 <b>{stringValue(row.localVm.runner) || 'local_vm'}</b>
-                <span>{localVmBackend || t('未知 backend')}</span>
+                {localVmBackend && <span>{localVmBackend}</span>}
                 {row.localVm.returncode !== undefined && <span>exit {String(row.localVm.returncode)}</span>}
               </div>
               {localVmStdout && <pre>{compactText(localVmStdout, 1600)}</pre>}
@@ -444,22 +292,11 @@ function CoworkSubrunCard({ row }: { row: CoworkRow }) {
                   ))}
                 </ul>
               )}
-            </>
-          ) : (
-            <small>{row.profile === 'local_vm' ? t('等待 local_vm 输出') : t('此 subrun 未使用 local_vm')}</small>
+            </div>
           )}
         </div>
-      </div>
+      )}
     </article>
-  );
-}
-
-function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' | 'muted' }) {
-  return (
-    <div className="cowork-stat" data-tone={tone}>
-      <strong>{value}</strong>
-      <span>{label}</span>
-    </div>
   );
 }
 
@@ -467,6 +304,7 @@ function buildCoworkRows(items: ChatSubagentEvent[], plan: CoworkPlanSnapshot | 
   const planSubruns = Array.isArray(plan?.subruns) ? plan.subruns : [];
   const itemById = new Map(items.map(item => [item.taskId, item]));
   const used = new Set<string>();
+  const rowKeys = new Set<string>();
   const rows: CoworkRow[] = [];
 
   for (const subrun of planSubruns) {
@@ -474,15 +312,39 @@ function buildCoworkRows(items: ChatSubagentEvent[], plan: CoworkPlanSnapshot | 
     const title = stringValue(subrun.title) || stringValue(subrun.name) || id;
     const item = itemById.get(id) || items.find(candidate => candidate.name === title);
     if (item) used.add(item.taskId);
-    rows.push(coworkRowFrom(item, subrun, rows.length + 1));
+    const row = coworkRowFrom(item, subrun, rows.length + 1);
+    if (coworkRowSeen(row, rowKeys)) continue;
+    rememberCoworkRow(row, rowKeys);
+    rows.push(row);
   }
 
   for (const item of items) {
     if (used.has(item.taskId)) continue;
-    rows.push(coworkRowFrom(item, null, rows.length + 1));
+    const row = coworkRowFrom(item, null, rows.length + 1);
+    if (coworkRowSeen(row, rowKeys)) continue;
+    used.add(item.taskId);
+    rememberCoworkRow(row, rowKeys);
+    rows.push(row);
   }
 
   return rows;
+}
+
+function coworkRowSeen(row: CoworkRow, rowKeys: Set<string>): boolean {
+  return coworkRowKeys(row).some(key => rowKeys.has(key));
+}
+
+function rememberCoworkRow(row: CoworkRow, rowKeys: Set<string>) {
+  for (const key of coworkRowKeys(row)) rowKeys.add(key);
+}
+
+function coworkRowKeys(row: CoworkRow): string[] {
+  const id = row.id.trim();
+  const title = row.title.trim().toLowerCase();
+  return [
+    id ? `id:${id}` : '',
+    title ? `title:${title}` : '',
+  ].filter(Boolean);
 }
 
 function coworkRowFrom(item: ChatSubagentEvent | undefined, subrun: CoworkPlanSubrun | null, index: number): CoworkRow {
@@ -592,6 +454,14 @@ function profileLabel(profile: string): string {
   return profile || 'local_worktree';
 }
 
+function inlineSubrunText(row: CoworkRow): string {
+  if (row.status === 'done') return '';
+  const text = (row.summary || row.prompt || '').trim();
+  if (!text) return '';
+  if (['finished', 'done', 'completed', 'success', 'succeeded', '完成', '已完成'].includes(text.toLowerCase())) return '';
+  return text;
+}
+
 function artifactRows(value: unknown): CoworkArtifactRow[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -612,32 +482,6 @@ function officeValidationLabel(metadata: UnknownRecord): string {
   if (!Object.keys(validation).length) return '';
   if (validation.ok === true) return '已验收';
   return firstString(validation, ['summary', 'error']) || '验收失败';
-}
-
-function changedFilesFromDiff(diff: UnknownRecord): WorktreeChangedFile[] {
-  const rawFiles = diff.files;
-  if (Array.isArray(rawFiles)) {
-    return rawFiles
-      .map(item => recordValue(item))
-      .map(item => ({
-        path: firstString(item, ['path']),
-        status: firstString(item, ['status']),
-        reason: firstString(item, ['reason']),
-        sourceStatus: firstString(item, ['source_status', 'sourceStatus']),
-      }))
-      .filter(item => item.path);
-  }
-  const status = stringValue(diff.status);
-  if (!status) return [];
-  return status.split('\n')
-    .map(line => {
-      const marker = line.slice(0, 2).trim() || line.slice(0, 1).trim() || '?';
-      let path = line.length >= 4 ? line.slice(3).trim() : line.trim();
-      if (path.includes(' -> ')) path = path.split(' -> ').pop()?.trim() || path;
-      path = path.replace(/^"|"$/g, '').replace(/\\/g, '/');
-      return { path, status: marker };
-    })
-    .filter(item => item.path);
 }
 
 function firstString(...args: Array<UnknownRecord | string[]>): string {
@@ -717,16 +561,4 @@ function elapsedText(startedAt?: number, finishedAt?: number): string {
   const ms = finishedAt - startedAt;
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function createdAtText(value: unknown): string {
-  const timestamp = typeof value === 'number' ? value : Number(value || 0);
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
-  const date = new Date(timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000);
-  return date.toLocaleString();
-}
-
-function formatActionError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error || 'Action failed');
 }

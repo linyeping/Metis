@@ -12,6 +12,7 @@ from backend.runtime.error_catalog import classify_llm_error
 from backend.web.desktop_window import handle_window_action
 from backend.web.helpers import error_response_payload, request_client_is_loopback
 from backend.web.llm_state import (
+    check_network_settings,
     first_run_status_payload,
     get_provider_models,
     get_provider_status,
@@ -276,6 +277,12 @@ def update_settings() -> Any:
     data = request.get_json(silent=True) or {}
     updated = update_runtime_settings(data)
     return jsonify({"updated": updated})
+
+
+@settings_bp.route("/settings/network/check", methods=["POST"])
+def network_check() -> Any:
+    data = request.get_json(silent=True) or {}
+    return jsonify(check_network_settings(data))
 
 
 # --- Provider routes -------------------------------------------------------

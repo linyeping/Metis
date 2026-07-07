@@ -8,26 +8,30 @@ export function SubagentGroup({ items, onDismiss }: { items: ChatSubagentEvent[]
   const t = useT();
   const stats = useMemo(() => subagentStats(items), [items]);
   const setRightRailMode = useUiStore(state => state.setRightRailMode);
+  const showProgress = stats.running > 0 || stats.planned > 0;
 
   if (items.length === 0) return null;
 
   return (
-    <section className="subagent-group" aria-label={t('子代理并行状态')} data-compact="true">
+    <section className="subagent-group" aria-label={t('子代理并行状态')} data-compact="true" data-progress={showProgress}>
       <button className="subagent-strip-main" type="button" onClick={() => setRightRailMode('activity')}>
         <Network size={15} />
         <div>
           <strong>{t('并行子代理')}</strong>
           <span>
             {stats.done}/{stats.total} {t('完成')}
+            {stats.planned ? ` · ${stats.planned} ${t('待执行')}` : ''}
             {stats.running ? ` · ${stats.running} ${t('运行中')}` : ''}
             {stats.error ? ` · ${stats.error} ${t('错误')}` : ''}
           </span>
         </div>
-        <em>{stats.progress}%</em>
+        {showProgress && <em>{stats.progress}%</em>}
       </button>
-      <div className="subagent-overall-progress" aria-label={`${t('整体进度')} ${stats.progress}%`}>
-        <span style={{ width: `${stats.progress}%` }} />
-      </div>
+      {showProgress && (
+        <div className="subagent-overall-progress" aria-label={`${t('整体进度')} ${stats.progress}%`}>
+          <span style={{ width: `${stats.progress}%` }} />
+        </div>
+      )}
       <button className="subagent-open-activity-button" type="button" onClick={() => setRightRailMode('activity')}>
         <PanelRightOpen size={13} />
         {t('活动')}
@@ -42,6 +46,7 @@ export function SubagentGroup({ items, onDismiss }: { items: ChatSubagentEvent[]
 export function SubagentActivityPanel({ items }: { items: ChatSubagentEvent[] }) {
   const t = useT();
   const stats = useMemo(() => subagentStats(items), [items]);
+  const showProgress = stats.running > 0 || stats.planned > 0;
 
   if (items.length === 0) {
     return (
@@ -63,15 +68,18 @@ export function SubagentActivityPanel({ items }: { items: ChatSubagentEvent[] })
           <strong>{t('并行子代理')}</strong>
           <span>
             {stats.done}/{stats.total} {t('完成')}
+            {stats.planned ? ` · ${stats.planned} ${t('待执行')}` : ''}
             {stats.running ? ` · ${stats.running} ${t('运行中')}` : ''}
             {stats.error ? ` · ${stats.error} ${t('错误')}` : ''}
           </span>
         </div>
-        <em>{stats.progress}%</em>
+        {showProgress && <em>{stats.progress}%</em>}
       </header>
-      <div className="subagent-overall-progress" aria-label={`${t('整体进度')} ${stats.progress}%`}>
-        <span style={{ width: `${stats.progress}%` }} />
-      </div>
+      {showProgress && (
+        <div className="subagent-overall-progress" aria-label={`${t('整体进度')} ${stats.progress}%`}>
+          <span style={{ width: `${stats.progress}%` }} />
+        </div>
+      )}
       <div className="subagent-list">
         {items.map(item => (
           <SubagentCard item={item} key={item.taskId} />
@@ -90,6 +98,9 @@ function SubagentCard({ item }: { item: ChatSubagentEvent }) {
   const progress = clampProgress(item.progress);
   const elapsed = elapsedText(item.startedAt, item.finishedAt || item.updatedAt);
   const StatusIcon = item.status === 'error' || item.status === 'canceled' ? AlertTriangle : isDoneStatus(item.status) ? CheckCircle2 : LoaderCircle;
+  const showProgress = isActiveSubagentStatus(item.status);
+  const displaySummary = showProgress ? summary : suppressTerminalSummary(summary);
+  const showBody = showProgress || Boolean(displaySummary) || Boolean(resultText);
 
   return (
     <article className="subagent-card" data-status={item.status}>
@@ -100,24 +111,30 @@ function SubagentCard({ item }: { item: ChatSubagentEvent }) {
         {elapsed && <small>{elapsed}</small>}
         <em>{t(statusText(item.status))}</em>
       </button>
-      <div className="subagent-card-body">
-        <div className="subagent-progress" aria-label={`${item.name} ${progress}%`}>
-          <span style={{ width: `${progress}%` }} />
-        </div>
-        <p>{summary || t('等待子代理输出')}</p>
-        <div className="subagent-card-actions">
-          <b>{progress}%</b>
-          {resultText && (
-            <button
-              className="subagent-right-rail-button"
-              type="button"
-              onClick={() => setToolPreview({ title: `Subagent · ${item.name}`, content: resultText })}
-            >
-              {t('右栏查看')}
-            </button>
+      {showBody && (
+        <div className="subagent-card-body">
+          {showProgress && (
+            <div className="subagent-progress" aria-label={`${item.name} ${progress}%`}>
+              <span style={{ width: `${progress}%` }} />
+            </div>
+          )}
+          {displaySummary && <p>{displaySummary}</p>}
+          {(showProgress || resultText) && (
+            <div className="subagent-card-actions">
+              {showProgress && <b>{progress}%</b>}
+              {resultText && (
+                <button
+                  className="subagent-right-rail-button"
+                  type="button"
+                  onClick={() => setToolPreview({ title: `Subagent · ${item.name}`, content: resultText })}
+                >
+                  {t('右栏查看')}
+                </button>
+              )}
+            </div>
           )}
         </div>
-      </div>
+      )}
       {open && resultText && <pre className="subagent-result">{resultText}</pre>}
     </article>
   );
@@ -128,8 +145,9 @@ function subagentStats(items: ChatSubagentEvent[]) {
   const done = items.filter(item => isDoneStatus(item.status)).length;
   const error = items.filter(item => item.status === 'error' || item.status === 'canceled').length;
   const running = items.filter(item => item.status === 'running' || item.status === 'waiting_permission').length;
+  const planned = items.filter(item => item.status === 'planned').length;
   const progress = total ? Math.round(items.reduce((sum, item) => sum + clampProgress(item.progress), 0) / total) : 0;
-  return { total, done, error, running, progress };
+  return { total, done, error, running, planned, progress };
 }
 
 function statusText(status: ChatSubagentEvent['status']): string {
@@ -144,6 +162,17 @@ function statusText(status: ChatSubagentEvent['status']): string {
 
 function isDoneStatus(status: ChatSubagentEvent['status']): boolean {
   return status === 'done' || status === 'promoted';
+}
+
+function isActiveSubagentStatus(status: ChatSubagentEvent['status']): boolean {
+  return status === 'planned' || status === 'running' || status === 'waiting_permission';
+}
+
+function suppressTerminalSummary(value: string): string {
+  const text = value.trim();
+  if (!text) return '';
+  if (['finished', 'done', 'completed', 'success', 'succeeded', '完成', '已完成'].includes(text.toLowerCase())) return '';
+  return text;
 }
 
 function elapsedText(startedAt?: number, finishedAt?: number): string {

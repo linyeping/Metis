@@ -94,6 +94,14 @@ _PROVIDER_SETTINGS_LOCK = threading.RLock()
 _PROVIDER_PROBE_CACHE_LOCK = threading.RLock()
 _PROVIDER_MODEL_CACHE_TTL_SECONDS = 300.0
 _PROVIDER_MODEL_CACHE: Dict[Tuple[str, str, str], Tuple[float, Dict[str, Any]]] = {}
+_PROXY_ENV_RUNTIME_KEYS = (
+    "METIS_PROXY_MODE",
+    "METIS_PROXY_SCHEME",
+    "METIS_PROXY_HOST",
+    "METIS_PROXY_PORT",
+    "METIS_PROXY_BYPASS",
+    "METIS_LLM_PROXY",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -485,11 +493,11 @@ def get_runtime_settings() -> Dict[str, Any]:
             "max_tokens": int(env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096")),
             "auto_memory": env_bool("METIS_AUTO_MEMORY", "MIRO_AUTO_MEMORY", True),
             "auto_skills": env_bool("METIS_AUTO_SKILLS", "MIRO_AUTO_SKILLS", True),
-            "proxy_mode": env("METIS_PROXY_MODE", "MIRO_PROXY_MODE", "system"),
-            "proxy_scheme": env("METIS_PROXY_SCHEME", "MIRO_PROXY_SCHEME", "http"),
-            "proxy_host": env("METIS_PROXY_HOST", "MIRO_PROXY_HOST", "127.0.0.1"),
-            "proxy_port": env("METIS_PROXY_PORT", "MIRO_PROXY_PORT", "7890"),
-            "proxy_bypass": env("METIS_PROXY_BYPASS", "MIRO_PROXY_BYPASS", "localhost,127.0.0.1,::1"),
+            "proxy_mode": _normalized_proxy_settings({})["proxy_mode"],
+            "proxy_scheme": _normalized_proxy_settings({})["proxy_scheme"],
+            "proxy_host": _normalized_proxy_settings({})["proxy_host"],
+            "proxy_port": _normalized_proxy_settings({})["proxy_port"],
+            "proxy_bypass": _normalized_proxy_settings({})["proxy_bypass"],
             "terminal_shell": env("METIS_TERMINAL_SHELL", "MIRO_TERMINAL_SHELL", "powershell"),
             "python_path": env("METIS_PYTHON", "MIRO_PYTHON", ""),
             "provider_validation": validation,
@@ -499,6 +507,8 @@ def get_runtime_settings() -> Dict[str, Any]:
 def update_runtime_settings(data: Dict[str, Any]) -> List[str]:
     with _PROVIDER_SETTINGS_LOCK:
         data = _normalized_runtime_settings_update(data)
+        if _has_proxy_settings(data):
+            data.update(_normalized_proxy_settings(data))
         mapping = {
             "backend": "METIS_LLM_BACKEND",
             "base_url": "METIS_LLM_BASE_URL",
@@ -572,6 +582,8 @@ def _normalized_runtime_settings_update(data: Dict[str, Any]) -> Dict[str, Any]:
 def persist_runtime_settings(data: Dict[str, Any]) -> None:
     with _PROVIDER_SETTINGS_LOCK:
         data = _normalized_runtime_settings_update(data)
+        if _has_proxy_settings(data):
+            data.update(_normalized_proxy_settings(data))
         load_persistent_config()
         file_values = _env_file_values()
         backend = str(
@@ -605,13 +617,11 @@ def persist_runtime_settings(data: Dict[str, Any]) -> None:
             "auto_skills": data.get("auto_skills")
             if data.get("auto_skills") is not None
             else env_bool("METIS_AUTO_SKILLS", "MIRO_AUTO_SKILLS", True),
-            "proxy_mode": str(data.get("proxy_mode") or env("METIS_PROXY_MODE", "MIRO_PROXY_MODE", "system")).strip(),
-            "proxy_scheme": str(data.get("proxy_scheme") or env("METIS_PROXY_SCHEME", "MIRO_PROXY_SCHEME", "http")).strip(),
-            "proxy_host": str(data.get("proxy_host") or env("METIS_PROXY_HOST", "MIRO_PROXY_HOST", "127.0.0.1")).strip(),
-            "proxy_port": str(data.get("proxy_port") or env("METIS_PROXY_PORT", "MIRO_PROXY_PORT", "7890")).strip(),
-            "proxy_bypass": str(
-                data.get("proxy_bypass") or env("METIS_PROXY_BYPASS", "MIRO_PROXY_BYPASS", "localhost,127.0.0.1,::1")
-            ).strip(),
+            "proxy_mode": _normalized_proxy_settings(data)["proxy_mode"],
+            "proxy_scheme": _normalized_proxy_settings(data)["proxy_scheme"],
+            "proxy_host": _normalized_proxy_settings(data)["proxy_host"],
+            "proxy_port": _normalized_proxy_settings(data)["proxy_port"],
+            "proxy_bypass": _normalized_proxy_settings(data)["proxy_bypass"],
             "terminal_shell": str(data.get("terminal_shell") or env("METIS_TERMINAL_SHELL", "MIRO_TERMINAL_SHELL", "powershell")).strip(),
             "python_path": str(data.get("python_path") or env("METIS_PYTHON", "MIRO_PYTHON", "")).strip(),
         }
@@ -619,20 +629,260 @@ def persist_runtime_settings(data: Dict[str, Any]) -> None:
 
 
 def _apply_proxy_runtime(data: Dict[str, Any]) -> None:
+    data = _normalized_proxy_settings(data)
     mode = str(data.get("proxy_mode") or os.environ.get("METIS_PROXY_MODE") or "system").strip().lower()
     os.environ["METIS_PROXY_MODE"] = mode
     if mode == "off":
         os.environ.pop("METIS_LLM_PROXY", None)
         return
     if mode != "custom":
+        os.environ.pop("METIS_LLM_PROXY", None)
         return
-    scheme = str(data.get("proxy_scheme") or os.environ.get("METIS_PROXY_SCHEME") or "http").strip() or "http"
-    host = str(data.get("proxy_host") or os.environ.get("METIS_PROXY_HOST") or "").strip()
-    port = str(data.get("proxy_port") or os.environ.get("METIS_PROXY_PORT") or "").strip()
+    scheme = str(data.get("proxy_scheme") or "http").strip() or "http"
+    host = str(data.get("proxy_host") or "").strip()
+    port = str(data.get("proxy_port") or "").strip()
     if not host or not port:
         os.environ.pop("METIS_LLM_PROXY", None)
         return
     os.environ["METIS_LLM_PROXY"] = f"{scheme}://{host}:{port}"
+
+
+def _has_proxy_settings(data: Dict[str, Any]) -> bool:
+    return any(
+        key in data
+        for key in (
+            "proxy_mode",
+            "proxyMode",
+            "proxy_scheme",
+            "proxyScheme",
+            "proxy_host",
+            "proxyHost",
+            "proxy_port",
+            "proxyPort",
+            "proxy_bypass",
+            "proxyBypass",
+        )
+    )
+
+
+def _normalized_proxy_settings(data: Dict[str, Any]) -> Dict[str, str]:
+    raw_mode = str(data.get("proxy_mode") or data.get("proxyMode") or env("METIS_PROXY_MODE", "MIRO_PROXY_MODE", "system")).strip().lower()
+    mode_aliases = {
+        "auto": "system",
+        "env": "system",
+        "environment": "system",
+        "windows": "system",
+        "manual": "custom",
+        "proxy": "custom",
+        "direct": "off",
+        "none": "off",
+        "disabled": "off",
+        "disable": "off",
+    }
+    mode = mode_aliases.get(raw_mode, raw_mode)
+    if mode not in {"system", "custom", "off"}:
+        mode = "system"
+    scheme = str(data.get("proxy_scheme") or data.get("proxyScheme") or env("METIS_PROXY_SCHEME", "MIRO_PROXY_SCHEME", "http")).strip().lower()
+    if scheme not in {"http", "https", "socks5", "socks5h"}:
+        scheme = "http"
+    host = str(data.get("proxy_host") or data.get("proxyHost") or env("METIS_PROXY_HOST", "MIRO_PROXY_HOST", "127.0.0.1")).strip()
+    port = str(data.get("proxy_port") or data.get("proxyPort") or env("METIS_PROXY_PORT", "MIRO_PROXY_PORT", "7890")).strip()
+    if port and not port.isdigit():
+        port = ""
+    bypass = str(
+        data.get("proxy_bypass")
+        or data.get("proxyBypass")
+        or env("METIS_PROXY_BYPASS", "MIRO_PROXY_BYPASS", "localhost,127.0.0.1,::1")
+    ).strip()
+    return {
+        "proxy_mode": mode,
+        "proxy_scheme": scheme,
+        "proxy_host": host,
+        "proxy_port": port,
+        "proxy_bypass": bypass,
+    }
+
+
+def _capture_proxy_env() -> Dict[str, Optional[str]]:
+    return {key: os.environ.get(key) for key in _PROXY_ENV_RUNTIME_KEYS}
+
+
+def _restore_proxy_env(snapshot: Dict[str, Optional[str]]) -> None:
+    for key in _PROXY_ENV_RUNTIME_KEYS:
+        value = snapshot.get(key)
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _proxy_effective_payload(url: str) -> Dict[str, Any]:
+    trust_env = not _force_direct_connection(url)
+    proxies = _proxies_for_url(url) if trust_env else None
+    proxy_url = ""
+    if isinstance(proxies, dict):
+        proxy_url = str(proxies.get("https") or proxies.get("http") or "")
+    return {
+        "mode": os.environ.get("METIS_PROXY_MODE", "system"),
+        "trust_env": trust_env,
+        "proxy_url": proxy_url,
+        "bypassed": not trust_env or not bool(proxy_url),
+    }
+
+
+def check_network_settings(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Run a real provider probe with transient proxy settings."""
+    normalized = _normalized_runtime_settings_update(data)
+    proxy = _normalized_proxy_settings(data)
+    snapshot = _capture_proxy_env()
+    started = time.monotonic()
+    try:
+        load_persistent_config()
+        os.environ["METIS_PROXY_MODE"] = proxy["proxy_mode"]
+        os.environ["METIS_PROXY_SCHEME"] = proxy["proxy_scheme"]
+        os.environ["METIS_PROXY_HOST"] = proxy["proxy_host"]
+        os.environ["METIS_PROXY_PORT"] = proxy["proxy_port"]
+        os.environ["METIS_PROXY_BYPASS"] = proxy["proxy_bypass"]
+        _apply_proxy_runtime(proxy)
+
+        provider = str(normalized.get("provider") or normalized.get("provider_id") or normalized.get("backend") or "openai").strip()
+        profile = resolve_provider_for_config(
+            provider,
+            base_url=str(normalized.get("base_url") or ""),
+            model=str(normalized.get("model") or ""),
+        )
+        backend = str(profile.provider_id)
+        file_values = _env_file_values()
+        incoming_key = str(normalized.get("api_key") or "").strip()
+        if _is_masked_api_key(incoming_key):
+            incoming_key = ""
+        fallback_key = _runtime_value("api_key", backend, file_values, "")
+        if not fallback_key and backend != provider:
+            fallback_key = _runtime_value("api_key", provider, file_values, "")
+        base_url = normalize_base_url(
+            backend,
+            str(normalized.get("base_url") or _runtime_value("base_url", backend, file_values, default_base_url(backend))),
+        )
+        model = str(normalized.get("model") or _runtime_value("model", backend, file_values, default_model(backend))).strip()
+        api_base_url = normalize_openai_api_base_url(base_url) if profile.openai_compatible and base_url else base_url
+        context = {
+            "profile": profile,
+            "provider_id": backend,
+            "provider_name": profile.display_name,
+            "base_url": base_url,
+            "api_base_url": api_base_url,
+            "model": model,
+            "api_key": incoming_key or fallback_key,
+        }
+        validation = verify_provider_settings(
+            {
+                "backend": backend,
+                "provider_id": backend,
+                "base_url": base_url,
+                "model": model,
+                "api_key": incoming_key,
+                "deep_probe": False,
+            }
+        )
+        os.environ["METIS_PROXY_MODE"] = proxy["proxy_mode"]
+        os.environ["METIS_PROXY_SCHEME"] = proxy["proxy_scheme"]
+        os.environ["METIS_PROXY_HOST"] = proxy["proxy_host"]
+        os.environ["METIS_PROXY_PORT"] = proxy["proxy_port"]
+        os.environ["METIS_PROXY_BYPASS"] = proxy["proxy_bypass"]
+        _apply_proxy_runtime(proxy)
+        if validation.get("ok") and context["api_key"] and profile.openai_compatible:
+            conformance = run_provider_conformance_probe(
+                provider_id=str(validation.get("provider_id") or backend),
+                base_url=str(validation.get("base_url") or base_url),
+                api_key=context["api_key"],
+                model=str(validation.get("model") or model),
+            )
+            validation["conformance"] = conformance
+            if conformance.get("ok"):
+                validation["title"] = "网络探测通过"
+                validation["message"] = "配置检查和 provider 一致性探测已完成。"
+                validation["hint"] = ""
+            else:
+                validation["title"] = "配置通过，真实请求失败"
+                validation["message"] = "本地配置格式有效，但真实小请求探测未完成。"
+                validation["hint"] = str(conformance.get("error") or "请检查代理、余额、模型权限或中转站协议兼容性。")
+        models_result: Dict[str, Any]
+        if not context["api_key"]:
+            models_result = _provider_probe_result(
+                "models",
+                status="error",
+                ok=False,
+                context=context,
+                message="缺少 API Key，无法做真实网络探测。",
+                hint="填写并保存 API Key，或在本页输入未保存 Key 后再测试。",
+                models=[],
+                models_url="",
+            )
+        elif profile.openai_compatible:
+            models_url = (_models_url_candidates(context) or [""])[0]
+            try:
+                payload = _provider_get_first_json_uncached(_models_url_candidates(context), context["api_key"], timeout=15.0)
+                raw_models = payload.get("data") if isinstance(payload, dict) else []
+                if not isinstance(raw_models, list):
+                    raw_models = payload.get("models") if isinstance(payload, dict) else []
+                models = [_model_catalog_item(item) for item in raw_models if isinstance(item, dict)]
+                models = [item for item in models if item["id"]]
+                models_result = _provider_probe_result(
+                    "models",
+                    status="ok",
+                    ok=True,
+                    context=context,
+                    message=f"模型目录可访问，返回 {len(models)} 个模型。",
+                    hint="网络、Base URL 与 API Key 至少通过了 /models 探测。",
+                    models=models[:50],
+                    models_url=models_url,
+                )
+            except Exception as exc:
+                models_result = _provider_probe_result(
+                    "models",
+                    status="error",
+                    ok=False,
+                    context=context,
+                    message=_safe_error_message(exc),
+                    hint="模型目录探测失败。请检查代理模式、Base URL、API Key 和中转站路径。",
+                    models=[],
+                    models_url=models_url,
+                )
+        else:
+            models_result = _provider_probe_result(
+                "models",
+                status="unsupported",
+                ok=bool(validation.get("ok")),
+                context=context,
+                message="当前 provider 不提供 OpenAI-compatible /models 探测。",
+                hint="以 provider 深度探测结果为准。",
+                models=[],
+                models_url="",
+            )
+        conformance = validation.get("conformance") if isinstance(validation.get("conformance"), dict) else {}
+        ok = bool(validation.get("ok")) and (bool(models_result.get("ok")) or bool(conformance.get("ok")))
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        return {
+            "ok": ok,
+            "status": "ok" if ok else "error",
+            "message": "网络探测通过。" if ok else "网络探测未通过。",
+            "hint": "" if ok else str(models_result.get("hint") or validation.get("hint") or ""),
+            "elapsed_ms": elapsed_ms,
+            "provider": {
+                "provider_id": backend,
+                "display_name": profile.display_name,
+                "base_url": base_url,
+                "api_base_url": api_base_url,
+                "model": model,
+                "has_api_key": bool(context["api_key"]),
+            },
+            "proxy": proxy,
+            "effective_proxy": _proxy_effective_payload(str(validation.get("chat_url") or api_base_url or base_url)),
+            "validation": validation,
+            "models": models_result,
+        }
+    finally:
+        _restore_proxy_env(snapshot)
 
 
 def _replace_with_retry(temp_path: str, path: str, *, attempts: int = 5) -> None:
@@ -996,6 +1246,19 @@ def _provider_get_first_json(urls: List[str], api_key: str, timeout: float = 12.
     for url in urls:
         try:
             return _provider_get_cached_model_json(url, api_key, timeout)
+        except Exception as exc:
+            last_exc = exc
+            continue
+    if last_exc:
+        raise last_exc
+    raise ValueError("模型目录端点为空。")
+
+
+def _provider_get_first_json_uncached(urls: List[str], api_key: str, timeout: float = 12.0) -> Dict[str, Any]:
+    last_exc: Optional[Exception] = None
+    for url in urls:
+        try:
+            return _provider_get_json(url, api_key, timeout)
         except Exception as exc:
             last_exc = exc
             continue

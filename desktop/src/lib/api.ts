@@ -26,6 +26,7 @@ import type {
   MetisRuntimeStatus,
   MetisRuntimeStep,
   ModelCapabilities,
+  NetworkCheckPayload,
   ParsedFile,
   PermissionAccessMode,
   PermissionAuditEntry,
@@ -831,6 +832,57 @@ export async function updateSettings(settings: Partial<RuntimeSettings> & { apiK
       python_path: settings.pythonPath,
     }),
   });
+}
+
+export async function checkNetworkSettings(settings: Partial<RuntimeSettings> & { apiKey?: string }): Promise<NetworkCheckPayload> {
+  const data = await requestJson<Record<string, unknown>>('/settings/network/check', {
+    method: 'POST',
+    body: JSON.stringify({
+      backend: settings.backend,
+      provider_id: settings.providerId,
+      base_url: settings.baseUrl,
+      model: settings.model,
+      api_key: settings.apiKey,
+      proxy_mode: settings.proxyMode,
+      proxy_scheme: settings.proxyScheme,
+      proxy_host: settings.proxyHost,
+      proxy_port: settings.proxyPort,
+      proxy_bypass: settings.proxyBypass,
+    }),
+  });
+  const provider = recordValue(data.provider);
+  const proxy = recordValue(data.proxy);
+  const effectiveProxy = recordValue(data.effective_proxy ?? data.effectiveProxy);
+  return {
+    ok: Boolean(data.ok),
+    status: stringValue(data.status),
+    message: stringValue(data.message),
+    hint: stringValue(data.hint),
+    elapsedMs: numberValue(data.elapsed_ms ?? data.elapsedMs),
+    provider: {
+      providerId: stringValue(provider.provider_id ?? provider.providerId),
+      displayName: stringValue(provider.display_name ?? provider.displayName),
+      baseUrl: stringValue(provider.base_url ?? provider.baseUrl),
+      apiBaseUrl: stringValue(provider.api_base_url ?? provider.apiBaseUrl),
+      model: stringValue(provider.model),
+      hasApiKey: Boolean(provider.has_api_key ?? provider.hasApiKey),
+    },
+    proxy: {
+      proxyMode: (stringValue(proxy.proxy_mode ?? proxy.proxyMode) || 'system') as NetworkCheckPayload['proxy']['proxyMode'],
+      proxyScheme: stringValue(proxy.proxy_scheme ?? proxy.proxyScheme),
+      proxyHost: stringValue(proxy.proxy_host ?? proxy.proxyHost),
+      proxyPort: stringValue(proxy.proxy_port ?? proxy.proxyPort),
+      proxyBypass: stringValue(proxy.proxy_bypass ?? proxy.proxyBypass),
+    },
+    effectiveProxy: {
+      mode: stringValue(effectiveProxy.mode),
+      trustEnv: Boolean(effectiveProxy.trust_env ?? effectiveProxy.trustEnv),
+      proxyUrl: stringValue(effectiveProxy.proxy_url ?? effectiveProxy.proxyUrl),
+      bypassed: Boolean(effectiveProxy.bypassed),
+    },
+    validation: providerValidationFromRecord(recordValue(data.validation)),
+    models: providerModelCatalogFromRecord(recordValue(data.models)),
+  };
 }
 
 function converterCandidateFromRecord(row: Record<string, unknown>): DocumentConverterCandidate {

@@ -682,7 +682,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
           renderSettingsLoading()
         );
       case 'network':
-        return settings ? <NetworkTab onSettingsChange={value => setSettings(value)} settings={settings} /> : renderSettingsLoading();
+        return settings ? <NetworkTab apiKey={apiKey} onSettingsChange={value => setSettings(value)} settings={settings} /> : renderSettingsLoading();
       case 'terminal':
         return settings ? (
           <TerminalTab

@@ -1136,7 +1136,7 @@ export function RightRail({ backendReady }: RightRailProps) {
       />
       {toolPreview && <div className="activity-inline-tool-output">{renderToolPanel()}</div>}
       {appMode === 'cowork' ? (
-        <CoworkActivityPanel items={subagents} plan={coworkPlan} runtimeStatus={runtimeStatus} />
+        <CoworkActivityPanel items={subagents} onClear={clearSubagents} plan={coworkPlan} runtimeStatus={runtimeStatus} />
       ) : (
         <SubagentActivityPanel items={subagents} />
       )}
@@ -2501,10 +2501,17 @@ function RunActivityCenter({
   const [error, setError] = useState('');
   const [cancelingId, setCancelingId] = useState('');
   const [resumingId, setResumingId] = useState('');
+  const [hiddenTerminalRunIds, setHiddenTerminalRunIds] = useState<Record<string, true>>({});
   const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
   const workspaceById = useMemo(() => new Map(workspaces.map(workspace => [workspace.id, workspace])), [workspaces]);
-  const activeRuns = useMemo(() => runs.filter(run => isActiveRunStatus(run.status)), [runs]);
-  const recentRuns = useMemo(() => runs.filter(run => !isActiveRunStatus(run.status)).slice(0, 4), [runs]);
+  const terminalRuns = useMemo(() => runs.filter(run => !isActiveRunStatus(run.status)), [runs]);
+  const visibleRuns = useMemo(
+    () => runs.filter(run => isActiveRunStatus(run.status) || !hiddenTerminalRunIds[run.runId]),
+    [hiddenTerminalRunIds, runs],
+  );
+  const activeRuns = useMemo(() => visibleRuns.filter(run => isActiveRunStatus(run.status)), [visibleRuns]);
+  const recentRuns = useMemo(() => visibleRuns.filter(run => !isActiveRunStatus(run.status)).slice(0, 1), [visibleRuns]);
+  const canClearTerminalRuns = terminalRuns.some(run => !hiddenTerminalRunIds[run.runId]);
 
   const refresh = useCallback(async () => {
     if (!backendReady) return;
@@ -2568,6 +2575,12 @@ function RunActivityCenter({
     setResumingId(run.runId);
     try {
       const next = await resumeRun(run.runId);
+      setHiddenTerminalRunIds(state => {
+        if (!state[next.runId]) return state;
+        const nextState = { ...state };
+        delete nextState[next.runId];
+        return nextState;
+      });
       setRuns(state => [next, ...state.filter(item => item.runId !== next.runId)]);
       if (next.sessionId) {
         await selectSession(next.sessionId);
@@ -2585,15 +2598,29 @@ function RunActivityCenter({
     <section className="run-activity-center" aria-label={t('后台任务中心')}>
       <header className="activity-section-head">
         <div>
-          <strong>{t('后台运行')}</strong>
-          <span>
-            {activeRuns.length} {t('运行中')}
-            {recentRuns.length ? ` · ${recentRuns.length} ${t('最近任务')}` : ''}
-          </span>
+          <strong>{t('后台任务')}</strong>
         </div>
-        <button type="button" title={t('刷新后台任务')} onClick={() => void refresh()}>
-          <RefreshCw className={busy ? 'spin' : undefined} size={13} />
-        </button>
+        <div className="run-activity-actions">
+          {canClearTerminalRuns && activeRuns.length === 0 && (
+            <button
+              className="run-clear-button"
+              type="button"
+              title={t('清理已结束任务')}
+              onClick={() => {
+                setHiddenTerminalRunIds(state => {
+                  const next = { ...state };
+                  for (const run of terminalRuns) next[run.runId] = true;
+                  return next;
+                });
+              }}
+            >
+              {t('清理')}
+            </button>
+          )}
+          <button type="button" title={t('刷新后台任务')} onClick={() => void refresh()}>
+            <RefreshCw className={busy ? 'spin' : undefined} size={13} />
+          </button>
+        </div>
       </header>
       {!backendReady && (
         <div className="run-activity-empty">
@@ -2613,9 +2640,9 @@ function RunActivityCenter({
           <span>{t('暂无后台任务。')}</span>
         </div>
       )}
-      {activeRuns.length > 0 && (
-        <div className="run-card-list" aria-label={t('运行中任务')}>
-          {activeRuns.map(run => (
+      {(activeRuns.length > 0 || recentRuns.length > 0) && (
+        <div className="run-card-list" aria-label={t('后台任务')}>
+          {[...activeRuns, ...recentRuns].map(run => (
             <RunActivityCard
               canceling={cancelingId === run.runId}
               key={run.runId}
@@ -2629,26 +2656,6 @@ function RunActivityCenter({
             />
           ))}
         </div>
-      )}
-      {recentRuns.length > 0 && (
-        <details className="run-recent-details">
-          <summary>{t('最近任务')}</summary>
-          <div className="run-card-list" aria-label={t('最近任务')}>
-            {recentRuns.map(run => (
-              <RunActivityCard
-                canceling={false}
-                key={run.runId}
-                onCancel={cancelRun}
-                onJump={jumpToRunSession}
-                onResume={resumeCoworkRun}
-                resuming={resumingId === run.runId}
-                run={run}
-                session={sessionById.get(run.sessionId)}
-                workspace={workspaceById.get(sessionById.get(run.sessionId)?.workspaceId || '')}
-              />
-            ))}
-          </div>
-        </details>
       )}
     </section>
   );
