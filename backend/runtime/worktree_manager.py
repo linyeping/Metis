@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import difflib
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import uuid
@@ -18,6 +20,24 @@ WORKTREE_PROMOTE_SCHEMA = "metis.worktree_promote.v1"
 WORKTREE_PROMOTE_ROLLBACK_SCHEMA = "metis.worktree_promote_rollback.v1"
 WORKTREE_STATUSES = {"active", "archived", "removed", "promoted", "failed"}
 _MAX_DIFF_CHARS = int(os.environ.get("METIS_WORKTREE_MAX_DIFF_CHARS", "200000"))
+_SNAPSHOT_IGNORE_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".metis",
+    ".metis-worktrees",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+}
+_SNAPSHOT_TEXT_LIMIT = int(os.environ.get("METIS_SNAPSHOT_DIFF_TEXT_LIMIT", str(512 * 1024)))
+_SNAPSHOT_HASH_LIMIT = int(os.environ.get("METIS_SNAPSHOT_HASH_LIMIT", str(100 * 1024 * 1024)))
 
 
 class WorktreeError(RuntimeError):
@@ -111,7 +131,10 @@ def create_worktree(
     if workspace is None:
         raise WorktreeError(f"workspace_root is not an existing directory: {workspace_root!r}")
 
-    repo_root = _require_git_repo(workspace)
+    try:
+        repo_root = _require_git_repo(workspace)
+    except WorktreeError:
+        return _create_snapshot_worktree(workspace, run_id=run_id, session_id=session_id, label=label)
     base_ref = _git_stdout(["rev-parse", "--verify", "HEAD"], cwd=repo_root).strip()
     if not base_ref:
         raise WorktreeError("git repository has no HEAD commit")
@@ -155,6 +178,57 @@ def create_worktree(
     return record
 
 
+def _create_snapshot_worktree(
+    workspace: Path,
+    *,
+    run_id: str = "",
+    session_id: str = "",
+    label: str = "run",
+) -> WorktreeRecord:
+    base_dir = _snapshot_base_dir(workspace)
+    if _is_within(base_dir, workspace):
+        raise WorktreeError(f"snapshot base is inside source workspace: {base_dir}")
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = (run_id or uuid.uuid4().hex)[:10]
+    safe_label = _slug(label or "run")
+    worktree_id = f"wt_{uuid.uuid4().hex[:12]}"
+    worktree_path = base_dir / f"{safe_label}-{suffix}"
+    if worktree_path.exists():
+        worktree_path = base_dir / f"{safe_label}-{suffix}-{uuid.uuid4().hex[:6]}"
+
+    baseline = _build_snapshot_manifest(workspace)
+    try:
+        shutil.copytree(str(workspace), str(worktree_path), ignore=_snapshot_ignore)
+    except OSError as exc:
+        raise WorktreeError(f"failed to create snapshot workspace: {exc}") from exc
+    manifest_path = _write_snapshot_manifest(workspace, worktree_id, baseline)
+    record = WorktreeRecord(
+        worktree_id=worktree_id,
+        workspace_root=str(workspace),
+        repo_root=str(workspace),
+        worktree_path=str(worktree_path.resolve()),
+        worktree_workspace_root=str(worktree_path.resolve()),
+        branch=f"metis/snapshot/{safe_label}-{suffix}",
+        base_ref=f"snapshot:{baseline.get('digest', '')}",
+        run_id=run_id,
+        session_id=session_id,
+        label=safe_label,
+        source_profile="local_worktree",
+        dirty_at_creation=False,
+        metadata={
+            "base_dir": str(base_dir),
+            "source_branch": "",
+            "worktree_kind": "snapshot",
+            "baseline_manifest_path": str(manifest_path),
+            "baseline_digest": str(baseline.get("digest") or ""),
+            "baseline_file_count": len(baseline.get("files") if isinstance(baseline.get("files"), dict) else {}),
+        },
+    )
+    _upsert_record(record.workspace_root, record)
+    return record
+
+
 def list_worktrees(workspace_root: str) -> List[WorktreeRecord]:
     return [WorktreeRecord.from_dict(row) for row in _load_registry(workspace_root).get("worktrees", []) if isinstance(row, dict)]
 
@@ -177,6 +251,18 @@ def archive_worktree(workspace_root: str, worktree_id: str) -> WorktreeRecord:
 
 def remove_worktree(workspace_root: str, worktree_id: str, *, force: bool = False) -> WorktreeRecord:
     record = get_worktree(workspace_root, worktree_id)
+    if _is_snapshot_record(record):
+        base_dir = _snapshot_base_dir(Path(record.workspace_root))
+        worktree_path = Path(record.worktree_path).resolve()
+        if not _is_within(worktree_path, base_dir):
+            raise WorktreeError(f"refusing to remove snapshot outside managed base: {worktree_path}")
+        if worktree_path.exists():
+            shutil.rmtree(worktree_path)
+        record.status = "removed"
+        record.removed_at = time.time()
+        record.updated_at = record.removed_at
+        _upsert_record(workspace_root, record)
+        return record
     base_dir = _worktree_base_dir(Path(record.repo_root))
     worktree_path = Path(record.worktree_path).resolve()
     if not _is_within(worktree_path, base_dir):
@@ -197,6 +283,8 @@ def remove_worktree(workspace_root: str, worktree_id: str, *, force: bool = Fals
 
 def diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = _MAX_DIFF_CHARS) -> Dict[str, Any]:
     record = get_worktree(workspace_root, worktree_id)
+    if _is_snapshot_record(record):
+        return _diff_snapshot_worktree(record, max_chars=max_chars)
     worktree_path = Path(record.worktree_path)
     if not worktree_path.is_dir():
         raise WorktreeError(f"worktree path no longer exists: {worktree_path}")
@@ -218,6 +306,380 @@ def diff_worktree(workspace_root: str, worktree_id: str, *, max_chars: int = _MA
     }
 
 
+def _is_snapshot_record(record: WorktreeRecord) -> bool:
+    return str(record.metadata.get("worktree_kind") or "").lower() == "snapshot" or str(record.base_ref).startswith("snapshot:")
+
+
+def _diff_snapshot_worktree(record: WorktreeRecord, *, max_chars: int = _MAX_DIFF_CHARS, paths: Optional[List[str]] = None) -> Dict[str, Any]:
+    source_root = Path(record.workspace_root).resolve()
+    worktree_path = Path(record.worktree_path).resolve()
+    if not source_root.is_dir() or not worktree_path.is_dir():
+        raise WorktreeError("source workspace or snapshot path no longer exists")
+    selected = _normalize_promote_paths(paths)
+    changes = _snapshot_changes(source_root, worktree_path, selected_paths=selected)
+    status = "\n".join(change["status_line"] for change in changes)
+    stat = _snapshot_stat(changes)
+    patch = _snapshot_patch(source_root, worktree_path, changes, max_chars=max_chars)
+    truncated = len(patch) > max_chars
+    if truncated:
+        patch = patch[:max_chars] + "\n[diff truncated]"
+    return {
+        "schema": "metis.worktree_diff.v1",
+        "worktree": record.to_dict(),
+        "status": status,
+        "stat": stat,
+        "patch": patch,
+        "files": [{"path": change["path"], "status": change["status"]} for change in changes],
+        "truncated": truncated,
+        "base_ref": record.base_ref,
+    }
+
+
+def _snapshot_changes(source_root: Path, worktree_path: Path, *, selected_paths: Optional[List[str]] = None) -> List[Dict[str, str]]:
+    selected = [path.strip().replace("\\", "/").strip("/") for path in selected_paths or [] if path.strip()]
+    source_files = {path: row for path, row in _build_snapshot_manifest(source_root).get("files", {}).items() if isinstance(row, dict)}
+    worktree_files = {path: row for path, row in _build_snapshot_manifest(worktree_path).get("files", {}).items() if isinstance(row, dict)}
+    all_paths = sorted(set(source_files) | set(worktree_files))
+    changes: List[Dict[str, str]] = []
+    for path in all_paths:
+        if selected and not any(path == item or path.startswith(f"{item}/") for item in selected):
+            continue
+        source_row = source_files.get(path)
+        worktree_row = worktree_files.get(path)
+        if source_row is None and worktree_row is not None:
+            status = "A"
+            status_line = f"?? {path}"
+        elif source_row is not None and worktree_row is None:
+            status = "D"
+            status_line = f" D {path}"
+        elif source_row and worktree_row and source_row.get("sha256") != worktree_row.get("sha256"):
+            status = "M"
+            status_line = f" M {path}"
+        else:
+            continue
+        changes.append({"path": path, "status": status, "status_line": status_line})
+    return changes
+
+
+def _snapshot_stat(changes: List[Dict[str, str]]) -> str:
+    if not changes:
+        return ""
+    counts = {"A": 0, "M": 0, "D": 0}
+    for change in changes:
+        counts[change.get("status", "M")] = counts.get(change.get("status", "M"), 0) + 1
+    parts = []
+    if counts.get("A"):
+        parts.append(f"{counts['A']} added")
+    if counts.get("M"):
+        parts.append(f"{counts['M']} modified")
+    if counts.get("D"):
+        parts.append(f"{counts['D']} deleted")
+    return f"{len(changes)} files changed ({', '.join(parts)})"
+
+
+def _snapshot_patch(source_root: Path, worktree_path: Path, changes: List[Dict[str, str]], *, max_chars: int) -> str:
+    chunks: List[str] = []
+    total = 0
+    for change in changes:
+        path = change["path"]
+        source_file = source_root / path
+        worktree_file = worktree_path / path
+        piece = _snapshot_file_patch(path, source_file, worktree_file, change.get("status", "M"))
+        if piece:
+            chunks.append(piece)
+            total += len(piece)
+        if total > max_chars:
+            break
+    return "\n".join(chunks)
+
+
+def _snapshot_file_patch(path: str, source_file: Path, worktree_file: Path, status: str) -> str:
+    old_text = "" if status == "A" else _read_diff_text(source_file)
+    new_text = "" if status == "D" else _read_diff_text(worktree_file)
+    if old_text is None or new_text is None:
+        return f"diff --snapshot a/{path} b/{path}\n[{status} binary or large file]\n"
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+    diff = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+        lineterm="",
+    )
+    return "\n".join(diff) + "\n"
+
+
+def _read_diff_text(path: Path) -> Optional[str]:
+    try:
+        if not path.is_file() or path.stat().st_size > _SNAPSHOT_TEXT_LIMIT:
+            return None
+        data = path.read_bytes()
+        if b"\0" in data[:4096]:
+            return None
+        return data.decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _review_snapshot_promote(
+    record: WorktreeRecord,
+    *,
+    paths: Optional[List[str]],
+    max_chars: int,
+) -> Dict[str, Any]:
+    selected_paths = _normalize_promote_paths(paths)
+    diff = _diff_snapshot_worktree(record, max_chars=max_chars, paths=selected_paths)
+    files = diff.get("files") if isinstance(diff.get("files"), list) else []
+    conflicts = _snapshot_conflicts(record, files)
+    ok = not conflicts
+    return {
+        "schema": WORKTREE_PROMOTE_REVIEW_SCHEMA,
+        "ok": ok,
+        "worktree": record.to_dict(),
+        "paths": selected_paths,
+        "files": files,
+        "status": diff.get("status", ""),
+        "stat": diff.get("stat", ""),
+        "patch": diff.get("patch", ""),
+        "truncated": bool(diff.get("truncated")),
+        "base_ref": record.base_ref,
+        "can_apply": ok,
+        "conflicts": _snapshot_conflict_payload(conflicts),
+        "message": "snapshot changes can be promoted" if ok else "source workspace changed after snapshot creation",
+    }
+
+
+def _promote_snapshot_worktree(
+    workspace_root: str,
+    record: WorktreeRecord,
+    *,
+    dry_run: bool,
+    paths: Optional[List[str]],
+) -> Dict[str, Any]:
+    selected_paths = _normalize_promote_paths(paths)
+    review = _review_snapshot_promote(record, paths=selected_paths, max_chars=_MAX_DIFF_CHARS)
+    files = review.get("files") if isinstance(review.get("files"), list) else []
+    if not files:
+        return {
+            "schema": WORKTREE_PROMOTE_SCHEMA,
+            "ok": True,
+            "dry_run": dry_run,
+            "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": [],
+            "message": "no changes to promote",
+        }
+    if not review.get("ok"):
+        return {
+            "schema": WORKTREE_PROMOTE_SCHEMA,
+            "ok": False,
+            "dry_run": dry_run,
+            "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": files,
+            "conflicts": review.get("conflicts", {}),
+            "error": "source workspace changed after snapshot creation",
+        }
+    if dry_run:
+        return {
+            "schema": WORKTREE_PROMOTE_SCHEMA,
+            "ok": True,
+            "dry_run": True,
+            "worktree": record.to_dict(),
+            "paths": selected_paths,
+            "files": files,
+            "stat": review.get("stat", ""),
+            "can_apply": True,
+            "conflicts": review.get("conflicts", {}),
+            "message": "snapshot changes can be promoted",
+        }
+
+    promotion_id = f"promo_{uuid.uuid4().hex[:12]}"
+    backup_dir = Path(record.workspace_root) / ".metis" / "worktrees" / "promotions" / promotion_id
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    source_root = Path(record.workspace_root).resolve()
+    worktree_path = Path(record.worktree_path).resolve()
+    rollback_rows: List[Dict[str, Any]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        rel = str(item.get("path") or "").replace("\\", "/").strip("/")
+        if not rel:
+            continue
+        source_file = source_root / rel
+        worktree_file = worktree_path / rel
+        backup_file = backup_dir / rel
+        existed = source_file.exists()
+        if existed and source_file.is_file():
+            backup_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, backup_file)
+        status = str(item.get("status") or "")
+        if status == "D":
+            if source_file.exists():
+                source_file.unlink()
+        else:
+            if not worktree_file.is_file():
+                continue
+            source_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(worktree_file, source_file)
+        rollback_rows.append({"path": rel, "existed": existed, "backup_path": str(backup_file) if existed else ""})
+
+    _record_snapshot_promotion(
+        record,
+        promotion_id=promotion_id,
+        backup_dir=backup_dir,
+        paths=selected_paths,
+        files=[item for item in files if isinstance(item, dict)],
+        stat=str(review.get("stat") or ""),
+        rollback_rows=rollback_rows,
+    )
+    record.status = "promoted"
+    record.promoted_at = time.time()
+    record.updated_at = record.promoted_at
+    _upsert_record(workspace_root, record)
+    return {
+        "schema": WORKTREE_PROMOTE_SCHEMA,
+        "ok": True,
+        "dry_run": False,
+        "worktree": record.to_dict(),
+        "promotion_id": promotion_id,
+        "rollback_available": True,
+        "rollback_patch_path": "",
+        "paths": selected_paths,
+        "files": files,
+        "stat": review.get("stat", ""),
+        "message": "snapshot changes promoted to source workspace",
+    }
+
+
+def _rollback_snapshot_promotion(
+    workspace_root: str,
+    record: WorktreeRecord,
+    *,
+    promotion_id: str,
+    dry_run: bool,
+) -> Dict[str, Any]:
+    promotion = _find_rollback_promotion(record, promotion_id)
+    if not promotion:
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": False,
+            "dry_run": dry_run,
+            "worktree": record.to_dict(),
+            "error": "no rollback promotion found",
+        }
+    rows = promotion.get("rollback_rows") if isinstance(promotion.get("rollback_rows"), list) else []
+    if dry_run:
+        return {
+            "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+            "ok": True,
+            "dry_run": True,
+            "worktree": record.to_dict(),
+            "promotion_id": str(promotion.get("promotion_id") or ""),
+            "paths": promotion.get("paths") if isinstance(promotion.get("paths"), list) else [],
+            "files": promotion.get("files") if isinstance(promotion.get("files"), list) else [],
+            "message": "snapshot rollback is available",
+        }
+    source_root = Path(record.workspace_root).resolve()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        rel = str(row.get("path") or "").replace("\\", "/").strip("/")
+        if not rel:
+            continue
+        source_file = source_root / rel
+        backup_path = Path(str(row.get("backup_path") or "")).expanduser()
+        if bool(row.get("existed")):
+            if not backup_path.is_file():
+                return {
+                    "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+                    "ok": False,
+                    "dry_run": False,
+                    "worktree": record.to_dict(),
+                    "promotion_id": str(promotion.get("promotion_id") or ""),
+                    "error": f"rollback backup not found: {backup_path}",
+                }
+            source_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backup_path, source_file)
+        elif source_file.exists():
+            source_file.unlink()
+    promotion["rolled_back"] = True
+    promotion["rolled_back_at"] = time.time()
+    record.updated_at = time.time()
+    _upsert_record(workspace_root, record)
+    return {
+        "schema": WORKTREE_PROMOTE_ROLLBACK_SCHEMA,
+        "ok": True,
+        "dry_run": False,
+        "worktree": record.to_dict(),
+        "promotion_id": str(promotion.get("promotion_id") or ""),
+        "paths": promotion.get("paths") if isinstance(promotion.get("paths"), list) else [],
+        "files": promotion.get("files") if isinstance(promotion.get("files"), list) else [],
+        "message": "snapshot promotion rolled back",
+    }
+
+
+def _snapshot_conflicts(record: WorktreeRecord, files: List[Any]) -> List[Dict[str, str]]:
+    baseline = _load_snapshot_manifest(record)
+    baseline_files = baseline.get("files") if isinstance(baseline.get("files"), dict) else {}
+    source_root = Path(record.workspace_root).resolve()
+    conflicts: List[Dict[str, str]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        rel = str(item.get("path") or "").replace("\\", "/").strip("/")
+        if not rel:
+            continue
+        baseline_row = baseline_files.get(rel) if isinstance(baseline_files.get(rel), dict) else None
+        source_file = source_root / rel
+        current_hash = _file_sha256(source_file) if source_file.is_file() else ""
+        if baseline_row is None:
+            if source_file.exists():
+                conflicts.append({"path": rel, "reason": "file was created in source after snapshot creation"})
+        elif not source_file.exists():
+            conflicts.append({"path": rel, "reason": "source file was deleted after snapshot creation"})
+        elif current_hash != baseline_row.get("sha256"):
+            conflicts.append({"path": rel, "reason": "source file changed after snapshot creation"})
+    return conflicts
+
+
+def _snapshot_conflict_payload(conflicts: List[Dict[str, str]]) -> Dict[str, Any]:
+    return {
+        "has_conflicts": bool(conflicts),
+        "summary": "no conflicts" if not conflicts else f"{len(conflicts)} source files changed after snapshot creation",
+        "items": conflicts[:100],
+    }
+
+
+def _record_snapshot_promotion(
+    record: WorktreeRecord,
+    *,
+    promotion_id: str,
+    backup_dir: Path,
+    paths: List[str],
+    files: List[Dict[str, str]],
+    stat: str,
+    rollback_rows: List[Dict[str, Any]],
+) -> None:
+    promotions = record.metadata.get("promotions") if isinstance(record.metadata.get("promotions"), list) else []
+    row = {
+        "schema": WORKTREE_PROMOTE_SCHEMA,
+        "promotion_id": promotion_id,
+        "backup_dir": str(backup_dir),
+        "paths": list(paths),
+        "files": list(files),
+        "stat": stat,
+        "rollback_rows": rollback_rows,
+        "created_at": time.time(),
+        "rolled_back": False,
+        "rolled_back_at": 0.0,
+    }
+    promotions.append(row)
+    record.metadata["promotions"] = promotions[-50:]
+    record.metadata["last_promotion"] = row
+
+
 def review_worktree_promote(
     workspace_root: str,
     worktree_id: str,
@@ -226,6 +688,8 @@ def review_worktree_promote(
     max_chars: int = _MAX_DIFF_CHARS,
 ) -> Dict[str, Any]:
     record = get_worktree(workspace_root, worktree_id)
+    if _is_snapshot_record(record):
+        return _review_snapshot_promote(record, paths=paths, max_chars=max_chars)
     source_repo = Path(record.repo_root)
     worktree_path = Path(record.worktree_path)
     if not source_repo.is_dir() or not worktree_path.is_dir():
@@ -268,6 +732,8 @@ def promote_worktree(
     paths: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     record = get_worktree(workspace_root, worktree_id)
+    if _is_snapshot_record(record):
+        return _promote_snapshot_worktree(workspace_root, record, dry_run=dry_run, paths=paths)
     source_repo = Path(record.repo_root)
     worktree_path = Path(record.worktree_path)
     if not source_repo.is_dir() or not worktree_path.is_dir():
@@ -363,6 +829,8 @@ def rollback_worktree_promotion(
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     record = get_worktree(workspace_root, worktree_id)
+    if _is_snapshot_record(record):
+        return _rollback_snapshot_promotion(workspace_root, record, promotion_id=promotion_id, dry_run=dry_run)
     source_repo = Path(record.repo_root)
     if not source_repo.is_dir():
         raise WorktreeError("source repo no longer exists")
@@ -668,6 +1136,94 @@ def _registry_path(workspace_root: str) -> Path:
     return workspace / ".metis" / "worktrees" / "registry.json"
 
 
+def _snapshot_manifest_dir(workspace_root: Path) -> Path:
+    return workspace_root / ".metis" / "worktrees" / "snapshots"
+
+
+def _write_snapshot_manifest(workspace_root: Path, worktree_id: str, manifest: Dict[str, Any]) -> Path:
+    out_dir = _snapshot_manifest_dir(workspace_root)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{worktree_id}-baseline.json"
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        handle.write("\n")
+    return path
+
+
+def _load_snapshot_manifest(record: WorktreeRecord) -> Dict[str, Any]:
+    path = Path(str(record.metadata.get("baseline_manifest_path") or "")).expanduser()
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _build_snapshot_manifest(root: Path) -> Dict[str, Any]:
+    files: Dict[str, Dict[str, Any]] = {}
+    for path in _iter_snapshot_files(root):
+        rel = _relative_posix(path, root)
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        files[rel] = {
+            "sha256": _file_sha256(path),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        }
+    digest = hashlib.sha256(
+        "\n".join(f"{path}\0{row.get('sha256')}\0{row.get('size')}" for path, row in sorted(files.items())).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": "metis.snapshot_manifest.v1",
+        "workspace_root": str(root),
+        "created_at": time.time(),
+        "digest": digest,
+        "files": files,
+    }
+
+
+def _iter_snapshot_files(root: Path) -> List[Path]:
+    rows: List[Path] = []
+    for current, dirnames, filenames in os.walk(root):
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name not in _SNAPSHOT_IGNORE_DIRS and name not in {item.strip() for item in os.environ.get("METIS_SNAPSHOT_IGNORE", "").split(",") if item.strip()}
+        ]
+        current_path = Path(current)
+        for filename in filenames:
+            path = current_path / filename
+            try:
+                if path.is_file():
+                    rows.append(path)
+            except OSError:
+                continue
+    return rows
+
+
+def _file_sha256(path: Path) -> str:
+    try:
+        size = path.stat().st_size
+        if size > _SNAPSHOT_HASH_LIMIT:
+            return f"large:{size}:{int(path.stat().st_mtime)}"
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return "unreadable"
+
+
+def _relative_posix(path: Path, root: Path) -> str:
+    return path.resolve().relative_to(root.resolve()).as_posix()
+
+
 def _resolve_existing_dir(path: str) -> Optional[Path]:
     try:
         resolved = Path(path or ".").expanduser().resolve()
@@ -692,6 +1248,28 @@ def _worktree_base_dir(repo_root: Path) -> Path:
         return Path(configured).expanduser().resolve()
     digest = hashlib.sha1(str(repo_root).lower().encode("utf-8")).hexdigest()[:8]
     return (repo_root.parent / ".metis-worktrees" / f"{repo_root.name}-{digest}").resolve()
+
+
+def _snapshot_base_dir(workspace: Path) -> Path:
+    configured = os.environ.get("METIS_WORKTREE_BASE", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    digest = hashlib.sha1(str(workspace).lower().encode("utf-8")).hexdigest()[:8]
+    return (workspace.parent / ".metis-worktrees" / f"{workspace.name}-{digest}").resolve()
+
+
+def _snapshot_ignore(_: str, names: List[str]) -> set[str]:
+    ignored: set[str] = set()
+    extra = {
+        item.strip()
+        for item in os.environ.get("METIS_SNAPSHOT_IGNORE", "").split(",")
+        if item.strip()
+    }
+    ignored_names = _SNAPSHOT_IGNORE_DIRS | extra
+    for name in names:
+        if name in ignored_names:
+            ignored.add(name)
+    return ignored
 
 
 def _corresponding_worktree_workspace(workspace: Path, repo_root: Path, worktree_path: Path) -> Path:

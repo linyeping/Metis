@@ -128,9 +128,31 @@ def test_worktree_promote_review_explains_conflict(tmp_path: Path, monkeypatch) 
     assert "source workspace already has changes" in review["conflicts"]["files"][0]["reason"]
 
 
-def test_create_worktree_refuses_non_git_workspace(tmp_path: Path) -> None:
+def test_create_worktree_supports_non_git_snapshot_workspace(tmp_path: Path, monkeypatch) -> None:
     workspace = tmp_path / "plain"
     workspace.mkdir()
+    (workspace / "notes.txt").write_text("original\n", encoding="utf-8")
+    monkeypatch.setenv("METIS_WORKTREE_BASE", str(tmp_path / "worktrees"))
 
-    with pytest.raises(wm.WorktreeError, match="not inside a git repository"):
-        wm.create_worktree(str(workspace), run_id="run-1")
+    record = wm.create_worktree(str(workspace), run_id="run-1")
+    worktree = Path(record.worktree_path)
+
+    assert record.metadata["worktree_kind"] == "snapshot"
+    assert worktree.is_dir()
+    assert not wm._is_within(worktree, workspace)
+
+    (worktree / "notes.txt").write_text("changed\n", encoding="utf-8")
+    (worktree / "report.md").write_text("# Report\n", encoding="utf-8")
+    diff = wm.diff_worktree(str(workspace), record.worktree_id)
+    assert "notes.txt" in diff["status"]
+    assert "report.md" in diff["status"]
+
+    promoted = wm.promote_worktree(str(workspace), record.worktree_id)
+    assert promoted["ok"] is True
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "changed\n"
+    assert (workspace / "report.md").read_text(encoding="utf-8") == "# Report\n"
+
+    rolled_back = wm.rollback_worktree_promotion(str(workspace), record.worktree_id)
+    assert rolled_back["ok"] is True
+    assert (workspace / "notes.txt").read_text(encoding="utf-8") == "original\n"
+    assert not (workspace / "report.md").exists()

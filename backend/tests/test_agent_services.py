@@ -74,6 +74,20 @@ def test_tool_label_title_summary_suggestions_and_verifier_report() -> None:
     assert "下一步" in generate_away_summary(history)
     assert generate_prompt_suggestions(history)[:2] == ["跑完整测试", "看一下 diff"]
 
+    cowork_success_history = [
+        {"role": "user", "content": "用 Cowork 做一个本地并行验证任务"},
+        {"role": "assistant", "content": "Cowork local run complete. Subruns: 3 total, 3 done, 0 failed. Summary artifact: art_123."},
+    ]
+    assert "查看错误日志" not in generate_prompt_suggestions(cowork_success_history)
+    assert "重试这一步" not in generate_prompt_suggestions(cowork_success_history)
+    assert generate_prompt_suggestions(cowork_success_history)[:2] == ["查看产物", "帮我验收"]
+
+    cowork_failure_history = [
+        {"role": "user", "content": "用 Cowork 做一个本地并行验证任务"},
+        {"role": "assistant", "content": "Cowork local run complete. Subruns: 3 total, 0 done, 3 failed."},
+    ]
+    assert generate_prompt_suggestions(cowork_failure_history)[:2] == ["查看错误日志", "重试这一步"]
+
     report = build_verification_agent_report(
         task="Fix login",
         changed_files=["desktop/src/App.tsx"],

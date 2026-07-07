@@ -120,6 +120,91 @@ def test_bounded_llm_planner_falls_back_with_complete_fields(monkeypatch: pytest
     assert all(subrun["acceptance_criteria"] for subrun in plan["subruns"])
 
 
+def test_deterministic_fallback_uses_numbered_subruns_and_profile_hints(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(cowork_coordinator, "_call_bounded_planner_model", lambda **_: (_ for _ in ()).throw(TimeoutError("planner timeout")))
+
+    goal = """用 Cowork 做一个本地并行验证任务，必须拆成 3 个 subrun：
+
+1. fast-artifact：在 workspace 里创建 reports/cowork-smoke-fast.md，内容包含 FAST_ARTIFACT_OK，并输出 FAST_DONE。
+2. slow-local-vm：使用 local_vm 执行一个长任务：先输出 SLOW_STARTED，然后 sleep 120 秒，最后创建 reports/cowork-smoke-slow.md，内容包含 SLOW_ARTIFACT_OK，并输出 SLOW_DONE。
+3. dependent-summary：依赖 fast-artifact 和 slow-local-vm，读取两个报告文件，生成 reports/cowork-smoke-summary.md，内容必须包含 FAST_ARTIFACT_OK、SLOW_ARTIFACT_OK、SUMMARY_OK。
+
+要求：
+- 每个 subrun 都必须有 evidence：stdout/test、diff、artifact 或失败原因。
+- slow-local-vm 必须走 local_vm，不要走 local_direct。
+- fast-artifact 和 dependent-summary 可以走 local_worktree。
+"""
+
+    plan = cowork_coordinator.build_cowork_plan(
+        goal,
+        run_id="run_numbered_fallback",
+        session_id="session_numbered_fallback",
+        max_subruns=3,
+        execution_profile="local_worktree",
+        base_config=AgentConfig(llm_backend="fake", llm_model="planner-test"),
+        workspace_root=str(tmp_path),
+    )
+
+    assert plan["planner"]["mode"] == "deterministic_fallback"
+    titles = [subrun["title"] for subrun in plan["subruns"]]
+    assert len(titles) == 3
+    assert "必须拆成" not in titles[0]
+    assert "fast-artifact" in titles[0]
+    assert "slow-local-vm" in titles[1]
+    assert "dependent-summary" in titles[2]
+    assert [subrun["execution_profile"] for subrun in plan["subruns"]] == [
+        "local_worktree",
+        "local_vm",
+        "local_worktree",
+    ]
+    assert plan["subruns"][2]["dependencies"] == [
+        plan["subruns"][0]["subrun_id"],
+        plan["subruns"][1]["subrun_id"],
+    ]
+    vm_tasks = plan["subruns"][1]["vm_tasks"]
+    assert vm_tasks
+    assert "SLOW_STARTED" in vm_tasks[0]["command"]
+    assert "SLOW_DONE" in vm_tasks[0]["command"]
+    assert vm_tasks[0]["artifact_patterns"] == ["reports/cowork-smoke-slow.md"]
+
+
+def test_cowork_summary_text_returns_user_facing_answer_from_report(tmp_path: Path) -> None:
+    worktree = tmp_path / "cowork-1"
+    report = worktree / "output" / "cowork" / "answer.md"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "# 任务意义说明报告\n\n"
+        "## 结论摘要\n\n"
+        "这段不应该优先于最终回答。\n\n"
+        "## 最终回答\n\n"
+        "这个任务的意义在于：把分散上下文整理成可执行判断，让用户知道为什么继续做、做完有什么价值。\n",
+        encoding="utf-8",
+    )
+    summary = {
+        "goal": "这个任务的意义是什么",
+        "subruns": [
+            {
+                "title": "说明任务意义",
+                "status": "succeeded",
+                "worktree_workspace_root": str(worktree),
+                "diff": {"status": " M .agent_todos.json\n?? output/cowork/answer.md"},
+                "agent": {"final_text": "已完成该子任务的中文说明报告。"},
+            }
+        ],
+        "artifact": {"artifact_id": "art_summary"},
+    }
+
+    text = cowork_coordinator._cowork_summary_text(summary)
+
+    assert "这个任务的意义在于" in text
+    assert "为什么继续做" in text
+    assert "Cowork local run complete" not in text
+    assert "art_summary" not in text
+
+
 def test_local_cowork_runs_restricted_agent_inside_subrun_worktree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

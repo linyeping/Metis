@@ -304,8 +304,10 @@ def generate_prompt_suggestions(history: Sequence[Mapping[str, Any]]) -> List[st
     assistant_text = _last_role_text(history, "assistant").lower()
     user_text = _last_role_text(history, "user")
     suggestions: List[str] = []
-    if any(marker in assistant_text for marker in ("error", "failed", "traceback", "失败", "报错")):
+    if _assistant_text_indicates_failure(assistant_text):
         suggestions.extend(["查看错误日志", "重试这一步"])
+    if _assistant_text_indicates_cowork_success(assistant_text):
+        suggestions.extend(["查看产物", "帮我验收"])
     if any(marker in assistant_text for marker in ("test", "pytest", "typecheck", "测试", "验证", "检查")):
         suggestions.extend(["跑完整测试", "看一下 diff"])
     if any(marker in assistant_text for marker in ("commit", "提交", "git")):
@@ -314,6 +316,33 @@ def generate_prompt_suggestions(history: Sequence[Mapping[str, Any]]) -> List[st
         suggestions.extend(["开始施工", "拆成阶段"])
     suggestions.extend(["继续优化", "帮我验收"])
     return _dedupe_suggestions(suggestions)[:3]
+
+
+def _assistant_text_indicates_failure(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in ("traceback", "exception", "报错")):
+        return True
+    if "error" in normalized and not re.search(r"\b0\s+errors?\b", normalized):
+        return True
+    if "失败" in normalized and not any(marker in normalized for marker in ("0 失败", "0个失败", "0 个失败", "无失败", "没有失败")):
+        return True
+    failed_text = re.sub(r"\b0\s+(?:failed|failures?)\b", "", normalized)
+    return bool(re.search(r"\bfailed\b|\bfailure\b", failed_text))
+
+
+def _assistant_text_indicates_cowork_success(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    if not normalized:
+        return False
+    if "cowork" not in normalized and "subrun" not in normalized:
+        return False
+    return bool(
+        re.search(r"\b\d+\s+done,\s*0\s+failed\b", normalized)
+        or re.search(r"\b0\s+failed\b", normalized)
+        or ("完成" in normalized and any(marker in normalized for marker in ("0 失败", "无失败", "没有失败")))
+    )
 
 
 def build_verification_agent_report(

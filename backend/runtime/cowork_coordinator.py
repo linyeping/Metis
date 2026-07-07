@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 import queue
+import re
 import subprocess
 import time
 import uuid
@@ -487,12 +488,13 @@ def _deterministic_subruns(goal: str, *, max_subruns: int, default_profile: str)
     chain_by_default = len([line for line in str(goal or "").splitlines() if line.strip(" -\t")]) < 2
     rows: List[Dict[str, Any]] = []
     for index, title in enumerate(tasks, 1):
-        dependencies = [rows[-1]["subrun_id"]] if chain_by_default and rows and index > 1 else []
+        profile = _deterministic_execution_profile(title, default_profile=default_profile)
+        dependencies = _deterministic_dependencies(title, rows, chain_by_default=chain_by_default, index=index)
         objective = _deterministic_objective(goal, title)
         inputs = _default_subrun_inputs(goal, index)
         expected_artifacts = _default_expected_artifacts(goal, title)
         acceptance_criteria = _default_acceptance_criteria(title)
-        vm_tasks = _default_vm_tasks(goal, title, default_profile)
+        vm_tasks = _default_vm_tasks(goal, title, profile)
         rows.append(
             CoworkSubrunPlan(
                 subrun_id=f"subrun_{uuid.uuid4().hex[:10]}",
@@ -511,7 +513,7 @@ def _deterministic_subruns(goal: str, *, max_subruns: int, default_profile: str)
                     acceptance_criteria=acceptance_criteria,
                     dependencies=dependencies,
                 ),
-                execution_profile=default_profile,
+                execution_profile=profile,
                 vm_tasks=vm_tasks,
             ).to_dict()
         )
@@ -1428,7 +1430,14 @@ def _safe_filename_fragment(value: str) -> str:
 
 def _task_candidates(goal: str, *, max_subruns: int) -> List[str]:
     limit = _bounded_subrun_limit(max_subruns)
-    lines = [line.strip(" -\t") for line in goal.splitlines() if line.strip(" -\t")]
+    raw_lines = [line.strip() for line in goal.splitlines() if line.strip()]
+    numbered = [_strip_numbered_task_marker(line) for line in raw_lines]
+    numbered = [line for line in numbered if line]
+    if numbered:
+        return [_compact_title(line, index) for index, line in enumerate(numbered[:limit], 1)]
+
+    lines = [_strip_bullet_task_marker(line) for line in raw_lines]
+    lines = [line for line in lines if line and not _looks_like_cowork_meta_line(line)]
     if len(lines) >= 2:
         return [_compact_title(line, index) for index, line in enumerate(lines[:limit], 1)]
     return [
@@ -1436,6 +1445,39 @@ def _task_candidates(goal: str, *, max_subruns: int) -> List[str]:
         "Draft isolated change plan",
         "Validate and summarize diffs",
     ][:limit]
+
+
+def _strip_numbered_task_marker(line: str) -> str:
+    text = str(line or "").strip()
+    match = re.match(r"^\s*\d+\s*[\.\)、:：]\s*(.+?)\s*$", text)
+    return match.group(1).strip() if match else ""
+
+
+def _strip_bullet_task_marker(line: str) -> str:
+    text = str(line or "").strip()
+    match = re.match(r"^\s*[-*]\s+(.+?)\s*$", text)
+    if match:
+        return match.group(1).strip()
+    return text.strip(" -\t")
+
+
+def _looks_like_cowork_meta_line(line: str) -> bool:
+    text = " ".join(str(line or "").split()).strip().lower()
+    if not text:
+        return True
+    if text.endswith(("：", ":")):
+        return True
+    return any(
+        marker in text
+        for marker in [
+            "必须拆成",
+            "每个 subrun",
+            "如果任务被取消",
+            "max subruns",
+            "requirements",
+            "要求",
+        ]
+    )
 
 
 def _compact_title(text: str, index: int) -> str:
@@ -1477,10 +1519,7 @@ def _bounded_subrun_limit(value: int) -> int:
 
 
 def _allowed_subrun_profiles(requested_execution_profile: str) -> List[str]:
-    requested = _subrun_execution_profile(requested_execution_profile)
-    if requested == LOCAL_VM:
-        return [LOCAL_WORKTREE, LOCAL_VM]
-    return [LOCAL_WORKTREE]
+    return [LOCAL_WORKTREE, LOCAL_VM]
 
 
 def _normalize_planner_execution_profile(
@@ -1615,6 +1654,9 @@ def _default_vm_tasks(goal: str, title: str, profile: str) -> List[Dict[str, Any
     if profile != LOCAL_VM:
         return []
     text = f"{goal} {title}".lower()
+    instruction_task = _default_local_vm_instruction_task(_matching_goal_instruction(goal, title) or title)
+    if instruction_task:
+        return _normalize_vm_tasks(instruction_task)
     if any(token in text for token in ["build", "compile", "构建", "编译"]):
         return _normalize_vm_tasks(
             {
@@ -1642,6 +1684,136 @@ def _default_vm_tasks(goal: str, title: str, profile: str) -> List[Dict[str, Any
                 "collect_artifacts": False,
             }
         )
+    return []
+
+
+def _matching_goal_instruction(goal: str, title: str) -> str:
+    key = str(title or "").split("：", 1)[0].split(":", 1)[0].replace("...", "").strip().lower()
+    key = re.sub(r"^\d+\s*[\.\)、:：]\s*", "", key).strip()
+    if not key:
+        return ""
+    for line in str(goal or "").splitlines():
+        clean = line.strip()
+        if clean and key in clean.lower():
+            return clean
+    return ""
+
+
+def _default_local_vm_instruction_task(title: str) -> Dict[str, Any] | None:
+    text = str(title or "")
+    if not _mentions_local_vm(_profile_hint_text(text)):
+        return None
+
+    markers = _uppercase_markers(text)
+    path = _first_workspace_report_path(text) or "reports/metis-local-vm-task.md"
+    sleep_seconds = _first_sleep_seconds(text)
+
+    started = next((marker for marker in markers if marker.endswith("_STARTED")), "METIS_VM_STARTED")
+    done = next((marker for marker in markers if marker.endswith("_DONE")), "METIS_VM_DONE")
+    artifact_marker = next((marker for marker in markers if marker.endswith("_OK")), done)
+    normalized_path = path.replace("\\", "/")
+    normalized_parent = str(Path(normalized_path).parent).replace("\\", "/")
+
+    commands = [
+        f"mkdir -p {_shell_quote(normalized_parent)}",
+        f"printf '%s\\n' {_shell_quote(started)}",
+    ]
+    if sleep_seconds:
+        commands.append(f"sleep {sleep_seconds}")
+    commands.extend(
+        [
+            f"printf '%s\\n' {_shell_quote(artifact_marker)} > {_shell_quote(normalized_path)}",
+            f"printf '%s\\n' {_shell_quote(done)}",
+        ]
+    )
+    return {
+        "title": "Run local_vm instruction",
+        "command": " && ".join(commands),
+        "timeout": max(120, min(sleep_seconds + 90, 900)) if sleep_seconds else 120,
+        "collect_artifacts": True,
+        "artifact_patterns": [normalized_path],
+        "require_artifacts": True,
+        "expected_stdout_contains": done,
+    }
+
+
+def _uppercase_markers(value: str) -> List[str]:
+    markers: List[str] = []
+    for match in re.findall(r"(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,})(?![A-Za-z0-9_])", str(value or "")):
+        if match not in markers:
+            markers.append(match)
+    return markers
+
+
+def _first_workspace_report_path(value: str) -> str:
+    match = re.search(r"(reports/[^\s,，。；;\"']+)", str(value or ""), flags=re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _first_sleep_seconds(value: str) -> int:
+    match = re.search(r"\bsleep\s+(\d{1,4})\b", str(value or ""), flags=re.IGNORECASE)
+    if not match:
+        return 0
+    return max(0, min(int(match.group(1)), 600))
+
+
+def _shell_quote(value: str) -> str:
+    return "'" + str(value or "").replace("'", "'\"'\"'") + "'"
+
+
+def _deterministic_execution_profile(title: str, *, default_profile: str) -> str:
+    text = _profile_hint_text(title)
+    if _mentions_local_vm(text):
+        return LOCAL_VM
+    if _mentions_local_worktree(text):
+        return LOCAL_WORKTREE
+    return default_profile if default_profile in {LOCAL_WORKTREE, LOCAL_VM} else LOCAL_WORKTREE
+
+
+def _profile_hint_text(value: str) -> str:
+    return str(value or "").lower().replace("-", "_").replace(" ", "_")
+
+
+def _mentions_local_vm(text: str) -> bool:
+    normalized = _profile_hint_text(text)
+    return any(
+        token in normalized
+        for token in [
+            "使用_local_vm",
+            "用_local_vm",
+            "走_local_vm",
+            "通过_local_vm",
+            "local_vm_执行",
+            "execution_profile:local_vm",
+            "execution_profile=local_vm",
+            "profile:local_vm",
+            "profile=local_vm",
+            "metisruntime",
+            "metis_runtime",
+            "wsl",
+            "虚拟机",
+        ]
+    )
+
+
+def _mentions_local_worktree(text: str) -> bool:
+    return any(token in text for token in ["local_worktree", "worktree", "工作树"])
+
+
+def _deterministic_dependencies(
+    title: str,
+    rows: List[Dict[str, Any]],
+    *,
+    chain_by_default: bool,
+    index: int,
+) -> List[str]:
+    if not rows:
+        return []
+    text = str(title or "").lower()
+    if any(token in text for token in ["dependent", "summary", "aggregate", "merge", "combine", "依赖", "汇总", "总结"]):
+        return [str(row.get("subrun_id") or "") for row in rows if row.get("subrun_id")]
+    if chain_by_default and index > 1:
+        return [str(rows[-1].get("subrun_id") or "")]
     return []
 
 
@@ -2796,14 +2968,183 @@ def _cowork_summary_text(summary: Dict[str, Any]) -> str:
     subruns = summary.get("subruns") if isinstance(summary.get("subruns"), list) else []
     done = sum(1 for item in subruns if isinstance(item, dict) and item.get("status") in {"done", "succeeded", "promoted"})
     failed = sum(1 for item in subruns if isinstance(item, dict) and item.get("status") == "failed")
+    answer = _cowork_answer_text(summary, subruns)
+    if answer:
+        if failed:
+            return f"{answer}\n\n注意：Cowork 有 {failed} 个子任务失败，上面只汇总已完成子任务中的可用结论。"
+        return answer
     artifact = summary.get("artifact") if isinstance(summary.get("artifact"), dict) else {}
     lines = [
-        "Cowork local run complete.",
-        f"Subruns: {len(subruns)} total, {done} done, {failed} failed.",
+        "Cowork 已完成，但没有抽取到可直接展示的回答正文。",
+        f"子任务：共 {len(subruns)} 个，完成 {done} 个，失败 {failed} 个。",
     ]
     if artifact.get("artifact_id"):
-        lines.append(f"Summary artifact: {artifact.get('artifact_id')}.")
+        lines.append(f"汇总 artifact: {artifact.get('artifact_id')}")
     return "\n".join(lines)
+
+
+def _cowork_answer_text(summary: Dict[str, Any], subruns: List[Any]) -> str:
+    for subrun in reversed([item for item in subruns if _subrun_terminal_success(item)]):
+        for text in _cowork_subrun_markdown_texts(subrun):
+            section = _extract_cowork_answer_section(text)
+            if section:
+                return section
+        final_text = _subrun_final_text(subrun)
+        section = _extract_cowork_answer_section(final_text)
+        if section:
+            return section
+
+    excerpts = []
+    for subrun in [item for item in subruns if _subrun_terminal_success(item)]:
+        final_text = _strip_cowork_status_noise(_subrun_final_text(subrun))
+        if not final_text:
+            continue
+        title = _clean_plan_text(subrun.get("title") if isinstance(subrun, dict) else "", 80)
+        excerpt = _truncate(final_text, 360)
+        excerpts.append(f"- {title}: {excerpt}" if title else f"- {excerpt}")
+        if len(excerpts) >= 3:
+            break
+    if excerpts:
+        goal = _clean_plan_text(summary.get("goal") if isinstance(summary, dict) else "", 120)
+        prefix = f"关于“{goal}”，Cowork 汇总到的结论是：" if goal else "Cowork 汇总到的结论是："
+        return "\n".join([prefix, *excerpts])
+    return ""
+
+
+def _subrun_terminal_success(item: Any) -> bool:
+    return isinstance(item, dict) and str(item.get("status") or "").lower() in {"done", "succeeded", "promoted"}
+
+
+def _subrun_final_text(subrun: Dict[str, Any]) -> str:
+    agent = subrun.get("agent") if isinstance(subrun.get("agent"), dict) else {}
+    return str(agent.get("final_text") or subrun.get("final_text") or "")
+
+
+def _cowork_subrun_markdown_texts(subrun: Dict[str, Any]) -> List[str]:
+    root_text = str(subrun.get("worktree_workspace_root") or (subrun.get("worktree") or {}).get("worktree_workspace_root") or "")
+    root = Path(root_text).expanduser() if root_text else None
+    candidates: List[Path] = []
+    for path_text in _cowork_markdown_paths_from_subrun(subrun):
+        path = Path(path_text)
+        if not path.is_absolute() and root is not None:
+            path = root / path
+        candidates.append(path)
+
+    texts: List[str] = []
+    seen: set[str] = set()
+    for path in candidates:
+        try:
+            resolved = path.expanduser().resolve()
+            key = str(resolved).lower()
+            if key in seen or not resolved.is_file() or resolved.suffix.lower() not in {".md", ".markdown"}:
+                continue
+            if resolved.stat().st_size > 128_000:
+                continue
+            seen.add(key)
+            texts.append(resolved.read_text(encoding="utf-8", errors="replace"))
+        except Exception:
+            continue
+    return texts
+
+
+def _cowork_markdown_paths_from_subrun(subrun: Dict[str, Any]) -> List[str]:
+    paths: List[str] = []
+    diff = subrun.get("diff") if isinstance(subrun.get("diff"), dict) else {}
+    for item in diff.get("changed_files") if isinstance(diff.get("changed_files"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        paths.extend([str(item.get("path") or ""), str(item.get("relative_path") or item.get("relativePath") or "")])
+    paths.extend(_cowork_markdown_paths_from_git_status(str(diff.get("status") or "")))
+    paths.extend(_cowork_markdown_paths_from_patch_preview(str(diff.get("patch_preview") or "")))
+    for item in subrun.get("artifacts") if isinstance(subrun.get("artifacts"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        paths.extend([str(item.get("path") or ""), str(item.get("relative_path") or item.get("relativePath") or "")])
+    out: List[str] = []
+    for path in paths:
+        clean = path.strip()
+        if not clean:
+            continue
+        suffix = Path(clean).suffix.lower()
+        if suffix in {".md", ".markdown"} and Path(clean).name != ".agent_todos.json":
+            out.append(clean)
+    return out
+
+
+def _cowork_markdown_paths_from_git_status(status: str) -> List[str]:
+    paths: List[str] = []
+    for line in str(status or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        match = re.match(r"^(?:[ MADRCU?!]{1,2}|[MADRCU?!]{1,2})\s+(.+?)\s*$", text)
+        if match:
+            paths.append(match.group(1).strip())
+    return paths
+
+
+def _cowork_markdown_paths_from_patch_preview(patch: str) -> List[str]:
+    paths: List[str] = []
+    for match in re.finditer(r"(?m)^(?:---|\+\+\+)\s+(?:a|b)/(.+?)\s*$", str(patch or "")):
+        path = match.group(1).strip()
+        if path and path != "/dev/null":
+            paths.append(path)
+    return paths
+
+
+def _extract_cowork_answer_section(text: str) -> str:
+    source = str(text or "").replace("\r\n", "\n").strip()
+    if not source:
+        return ""
+    headings = list(re.finditer(r"(?m)^(#{1,6})\s*(.+?)\s*$", source))
+    targets = [
+        "最终回答",
+        "直接回答",
+        "结论摘要",
+        "核心结论",
+        "结论",
+        "final answer",
+        "answer",
+        "summary",
+    ]
+    for target in targets:
+        for index, match in enumerate(headings):
+            title = match.group(2).strip().lower()
+            if target not in title:
+                continue
+            end = headings[index + 1].start() if index + 1 < len(headings) else len(source)
+            section = source[match.end():end].strip()
+            cleaned = _strip_cowork_status_noise(section)
+            if cleaned:
+                return _truncate(cleaned, 2200)
+    cleaned = _strip_cowork_status_noise(source)
+    if cleaned and not _looks_like_cowork_completion_only(cleaned):
+        return _truncate(cleaned, 1400)
+    return ""
+
+
+def _strip_cowork_status_noise(text: str) -> str:
+    lines = [line.rstrip() for line in str(text or "").strip().splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    noise_prefixes = (
+        "已完成子任务",
+        "已完成该子任务",
+        "## 产物",
+        "## 变更摘要",
+        "## 验证情况",
+        "## 未解决风险",
+    )
+    if lines and any(lines[0].strip().startswith(prefix) for prefix in noise_prefixes):
+        return ""
+    return "\n".join(lines).strip()
+
+
+def _looks_like_cowork_completion_only(text: str) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    if not normalized:
+        return True
+    return normalized.startswith("cowork local run complete") or normalized.startswith("cowork 已完成")
 
 
 def _raise_if_cancelled(cancelled: Callable[[], bool] | None) -> None:
