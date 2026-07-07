@@ -118,6 +118,16 @@ def test_provider_model_catalog_success_is_cached(monkeypatch: pytest.MonkeyPatc
     assert second["models"][0]["id"] == "gpt-5.5"
 
 
+def test_model_catalog_marks_known_non_chat_ids() -> None:
+    image_model = llm_state._model_catalog_item({"id": "gpt-image-1"})
+    embedding_model = llm_state._model_catalog_item({"id": "text-embedding-3-large"})
+    chat_model = llm_state._model_catalog_item({"id": "gpt-5.5"})
+
+    assert image_model["chat_capable"] is False
+    assert embedding_model["chat_capable"] is False
+    assert chat_model["chat_capable"] is True
+
+
 def test_ollama_models_use_local_tags_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm_state, "list_ollama_models", lambda _base_url: [{"name": "llama3.1:8b"}])
     monkeypatch.setattr(llm_state, "check_ollama_running", lambda _base_url: True)

@@ -1,16 +1,14 @@
 import { memo, useMemo } from 'react';
-import { ChevronRight, Cpu, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
+import { Cpu, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
 import type {
   Language,
   ModelCapabilities,
   ProviderModelCatalog,
-  ProviderProfile,
   ProviderValidation,
   RuntimeSettings,
 } from '../../../lib/types';
 import { tr } from '../../../lib/i18n';
 import { formatSettingsTokenCount, stripConfigWhitespace } from '../settingsShared';
-import { ProviderRegistryManager } from '../ProviderRegistryManager';
 import { useT } from '../../../hooks/useT';
 
 interface ModelTabProps {
@@ -21,17 +19,34 @@ interface ModelTabProps {
   language: Language;
   loadingModels: boolean;
   modelCatalog: ProviderModelCatalog | null;
-  modelCatalogOpen: boolean;
   onApiKeyChange: (value: string) => void;
   onCheckProvider: (deepProbe?: boolean) => void | Promise<void>;
-  onModelCatalogOpenChange: (value: boolean | ((current: boolean) => boolean)) => void;
   onRefreshModelCatalog: () => void | Promise<void>;
-  onRepairProviderSettings: () => void;
-  onSelectProvider: (providerId: string) => void;
   onSettingsChange: (value: RuntimeSettings) => void;
   providerCheck: ProviderValidation | null;
-  providers: ProviderProfile[];
   settings: RuntimeSettings;
+}
+
+function modelsEndpointPreview(baseUrl: string): string {
+  const base = stripConfigWhitespace(baseUrl).replace(/\/+$/, '');
+  if (!base) return '';
+  return `${base.replace(/\/(?:chat\/completions|models|usage)$/i, '')}/models`;
+}
+
+function endpointSettings(settings: RuntimeSettings, baseUrl: string): RuntimeSettings {
+  const cleanedBaseUrl = stripConfigWhitespace(baseUrl);
+  const providerId = /api\.openai\.com/i.test(cleanedBaseUrl) ? 'openai' : 'custom-openai';
+  return {
+    ...settings,
+    backend: providerId,
+    providerId,
+    baseUrl: cleanedBaseUrl,
+  };
+}
+
+function isLikelyChatModel(modelId: string): boolean {
+  const value = modelId.toLowerCase();
+  return !/(^gpt-image|image|dall-e|embedding|rerank|moderation|whisper|tts|audio)/.test(value);
 }
 
 export const ModelTab = memo(function ModelTab({
@@ -42,43 +57,21 @@ export const ModelTab = memo(function ModelTab({
   language,
   loadingModels,
   modelCatalog,
-  modelCatalogOpen,
   onApiKeyChange,
   onCheckProvider,
-  onModelCatalogOpenChange,
   onRefreshModelCatalog,
-  onRepairProviderSettings,
-  onSelectProvider,
   onSettingsChange,
   providerCheck,
-  providers,
   settings,
 }: ModelTabProps) {
   const t = useT();
-  const currentProvider = useMemo(
-    () => providers.find(item => item.providerId === (settings.providerId || settings.backend)) ?? null,
-    [providers, settings.backend, settings.providerId],
+  const chatModels = useMemo(
+    () => (modelCatalog?.models ?? []).filter(item => item.chatCapable && isLikelyChatModel(item.id)),
+    [modelCatalog],
   );
-  const providerPresetModels = useMemo(
-    () => (currentProvider ? Array.from(new Set([currentProvider.defaultModel, ...currentProvider.fallbackModels].filter(Boolean))) : []),
-    [currentProvider],
-  );
-  const providerApiFamily = currentProvider
-    ? currentProvider.openaiCompatible
-      ? 'OpenAI-compatible Chat Completions'
-      : currentProvider.backendType
-    : '';
-  const providerEndpointPreview =
-    currentProvider?.openaiCompatible && settings.baseUrl
-      ? `${settings.baseUrl.replace(/\/+$/, '')}${currentProvider.chatCompletionsPath || '/chat/completions'}`
-      : '';
-  const providerModelMismatch = Boolean(
-    currentProvider &&
-      settings.model &&
-      providerPresetModels.length > 0 &&
-      !providerPresetModels.includes(settings.model) &&
-      /^(gpt-|o\d|claude|gemini|kimi|glm|qwen|deepseek)/i.test(settings.model),
-  );
+  const hiddenModelCount = Math.max(0, (modelCatalog?.models.length ?? 0) - chatModels.length);
+  const selectedModelMissing = Boolean(settings.model && chatModels.length > 0 && !chatModels.some(item => item.id === settings.model));
+  const endpointPreview = modelCatalog?.modelsUrl || modelsEndpointPreview(settings.baseUrl);
   const tierVariant = capabilities ? (capabilities.tier <= 1 ? 'success' : capabilities.tier === 2 ? 'warning' : 'danger') : 'neutral';
 
   return (
@@ -86,77 +79,42 @@ export const ModelTab = memo(function ModelTab({
       <section className="settings-section">
         <div className="settings-section-header">
           <Server size={16} className="section-icon" />
-          <h3>{t('Provider 配置')}</h3>
+          <h3>{t('API 连接')}</h3>
         </div>
-        <label>
-          <span>{tr(language, 'provider')}</span>
-          <select value={settings.providerId || settings.backend} onChange={event => onSelectProvider(event.target.value)}>
-            {providers.map(provider => (
-              <option key={provider.providerId} value={provider.providerId}>
-                {provider.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        {currentProvider && (
-          <div className="provider-profile-panel" data-mismatch={providerModelMismatch}>
-            <div className="provider-profile-head">
-              <span>
-                <strong>{currentProvider.displayName}</strong>
-                <em>{providerApiFamily}</em>
-              </span>
-              <button type="button" onClick={onRepairProviderSettings}>
-                {t('修复当前配置')}
-              </button>
-            </div>
-            <div className="provider-profile-grid">
-              <span>
-                <small>Provider ID</small>
-                <strong>{currentProvider.providerId}</strong>
-              </span>
-              <span>
-                <small>{t('默认模型')}</small>
-                <strong>{currentProvider.defaultModel || t('手动填写')}</strong>
-              </span>
-              <span>
-                <small>{t('本地预设')}</small>
-                <strong>{providerPresetModels.length || 0} {t('个')}</strong>
-              </span>
-              <span>
-                <small>{t('工具调用')}</small>
-                <strong>{currentProvider.capabilities.tools ? t('支持') : t('未知/不支持')}</strong>
-              </span>
-            </div>
-            {providerEndpointPreview && <code>{providerEndpointPreview}</code>}
-            {providerPresetModels.length > 0 && (
-              <div className="provider-preset-strip">
-                {providerPresetModels.map(modelId => (
-                  <button
-                    type="button"
-                    key={modelId}
-                    data-active={settings.model === modelId}
-                    onClick={() => onSettingsChange({ ...settings, model: modelId })}
-                  >
-                    <span>{modelId}</span>
-                    <small>{formatSettingsTokenCount(currentProvider.modelContextWindows[modelId] || 0)}</small>
-                  </button>
-                ))}
-              </div>
-            )}
-            {providerModelMismatch && (
-              <p className="provider-profile-warning">
-                {t('当前模型看起来不属于 ')}{currentProvider.displayName}{t('。建议修复配置，或选择本地预设模型。')}
-              </p>
-            )}
+        <div className="provider-profile-panel" data-mismatch="false">
+          <div className="provider-profile-head">
+            <span>
+              <strong>{t('OpenAI-compatible 中转站')}</strong>
+              <em>{t('根据 Base URL 和 API Key 自动读取 /models。')}</em>
+            </span>
           </div>
-        )}
+          <div className="provider-profile-grid">
+            <span>
+              <small>Base URL</small>
+              <strong>{settings.baseUrl ? t('已填写') : t('未填写')}</strong>
+            </span>
+            <span>
+              <small>API Key</small>
+              <strong>{apiKey || settings.apiKey ? t('已配置') : t('未填写')}</strong>
+            </span>
+            <span>
+              <small>{t('模型来源')}</small>
+              <strong>{chatModels.length > 0 ? `${chatModels.length} ${t('个')}` : '/models'}</strong>
+            </span>
+            <span>
+              <small>{t('识别方式')}</small>
+              <strong>{t('自动识别')}</strong>
+            </span>
+          </div>
+          {endpointPreview && <code>{endpointPreview}</code>}
+        </div>
         <label>
           <span>Base URL</span>
           <input
             className="settings-base-url-input"
             value={settings.baseUrl}
             spellCheck={false}
-            onChange={event => onSettingsChange({ ...settings, baseUrl: stripConfigWhitespace(event.target.value) })}
+            onChange={event => onSettingsChange(endpointSettings(settings, event.target.value))}
           />
         </label>
         <label>
@@ -164,7 +122,7 @@ export const ModelTab = memo(function ModelTab({
           <input
             className="settings-api-key-input"
             value={apiKey}
-            placeholder={settings.apiKey || (settings.providerId === 'custom-openai' ? '' : 'sk-...')}
+            placeholder={settings.apiKey || 'sk-...'}
             spellCheck={false}
             onChange={event => onApiKeyChange(stripConfigWhitespace(event.target.value))}
           />
@@ -209,59 +167,48 @@ export const ModelTab = memo(function ModelTab({
         </div>
         <label>
           <span>{tr(language, 'model')}</span>
-          <input
-            className="settings-model-input"
-            value={settings.model}
-            spellCheck={false}
-            onChange={event => onSettingsChange({ ...settings, model: event.target.value })}
-          />
+          {chatModels.length > 0 ? (
+            <select
+              className="settings-model-input"
+              value={settings.model}
+              onChange={event => onSettingsChange({ ...settings, model: event.target.value })}
+            >
+              {selectedModelMissing && <option value={settings.model}>{settings.model} · {t('当前')}</option>}
+              {chatModels.map(item => (
+                <option key={item.id} value={item.id}>
+                  {item.displayName || item.id}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="settings-model-input"
+              value={settings.model}
+              spellCheck={false}
+              onChange={event => onSettingsChange({ ...settings, model: event.target.value })}
+            />
+          )}
         </label>
         <div className="provider-catalog-panel" data-status={modelCatalog?.status || 'idle'}>
           <div className="settings-action-row">
             <button type="button" disabled={loadingModels} onClick={() => void onRefreshModelCatalog()}>
               <RefreshCw size={14} />
-              {loadingModels ? t('读取中...') : t('刷新模型目录')}
+              {loadingModels ? t('读取中...') : t('读取模型列表')}
             </button>
-            {modelCatalog?.modelsUrl && <code>{modelCatalog.modelsUrl}</code>}
+            {endpointPreview && <code>{endpointPreview}</code>}
           </div>
           {modelCatalog && (
             <div className="provider-catalog-result">
-              <button
-                type="button"
-                className="provider-model-disclosure"
-                aria-expanded={modelCatalogOpen}
-                onClick={() => onModelCatalogOpenChange(value => !value)}
-              >
-                <ChevronRight className="disclosure-chevron" data-open={modelCatalogOpen} size={14} />
-                <span>
-                  <strong>{t(modelCatalog.message || '模型目录')}</strong>
-                  {modelCatalog.hint && <em>{t(modelCatalog.hint)}</em>}
-                </span>
-                <small>{modelCatalog.models.length > 0 ? `${modelCatalog.models.length} ${t('个模型')}` : modelCatalog.status}</small>
-              </button>
-              {modelCatalogOpen && modelCatalog.models.length > 0 && (
-                <div className="provider-model-list">
-                  {modelCatalog.models.map(item => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      data-active={settings.model === item.id}
-                      data-disabled={!item.chatCapable}
-                      onClick={() => {
-                        if (!item.chatCapable) return;
-                        onSettingsChange({ ...settings, model: item.id });
-                      }}
-                    >
-                      <span>
-                        <strong>{item.displayName || item.id}</strong>
-                        <em>{item.chatCapable ? `${item.type} · ${formatSettingsTokenCount(item.contextLimit)}` : `${item.type} · ${t('非聊天模型')}`}</em>
-                      </span>
-                    </button>
-                  ))}
-                </div>
+              <span className="provider-model-summary">
+                <strong>{t(modelCatalog.message || '模型目录')}</strong>
+                {modelCatalog.hint && <em>{t(modelCatalog.hint)}</em>}
+                <small>{chatModels.length > 0 ? `${chatModels.length} ${t('个聊天模型')}` : modelCatalog.status}</small>
+              </span>
+              {hiddenModelCount > 0 && (
+                <p className="provider-model-empty">{t('已隐藏非聊天模型 ')}{hiddenModelCount}{t(' 个。')}</p>
               )}
-              {modelCatalogOpen && modelCatalog.models.length === 0 && (
-                <p className="provider-model-empty">{t('这个供应商没有返回可切换的聊天模型，仍可手动填写模型名。')}</p>
+              {chatModels.length === 0 && (
+                <p className="provider-model-empty">{t('当前 API 没有返回可切换的聊天模型，仍可手动填写模型名。')}</p>
               )}
             </div>
           )}
@@ -343,8 +290,6 @@ export const ModelTab = memo(function ModelTab({
           <p className="section-desc">{capabilitiesError || t('正在读取模型能力...')}</p>
         )}
       </section>
-
-      <ProviderRegistryManager />
     </div>
   );
 });

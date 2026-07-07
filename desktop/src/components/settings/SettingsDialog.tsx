@@ -43,7 +43,6 @@ import type {
   MetisRuntimeStatus,
   PermissionStatePayload,
   ProviderModelCatalog,
-  ProviderProfile,
   ProviderStatusPayload,
   ProviderUsagePayload,
   ProviderValidation,
@@ -165,10 +164,8 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
 
   const [active, setActive] = useState<SettingsSection>(settingsSection);
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
-  const [providers, setProviders] = useState<ProviderProfile[]>([]);
   const [providerCheck, setProviderCheck] = useState<ProviderValidation | null>(null);
   const [modelCatalog, setModelCatalog] = useState<ProviderModelCatalog | null>(null);
-  const [modelCatalogOpen, setModelCatalogOpen] = useState(false);
   const [providerUsage, setProviderUsage] = useState<ProviderUsagePayload | null>(null);
   const [modelCapabilities, setModelCapabilities] = useState<ModelCapabilities | null>(null);
   const [modelCapabilitiesError, setModelCapabilitiesError] = useState('');
@@ -205,7 +202,6 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     setSettings(null);
     setProviderCheck(null);
     setModelCatalog(null);
-    setModelCatalogOpen(false);
     setProviderUsage(null);
     setApiKey('');
     void getSettings().then(data => {
@@ -261,7 +257,6 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
 
   const refreshProviderStatus = useCallback(async (force = false) => {
     const providerStatus = await getProviderStatusCached(force);
-    setProviders(providerStatus.providers);
     setProviderCheck(current => current ?? providerStatus.active);
   }, []);
 
@@ -362,44 +357,6 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     }
   }, [apiKey, memory, onSaved, setOpen, settings]);
 
-  const selectProvider = useCallback(
-    (providerId: string) => {
-      if (!settings) return;
-      const provider = providers.find(item => item.providerId === providerId);
-      setProviderCheck(null);
-      setModelCatalog(null);
-      setModelCatalogOpen(false);
-      setProviderUsage(null);
-      setSettings({
-        ...settings,
-        apiKey: '',
-        backend: providerId,
-        providerId,
-        baseUrl: provider?.baseUrl ?? settings.baseUrl,
-        model: provider?.defaultModel ?? settings.model,
-      });
-      setApiKey('');
-    },
-    [providers, settings],
-  );
-
-  const repairProviderSettings = useCallback(() => {
-    if (!settings) return;
-    const provider = providers.find(item => item.providerId === (settings.providerId || settings.backend));
-    if (!provider) return;
-    setProviderCheck(null);
-    setModelCatalog(null);
-    setModelCatalogOpen(false);
-    setProviderUsage(null);
-    setSettings({
-      ...settings,
-      backend: provider.providerId,
-      providerId: provider.providerId,
-      baseUrl: provider.baseUrl || settings.baseUrl,
-      model: provider.defaultModel || settings.model,
-    });
-  }, [providers, settings]);
-
   const checkProvider = useCallback(async (deepProbe = false) => {
     if (!settings) return;
     setCheckingProvider(true);
@@ -427,13 +384,24 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
         baseUrl: stripConfigWhitespace(settings.baseUrl),
         model: settings.model,
         apiKey: stripConfigWhitespace(apiKey) || stripConfigWhitespace(settings.apiKey),
+        remoteOnly: true,
       });
       setModelCatalog(catalog);
-      setModelCatalogOpen(true);
     } finally {
       setLoadingModels(false);
     }
   }, [apiKey, settings]);
+
+  useEffect(() => {
+    if (!open || active !== 'model' || !settings) return undefined;
+    const cleanedBaseUrl = stripConfigWhitespace(settings.baseUrl);
+    const usableKey = stripConfigWhitespace(apiKey) || stripConfigWhitespace(settings.apiKey);
+    if (!cleanedBaseUrl || !usableKey) return undefined;
+    const timer = window.setTimeout(() => {
+      void refreshModelCatalog();
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [active, apiKey, open, refreshModelCatalog, settings]);
 
   const refreshProviderUsage = useCallback(async () => {
     if (!settings) return;
@@ -666,16 +634,27 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             language={language}
             loadingModels={loadingModels}
             modelCatalog={modelCatalog}
-            modelCatalogOpen={modelCatalogOpen}
-            onApiKeyChange={setApiKey}
+            onApiKeyChange={value => {
+              setApiKey(value);
+              setProviderCheck(null);
+              setModelCatalog(null);
+            }}
             onCheckProvider={checkProvider}
-            onModelCatalogOpenChange={setModelCatalogOpen}
             onRefreshModelCatalog={refreshModelCatalog}
-            onRepairProviderSettings={repairProviderSettings}
-            onSelectProvider={selectProvider}
-            onSettingsChange={value => setSettings(value)}
+            onSettingsChange={value => {
+              if (
+                value.backend !== settings.backend ||
+                value.providerId !== settings.providerId ||
+                value.baseUrl !== settings.baseUrl ||
+                value.model !== settings.model
+              ) {
+                setProviderCheck(null);
+                setModelCatalog(null);
+                setProviderUsage(null);
+              }
+              setSettings(value);
+            }}
             providerCheck={providerCheck}
-            providers={providers}
             settings={settings}
           />
         ) : (

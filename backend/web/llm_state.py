@@ -1493,7 +1493,12 @@ def _model_catalog_item(item: Dict[str, Any]) -> Dict[str, Any]:
     model_id = str(item.get("id") or item.get("model") or item.get("name") or "").strip()
     model_type = str(item.get("type") or "").strip()
     display_name = str(item.get("display_name") or item.get("displayName") or model_id).strip()
-    chat_capable = not model_type or model_type.lower() not in {"image", "embedding", "rerank", "audio"}
+    lowered_model_id = model_id.lower()
+    non_chat_by_id = lowered_model_id.startswith(("gpt-image", "dall-e")) or any(
+        marker in lowered_model_id
+        for marker in ("embedding", "rerank", "moderation", "whisper", "tts")
+    )
+    chat_capable = (not model_type or model_type.lower() not in {"image", "embedding", "rerank", "audio"}) and not non_chat_by_id
     raw_context_limit = item.get("context_limit", item.get("contextWindow"))
     context_limit_value = raw_context_limit if isinstance(raw_context_limit, int) else context_limit(model_id)
     return {

@@ -974,23 +974,23 @@ async function verifyProviderUsageAndModels(checks: SmokeCheck[]): Promise<void>
   record(
     checks,
     'new76-provider-profile-panel-visible',
-    profilePanelText.includes('DeepSeek') &&
-      profilePanelText.includes('deepseek-v4-flash') &&
-      profilePanelText.includes('本地预设'),
+    profilePanelText.includes('OpenAI-compatible 中转站') &&
+      profilePanelText.includes('模型来源') &&
+      profilePanelText.includes('自动识别'),
     profilePanelText,
   );
   await waitForCondition(() => Boolean(document.querySelector('.provider-catalog-panel')), 'provider catalog panel visible');
-  const providerTextInputs = Array.from(
-    document.querySelectorAll<HTMLInputElement>('.settings-base-url-input, .settings-model-input, .settings-api-key-input'),
+  const providerConfigInputs = Array.from(
+    document.querySelectorAll<HTMLInputElement>('.settings-base-url-input, .settings-api-key-input'),
   );
   record(
     checks,
     'new72-provider-text-inputs-spellcheck-disabled',
-    providerTextInputs.length === 3 && providerTextInputs.every(input => input.spellcheck === false),
-    providerTextInputs.map(input => `${input.className}:${input.spellcheck}`).join(', '),
+    providerConfigInputs.length === 2 && providerConfigInputs.every(input => input.spellcheck === false),
+    providerConfigInputs.map(input => `${input.className}:${input.spellcheck}`).join(', '),
   );
   const catalogButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.provider-catalog-panel button')).find(button =>
-    button.textContent?.includes('刷新模型目录'),
+    button.textContent?.includes('读取模型列表'),
   );
   record(checks, 'new68-provider-model-button-visible', Boolean(catalogButton), document.querySelector('.provider-catalog-panel')?.textContent || '');
   catalogButton?.click();
@@ -1002,37 +1002,21 @@ async function verifyProviderUsageAndModels(checks: SmokeCheck[]): Promise<void>
   record(
     checks,
     'new68-provider-models-visible',
-    modelPanelText.includes('非聊天模型') || modelPanelText.includes('本地预设模型') || modelPanelText.includes('deepseek-v4-pro'),
+    modelPanelText.includes('聊天模型') && (modelPanelText.includes('gpt-5.5') || modelPanelText.includes('deepseek-v4-pro')),
     modelPanelText,
   );
-  const disclosure = document.querySelector<HTMLButtonElement>('.provider-model-disclosure');
-  record(
-    checks,
-    'new72-provider-model-disclosure-visible',
-    Boolean(disclosure) && disclosure?.getAttribute('aria-expanded') === 'true',
-    document.querySelector('.provider-catalog-panel')?.textContent || '',
+  const modelSelect = document.querySelector<HTMLSelectElement>('select.settings-model-input');
+  const targetOption = Array.from(modelSelect?.options ?? []).find(option =>
+    option.value.includes('gpt-5.4') || option.value.includes('deepseek-v4-pro'),
   );
-  disclosure?.click();
-  await waitForCondition(() => !document.querySelector('.provider-model-list'), 'provider model catalog collapsed');
-  record(
-    checks,
-    'new72-provider-model-picker-collapses',
-    disclosure?.getAttribute('aria-expanded') === 'false',
-    document.querySelector('.provider-catalog-panel')?.innerHTML || '',
-  );
-  disclosure?.click();
-  await waitForCondition(() => Boolean(document.querySelector('.provider-model-list')), 'provider model catalog expanded');
-  const targetModel = Array.from(document.querySelectorAll<HTMLButtonElement>('.provider-model-list button')).find(button =>
-    button.textContent?.includes('gpt-5.4') || button.textContent?.includes('deepseek-v4-pro'),
-  );
-  const targetModelId = targetModel?.textContent?.includes('gpt-5.4') ? 'gpt-5.4' : 'deepseek-v4-pro';
-  targetModel?.click();
-  await waitForCondition(() => document.querySelector<HTMLInputElement>('.settings-model-input')?.value === targetModelId, 'provider model selection applied');
+  const targetModelId = targetOption?.value || '';
+  if (modelSelect && targetModelId) setSelectValue(modelSelect, targetModelId);
+  await waitForCondition(() => document.querySelector<HTMLSelectElement | HTMLInputElement>('.settings-model-input')?.value === targetModelId, 'provider model selection applied');
   record(
     checks,
     'new72-provider-model-picker-selects-model',
-    document.querySelector<HTMLInputElement>('.settings-model-input')?.value === targetModelId,
-    document.querySelector<HTMLInputElement>('.settings-model-input')?.value || '',
+    Boolean(targetModelId) && document.querySelector<HTMLSelectElement | HTMLInputElement>('.settings-model-input')?.value === targetModelId,
+    document.querySelector<HTMLSelectElement | HTMLInputElement>('.settings-model-input')?.value || '',
   );
   ui.setSettingsSection('tools');
   await waitForCondition(() => Boolean(document.querySelector('.permission-panel')), 'permission panel visible');
