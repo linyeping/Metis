@@ -13562,6 +13562,8 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 }
 
 .settings-main {
+  --settings-content-gutter: 28px;
+  --settings-content-width: 980px;
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--bg);
 }
@@ -13572,7 +13574,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 16px;
-  padding: 28px max(34px, calc((100% - 1180px) / 2 + 34px)) 18px;
+  padding: 26px max(var(--settings-content-gutter), calc((100% - var(--settings-content-width)) / 2 + var(--settings-content-gutter))) 17px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 88%, var(--bg-secondary));
 }
@@ -13630,7 +13632,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 
 .settings-panel {
   display: grid;
-  width: min(100%, 1180px);
+  width: min(100%, var(--settings-content-width));
   min-width: 0;
   min-height: 0;
   max-height: 100%;
@@ -13639,7 +13641,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   overflow-y: auto;
   overflow-x: hidden;
   margin: 0 auto;
-  padding: 20px 34px 40px;
+  padding: 18px var(--settings-content-gutter) 40px;
 }
 
 .settings-panel label,
@@ -15620,7 +15622,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 
 .network-mode-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 8px;
 }
 
@@ -16517,7 +16519,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 7px;
 }
 
