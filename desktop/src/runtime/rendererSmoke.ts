@@ -974,7 +974,7 @@ async function verifyProviderUsageAndModels(checks: SmokeCheck[]): Promise<void>
   record(
     checks,
     'new76-provider-profile-panel-visible',
-    profilePanelText.includes('OpenAI-compatible 中转站') &&
+    profilePanelText.includes('模型服务 API') &&
       profilePanelText.includes('模型来源') &&
       profilePanelText.includes('自动识别'),
     profilePanelText,

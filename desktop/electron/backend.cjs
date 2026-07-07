@@ -1443,7 +1443,7 @@ function fakeProviderProfiles() {
     },
     {
       provider_id: 'openai-compatible',
-      display_name: 'OpenAI Compatible',
+      display_name: '通用模型 API',
       backend_type: 'openai',
       aliases: ['openai_compat'],
       base_url: '',
@@ -1458,7 +1458,7 @@ function fakeProviderProfiles() {
     },
     {
       provider_id: 'custom-openai',
-      display_name: '自定义 OpenAI 中转站',
+      display_name: '自定义模型 API',
       backend_type: 'openai',
       aliases: ['custom', 'custom-openai', 'openai-relay', 'relay-openai'],
       base_url: '',
@@ -1726,7 +1726,7 @@ function fakeProviderModelCatalog(data = {}) {
       base_url: validation.base_url,
       api_base_url: apiBaseUrl,
       model: validation.model,
-      message: '当前供应商不支持 OpenAI-compatible /models 目录查询。',
+      message: '当前供应商不支持远程模型目录查询。',
       hint: '可以继续手动填写模型名。',
       models: []
     }

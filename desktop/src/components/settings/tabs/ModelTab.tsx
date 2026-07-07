@@ -84,8 +84,8 @@ export const ModelTab = memo(function ModelTab({
         <div className="provider-profile-panel" data-mismatch="false">
           <div className="provider-profile-head">
             <span>
-              <strong>{t('OpenAI-compatible 中转站')}</strong>
-              <em>{t('根据 Base URL 和 API Key 自动读取 /models。')}</em>
+              <strong>{t('模型服务 API')}</strong>
+              <em>{t('根据 Base URL 和 API Key 自动读取模型列表。')}</em>
             </span>
           </div>
           <div className="provider-profile-grid">

@@ -853,7 +853,7 @@ def check_network_settings(data: Dict[str, Any]) -> Dict[str, Any]:
                 status="unsupported",
                 ok=bool(validation.get("ok")),
                 context=context,
-                message="当前 provider 不提供 OpenAI-compatible /models 探测。",
+                message="当前 provider 不提供远程模型目录探测。",
                 hint="以 provider 深度探测结果为准。",
                 models=[],
                 models_url="",
@@ -1032,7 +1032,7 @@ def get_provider_models(data: Dict[str, Any]) -> Dict[str, Any]:
             status="unsupported",
             ok=False,
             context=context,
-            message="当前供应商不支持 OpenAI-compatible /models 目录查询。",
+            message="当前供应商不支持远程模型目录查询。",
             hint="可以继续手动填写模型名。",
             models=[],
         )

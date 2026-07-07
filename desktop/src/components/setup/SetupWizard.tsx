@@ -226,7 +226,7 @@ function fallbackProviders(): ProviderProfile[] {
     },
     {
       providerId: 'custom-openai',
-      displayName: '自定义 OpenAI 中转站',
+      displayName: '自定义模型 API',
       backendType: 'openai',
       aliases: ['custom', 'openai-relay'],
       baseUrl: '',
@@ -263,7 +263,7 @@ function apiKeyFormatHint(providerId: string, zh: boolean): string {
     return zh ? 'Gemini API key 通常来自 Google AI Studio。' : 'Gemini API keys usually come from Google AI Studio.';
   }
   if (id.includes('custom')) {
-    return zh ? '自定义 OpenAI 兼容服务请填写服务方提供的 Bearer key。' : 'For custom OpenAI-compatible relays, use the Bearer key from that service.';
+    return zh ? '自定义模型 API 请填写服务方提供的 Bearer key。' : 'For a custom model API, use the Bearer key from that service.';
   }
-  return zh ? 'OpenAI / DeepSeek 兼容密钥通常以 sk- 开头。' : 'OpenAI / DeepSeek-compatible keys usually start with sk-.';
+  return zh ? '多数模型 API 密钥通常以 sk- 开头。' : 'Most model API keys usually start with sk-.';
 }

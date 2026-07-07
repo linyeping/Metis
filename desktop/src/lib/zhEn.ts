@@ -119,7 +119,7 @@ export const zhEn: Record<string, string> = {
   '配置': 'Configure',
   '验证': 'Verify',
   '完成': 'Done',
-  '自定义 OpenAI 中转站': 'Custom OpenAI relay',
+  '自定义模型 API': 'Custom model API',
 
   // —— 设置：对话 / 工具 / 外观 ——
   '对话设置': 'Chat settings',
@@ -158,7 +158,7 @@ export const zhEn: Record<string, string> = {
   '网关 / 主机': 'Gateway / host',
   '绕过地址': 'Bypass list',
   '实际开发提示': 'Practical tips',
-  '如果 DeepSeek / OpenAI 中转站不通，优先检查代理模式、Base URL、模型名和 API Key 是否匹配。': 'If the DeepSeek / OpenAI relay is unreachable, first check that proxy mode, Base URL, model name, and API key all match.',
+  '如果模型 API 不通，优先检查代理模式、Base URL、模型名和 API Key 是否匹配。': 'If the model API is unreachable, first check that proxy mode, Base URL, model name, and API key all match.',
   '关闭代理会让 Metis LLM 请求忽略环境变量和 Windows 系统代理。': 'Disabling the proxy makes Metis LLM requests ignore env vars and the Windows system proxy.',
   '额度 / Usage': 'Usage',
   '未选择模型': 'No model selected',
@@ -172,7 +172,7 @@ export const zhEn: Record<string, string> = {
   '累计 Tokens': 'Total tokens',
   '累计费用': 'Total cost',
   '读取规则': 'Read rules',
-  'PinAI / 自定义 OpenAI 中转站优先读取 `/v1/usage`；DeepSeek 读取 `/user/balance`。': 'PinAI / custom OpenAI relays read `/v1/usage` first; DeepSeek reads `/user/balance`.',
+  '自定义模型 API 优先读取 `/v1/usage`；DeepSeek 读取 `/user/balance`。': 'Custom model APIs read `/v1/usage` first; DeepSeek reads `/user/balance`.',
   '如果供应商不开放额度接口，Metis 会显示不支持，不会编造百分比。': 'If the provider exposes no usage API, Metis shows it as unsupported rather than inventing percentages.',
 
   // —— 设置：关于 ——
@@ -844,7 +844,7 @@ export const zhEn: Record<string, string> = {
   '请检查网络、余额、模型权限或中转站协议兼容性。': 'Check network, balance, model permissions, or relay protocol compatibility.',
   '当前供应商不支持远程模型目录，已显示本地预设模型。': 'This provider has no remote model catalog; local preset models are shown.',
   '可以选择预设模型，也可以继续手动填写模型名。': 'Pick a preset model, or keep entering a model name manually.',
-  '当前供应商不支持 OpenAI-compatible /models 目录查询。': 'This provider does not support OpenAI-compatible /models catalog queries.',
+  '当前供应商不支持远程模型目录查询。': 'This provider does not support remote model catalog queries.',
   '可以继续手动填写模型名。': 'You can keep entering a model name manually.',
   '尚未填写 API Key，已显示本地预设模型。': 'No API key yet; local preset models are shown.',
   '填入 API Key 后可再刷新远程模型目录；未保存的 Key 不会被持久化。': 'Enter an API key to refresh the remote catalog; unsaved keys are not persisted.',

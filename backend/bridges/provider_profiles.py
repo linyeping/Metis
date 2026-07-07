@@ -75,7 +75,7 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderProfile, ...] = (
     ),
     ProviderProfile(
         provider_id=ProviderId("openai-compatible"),
-        display_name="OpenAI Compatible",
+        display_name="通用模型 API",
         backend_type="openai",
         aliases=("openai_compat",),
         default_model="",
@@ -87,7 +87,7 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderProfile, ...] = (
     ),
     ProviderProfile(
         provider_id=ProviderId("custom-openai"),
-        display_name="自定义 OpenAI 中转站",
+        display_name="自定义模型 API",
         backend_type="openai",
         aliases=("custom", "custom-openai", "openai-relay", "relay-openai"),
         default_model="",

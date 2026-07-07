@@ -82,7 +82,7 @@ export const UsageTab = memo(function UsageTab({
           <Gauge size={16} className="section-icon" />
           <h3>{t('读取规则')}</h3>
         </div>
-        <p className="section-desc">{t('PinAI / 自定义 OpenAI 中转站优先读取 `/v1/usage`；DeepSeek 读取 `/user/balance`。')}</p>
+        <p className="section-desc">{t('自定义模型 API 优先读取 `/v1/usage`；DeepSeek 读取 `/user/balance`。')}</p>
         <p className="section-desc">{t('如果供应商不开放额度接口，Metis 会显示不支持，不会编造百分比。')}</p>
       </section>
     </div>

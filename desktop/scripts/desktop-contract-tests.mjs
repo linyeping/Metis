@@ -684,9 +684,9 @@ test('file change diff workbench and custom OpenAI relay stay wired', () => {
   assert.match(api, /return providerValidationFromRecord\(data\)/);
   assert.match(css, /\.setup-verification/);
   assert.match(fakeBackend, /provider_id:\s*'custom-openai'/);
-  assert.match(fakeBackend, /display_name:\s*'自定义 OpenAI 中转站'/);
+  assert.match(fakeBackend, /display_name:\s*'自定义模型 API'/);
   assert.match(realProfiles, /ProviderId\("custom-openai"\)/);
-  assert.match(realProfiles, /自定义 OpenAI 中转站/);
+  assert.match(realProfiles, /自定义模型 API/);
   assert.match(doc, /NEW-52/);
 });
 
@@ -1996,7 +1996,7 @@ test('NEW-76 provider manager and model consistency stays wired', () => {
 
   assert.match(app, /<SettingsDialog onSaved=\{refresh\}/);
   assert.match(settings, /provider-profile-panel/);
-  assert.match(settings, /OpenAI-compatible 中转站/);
+  assert.match(settings, /模型服务 API/);
   assert.match(settings, /模型来源/);
   assert.match(settings, /自动识别/);
   assert.doesNotMatch(settings, /<select value=\{settings\.providerId \|\| settings\.backend\}/);
