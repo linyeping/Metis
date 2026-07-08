@@ -145,7 +145,6 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const setOpen = useUiStore(state => state.setSettingsOpen);
   const settingsSection = useUiStore(state => state.settingsSection);
   const setSettingsSection = useUiStore(state => state.setSettingsSection);
-  const theme = useUiStore(state => state.theme);
   const setTheme = useUiStore(state => state.setTheme);
   const appearanceMode = useUiStore(state => state.appearanceMode);
   const lightTheme = useUiStore(state => state.lightTheme);
@@ -609,7 +608,6 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             onLanguageChange={value => setLanguage(value as Language)}
             onThemeChange={value => setTheme(value as ThemeName)}
             onUiFontSizeChange={setUiFontSize}
-            theme={theme}
             uiFontSize={uiFontSize}
           />
         );

@@ -1995,20 +1995,20 @@ test('NEW-76 provider manager and model consistency stays wired', () => {
   );
 
   assert.match(app, /<SettingsDialog onSaved=\{refresh\}/);
-  assert.match(settings, /provider-profile-panel/);
-  assert.match(settings, /模型服务 API/);
-  assert.match(settings, /模型来源/);
-  assert.match(settings, /自动识别/);
+  assert.match(settings, /model-service-strip/);
+  assert.match(settings, /模型发现/);
+  assert.match(settings, /从当前 API 的 \/models 读取可用聊天模型/);
   assert.doesNotMatch(settings, /<select value=\{settings\.providerId \|\| settings\.backend\}/);
   assert.doesNotMatch(settings, /providerPresetModels/);
-  assert.match(css, /\.provider-profile-panel/);
+  assert.match(css, /\.model-service-strip/);
+  assert.match(css, /\.model-discovery-panel/);
   assert.match(llmState, /_resolved_provider_runtime_values/);
   assert.match(providerRegistry, /normalize_provider_model/);
   assert.match(providerRegistry, /_looks_like_foreign_model/);
   assert.match(providerTests, /test_validate_provider_config_repairs_obvious_foreign_model/);
   assert.match(catalogTests, /test_deepseek_model_fallback_does_not_read_openai_model/);
   assert.match(smoke, /new76-deepseek-gpt-model-repaired/);
-  assert.match(smoke, /new76-provider-profile-panel-visible/);
+  assert.match(smoke, /new76-model-service-strip-visible/);
   assert.match(doc, /Provider Manager And Model Consistency/);
 });
 

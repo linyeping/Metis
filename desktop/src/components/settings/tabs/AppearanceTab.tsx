@@ -23,13 +23,12 @@ interface AppearanceTabProps {
   onLanguageChange: (value: Language) => void;
   onThemeChange: (value: ThemeName) => void;
   onUiFontSizeChange: (value: number) => void;
-  theme: ThemeName;
   uiFontSize: number;
 }
 
 const themeGroups: Array<{ mode: AppearanceMode; label: string }> = [
-  { mode: 'light', label: '浅色（白天）' },
-  { mode: 'dark', label: '深色（夜晚）' },
+  { mode: 'light', label: '白天' },
+  { mode: 'dark', label: '夜晚' },
 ];
 
 export const AppearanceTab = memo(function AppearanceTab({
@@ -45,12 +44,14 @@ export const AppearanceTab = memo(function AppearanceTab({
   onLanguageChange,
   onThemeChange,
   onUiFontSizeChange,
-  theme,
   uiFontSize,
 }: AppearanceTabProps) {
   const t = useT();
+  const currentModeTheme = appearanceMode === 'light' ? lightTheme : darkTheme;
+  const currentPalette = themes[currentModeTheme];
+
   return (
-    <div className="settings-card-grid">
+    <div className="settings-card-grid appearance-settings-grid">
       <section className="settings-section">
         <div className="settings-section-header">
           <Palette size={16} className="section-icon" />
@@ -63,49 +64,78 @@ export const AppearanceTab = memo(function AppearanceTab({
             <option value="en">English</option>
           </select>
         </label>
-        <div className="appearance-mode-toggle" role="group" aria-label={`${t('白天')} / ${t('夜晚')}`}>
-          <button type="button" data-active={appearanceMode === 'light'} onClick={() => onAppearanceModeChange('light')}>
-            <Sun size={14} />
-            {t('白天')}
-          </button>
-          <button type="button" data-active={appearanceMode === 'dark'} onClick={() => onAppearanceModeChange('dark')}>
-            <Moon size={14} />
-            {t('夜晚')}
-          </button>
+        <div className="appearance-preview-grid" role="group" aria-label={t('外观模式')}>
+          {themeGroups.map(group => {
+            const optionTheme = group.mode === 'light' ? lightTheme : darkTheme;
+            const palette = themes[optionTheme];
+            const Icon = group.mode === 'light' ? Sun : Moon;
+            return (
+              <button
+                type="button"
+                className="appearance-preview-card"
+                key={group.mode}
+                data-active={appearanceMode === group.mode}
+                onClick={() => onAppearanceModeChange(group.mode)}
+              >
+                <span
+                  className="appearance-preview-window"
+                  style={{
+                    background: palette['--bg'],
+                    borderColor: palette['--border'],
+                  }}
+                  aria-hidden="true"
+                >
+                  <span
+                    className="appearance-preview-sidebar"
+                    style={{ background: palette['--bg-secondary'], borderColor: palette['--border'] }}
+                  />
+                  <span className="appearance-preview-content">
+                    <i style={{ background: palette['--text-faint'] }} />
+                    <i style={{ background: palette['--accent'] }} />
+                    <i style={{ background: palette['--bg-tertiary'] }} />
+                  </span>
+                </span>
+                <strong>
+                  <Icon size={14} />
+                  {t(group.label)}
+                </strong>
+                <small>{themeLabels[optionTheme][language]}</small>
+              </button>
+            );
+          })}
         </div>
-        {themeGroups.map(group => {
-          const savedForMode = group.mode === 'light' ? lightTheme : darkTheme;
-          return (
-            <div className="theme-group" key={group.mode}>
-              <p className="theme-group-label">{t(group.label)}</p>
-              <div className="theme-grid">
-                {themeNames
-                  .filter(name => themeMode[name] === group.mode)
-                  .map(name => {
-                    const palette = themes[name];
-                    return (
-                      <button
-                        type="button"
-                        key={name}
-                        data-active={savedForMode === name}
-                        data-current={theme === name}
-                        onClick={() => onThemeChange(name)}
-                      >
-                        <span
-                          className="theme-dot"
-                          style={{
-                            background: `conic-gradient(from 130deg, ${palette['--accent']} 0 33%, ${palette['--accent-ink']} 33% 66%, ${palette['--bg-tertiary']} 66% 100%)`,
-                            borderColor: palette['--border'],
-                          }}
-                        />
-                        <strong>{themeLabels[name][language]}</strong>
-                      </button>
-                    );
-                  })}
-              </div>
-            </div>
-          );
-        })}
+        <div className="appearance-theme-panel">
+          <label>
+            <span>{t('当前模式主题')}</span>
+            <select value={currentModeTheme} onChange={event => onThemeChange(event.target.value as ThemeName)}>
+              {themeNames
+                .filter(name => themeMode[name] === appearanceMode)
+                .map(name => (
+                  <option value={name} key={name}>
+                    {themeLabels[name][language]}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <div
+            className="appearance-code-preview"
+            style={{
+              background: currentPalette['--bg-secondary'],
+              borderColor: currentPalette['--border'],
+              color: currentPalette['--text'],
+            }}
+            aria-hidden="true"
+          >
+            <span style={{ color: currentPalette['--text-faint'] }}>1</span>
+            <code>
+              <em style={{ color: currentPalette['--accent'] }}>const</em> themePreview = <strong style={{ color: currentPalette['--accent-ink'] }}>"{themeLabels[currentModeTheme][language]}"</strong>;
+            </code>
+            <span style={{ color: currentPalette['--text-faint'] }}>2</span>
+            <code>
+              surface: <strong style={{ color: currentPalette['--accent-ink'] }}>"Metis Desktop"</strong>
+            </code>
+          </div>
+        </div>
       </section>
       <section className="settings-section">
         <div className="settings-section-header">
@@ -116,7 +146,7 @@ export const AppearanceTab = memo(function AppearanceTab({
           <span>{t('字体')}</span>
           <select value={fontFamily} onChange={event => onFontFamilyChange(event.target.value as FontFamily)}>
             {fontOptions.map(option => (
-              <option value={option.value}>
+              <option value={option.value} key={option.value}>
                 {t(option.label)}
               </option>
             ))}

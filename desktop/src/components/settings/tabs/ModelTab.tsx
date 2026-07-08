@@ -73,100 +73,121 @@ export const ModelTab = memo(function ModelTab({
   const selectedModelMissing = Boolean(settings.model && chatModels.length > 0 && !chatModels.some(item => item.id === settings.model));
   const endpointPreview = modelCatalog?.modelsUrl || modelsEndpointPreview(settings.baseUrl);
   const tierVariant = capabilities ? (capabilities.tier <= 1 ? 'success' : capabilities.tier === 2 ? 'warning' : 'danger') : 'neutral';
+  const connectionVariant = providerCheck?.ok ? 'success' : providerCheck ? 'warning' : 'neutral';
+  const catalogVariant = modelCatalog?.status === 'ok' ? 'success' : modelCatalog?.status === 'error' ? 'danger' : modelCatalog ? 'warning' : 'neutral';
+  const serviceName = settings.providerId || settings.backend || t('模型服务');
 
   return (
-    <div className="settings-card-grid">
-      <section className="settings-section">
-        <div className="settings-section-header">
-          <Server size={16} className="section-icon" />
-          <h3>{t('API 连接')}</h3>
+    <div className="settings-card-grid model-settings-grid">
+      <section className="settings-section model-connection-section">
+        <div className="settings-section-header settings-section-header-with-action">
+          <span className="settings-section-title">
+            <Server size={16} className="section-icon" />
+            <h3>{t('连接')}</h3>
+          </span>
+          <button type="button" className="settings-inline-button" disabled={checkingProvider} onClick={() => void onCheckProvider(true)}>
+            {checkingProvider ? t('测试中...') : t('测试连接')}
+          </button>
         </div>
-        <div className="provider-profile-panel" data-mismatch="false">
-          <div className="provider-profile-head">
-            <span>
-              <strong>{t('模型服务 API')}</strong>
-              <em>{t('根据 Base URL 和 API Key 自动读取模型列表。')}</em>
-            </span>
-          </div>
-          <div className="provider-profile-grid">
-            <span>
-              <small>Base URL</small>
-              <strong>{settings.baseUrl ? t('已填写') : t('未填写')}</strong>
-            </span>
-            <span>
-              <small>API Key</small>
-              <strong>{apiKey || settings.apiKey ? t('已配置') : t('未填写')}</strong>
-            </span>
-            <span>
-              <small>{t('模型来源')}</small>
-              <strong>{chatModels.length > 0 ? `${chatModels.length} ${t('个')}` : '/models'}</strong>
-            </span>
-            <span>
-              <small>{t('识别方式')}</small>
-              <strong>{t('自动识别')}</strong>
-            </span>
-          </div>
-          {endpointPreview && <code>{endpointPreview}</code>}
+        <p className="section-desc">{t('配置 Metis 发送模型请求的服务地址和凭据。')}</p>
+        <div className="model-service-strip" data-status={connectionVariant}>
+          <Server size={16} />
+          <span>
+            <strong>{serviceName}</strong>
+            <small>{settings.baseUrl || t('未填写 Base URL')}</small>
+          </span>
+          <em>{providerCheck?.ok ? t('已通过') : providerCheck ? t('需处理') : t('未测试')}</em>
         </div>
-        <label>
-          <span>Base URL</span>
-          <input
-            className="settings-base-url-input"
-            value={settings.baseUrl}
-            spellCheck={false}
-            onChange={event => onSettingsChange(endpointSettings(settings, event.target.value))}
-          />
-        </label>
-        <label>
-          <span>{tr(language, 'apiKey')}</span>
-          <input
-            className="settings-api-key-input"
-            value={apiKey}
-            placeholder={settings.apiKey || 'sk-...'}
-            spellCheck={false}
-            onChange={event => onApiKeyChange(stripConfigWhitespace(event.target.value))}
-          />
-        </label>
-        <div className="provider-check-panel" data-ok={providerCheck?.ok ?? false}>
-          <div className="settings-action-row">
-            <button type="button" disabled={checkingProvider} onClick={() => void onCheckProvider(false)}>
-              {checkingProvider ? t('检查中...') : t('本地检查配置')}
-            </button>
-            <button type="button" disabled={checkingProvider} onClick={() => void onCheckProvider(true)}>
-              {checkingProvider ? t('探测中...') : t('深度探测')}
-            </button>
-          </div>
-          {providerCheck && (
-            <div>
+        <div className="model-credential-panel">
+          <label className="model-field-row">
+            <span>
+              <strong>Base URL *</strong>
+              <small>{t('模型服务的完整接口地址。')}</small>
+            </span>
+            <input
+              className="settings-base-url-input"
+              value={settings.baseUrl}
+              spellCheck={false}
+              onChange={event => onSettingsChange(endpointSettings(settings, event.target.value))}
+            />
+          </label>
+          <label className="model-field-row">
+            <span>
+              <strong>{tr(language, 'apiKey')} *</strong>
+              <small>{t('保存时写入本地配置，粘贴时会自动清理空格。')}</small>
+            </span>
+            <input
+              className="settings-api-key-input"
+              value={apiKey}
+              placeholder={settings.apiKey || 'sk-...'}
+              spellCheck={false}
+              onChange={event => onApiKeyChange(stripConfigWhitespace(event.target.value))}
+            />
+          </label>
+        </div>
+        {providerCheck && (
+          <div className="provider-check-panel" data-ok={providerCheck.ok}>
+            <span>
               <strong>{t(providerCheck.title)}</strong>
-              <span>{t(providerCheck.message)}</span>
-              {providerCheck.chatUrl && <small>{providerCheck.chatUrl}</small>}
-              {providerCheck.hint && <em>{t(providerCheck.hint)}</em>}
-              {providerCheck.warnings.map(warning => (
-                <em key={warning}>{t(warning)}</em>
-              ))}
-              {providerCheck.conformance && (
-                <small>
-                  Conformance: {providerCheck.conformance.multiRoundContinuation || 'unknown'} · reasoning{' '}
-                  {providerCheck.conformance.requiresReasoningPassback === null
-                    ? 'unknown'
-                    : providerCheck.conformance.requiresReasoningPassback
-                      ? 'passback'
-                      : 'not required'}
-                </small>
+              <em>{t(providerCheck.message)}</em>
+            </span>
+            {providerCheck.chatUrl && <small>{providerCheck.chatUrl}</small>}
+            {providerCheck.hint && <em>{t(providerCheck.hint)}</em>}
+            {providerCheck.warnings.map(warning => (
+              <em key={warning}>{t(warning)}</em>
+            ))}
+            {providerCheck.conformance && (
+              <small>
+                Conformance: {providerCheck.conformance.multiRoundContinuation || 'unknown'} · reasoning{' '}
+                {providerCheck.conformance.requiresReasoningPassback === null
+                  ? 'unknown'
+                  : providerCheck.conformance.requiresReasoningPassback
+                    ? 'passback'
+                    : 'not required'}
+              </small>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="settings-section model-discovery-section">
+        <div className="settings-section-header settings-section-header-with-action">
+          <span className="settings-section-title">
+            <SlidersHorizontal size={16} className="section-icon" />
+            <h3>{t('模型发现')}</h3>
+          </span>
+          <button type="button" className="settings-inline-button" disabled={loadingModels} onClick={() => void onRefreshModelCatalog()}>
+            <RefreshCw size={14} className={loadingModels ? 'spin-icon' : undefined} />
+            {loadingModels ? t('读取中...') : t('读取模型列表')}
+          </button>
+        </div>
+        <p className="section-desc">{t('从当前 API 的 /models 读取可用聊天模型，只显示这组配置实际返回的模型。')}</p>
+        <div className="provider-catalog-panel model-discovery-panel" data-status={modelCatalog?.status || 'idle'}>
+          <div className="model-discovery-summary" data-status={catalogVariant}>
+            <span>
+              <strong>{chatModels.length > 0 ? `${chatModels.length} ${t('个聊天模型')}` : t('等待模型发现')}</strong>
+              <small>{endpointPreview || t('填写 Base URL 后可读取模型列表')}</small>
+            </span>
+            <em>{modelCatalog?.status || 'idle'}</em>
+          </div>
+          {modelCatalog && (
+            <div className="provider-catalog-result">
+              <span className="provider-model-summary">
+                <strong>{t(modelCatalog.message || '模型目录')}</strong>
+                {modelCatalog.hint && <em>{t(modelCatalog.hint)}</em>}
+                <small>{chatModels.length > 0 ? `${chatModels.length} ${t('个聊天模型')}` : modelCatalog.status}</small>
+              </span>
+              {hiddenModelCount > 0 && (
+                <p className="provider-model-empty">{t('已隐藏非聊天模型 ')}{hiddenModelCount}{t(' 个。')}</p>
               )}
             </div>
           )}
         </div>
-      </section>
-
-      <section className="settings-section">
-        <div className="settings-section-header">
-          <SlidersHorizontal size={16} className="section-icon" />
-          <h3>{t('模型选择')}</h3>
-        </div>
-        <label>
-          <span>{tr(language, 'model')}</span>
+        <label className="model-field-row">
+          <span>
+            <strong>{tr(language, 'model')}</strong>
+            <small>{chatModels.length > 0 ? t('从当前 API 探测结果选择。') : t('等待模型发现，必要时可临时手动填写。')}</small>
+          </span>
           {chatModels.length > 0 ? (
             <select
               className="settings-model-input"
@@ -189,31 +210,34 @@ export const ModelTab = memo(function ModelTab({
             />
           )}
         </label>
-        <div className="provider-catalog-panel" data-status={modelCatalog?.status || 'idle'}>
-          <div className="settings-action-row">
-            <button type="button" disabled={loadingModels} onClick={() => void onRefreshModelCatalog()}>
-              <RefreshCw size={14} />
-              {loadingModels ? t('读取中...') : t('读取模型列表')}
-            </button>
-            {endpointPreview && <code>{endpointPreview}</code>}
+        {chatModels.length > 0 ? (
+          <div className="provider-model-list model-discovered-list">
+            {chatModels.slice(0, 8).map(item => (
+              <button
+                type="button"
+                key={item.id}
+                data-active={settings.model === item.id}
+                onClick={() => onSettingsChange({ ...settings, model: item.id })}
+              >
+                <span>
+                  <strong>{item.displayName || item.id}</strong>
+                  <em>{item.id}</em>
+                </span>
+              </button>
+            ))}
+            {chatModels.length > 8 && <p className="provider-model-empty">{t('还有 ')}{chatModels.length - 8}{t(' 个模型可在上方下拉选择。')}</p>}
           </div>
-          {modelCatalog && (
-            <div className="provider-catalog-result">
-              <span className="provider-model-summary">
-                <strong>{t(modelCatalog.message || '模型目录')}</strong>
-                {modelCatalog.hint && <em>{t(modelCatalog.hint)}</em>}
-                <small>{chatModels.length > 0 ? `${chatModels.length} ${t('个聊天模型')}` : modelCatalog.status}</small>
-              </span>
-              {hiddenModelCount > 0 && (
-                <p className="provider-model-empty">{t('已隐藏非聊天模型 ')}{hiddenModelCount}{t(' 个。')}</p>
-              )}
-              {chatModels.length === 0 && (
-                <p className="provider-model-empty">{t('当前 API 没有返回可切换的聊天模型，仍可手动填写模型名。')}</p>
-              )}
-            </div>
-          )}
+        ) : modelCatalog ? (
+          <p className="provider-model-empty">{t('当前 API 没有返回可切换的聊天模型，仍可手动填写模型名。')}</p>
+        ) : null}
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-header">
+          <SlidersHorizontal size={16} className="section-icon" />
+          <h3>{t('推理与输出')}</h3>
         </div>
-        <div className="settings-inline-grid">
+        <div className="settings-inline-grid model-parameter-grid">
           <label>
             <span>{tr(language, 'temperature')}</span>
             <input

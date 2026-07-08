@@ -969,15 +969,13 @@ async function verifyProviderUsageAndModels(checks: SmokeCheck[]): Promise<void>
   );
 
   ui.setSettingsSection('model');
-  await waitForCondition(() => Boolean(document.querySelector('.provider-profile-panel')), 'provider profile panel visible');
-  const profilePanelText = document.querySelector('.provider-profile-panel')?.textContent || '';
+  await waitForCondition(() => Boolean(document.querySelector('.model-service-strip')), 'model service strip visible');
+  const serviceStripText = document.querySelector('.model-service-strip')?.textContent || '';
   record(
     checks,
-    'new76-provider-profile-panel-visible',
-    profilePanelText.includes('模型服务 API') &&
-      profilePanelText.includes('模型来源') &&
-      profilePanelText.includes('自动识别'),
-    profilePanelText,
+    'new76-model-service-strip-visible',
+    serviceStripText.includes('custom-openai') || serviceStripText.includes('模型服务'),
+    serviceStripText,
   );
   await waitForCondition(() => Boolean(document.querySelector('.provider-catalog-panel')), 'provider catalog panel visible');
   const providerConfigInputs = Array.from(
@@ -989,10 +987,10 @@ async function verifyProviderUsageAndModels(checks: SmokeCheck[]): Promise<void>
     providerConfigInputs.length === 2 && providerConfigInputs.every(input => input.spellcheck === false),
     providerConfigInputs.map(input => `${input.className}:${input.spellcheck}`).join(', '),
   );
-  const catalogButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.provider-catalog-panel button')).find(button =>
+  const catalogButton = Array.from(document.querySelectorAll<HTMLButtonElement>('.model-discovery-section button')).find(button =>
     button.textContent?.includes('读取模型列表'),
   );
-  record(checks, 'new68-provider-model-button-visible', Boolean(catalogButton), document.querySelector('.provider-catalog-panel')?.textContent || '');
+  record(checks, 'new68-provider-model-button-visible', Boolean(catalogButton), document.querySelector('.model-discovery-section')?.textContent || '');
   catalogButton?.click();
   await waitForCondition(() => {
     const text = document.querySelector('.provider-catalog-panel')?.textContent || '';
