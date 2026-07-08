@@ -13380,6 +13380,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 }
 
 .settings-dialog {
+  --settings-top-section-height: 116px;
   display: grid;
   width: 100vw;
   height: 100vh;
@@ -13414,7 +13415,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 14px;
-  padding: 18px 10px 18px;
+  padding: 0 10px 18px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-secondary) 72%, var(--bg));
   -webkit-app-region: no-drag;
@@ -13423,9 +13424,12 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 .settings-sidebar-top {
   display: grid;
   min-width: 0;
+  min-height: var(--settings-top-section-height);
   gap: 13px;
-  padding: 0 8px 13px;
+  margin: 0 -10px;
+  padding: 18px 18px 13px;
   border-bottom: 1px solid var(--border);
+  box-sizing: border-box;
 }
 
 .settings-back-button {
@@ -13619,6 +13623,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 .settings-main-header {
   display: grid;
   min-width: 0;
+  min-height: var(--settings-top-section-height);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
@@ -15714,7 +15719,9 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   .settings-sidebar-top {
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
-    padding: 0 0 12px;
+    min-height: 0;
+    margin: 0 -12px;
+    padding: 0 12px 12px;
   }
 
   .settings-nav {
@@ -16758,30 +16765,6 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   display: grid;
   min-width: 0;
   gap: 10px;
-}
-
-.appearance-code-preview {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 0 10px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-family: var(--font-mono);
-  font-size: var(--ui-font-size-sm);
-  line-height: 1.7;
-}
-
-.appearance-code-preview span,
-.appearance-code-preview code,
-.appearance-code-preview strong,
-.appearance-code-preview em {
-  min-width: 0;
-  overflow: hidden;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .primary {

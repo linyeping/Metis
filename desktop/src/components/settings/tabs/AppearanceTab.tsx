@@ -48,7 +48,6 @@ export const AppearanceTab = memo(function AppearanceTab({
 }: AppearanceTabProps) {
   const t = useT();
   const currentModeTheme = appearanceMode === 'light' ? lightTheme : darkTheme;
-  const currentPalette = themes[currentModeTheme];
 
   return (
     <div className="settings-card-grid appearance-settings-grid">
@@ -117,24 +116,6 @@ export const AppearanceTab = memo(function AppearanceTab({
                 ))}
             </select>
           </label>
-          <div
-            className="appearance-code-preview"
-            style={{
-              background: currentPalette['--bg-secondary'],
-              borderColor: currentPalette['--border'],
-              color: currentPalette['--text'],
-            }}
-            aria-hidden="true"
-          >
-            <span style={{ color: currentPalette['--text-faint'] }}>1</span>
-            <code>
-              <em style={{ color: currentPalette['--accent'] }}>const</em> themePreview = <strong style={{ color: currentPalette['--accent-ink'] }}>"{themeLabels[currentModeTheme][language]}"</strong>;
-            </code>
-            <span style={{ color: currentPalette['--text-faint'] }}>2</span>
-            <code>
-              surface: <strong style={{ color: currentPalette['--accent-ink'] }}>"Metis Desktop"</strong>
-            </code>
-          </div>
         </div>
       </section>
       <section className="settings-section">
