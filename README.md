@@ -14,107 +14,87 @@
   <img alt="Flask SSE" src="https://img.shields.io/badge/Flask-SSE-2E8B72?style=flat-square&logo=flask&logoColor=white" />
 </p>
 
-**[下载 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [查看更新](desktop/release/RELEASE_NOTES_v26.7.11.md) · [English](README.en.md)**
+<p>
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="下载 Metis 26.7.11" src="https://img.shields.io/badge/下载_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="查看 Release Notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+</p>
 
-由 [linyeping](https://github.com/linyeping) 打造 · 产品方向与部分设计思路致谢 [Serein](https://github.com/Serein0812)
+<sub>Windows 10 / 11 · 64 位 · DeepSeek / OpenAI-compatible API</sub><br />
+<sub><a href="README.en.md">English</a> · 由 <a href="https://github.com/linyeping">linyeping</a> 打造 · 产品方向与部分设计思路致谢 <a href="https://github.com/Serein0812">Serein</a></sub>
 
 </div>
 
 <br />
 
-<h2 align="center">从目标到结果</h2>
+<h2 align="center">一个工作台，三种执行强度</h2>
 
 <p align="center">
-  Metis 不是给聊天窗口再加几个按钮，而是一套运行在本机的 <b>AI 执行工作台</b>。<br />
-  它把模型推理、项目上下文、工具调用、权限控制和结果验证放进同一条桌面工作流。
+  不同任务进入各自最合适的工作面，但共享同一套会话、工具、权限和证据链。
 </p>
 
 <p align="center">
-  <kbd>目标</kbd> &nbsp;→&nbsp; <kbd>计划</kbd> &nbsp;→&nbsp; <kbd>执行</kbd> &nbsp;→&nbsp; <kbd>观察</kbd> &nbsp;→&nbsp; <kbd>验证</kbd> &nbsp;→&nbsp; <kbd>交付</kbd>
+  <img src="backend/assets/work-surfaces.png" alt="Metis Chat、Cowork 与 Code 三种工作面" width="100%" />
 </p>
 
 <p align="center">
-  <sub>理解仓库、修改文件、运行命令、检查网页、操作 Windows 应用，并以 diff、测试、截图、日志和产物作为完成证据。</sub>
+  <b>CHAT</b> 快速理解与轻量执行 &nbsp;·&nbsp;
+  <b>COWORK</b> 计划驱动的多步骤交付 &nbsp;·&nbsp;
+  <b>CODE</b> 围绕仓库的工程闭环
 </p>
 
-<p align="center">
-  <b>Local-first by design</b><br />
-  <sub>文件、命令与桌面操作在本机执行；无强制账号、无内置遥测，API Key 与 OAuth Token 不经过 Metis 中转服务。</sub>
-</p>
+<p align="center"><sub>模式之间的会话、工作区和草稿相互隔离；快速切换不会让旧请求覆盖当前记录。</sub></p>
 
 <br />
 
-<h2 align="center">获取 Metis</h2>
+<h2 align="center">不止回答，而是把工作做完</h2>
 
 <p align="center">
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="Download Metis 26.7.11" src="https://img.shields.io/badge/下载_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
-  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="Release notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+  Metis 把模型推理、项目上下文、工具调用、权限控制与结果验证放进同一条本机工作流。
 </p>
 
-<p align="center">
-  <b>Windows 10 / 11 · 64 位 · DeepSeek / OpenAI-compatible API</b><br />
-  <sub>安装包尚未代码签名，Windows SmartScreen 可能显示提示。请仅从本仓库的 GitHub Release 下载。</sub>
-</p>
+<div align="center">
+  <img src="backend/assets/Feature%20Showcase.png" alt="Metis 可执行代码、浏览器、桌面与技能任务" width="100%" />
+</div>
 
-<br />
-
-<h2 align="center">三种工作面</h2>
-
-<p align="center">不同强度的任务拥有独立但连续的工作面，不必全部挤进一条聊天流。</p>
-
-<table width="100%">
+<table align="center" width="100%">
   <tr>
-    <td width="33%" align="center" valign="top">
-      <img alt="Chat" src="https://img.shields.io/badge/CHAT-Ask_%26_Explore-4F7CAC?style=for-the-badge" /><br /><br />
-      <b>快速理解与轻量执行</b><br />
-      <sub>问答、分析、检索与文件处理<br />按需激活工具，保持响应直接</sub>
+    <td width="50%" valign="top">
+      <b>从目标到证据</b><br /><br />
+      理解仓库与上下文 → 拆解计划 → 修改文件与运行命令 → 检查网页或 Windows 应用 → 汇总 diff、测试、截图、日志和产物。
     </td>
-    <td width="34%" align="center" valign="top">
-      <img alt="Cowork" src="https://img.shields.io/badge/COWORK-Plan_%26_Deliver-2E8B72?style=for-the-badge" /><br /><br />
-      <b>计划驱动的多步骤交付</b><br />
-      <sub>拆分子任务、跨工具协作<br />汇总过程证据与最终产物</sub>
+    <td width="50%" valign="top">
+      <b>长任务不中断</b><br /><br />
+      上下文压缩、checkpoint、后台 run、重连与恢复共同维护任务连续性，过程状态和最终产物都可回看。
     </td>
-    <td width="33%" align="center" valign="top">
-      <img alt="Code" src="https://img.shields.io/badge/CODE-Build_%26_Verify-8A6BBE?style=for-the-badge" /><br /><br />
-      <b>围绕仓库的工程闭环</b><br />
-      <sub>理解代码、修改文件、运行测试<br />以 diff 与验证结果完成交付</sub>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>本机优先</b><br /><br />
+      文件系统、终端、浏览器和桌面工具在用户设备上运行；无需平台账号，也没有内置遥测。
+    </td>
+    <td width="50%" valign="top">
+      <b>可验证交付</b><br /><br />
+      工具调用、耗时、摘要和结果保持可见；完成状态由测试、diff、截图或日志证明，而不是只给一句“已完成”。
     </td>
   </tr>
 </table>
 
-<p align="center"><sub>会话、工作区和草稿按模式隔离；快速切换不会让旧请求覆盖当前记录，也不会串入其他模式的工作区。</sub></p>
-
 <br />
 
-<h2 align="center">可验证的执行能力</h2>
+<h2 align="center">连接你已经使用的服务</h2>
 
-<table width="100%">
-  <tr>
-    <td width="33%" align="center" valign="top"><b>Code & Terminal</b><br /><br /><sub>代码搜索、结构化编辑、Git / CLI、测试与构建<br /><br /><b>证据：</b>diff、终端输出、测试结论、生成文件</sub></td>
-    <td width="34%" align="center" valign="top"><b>Preview Browser</b><br /><br /><sub>导航、点击、输入、DOM 观察、console / network 诊断<br /><br /><b>证据：</b>页面状态、截图、DOM 与错误记录</sub></td>
-    <td width="33%" align="center" valign="top"><b>Computer Use</b><br /><br /><sub>基于窗口观察执行鼠标键盘操作<br /><br /><b>证据：</b>操作轨迹、窗口截图、步骤状态</sub></td>
-  </tr>
-  <tr>
-    <td width="33%" align="center" valign="top"><b>Store & Connectors</b><br /><br /><sub>技能、工具与外部服务连接器<br /><br /><b>证据：</b>可追溯来源、能力说明、连接状态</sub></td>
-    <td width="34%" align="center" valign="top"><b>Long-running Work</b><br /><br /><sub>上下文压缩、checkpoint、后台 run、重连与恢复<br /><br /><b>证据：</b>会话进度、恢复边界、任务产物</sub></td>
-    <td width="33%" align="center" valign="top"><b>Safety & Evidence</b><br /><br /><sub>风险分层、权限审批、凭据隔离与活动审计<br /><br /><b>原则：</b>结果由测试、diff、截图或日志验证</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="desktop/src/assets/connectors/github.svg" alt="GitHub" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/slack.svg" alt="Slack" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/notion.svg" alt="Notion" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/google-calendar.svg" alt="Google Calendar" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/google-drive.svg" alt="Google Drive" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/gmail.svg" alt="Gmail" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/postgresql.svg" alt="PostgreSQL" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/filesystem.svg" alt="Local Filesystem" width="42" height="42" />
+</p>
 
-<br />
-
-<h2 align="center">可信执行边界</h2>
-
-<table width="100%">
-  <tr>
-    <td width="50%" align="center" valign="top"><b>本机优先</b><br /><sub>文件系统、终端、浏览器和桌面工具在用户设备上运行</sub></td>
-    <td width="50%" align="center" valign="top"><b>权限分层</b><br /><sub>读取、写入、删除与外部提交按风险进入审批流程</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center" valign="top"><b>过程可见</b><br /><sub>工具状态、耗时、摘要、结果与后台任务均可回看</sub></td>
-    <td width="50%" align="center" valign="top"><b>凭据隔离</b><br /><sub>API Key 与 OAuth Token 不进入日志和模型上下文</sub></td>
-  </tr>
-</table>
+<p align="center"><sub>Store 与连接器中心提供具体的能力说明、来源、授权方式、可用工具和连接状态。</sub></p>
 
 <br />
 
@@ -133,48 +113,22 @@
 
 ---
 
-<h2 align="center">产品界面</h2>
+<h2 align="center">本机架构</h2>
 
 <div align="center">
-<img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
+  <img src="backend/assets/Architecture.png" alt="Metis 本机架构" width="100%" />
 </div>
 
-<p align="center">
-  中心线程承载目标和结果，右侧工作台承载 Preview、Diff、Terminal、Files 与后台 Activity。<br />
-  <sub>设置中心统一管理模型、权限、运行时、连接器和桌面行为。</sub>
-</p>
+<table align="center" width="100%">
+  <tr>
+    <td width="33%" valign="top"><b>Electron Desktop</b><br /><sub>窗口、菜单、OAuth、WebContentsView Preview 与打包后的后端生命周期。</sub></td>
+    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code、工具活动、右侧工作台、设置中心与状态管理。</sub></td>
+    <td width="33%" valign="top"><b>Python Agent</b><br /><sub>Flask + SSE、agent loop、工具注册、技能、浏览器与桌面自动化、checkpoint 和连接器。</sub></td>
+  </tr>
+</table>
 
----
-
-<h2 align="center">架构</h2>
-
-<div align="center">
-<img src="backend/assets/Architecture.png" alt="Architecture" width="100%" />
-</div>
-
-```text
-Metis Desktop
-├─ Electron main process
-│  ├─ 窗口、菜单、OAuth、WebContentsView Preview
-│  ├─ 后端生命周期管理
-│  └─ Windows 打包入口
-├─ React renderer
-│  ├─ Chat / Tool Activity / Right Rail / Settings
-│  ├─ Browser Activity / Preview Browser UI
-│  └─ Zustand stores + assistant-ui message stream
-└─ Python backend
-   ├─ Flask + SSE API
-   ├─ agent_loop / tool_registry / skills
-   ├─ browser automation / desktop automation
-   ├─ provider adapters
-   └─ checkpoint / context budget / connectors
-```
-
-通信方式：
-
-- Renderer 与后端通过 HTTP / SSE 通信。
-- Electron main 负责本地预览、OAuth、打包后的后端启动和桌面 shell 能力。
-- 后端工具最终调用本地文件系统、终端、浏览器、桌面自动化和模型 API。
+> [!NOTE]
+> Renderer 与本机后端通过 HTTP / SSE 通信。API Key 与 OAuth Token 不经过 Metis 中转服务，也不会写入日志或模型上下文。
 
 ---
 

@@ -14,107 +14,87 @@
   <img alt="Flask SSE" src="https://img.shields.io/badge/Flask-SSE-2E8B72?style=flat-square&logo=flask&logoColor=white" />
 </p>
 
-**[Download 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [Release notes](desktop/release/RELEASE_NOTES_v26.7.11.md) · [中文](README.md)**
+<p>
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="Download Metis 26.7.11" src="https://img.shields.io/badge/Download_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="View Release Notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+</p>
 
-Built by [linyeping](https://github.com/linyeping) · Product direction and design acknowledgements: [Serein](https://github.com/Serein0812)
+<sub>Windows 10 / 11 · 64-bit · DeepSeek / OpenAI-compatible API</sub><br />
+<sub><a href="README.md">中文</a> · Built by <a href="https://github.com/linyeping">linyeping</a> · Product direction and design acknowledgements: <a href="https://github.com/Serein0812">Serein</a></sub>
 
 </div>
 
 <br />
 
-<h2 align="center">From Intent to Evidence</h2>
+<h2 align="center">One Workbench, Three Levels of Execution</h2>
 
 <p align="center">
-  Metis is not a chat window with a few tool buttons. It is a local <b>AI execution workbench</b>.<br />
-  Reasoning, project context, tool calls, permission control, and verification live in one desktop workflow.
+  Each task enters the surface that fits it best while sharing the same sessions, tools, permissions, and evidence chain.
 </p>
 
 <p align="center">
-  <kbd>Goal</kbd> &nbsp;→&nbsp; <kbd>Plan</kbd> &nbsp;→&nbsp; <kbd>Execute</kbd> &nbsp;→&nbsp; <kbd>Observe</kbd> &nbsp;→&nbsp; <kbd>Verify</kbd> &nbsp;→&nbsp; <kbd>Deliver</kbd>
+  <img src="backend/assets/work-surfaces.png" alt="Metis Chat, Cowork, and Code work surfaces" width="100%" />
 </p>
 
 <p align="center">
-  <sub>Understand repositories, edit files, run commands, inspect web apps, operate Windows software, and attach diffs, tests, screenshots, logs, and artifacts as evidence.</sub>
+  <b>CHAT</b> fast understanding and light execution &nbsp;·&nbsp;
+  <b>COWORK</b> plan-driven multi-step delivery &nbsp;·&nbsp;
+  <b>CODE</b> repository-centered engineering loop
 </p>
 
-<p align="center">
-  <b>Local-first by design</b><br />
-  <sub>Filesystem, terminal, browser, and desktop actions run locally. No platform account, no built-in telemetry, and no Metis relay for API keys or OAuth tokens.</sub>
-</p>
+<p align="center"><sub>Sessions, workspaces, and drafts stay isolated by mode, so rapid navigation cannot let stale requests overwrite the active record.</sub></p>
 
 <br />
 
-<h2 align="center">Get Metis</h2>
+<h2 align="center">Not Just Answers. Finished Work.</h2>
 
 <p align="center">
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="Download Metis 26.7.11" src="https://img.shields.io/badge/Download_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
-  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="Release notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+  Metis brings model reasoning, project context, tool calls, permission control, and verification into one local workflow.
 </p>
 
-<p align="center">
-  <b>Windows 10 / 11 · 64-bit · DeepSeek / OpenAI-compatible API</b><br />
-  <sub>The installer is not code-signed yet, so Windows SmartScreen may warn. Download only from this repository's GitHub Release.</sub>
-</p>
+<div align="center">
+  <img src="backend/assets/Feature%20Showcase.png" alt="Metis executes code, browser, desktop, and skill workflows" width="100%" />
+</div>
 
-<br />
-
-<h2 align="center">Three Work Surfaces</h2>
-
-<p align="center">Different levels of work get focused but continuous surfaces instead of one overloaded conversation stream.</p>
-
-<table width="100%">
+<table align="center" width="100%">
   <tr>
-    <td width="33%" align="center" valign="top">
-      <img alt="Chat" src="https://img.shields.io/badge/CHAT-Ask_%26_Explore-4F7CAC?style=for-the-badge" /><br /><br />
-      <b>Fast understanding and light execution</b><br />
-      <sub>Questions, analysis, research, and file work<br />Tools activate only when needed</sub>
+    <td width="50%" valign="top">
+      <b>From intent to evidence</b><br /><br />
+      Understand the repository and context → build a plan → edit files and run commands → inspect web or Windows apps → collect diffs, tests, screenshots, logs, and artifacts.
     </td>
-    <td width="34%" align="center" valign="top">
-      <img alt="Cowork" src="https://img.shields.io/badge/COWORK-Plan_%26_Deliver-2E8B72?style=for-the-badge" /><br /><br />
-      <b>Plan-driven multi-step delivery</b><br />
-      <sub>Decompose work and coordinate tools<br />Aggregate evidence and final artifacts</sub>
+    <td width="50%" valign="top">
+      <b>Long-running continuity</b><br /><br />
+      Context compaction, checkpoints, background runs, reconnect, and resume keep work moving while progress and final artifacts remain inspectable.
     </td>
-    <td width="33%" align="center" valign="top">
-      <img alt="Code" src="https://img.shields.io/badge/CODE-Build_%26_Verify-8A6BBE?style=for-the-badge" /><br /><br />
-      <b>Repository-centered engineering loop</b><br />
-      <sub>Understand, implement, test, and build<br />Deliver with diffs and verification</sub>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>Local-first</b><br /><br />
+      Filesystem, terminal, browser, and desktop tools run on the user's device, with no platform account requirement and no built-in telemetry.
+    </td>
+    <td width="50%" valign="top">
+      <b>Verifiable delivery</b><br /><br />
+      Tool calls, duration, summaries, and results stay visible. Completion is backed by tests, diffs, screenshots, or logs instead of a bare “done.”
     </td>
   </tr>
 </table>
 
-<p align="center"><sub>Sessions, workspaces, and drafts are isolated by mode. Rapid navigation cannot let stale requests overwrite the active session or leak another workspace.</sub></p>
-
 <br />
 
-<h2 align="center">Verifiable Execution</h2>
+<h2 align="center">Connect the Services You Already Use</h2>
 
-<table width="100%">
-  <tr>
-    <td width="33%" align="center" valign="top"><b>Code & Terminal</b><br /><br /><sub>Code search, structured edits, Git / CLI, tests, and builds<br /><br /><b>Evidence:</b> diffs, terminal output, test results, generated files</sub></td>
-    <td width="34%" align="center" valign="top"><b>Preview Browser</b><br /><br /><sub>Navigation, interaction, DOM observation, console / network diagnostics<br /><br /><b>Evidence:</b> page state, screenshots, DOM, and failures</sub></td>
-    <td width="33%" align="center" valign="top"><b>Computer Use</b><br /><br /><sub>Mouse and keyboard execution from window-level observations<br /><br /><b>Evidence:</b> action trail, captures, and step state</sub></td>
-  </tr>
-  <tr>
-    <td width="33%" align="center" valign="top"><b>Store & Connectors</b><br /><br /><sub>Skills, tools, and external service connectors<br /><br /><b>Evidence:</b> traceable source, capabilities, connection state</sub></td>
-    <td width="34%" align="center" valign="top"><b>Long-running Work</b><br /><br /><sub>Context compaction, checkpoints, background runs, reconnect, and resume<br /><br /><b>Evidence:</b> progress, recovery boundaries, artifacts</sub></td>
-    <td width="33%" align="center" valign="top"><b>Safety & Evidence</b><br /><br /><sub>Risk tiers, approvals, credential isolation, and activity auditing<br /><br /><b>Principle:</b> verify with tests, diffs, screenshots, or logs</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="desktop/src/assets/connectors/github.svg" alt="GitHub" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/slack.svg" alt="Slack" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/notion.svg" alt="Notion" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/google-calendar.svg" alt="Google Calendar" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/google-drive.svg" alt="Google Drive" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/gmail.svg" alt="Gmail" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/postgresql.svg" alt="PostgreSQL" width="42" height="42" />&nbsp;&nbsp;&nbsp;
+  <img src="desktop/src/assets/connectors/filesystem.svg" alt="Local Filesystem" width="42" height="42" />
+</p>
 
-<br />
-
-<h2 align="center">Trust Boundaries</h2>
-
-<table width="100%">
-  <tr>
-    <td width="50%" align="center" valign="top"><b>Local-first</b><br /><sub>Filesystem, terminal, browser, and desktop tools run on the user's device</sub></td>
-    <td width="50%" align="center" valign="top"><b>Layered permissions</b><br /><sub>Reads, writes, deletes, and submissions follow risk-aware approvals</sub></td>
-  </tr>
-  <tr>
-    <td width="50%" align="center" valign="top"><b>Inspectable activity</b><br /><sub>Tool status, duration, summaries, results, and background runs remain visible</sub></td>
-    <td width="50%" align="center" valign="top"><b>Credential isolation</b><br /><sub>API keys and OAuth tokens stay out of logs and model context</sub></td>
-  </tr>
-</table>
+<p align="center"><sub>The Store and connector center expose concrete capabilities, provenance, authorization, available tools, and live connection state.</sub></p>
 
 <br />
 
@@ -133,48 +113,22 @@ Built by [linyeping](https://github.com/linyeping) · Product direction and desi
 
 ---
 
-<h2 align="center">Product Interface</h2>
+<h2 align="center">Local Architecture</h2>
 
 <div align="center">
-<img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
+  <img src="backend/assets/Architecture.png" alt="Metis local architecture" width="100%" />
 </div>
 
-<p align="center">
-  The central thread carries goals and outcomes; the right workbench hosts Preview, Diff, Terminal, Files, and background Activity.<br />
-  <sub>Settings centralizes models, permissions, runtime management, connectors, and desktop behavior.</sub>
-</p>
+<table align="center" width="100%">
+  <tr>
+    <td width="33%" valign="top"><b>Electron Desktop</b><br /><sub>Windowing, menus, OAuth, WebContentsView Preview, and packaged backend lifecycle.</sub></td>
+    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code, tool activity, right workbench, settings, and state management.</sub></td>
+    <td width="33%" valign="top"><b>Python Agent</b><br /><sub>Flask + SSE, agent loop, tool registry, skills, browser and desktop automation, checkpoints, and connectors.</sub></td>
+  </tr>
+</table>
 
----
-
-<h2 align="center">Architecture</h2>
-
-<div align="center">
-<img src="backend/assets/Architecture.png" alt="Architecture" width="100%" />
-</div>
-
-```text
-Metis Desktop
-├─ Electron main process
-│  ├─ Windowing, menus, OAuth, WebContentsView Preview
-│  ├─ Backend lifecycle management
-│  └─ Windows packaging entry
-├─ React renderer
-│  ├─ Chat / Tool Activity / Right Rail / Settings
-│  ├─ Browser Activity / Preview Browser UI
-│  └─ Zustand stores + assistant-ui message stream
-└─ Python backend
-   ├─ Flask + SSE API
-   ├─ agent_loop / tool_registry / skills
-   ├─ browser automation / desktop automation
-   ├─ provider adapters
-   └─ checkpoint / context budget / connectors
-```
-
-Communication model:
-
-- The renderer talks to the backend over HTTP / SSE.
-- The Electron main process owns local preview, OAuth, packaged backend startup, and desktop shell capabilities.
-- Backend tools interact with the local filesystem, terminal, browser, desktop automation, and model APIs.
+> [!NOTE]
+> The renderer talks to the local backend over HTTP / SSE. API keys and OAuth tokens never pass through a Metis relay and stay out of logs and model context.
 
 ---
 
