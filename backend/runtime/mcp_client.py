@@ -82,7 +82,7 @@ class MCPSession:
         # npx.cmd/node.cmd (Popen without shell=True won't append .cmd itself).
         # Falls back to the bare name on POSIX or when not found.
         resolved = shutil.which(command, path=env.get("PATH")) or command
-        cmd = [resolved] + list(self.config.args)
+        cmd = [resolved] + [_expand_env_argument(arg, env) for arg in self.config.args]
 
         self._process = subprocess.Popen(
             cmd,
@@ -711,6 +711,14 @@ def _stdio_env_for_config(config: MCPServerConfig) -> Dict[str, str]:
     if token_env and auth_token:
         env[token_env] = auth_token
     return env
+
+
+def _expand_env_argument(value: str, env: Dict[str, str]) -> str:
+    return re.sub(
+        r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}",
+        lambda match: env.get(match.group(1), match.group(0)),
+        str(value),
+    )
 
 
 def _resolve_auth_token(config: MCPServerConfig) -> str:

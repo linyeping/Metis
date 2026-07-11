@@ -6,6 +6,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import re
+import uuid
+from pathlib import Path
 from typing import Dict, Optional
 
 
@@ -119,9 +123,17 @@ class ResultCompactor:
         compacted = compactor.compact("grep_search", raw_result)
     """
 
-    def __init__(self, max_chars: int = _MAX_RESULT_CHARS):
+    def __init__(
+        self,
+        max_chars: int = _MAX_RESULT_CHARS,
+        *,
+        workspace_root: str = "",
+        session_id: str = "",
+    ):
         self._max_chars = max_chars
         self._seen_files: Dict[str, str] = {}  # path -> content_hash
+        self._workspace_root = str(workspace_root or "").strip()
+        self._session_id = str(session_id or "session").strip() or "session"
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -139,7 +151,10 @@ class ResultCompactor:
                 return deduped
 
         compressed = method(result)
-        return self._final_cap(compressed)
+        archive_reference = ""
+        if compressed != result:
+            archive_reference = self._archive_full_result(tool_name, result)
+        return self._finalize_with_archive(compressed, archive_reference)
 
     def reset_seen_files(self) -> None:
         """清空文件去重缓存（新会话时调用）。"""
@@ -367,8 +382,14 @@ class ResultCompactor:
         """通用兜底：头 + 尾。"""
         if len(result) <= self._max_chars:
             return result
-        HEAD = self._max_chars * 2 // 3
-        TAIL = self._max_chars // 3
+        return self._head_tail_with_limit(result, self._max_chars)
+
+    @staticmethod
+    def _head_tail_with_limit(result: str, limit: int) -> str:
+        if len(result) <= limit:
+            return result
+        HEAD = max(1, limit * 2 // 3)
+        TAIL = max(1, limit // 3)
         mid_lines = result[HEAD:-TAIL].count("\n")
         mid_chars = len(result) - HEAD - TAIL
         return (
@@ -382,11 +403,55 @@ class ResultCompactor:
     # 最终上限
     # ------------------------------------------------------------------
 
-    def _final_cap(self, result: str) -> str:
+    def _final_cap(self, result: str, *, limit: Optional[int] = None) -> str:
         """确保结果不超过全局上限。"""
-        if len(result) <= self._max_chars:
+        cap = max(256, int(limit if limit is not None else self._max_chars))
+        if len(result) <= cap:
             return result
-        return self._strategy_head_tail(result)
+        return self._head_tail_with_limit(result, cap)
+
+    def _finalize_with_archive(self, result: str, archive_reference: str) -> str:
+        if not archive_reference:
+            return self._final_cap(result)
+        separator = "\n\n"
+        content_limit = max(256, self._max_chars - len(separator) - len(archive_reference))
+        return self._final_cap(result, limit=content_limit) + separator + archive_reference
+
+    def _archive_full_result(self, tool_name: str, result: str) -> str:
+        if not self._workspace_root:
+            return ""
+        root = Path(self._workspace_root).resolve(strict=False)
+        digest = hashlib.sha256(result.encode("utf-8", errors="replace")).hexdigest()
+        safe_session = _safe_segment(self._session_id, fallback="session")
+        safe_tool = _safe_segment(tool_name, fallback="tool")
+        relative_path = (
+            Path(".metis")
+            / "artifacts"
+            / "tool-results"
+            / safe_session
+            / f"{safe_tool}-{digest[:16]}.txt"
+        )
+        target = (root / relative_path).resolve(strict=False)
+        temp_path: Optional[Path] = None
+        try:
+            target.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                temp_path = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+                temp_path.write_text(result, encoding="utf-8")
+                os.replace(temp_path, target)
+        except (OSError, ValueError):
+            return ""
+        finally:
+            if temp_path is not None and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+        return (
+            f"[Full tool result archived: {relative_path.as_posix()} | "
+            f"sha256={digest} | chars={len(result)}. Read this file when exact omitted output is needed.]"
+        )
 
 
 def _split_research_payload(result: str) -> tuple[str, str]:
@@ -395,3 +460,8 @@ def _split_research_payload(result: str) -> tuple[str, str]:
         before, after = result.split(marker, 1)
         return before + marker, after.strip()
     return "", result
+
+
+def _safe_segment(value: str, *, fallback: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "").strip()).strip("._-")
+    return cleaned[:80] or fallback

@@ -35,6 +35,9 @@ class SkillDefinition:
     paths: List[str] = field(default_factory=list)
     allowed_tools: List[str] = field(default_factory=list)
     disallowed_tools: List[str] = field(default_factory=list)
+    icon_small: str = ""
+    icon_large: str = ""
+    brand_color: str = ""
     frontmatter: Dict[str, Any] = field(default_factory=dict)
     mtime: float = 0.0
 
@@ -280,6 +283,10 @@ def skill_to_payload(skill: SkillDefinition, *, include_content: bool = False) -
         "allowed_tools": list(skill.allowed_tools),
         "disallowed_tools": list(skill.disallowed_tools),
         "preview": (skill.description or skill.body or skill.content)[:500],
+        "icon_small": skill.icon_small,
+        "icon_large": skill.icon_large,
+        "brand_color": skill.brand_color,
+        "icon_data_url": _skill_icon_data_url(skill),
     }
     if include_content:
         payload["content"] = skill.content
@@ -330,6 +337,7 @@ def _read_skill(path: Path, *, source: str) -> Optional[SkillDefinition]:
         actual_source = "builtin"
     description = _clean_text(frontmatter.get("description")) or _legacy_description(body) or title
     when_to_use = _clean_text(frontmatter.get("when_to_use")) or _clean_text(frontmatter.get("when-to-use"))
+    interface = frontmatter.get("interface") if isinstance(frontmatter.get("interface"), dict) else {}
     return SkillDefinition(
         name=name,
         title=title,
@@ -349,6 +357,9 @@ def _read_skill(path: Path, *, source: str) -> Optional[SkillDefinition]:
         paths=_string_list(frontmatter.get("paths")),
         allowed_tools=_string_list(frontmatter.get("allowed-tools", frontmatter.get("allowed_tools"))),
         disallowed_tools=_string_list(frontmatter.get("disallowed-tools", frontmatter.get("disallowed_tools"))),
+        icon_small=_clean_text(interface.get("icon_small") or interface.get("iconSmall") or frontmatter.get("icon_small")),
+        icon_large=_clean_text(interface.get("icon_large") or interface.get("iconLarge") or frontmatter.get("icon_large")),
+        brand_color=_clean_text(interface.get("brand_color") or interface.get("brandColor") or frontmatter.get("brand_color")),
         frontmatter=frontmatter,
         mtime=stat.st_mtime,
     )
@@ -400,24 +411,63 @@ def _parse_simple_yaml(lines: Iterable[str]) -> Dict[str, Any]:
         line = raw_line.rstrip()
         if not line.strip() or line.lstrip().startswith("#"):
             continue
+        indent = len(line) - len(line.lstrip(" "))
         stripped = line.strip()
         if current_key and stripped.startswith("- "):
-            existing = data.setdefault(current_key, [])
+            existing = data.get(current_key)
+            if isinstance(existing, dict) and not existing:
+                existing = []
+                data[current_key] = existing
             if isinstance(existing, list):
                 existing.append(_parse_scalar(stripped[2:].strip()))
             continue
         if ":" not in line:
             continue
-        key, value = line.split(":", 1)
-        current_key = key.strip()
+        key, value = stripped.split(":", 1)
+        key = key.strip()
         raw_value = value.strip()
-        if not current_key:
+        if not key:
             continue
+        if indent > 0 and current_key:
+            parent = data.get(current_key)
+            if not isinstance(parent, dict):
+                parent = {}
+                data[current_key] = parent
+            parent[key] = _parse_scalar(raw_value) if raw_value else {}
+            continue
+        current_key = key
         if not raw_value:
-            data[current_key] = []
+            data[current_key] = {}
             continue
         data[current_key] = _parse_scalar(raw_value)
     return data
+
+
+def _skill_icon_data_url(skill: SkillDefinition) -> str:
+    import base64
+    import mimetypes
+
+    raw = skill.icon_large or skill.icon_small
+    if not raw or raw.startswith(("http://", "https://", "data:")):
+        return raw if raw.startswith("data:image/") else ""
+    root = Path(skill.directory).resolve(strict=False)
+    target = (root / raw).resolve(strict=False)
+    if target != root and root not in target.parents:
+        return ""
+    try:
+        if not target.is_file() or target.stat().st_size > 512_000:
+            return ""
+        mime = mimetypes.guess_type(target.name)[0] or ""
+        if mime not in {"image/png", "image/jpeg", "image/webp", "image/svg+xml"}:
+            return ""
+        content = target.read_bytes()
+        if mime == "image/svg+xml":
+            lowered = content.decode("utf-8", errors="ignore").lower()
+            if any(token in lowered for token in ("<script", "<foreignobject", "javascript:", " onload=", " onerror=", "href=\"http", "href='http")):
+                return ""
+        return f"data:{mime};base64,{base64.b64encode(content).decode('ascii')}"
+    except OSError:
+        return ""
 
 
 def _parse_scalar(value: str) -> Any:

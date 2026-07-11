@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from .context_budget import context_ledger
+from .context_control import (
+    model_visible_history,
+    preserved_user_intent_messages,
+    recent_turn_boundary,
+)
 
 
 _ARCHIVE_PREFIX = "[Archived tool result]"
@@ -125,21 +130,23 @@ def maybe_auto_compact_messages(
     ratio_threshold: float = 0.7,
     keep_recent: int = 6,
 ) -> AutoCompactResult:
+    visible_messages = model_visible_history([dict(message) for message in messages])
     if ratio_threshold <= 0:
-        return AutoCompactResult(messages=[dict(message) for message in messages])
+        return AutoCompactResult(messages=visible_messages)
 
-    ledger = context_ledger(messages, tools, model=model)
+    ledger = context_ledger(visible_messages, tools, model=model)
     ratio = float(ledger.get("context_ratio") or 0.0)
-    if ratio < ratio_threshold or len(messages) <= keep_recent + 2:
-        return AutoCompactResult(messages=[dict(message) for message in messages], context_ratio=ratio)
+    boundary = recent_turn_boundary(visible_messages, keep_recent_turns=keep_recent)
+    if ratio < ratio_threshold or boundary <= 0:
+        return AutoCompactResult(messages=visible_messages, context_ratio=ratio)
 
-    compacted = mechanical_compact_messages(messages, keep_recent=keep_recent)
+    compacted = mechanical_compact_messages(visible_messages, keep_recent=keep_recent)
     return AutoCompactResult(
         messages=compacted,
         compacted=True,
-        before_count=len(messages),
+        before_count=len(visible_messages),
         after_count=len(compacted),
-        summary_preview="Auto-compacted runtime context while preserving the original task and recent turns.",
+        summary_preview="Auto-compacted runtime context while preserving user-authored intent and recent turns.",
         context_ratio=ratio,
     )
 
@@ -149,7 +156,7 @@ def mechanical_compact_messages(
     *,
     keep_recent: int = 6,
 ) -> List[Dict[str, Any]]:
-    copied = [dict(message) for message in messages]
+    copied = model_visible_history([dict(message) for message in messages])
     leading_system_count = 0
     for message in copied:
         if str(message.get("role") or "") != "system":
@@ -158,17 +165,17 @@ def mechanical_compact_messages(
 
     leading_system = copied[:leading_system_count]
     body = copied[leading_system_count:]
-    if len(body) <= keep_recent:
+    boundary = recent_turn_boundary(body, keep_recent_turns=keep_recent)
+    if boundary <= 0:
         return copied
 
-    recent = body[-keep_recent:]
-    recent_ids = {id(message) for message in recent}
+    older = body[:boundary]
+    recent = body[boundary:]
     protected_skill_messages = [
         dict(message)
-        for message in body[:-keep_recent]
+        for message in older
         if str(message.get("role") or "") == "tool"
         and str(message.get("name") or "") == "load_skill"
-        and id(message) not in recent_ids
     ]
     for message in protected_skill_messages:
         content = str(message.get("content") or "")
@@ -176,10 +183,11 @@ def mechanical_compact_messages(
             message["content"] = content[:8000].rstrip() + "\n\n[Skill content truncated to 2K tokens during compaction.]"
     summary = {
         "role": "system",
-        "content": _mechanical_summary(body[:-keep_recent]),
+        "content": _mechanical_summary(older),
     }
+    user_intent_ledger = preserved_user_intent_messages(older)
     evicted_recent, _evicted = evict_tool_results(recent, force=True, protect_recent=2)
-    return leading_system + [summary] + protected_skill_messages[-8:] + evicted_recent
+    return leading_system + [summary] + user_intent_ledger + protected_skill_messages[-8:] + evicted_recent
 
 
 def _can_evict_tool_result(tool_name: str, content: str, *, min_chars: int) -> bool:
@@ -227,6 +235,7 @@ def _mechanical_summary(messages: List[Mapping[str, Any]]) -> str:
             "",
             "Progress:",
             "- Older conversation turns were mechanically compacted to keep the run within the model context window.",
+            "- User-authored instructions from the compacted segment are replayed verbatim below this summary.",
             "- Recent messages remain below this summary and are the source of truth for the current step.",
             "",
             "Next:",

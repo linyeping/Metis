@@ -53,6 +53,7 @@ from backend.bridges.model_capability import (
     DEEPSEEK_EFFICIENCY_MARKER,
     detect_from_model_name,
     family_prompt_for_model,
+    tier_compact_thresholds,
 )
 from backend.bridges.provider_registry import resolve_provider_for_config, requires_reasoning_passback_enabled
 from backend.runtime.tool_tiers import INTERNAL_TOOLS, expose_internal_tools, tools_for_tier
@@ -662,13 +663,16 @@ def _append_turn_budget_hint(
     ]
 
 
-def _auto_compact_ratio() -> float:
-    raw = os.environ.get("METIS_AUTO_COMPACT_RATIO", "0.7").strip()
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning("invalid METIS_AUTO_COMPACT_RATIO=%r; using 0.7", raw)
-        return 0.7
+def _auto_compact_ratio(model_name: str = "") -> float:
+    raw = os.environ.get("METIS_AUTO_COMPACT_RATIO", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            logger.warning("invalid METIS_AUTO_COMPACT_RATIO=%r; using model-tier threshold", raw)
+    capabilities = detect_from_model_name(model_name)
+    _stage_1, stage_2, _stage_3 = tier_compact_thresholds(capabilities.tier)
+    return stage_2
 
 
 def _maybe_auto_compact_context(
@@ -683,7 +687,7 @@ def _maybe_auto_compact_context(
         messages,
         tools=tools,
         model=config.llm_model,
-        ratio_threshold=_auto_compact_ratio(),
+        ratio_threshold=_auto_compact_ratio(config.llm_model),
     )
     if not result.compacted:
         return result.messages, []
@@ -719,11 +723,12 @@ def _evict_tool_results_for_budget(
     tools: List[Dict[str, Any]],
     config: AgentConfig,
 ) -> List[Dict[str, Any]]:
-    ledger = context_ledger(messages, tools, model=config.llm_model)
+    visible_messages = _messages_for_llm_request(messages, config)
+    ledger = context_ledger(visible_messages, tools, model=config.llm_model)
     ratio = float(ledger.get("context_ratio") or 0.0)
     if ratio < 0.5:
-        return messages
-    evicted_messages, evicted = evict_tool_results(messages, context_ratio=ratio)
+        return visible_messages
+    evicted_messages, evicted = evict_tool_results(visible_messages, context_ratio=ratio)
     if evicted:
         logger.info("runtime tool result eviction evicted=%s ratio=%s", evicted, ratio)
     return evicted_messages
@@ -1012,7 +1017,10 @@ def run(
     continuation_count = 0
     continuation_buffer = ""
     seen_files: Dict[str, str] = {}
-    compactor = ResultCompactor()
+    compactor = ResultCompactor(
+        workspace_root=config.workspace_root,
+        session_id=config.session_id,
+    )
     edit_guard = EditGuard(config.workspace_root)
     verification_tracker = VerificationTracker()
     verification_nudged = False
@@ -1480,6 +1488,8 @@ def run_stream(
     registry: Optional[ToolRegistry] = None,
     backend: Optional[LLMBackend] = None,
     cancel_event: Optional[threading.Event] = None,
+    steering_provider: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    queue_provider: Optional[Callable[[], List[Dict[str, Any]]]] = None,
 ) -> Generator[Event, Optional[bool], None]:
     """Streaming variant of run(). Yields text chunks before final content events."""
     registry = registry or get_registry()
@@ -1506,7 +1516,10 @@ def run_stream(
     continuation_count = 0
     continuation_buffer = ""
     seen_files: Dict[str, str] = {}
-    compactor = ResultCompactor()
+    compactor = ResultCompactor(
+        workspace_root=config.workspace_root,
+        session_id=config.session_id,
+    )
     edit_guard = EditGuard(config.workspace_root)
     verification_tracker = VerificationTracker()
     verification_nudged = False
@@ -1550,6 +1563,10 @@ def run_stream(
             yield _cancelled_error_event()
             yield _error_done_event(turn_count, tool_call_count, cumulative_usage, ledger=last_context_ledger, config=config)
             return
+        steering_items = _consume_steering_items(steering_provider)
+        if steering_items:
+            _append_steering_messages(working_messages, steering_items)
+            yield _steering_applied_event(steering_items, turn_count, tool_call_count)
         working_messages = _refresh_todo_context_message(working_messages, config.workspace_root)
         working_messages = _append_turn_budget_hint(
             working_messages,
@@ -2176,6 +2193,30 @@ def run_stream(
                 working_messages.append({"role": "user", "content": verification_tracker.nudge_text()})
                 turn_count -= 1
                 continue
+            steering_items = _consume_steering_items(steering_provider)
+            if steering_items:
+                yield ContentEvent(text=continuation_buffer + response.content)
+                continuation_buffer = ""
+                working_messages.append(_format_assistant_message(response, config))
+                _append_steering_messages(working_messages, steering_items)
+                yield _steering_applied_event(steering_items, turn_count, tool_call_count)
+                continue
+            queued_items = _consume_steering_items(queue_provider)
+            if queued_items:
+                yield ContentEvent(text=continuation_buffer + response.content)
+                continuation_buffer = ""
+                working_messages.append(_format_assistant_message(response, config))
+                _append_steering_messages(working_messages, queued_items)
+                yield _queued_followup_started_event(queued_items, turn_count, tool_call_count)
+                turn_count = 0
+                last_tool_signature = ""
+                repeated_tool_count = 0
+                tool_repair_attempts = 0
+                continuation_count = 0
+                verification_tracker = VerificationTracker()
+                verification_nudged = False
+                tracker = ToolCallTracker(repeat_limit=REPEATED_TOOL_CALL_LIMIT)
+                continue
             yield ContentEvent(text=continuation_buffer + response.content)
             continuation_buffer = ""
             yield _runtime_status_event(
@@ -2188,7 +2229,29 @@ def run_stream(
             logger.info("agent stream completed turns=%s tool_calls=%s", turn_count, tool_call_count)
             return
 
-        yield ContentEvent(text=(continuation_buffer + accumulated_text) or "(No response from LLM)")
+        empty_response_text = (continuation_buffer + accumulated_text) or "(No response from LLM)"
+        steering_items = _consume_steering_items(steering_provider)
+        queued_items = [] if steering_items else _consume_steering_items(queue_provider)
+        if steering_items or queued_items:
+            next_items = steering_items or queued_items
+            yield ContentEvent(text=empty_response_text)
+            continuation_buffer = ""
+            working_messages.append(_format_assistant_message(response, config))
+            _append_steering_messages(working_messages, next_items)
+            if steering_items:
+                yield _steering_applied_event(next_items, turn_count, tool_call_count)
+            else:
+                yield _queued_followup_started_event(next_items, turn_count, tool_call_count)
+                turn_count = 0
+                last_tool_signature = ""
+                repeated_tool_count = 0
+                tool_repair_attempts = 0
+                continuation_count = 0
+                verification_tracker = VerificationTracker()
+                verification_nudged = False
+                tracker = ToolCallTracker(repeat_limit=REPEATED_TOOL_CALL_LIMIT)
+            continue
+        yield ContentEvent(text=empty_response_text)
         yield _runtime_status_event(
             "completed",
             "Agent runtime completed",
@@ -2222,6 +2285,77 @@ def run_stream(
         messages=_messages_for_llm_request(working_messages, config),
         tools=tools,
         config=config,
+    )
+
+
+def _consume_steering_items(
+    provider: Optional[Callable[[], List[Dict[str, Any]]]],
+) -> List[Dict[str, Any]]:
+    if provider is None:
+        return []
+    try:
+        items = provider() or []
+    except Exception as exc:
+        logger.warning("failed to consume steering messages: %s", sanitize_for_log(exc))
+        return []
+    return [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("message") or "").strip()
+    ]
+
+
+def _append_steering_messages(
+    working_messages: List[Dict[str, Any]],
+    items: List[Dict[str, Any]],
+) -> None:
+    for item in items:
+        working_messages.append({"role": "user", "content": str(item.get("message") or "").strip()})
+
+
+def _steering_applied_event(
+    items: List[Dict[str, Any]],
+    turn_count: int,
+    tool_call_count: int,
+) -> RuntimeStatusEvent:
+    ids = [str(item.get("id") or "") for item in items if str(item.get("id") or "")]
+    return _runtime_status_event(
+        "steering_applied",
+        "User guidance applied to the active run",
+        turn=turn_count,
+        tool_calls=tool_call_count,
+        recoverable=True,
+        details={
+            "followup_ids": ids,
+            "followups": [
+                {"id": str(item.get("id") or ""), "message": str(item.get("message") or "")}
+                for item in items
+            ],
+            "count": len(items),
+        },
+    )
+
+
+def _queued_followup_started_event(
+    items: List[Dict[str, Any]],
+    turn_count: int,
+    tool_call_count: int,
+) -> RuntimeStatusEvent:
+    ids = [str(item.get("id") or "") for item in items if str(item.get("id") or "")]
+    return _runtime_status_event(
+        "queued_followup_started",
+        "Queued follow-up started in the active run",
+        turn=turn_count,
+        tool_calls=tool_call_count,
+        recoverable=True,
+        details={
+            "followup_ids": ids,
+            "followups": [
+                {"id": str(item.get("id") or ""), "message": str(item.get("message") or "")}
+                for item in items
+            ],
+            "count": len(items),
+        },
     )
 
 

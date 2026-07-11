@@ -5,9 +5,13 @@ import time
 from collections.abc import Mapping
 from typing import Any, Dict, List, Optional
 
+from .context_budget import estimate_tokens
+
 
 COMPACT_STATE_VERSION = 2
 COMPACT_MARKER = "[Metis Context Compact v2]"
+USER_INTENT_TOKEN_BUDGET = 20_000
+USER_INTENT_LEDGER_MARKER = "[Preserved User Intent Ledger]"
 COMPACT_SECTION_KEYS = (
     "user_intent",
     "current_work",
@@ -142,8 +146,20 @@ def normalize_compact_state(value: Any) -> Dict[str, Any]:
                 ),
                 "preserved_message_ids": _coerce_text_list(
                     value.get("preserved_message_ids", value.get("preservedMessageIds")),
-                    limit=32,
+                    limit=256,
                     item_limit=120,
+                ),
+                "preserved_user_message_ids": _coerce_text_list(
+                    value.get("preserved_user_message_ids", value.get("preservedUserMessageIds")),
+                    limit=256,
+                    item_limit=120,
+                ),
+                "user_intent_token_budget": max(
+                    1,
+                    _safe_int(
+                        value.get("user_intent_token_budget", value.get("userIntentTokenBudget")),
+                        USER_INTENT_TOKEN_BUDGET,
+                    ),
                 ),
                 "source_message_count": max(
                     0,
@@ -169,15 +185,115 @@ def compact_boundary_index(history: List[Dict[str, Any]], compact_state: Any) ->
 def model_context_for_history(history: List[Dict[str, Any]], compact_state: Any) -> List[Dict[str, Any]]:
     state = normalize_compact_state(compact_state)
     if not state:
-        return list(history)
+        return model_visible_history(history)
     boundary_index = compact_boundary_index(history, state)
     summary_message = {"role": "system", "content": render_compact_context(state)}
     mode = str(state.get("mode") or "partial_older").strip().lower()
+    if _safe_int(state.get("version"), 1) < COMPACT_STATE_VERSION:
+        if mode == "full":
+            return [summary_message]
+        if mode == "partial_recent":
+            return model_visible_history(history[:boundary_index]) + [summary_message]
+        return [summary_message] + model_visible_history(history[boundary_index:])
+    user_budget = max(1, _safe_int(state.get("user_intent_token_budget"), USER_INTENT_TOKEN_BUDGET))
     if mode == "full":
-        return [summary_message]
+        return [summary_message] + preserved_user_intent_messages(history, token_budget=user_budget)
     if mode == "partial_recent":
-        return list(history[:boundary_index]) + [summary_message]
-    return [summary_message] + list(history[boundary_index:])
+        summarized = history[boundary_index:]
+        return (
+            model_visible_history(history[:boundary_index])
+            + [summary_message]
+            + preserved_user_intent_messages(summarized, token_budget=user_budget)
+        )
+    summarized = history[:boundary_index]
+    return (
+        [summary_message]
+        + preserved_user_intent_messages(summarized, token_budget=user_budget)
+        + model_visible_history(history[boundary_index:])
+    )
+
+
+def model_visible_history(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return messages that belong in a provider request.
+
+    Transcript-only tool cards are persisted for the desktop UI, but they are
+    not valid model messages and must not affect compaction thresholds.
+    """
+
+    visible: List[Dict[str, Any]] = []
+    for message in history:
+        if not isinstance(message, Mapping):
+            continue
+        if _is_transcript_only_tool(message):
+            evidence = _transcript_tool_context_message(message)
+            if evidence:
+                visible.append(evidence)
+            continue
+        visible.append(dict(message))
+    return visible
+
+
+def recent_turn_boundary(history: List[Dict[str, Any]], keep_recent_turns: int = 6) -> int:
+    """Return the raw-history index that starts the recent user-turn tail."""
+
+    keep = max(0, int(keep_recent_turns or 0))
+    if keep <= 0:
+        return len(history)
+    seen_users = 0
+    for index in range(len(history) - 1, -1, -1):
+        message = history[index]
+        if not isinstance(message, Mapping) or _is_transcript_only_tool(message):
+            continue
+        if _role(message) != "user":
+            continue
+        seen_users += 1
+        if seen_users == keep:
+            return index
+    return 0
+
+
+def preserved_user_intent_messages(
+    messages: List[Dict[str, Any]],
+    *,
+    token_budget: int = USER_INTENT_TOKEN_BUDGET,
+) -> List[Dict[str, Any]]:
+    """Select old user-authored intent verbatim within a bounded hot-context budget."""
+
+    budget = max(1, int(token_budget or USER_INTENT_TOKEN_BUDGET))
+    selected: List[Dict[str, Any]] = []
+    used = 0
+    for raw_message in reversed(messages):
+        if not isinstance(raw_message, Mapping) or _role(raw_message) != "user":
+            continue
+        message = _user_intent_message(raw_message)
+        tokens = max(1, estimate_tokens(message.get("content")))
+        if selected and used + tokens > budget:
+            remaining = budget - used
+            if remaining > 64:
+                message["content"] = _truncate_content_to_token_budget(message.get("content"), remaining)
+                selected.append(message)
+            break
+        if not selected and tokens > budget:
+            message["content"] = _truncate_content_to_token_budget(message.get("content"), budget)
+            tokens = max(1, estimate_tokens(message.get("content")))
+        selected.append(message)
+        used += tokens
+        if used >= budget:
+            break
+    selected.reverse()
+    if not selected:
+        return []
+    return [
+        {
+            "role": "system",
+            "content": (
+                f"{USER_INTENT_LEDGER_MARKER}\n"
+                "The following messages are preserved user-authored instructions from compacted history. "
+                "Keep their original order. When instructions conflict, the later user message wins."
+            ),
+        },
+        *selected,
+    ]
 
 
 def compact_state_after_truncate(
@@ -199,9 +315,20 @@ def compact_state_after_truncate(
     next_state["boundary_index"] = next_boundary
     if _safe_int(next_state.get("version"), 1) >= COMPACT_STATE_VERSION:
         if str(next_state.get("mode") or "") == "partial_recent":
-            next_state["preserved_message_ids"] = _message_ids(new_history[:next_boundary])
+            preserved_segment = new_history[:next_boundary]
+            summarized_segment = new_history[next_boundary:]
         else:
-            next_state["preserved_message_ids"] = _message_ids(new_history[next_boundary:])
+            preserved_segment = new_history[next_boundary:]
+            summarized_segment = new_history[:next_boundary]
+        next_state["preserved_message_ids"] = _message_ids(model_visible_history(preserved_segment), limit=256)
+        intent_messages = preserved_user_intent_messages(
+            summarized_segment,
+            token_budget=max(
+                1,
+                _safe_int(next_state.get("user_intent_token_budget"), USER_INTENT_TOKEN_BUDGET),
+            ),
+        )
+        next_state["preserved_user_message_ids"] = _message_ids(intent_messages, limit=256)
         next_state["source_message_count"] = min(
             max(0, _safe_int(next_state.get("source_message_count"), 0)),
             max(0, len(new_history) - next_boundary)
@@ -215,7 +342,7 @@ def build_compact_state_v2(
     history: List[Dict[str, Any]],
     *,
     summary: str,
-    keep_recent: int = 4,
+    keep_recent: int = 6,
     previous_state: Any = None,
     compacted_at: Optional[float] = None,
     mode: str = "partial_older",
@@ -224,7 +351,11 @@ def build_compact_state_v2(
     previous = normalize_compact_state(previous_state)
     compact_mode = _normalize_compact_mode(mode)
     if boundary_index is None:
-        boundary_index = len(history) if compact_mode == "full" else max(0, len(history) - max(0, keep_recent))
+        boundary_index = (
+            len(history)
+            if compact_mode == "full"
+            else recent_turn_boundary(history, keep_recent_turns=max(0, keep_recent))
+        )
     else:
         boundary_index = max(0, min(_safe_int(boundary_index, 0), len(history)))
     boundary_message_id = ""
@@ -235,12 +366,18 @@ def build_compact_state_v2(
     section_boundary = len(section_history) if compact_mode in {"full", "partial_recent"} else boundary_index
     extracted = extract_compact_sections(section_history, boundary_index=section_boundary)
     previous_sections = previous.get("sections") if isinstance(previous.get("sections"), Mapping) else {}
-    sections = merge_sections(previous_sections, extracted)
+    sections = merge_sections(extracted, previous_sections)
     clean_summary = str(summary or "").strip()
     if not clean_summary:
         clean_summary = render_summary_from_sections(sections)
     preserved_messages = history[:boundary_index] if compact_mode == "partial_recent" else history[boundary_index:]
     source_message_count = len(history[boundary_index:]) if compact_mode == "partial_recent" else boundary_index
+    summarized_messages = history[boundary_index:] if compact_mode == "partial_recent" else history[:boundary_index]
+    preserved_user_messages = preserved_user_intent_messages(
+        summarized_messages,
+        token_budget=USER_INTENT_TOKEN_BUDGET,
+    )
+    preserved_user_ids = _message_ids(preserved_user_messages, limit=256)
 
     return {
         "version": COMPACT_STATE_VERSION,
@@ -252,10 +389,18 @@ def build_compact_state_v2(
         "compact_count": max(0, _safe_int(previous.get("compact_count"), 0)) + 1,
         "source_message_count": source_message_count,
         "sections": sections,
-        "preserved_message_ids": _message_ids(preserved_messages),
+        "preserved_message_ids": _message_ids(model_visible_history(preserved_messages), limit=256),
+        "preserved_user_message_ids": preserved_user_ids,
+        "user_intent_token_budget": USER_INTENT_TOKEN_BUDGET,
         "rehydration_hints": [
             "The full persisted transcript remains the source of truth; this message is only a compact continuity layer.",
             _rehydration_hint_for_mode(compact_mode),
+            (
+                f"User-authored instructions from compacted history are replayed verbatim under "
+                f"{USER_INTENT_LEDGER_MARKER}, bounded to about {USER_INTENT_TOKEN_BUDGET} tokens."
+                if preserved_user_messages
+                else "No user-authored instructions were found in the compacted segment."
+            ),
             "Re-run read/search/observe tools when exact omitted file, page, or desktop details matter.",
         ],
     }
@@ -433,14 +578,14 @@ def _coerce_text_list(value: Any, *, limit: int, item_limit: int) -> List[str]:
     return items
 
 
-def _message_ids(messages: List[Dict[str, Any]]) -> List[str]:
+def _message_ids(messages: List[Dict[str, Any]], *, limit: int = 256) -> List[str]:
     ids: List[str] = []
     for message in messages:
         if isinstance(message, Mapping):
             message_id = str(message.get("id") or "").strip()
             if message_id:
                 ids.append(message_id)
-    return ids[:32]
+    return ids[: max(1, limit)]
 
 
 def _role(message: Any) -> str:
@@ -468,6 +613,83 @@ def _content_text(content: Any) -> str:
                     parts.append(str(block.get("text") or block.get("content") or ""))
         return "\n".join(part for part in parts if part)
     return str(content or "")
+
+
+def _is_transcript_only_tool(message: Mapping[str, Any]) -> bool:
+    return str(message.get("metis_kind") or "") == "tool"
+
+
+def _transcript_tool_context_message(message: Mapping[str, Any]) -> Dict[str, Any]:
+    tool = message.get("metis_tool") if isinstance(message.get("metis_tool"), Mapping) else {}
+    if not tool:
+        return {}
+    name = str(tool.get("name") or "tool").strip() or "tool"
+    status = str(tool.get("status") or "observed").strip() or "observed"
+    summary = _truncate(str(tool.get("summary") or "").strip(), 260)
+    result = str(tool.get("result") or "")
+    archive_line = ""
+    for line in result.splitlines():
+        if line.startswith("[Full tool result archived:"):
+            archive_line = line[:700]
+            break
+    details = f"[Persisted tool evidence] {name}: {status}."
+    if summary:
+        details += f" {summary}"
+    if archive_line:
+        details += f"\n{archive_line}"
+    return {"role": "assistant", "content": details}
+
+
+def _user_intent_message(message: Mapping[str, Any]) -> Dict[str, Any]:
+    content = message.get("content")
+    if isinstance(content, list):
+        blocks: List[Dict[str, Any]] = []
+        inserted_image_placeholder = False
+        for block in content:
+            if isinstance(block, str):
+                blocks.append({"type": "text", "text": block})
+                continue
+            if not isinstance(block, Mapping):
+                continue
+            block_type = str(block.get("type") or "").lower()
+            if "image" in block_type or isinstance(block.get("image_url"), Mapping):
+                if not inserted_image_placeholder:
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "text": "[Historical image omitted from hot context; re-open the persisted transcript if needed.]",
+                        }
+                    )
+                    inserted_image_placeholder = True
+                continue
+            text = str(block.get("text") or block.get("content") or "")
+            if text:
+                blocks.append({"type": "text", "text": text})
+        clean_content: Any = blocks
+    else:
+        clean_content = str(content or "")
+    clean: Dict[str, Any] = {"role": "user", "content": clean_content}
+    message_id = str(message.get("id") or "").strip()
+    if message_id:
+        clean["id"] = message_id
+    return clean
+
+
+def _truncate_content_to_token_budget(content: Any, token_budget: int) -> Any:
+    text = _content_text(content)
+    if estimate_tokens(text) <= token_budget:
+        return content
+    if not text:
+        return ""
+    low = 0
+    high = len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if estimate_tokens(text[:middle]) <= token_budget:
+            low = middle
+        else:
+            high = middle - 1
+    return text[:low].rstrip() + "\n[User message truncated at the preserved-intent token budget.]"
 
 
 def _tool_record(message: Mapping[str, Any]) -> Dict[str, Any]:

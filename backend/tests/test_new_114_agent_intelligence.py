@@ -6,6 +6,7 @@ from typing import Any
 from backend.bridges.model_capability import detect_from_model_name, tier_compact_thresholds
 from backend.core.engine.prompt_runtime import compile_prompt_runtime
 from backend.core.memory import workspace_state
+from backend.runtime import agent_loop
 from backend.runtime import tool_registry as runtime_tool_registry
 from backend.runtime.llm_backends import openai_compat
 from backend.tools.coding.workflow_features.hooks.post_tool_hook import post_tool_hook
@@ -79,6 +80,17 @@ def test_new_114_compaction_stages_follow_model_capability_tiers() -> None:
     assert tier_compact_thresholds(3) == (0.50, 0.70, 0.85)
 
 
+def test_new_114_runtime_auto_compact_uses_same_stage_two_threshold(monkeypatch: Any) -> None:
+    monkeypatch.delenv("METIS_AUTO_COMPACT_RATIO", raising=False)
+
+    assert agent_loop._auto_compact_ratio("gpt-4o") == tier_compact_thresholds(
+        detect_from_model_name("gpt-4o").tier
+    )[1]
+    assert agent_loop._auto_compact_ratio("gpt-4o-mini") == tier_compact_thresholds(
+        detect_from_model_name("gpt-4o-mini").tier
+    )[1]
+
+
 def test_new_114_observation_masking_preserves_recent_messages() -> None:
     from backend.web.app import _mask_observations
 
@@ -90,8 +102,9 @@ def test_new_114_observation_masking_preserves_recent_messages() -> None:
         {"role": "tool", "name": "grep_search", "tool_call_id": "recent", "content": "keep me"},
     ]
 
-    masked = _mask_observations(history, keep_recent=2)
+    masked = _mask_observations(history, keep_recent=1)
 
+    assert masked[0]["content"] == "start"
     assert masked[1]["content"].startswith("[Observation masked")
     assert "read_file" in masked[1]["content"]
     assert masked[-1]["content"] == "keep me"

@@ -1,0 +1,74 @@
+{
+  "schema": "metis.marketplace.v1",
+  "name": "metis-official",
+  "displayName": "Metis Official",
+  "version": "2026.7.10",
+  "items": [
+    {
+      "id": "metis.documents",
+      "kind": "skill",
+      "name": "Documents",
+      "skillName": "documents",
+      "version": "1.0.0",
+      "description": "创建、编辑、渲染并验证 Word 文档。",
+      "publisher": "Metis",
+      "category": "Productivity",
+      "featured": true,
+      "icon": "./assets/documents.svg",
+      "brandColor": "#4285F4",
+      "source": { "type": "bundled", "path": "../builtin_skills/documents", "installName": "documents" }
+    },
+    {
+      "id": "metis.pdf",
+      "kind": "skill",
+      "name": "PDF",
+      "skillName": "pdf",
+      "version": "1.0.0",
+      "description": "读取、创建、渲染并检查 PDF 文件。",
+      "publisher": "Metis",
+      "category": "Productivity",
+      "featured": true,
+      "icon": "./assets/pdf.svg",
+      "brandColor": "#EF4444",
+      "source": { "type": "bundled", "path": "../builtin_skills/pdf", "installName": "pdf" }
+    },
+    {
+      "id": "metis.filesystem-mcp",
+      "kind": "mcp",
+      "name": "Filesystem MCP",
+      "version": "1.0.0",
+      "description": "通过 MCP 在明确授权的目录内读取和管理文件。",
+      "publisher": "Model Context Protocol",
+      "category": "Developer Tools",
+      "featured": true,
+      "icon": "./assets/filesystem.svg",
+      "brandColor": "#F59E0B",
+      "source": { "type": "official", "url": "https://github.com/modelcontextprotocol/servers" },
+      "mcp": {
+        "serverName": "metis-filesystem",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "${METIS_MCP_FILESYSTEM_ROOT}"],
+        "environmentVariables": [
+          { "name": "METIS_MCP_FILESYSTEM_ROOT", "description": "允许访问的绝对目录", "required": true, "secret": false }
+        ]
+      }
+    },
+    {
+      "id": "metis.workspace-toolkit",
+      "kind": "plugin",
+      "name": "Workspace Toolkit",
+      "version": "1.0.0",
+      "description": "Documents Skill 与 Filesystem MCP 组成的完整工作区插件。",
+      "publisher": "Metis",
+      "category": "Productivity",
+      "featured": true,
+      "icon": "./assets/workspace-toolkit.svg",
+      "brandColor": "#10B981",
+      "source": { "type": "bundled-plugin", "path": "./plugins/workspace-toolkit" },
+      "plugin": {
+        "skills": ["metis.documents"],
+        "mcpServers": ["metis.filesystem-mcp"]
+      }
+    }
+  ]
+}

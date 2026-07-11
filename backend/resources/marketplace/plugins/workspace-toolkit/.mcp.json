@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "workspace-filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${METIS_MCP_FILESYSTEM_ROOT}"],
+      "environmentVariables": [
+        {
+          "name": "METIS_MCP_FILESYSTEM_ROOT",
+          "description": "Absolute directory this server may access",
+          "required": true,
+          "secret": false
+        }
+      ]
+    }
+  }
+}

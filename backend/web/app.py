@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from dataclasses import replace
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
 from flask import Flask, Response, abort, jsonify, request, send_file, stream_with_context
@@ -27,6 +27,7 @@ from backend.runtime.agent_loop import (  # noqa: E402
     DoneEvent,
     ErrorEvent,
     PermissionRequestEvent,
+    RuntimeStatusEvent,
     TextDeltaEvent,
     ThinkingEvent,
     ToolCallEvent,
@@ -66,6 +67,7 @@ from backend.runtime.checkpoint_store import (  # noqa: E402
 )
 from backend.core.paths import legacy_miro_path, metis_path  # noqa: E402
 from backend.runtime.tool_registry import get_registry  # noqa: E402
+from backend.runtime.result_compactor import ResultCompactor  # noqa: E402
 from backend.runtime.error_catalog import ErrorInfo, classify_llm_error  # noqa: E402
 from backend.runtime.path_safety import (  # noqa: E402
     WRITE_TOOLS,
@@ -80,6 +82,7 @@ from backend.runtime.context_control import (  # noqa: E402
     compact_state_after_truncate as context_compact_state_after_truncate,
     model_context_for_history as context_model_context_for_history,
     normalize_compact_state as context_normalize_compact_state,
+    recent_turn_boundary as context_recent_turn_boundary,
 )
 from backend.runtime.agent_services import (  # noqa: E402
     build_tool_contract,
@@ -112,6 +115,7 @@ from backend.web.sessions import get_session_manager  # noqa: E402
 from backend.web.workspaces import get_workspace_manager  # noqa: E402
 from backend.web.runtime_state import RuntimeState  # noqa: E402
 from backend.web.preview_bridge import preview_bridge_bp  # noqa: E402
+from backend.web.marketplace_routes import marketplace_bp  # noqa: E402
 from backend.web.permission_requests import (  # noqa: E402
     DEFAULT_PERMISSION_TIMEOUT_SECONDS,
     PermissionRequestStore,
@@ -429,11 +433,12 @@ def _mask_observations(
     if keep_recent <= 0:
         old = list(history)
         recent: List[Dict[str, Any]] = []
-    elif len(history) <= keep_recent:
-        return list(history)
     else:
-        old = history[:-keep_recent]
-        recent = history[-keep_recent:]
+        boundary = context_recent_turn_boundary(history, keep_recent_turns=keep_recent)
+        if boundary <= 0:
+            return list(history)
+        old = history[:boundary]
+        recent = history[boundary:]
     masked: List[Dict[str, Any]] = []
 
     for message in old:
@@ -454,6 +459,11 @@ def _mask_observations(
             continue
 
         next_message = dict(message)
+        if role == "user":
+            if aggressive:
+                next_message["content"] = _strip_images_from_content(next_message.get("content", ""))
+            masked.append(next_message)
+            continue
         if role == "assistant":
             if aggressive and len(content) > 600:
                 next_message["content"] = content[:600] + "\n[...truncated]"
@@ -462,9 +472,6 @@ def _mask_observations(
 
         if aggressive:
             next_message["content"] = _strip_images_from_content(next_message.get("content", ""))
-        truncated_limit = 300 if aggressive else 500
-        if len(content) > truncated_limit:
-            next_message["content"] = content[:truncated_limit] + "\n[...truncated]"
         masked.append(next_message)
 
     recent_messages = []
@@ -1481,7 +1488,10 @@ def _compact_history(
 
     summary_input = "\n".join(summary_lines)
     if len(summary_input) > 8000:
-        summary_input = summary_input[:8000] + "\n[...truncated...]"
+        head = summary_input[:4500].rstrip()
+        tail = summary_input[-3300:].lstrip()
+        omitted = len(summary_input) - len(head) - len(tail)
+        summary_input = f"{head}\n\n[... {omitted} middle characters omitted ...]\n\n{tail}"
 
     # Prepend key facts so LLM preserves them in the summary
     if key_facts:
@@ -1504,6 +1514,9 @@ def _compact_history(
                         "content": (
                             "You are summarizing conversation history for context continuity. "
                             "The project's METIS.md is always in the system prompt, so do not repeat it.\n\n"
+                            "User-authored instructions are preserved separately and replayed verbatim. "
+                            "Focus this summary on execution state: completed work, decisions, changed files, "
+                            "errors, verification, unfinished work, and the next step.\n\n"
                             + (
                                 (
                                     "Produce a single compact paragraph covering decisions, changed files, "
@@ -1841,6 +1854,7 @@ def _create_run_state(
         "next_seq_v2": 1,
         "tool_lifecycle": {},
         "pending_tool_running": {},
+        "followups": [],
         "cancel_requested": False,
         "cancel_event": threading.Event(),
         "created_at": now,
@@ -1922,8 +1936,66 @@ def _run_public_payload(run: Dict[str, Any]) -> Dict[str, Any]:
         "finished_at": run.get("finished_at", 0),
         "event_count": len(run.get("events") or []),
         "last_seq": int(run.get("next_seq") or 1) - 1,
+        "followups": [
+            _run_followup_public_payload(item)
+            for item in list(run.get("followups") or [])
+            if isinstance(item, dict)
+        ],
         "error": run.get("error", ""),
     }
+
+
+def _run_followup_public_payload(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": str(item.get("id") or ""),
+        "message": str(item.get("message") or ""),
+        "behavior": str(item.get("behavior") or "queue"),
+        "status": str(item.get("status") or "pending"),
+        "created_at": float(item.get("created_at") or 0),
+        "updated_at": float(item.get("updated_at") or 0),
+    }
+
+
+def _consume_run_steering(run: Dict[str, Any]) -> List[Dict[str, Any]]:
+    consumed: List[Dict[str, Any]] = []
+    with run["condition"]:
+        now = time.time()
+        for item in list(run.get("followups") or []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status") or "pending") != "pending":
+                continue
+            if str(item.get("behavior") or "queue") != "steer":
+                continue
+            item["status"] = "applied"
+            item["updated_at"] = now
+            consumed.append(dict(item))
+        if consumed:
+            run["updated_at"] = now
+            run["condition"].notify_all()
+    return consumed
+
+
+def _consume_run_queue(run: Dict[str, Any]) -> List[Dict[str, Any]]:
+    with run["condition"]:
+        item = next(
+            (
+                candidate
+                for candidate in list(run.get("followups") or [])
+                if isinstance(candidate, dict)
+                and str(candidate.get("status") or "pending") == "pending"
+                and str(candidate.get("behavior") or "queue") == "queue"
+            ),
+            None,
+        )
+        if item is None:
+            return []
+        now = time.time()
+        item["status"] = "applied"
+        item["updated_at"] = now
+        run["updated_at"] = now
+        run["condition"].notify_all()
+        return [dict(item)]
 
 
 def _run_is_resumable(run: Dict[str, Any]) -> bool:
@@ -2495,6 +2567,8 @@ def _stream_agent_response(
     run_id: str = "",
     turn_id: str = "",
     message_id: str = "",
+    steering_provider: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+    queue_provider: Optional[Callable[[], List[Dict[str, Any]]]] = None,
 ) -> Any:
     """Stream a normal agent response with shared permission and compact handling."""
     if session_id:
@@ -2502,6 +2576,10 @@ def _stream_agent_response(
     run_history = list(history if history is not None else messages)
     runtime_compact_state = dict(compact_state or {})
     working_messages = list(messages)
+    transcript_result_compactor = ResultCompactor(
+        workspace_root=config.workspace_root,
+        session_id=session_id or config.session_id,
+    )
     pending_compact_event: Optional[CompactEvent] = None
     estimated_prompt_tokens = _estimate_prompt_tokens(working_messages, config.system_prompt)
     stage = compaction_stage(estimated_prompt_tokens, config.llm_model)
@@ -2511,9 +2589,15 @@ def _stream_agent_response(
         pending_compact_event = _trigger_auto_compact(config, aggressive=(stage == 3))
         working_messages = _mask_observations(
             working_messages,
-            keep_recent=4 if stage == 3 else 6,
+            keep_recent=6,
             aggressive=(stage == 3),
         )
+
+    def consume_steering_for_stream() -> List[Dict[str, Any]]:
+        if steering_provider is None:
+            return []
+        return steering_provider() or []
+
     try:
         registry = get_registry()
         tool_schemas = registry.get_all_schemas(format="openai")
@@ -2541,10 +2625,14 @@ def _stream_agent_response(
             config.llm_model,
         )
         messages = working_messages
-        if cancel_event is None:
-            gen = run_stream(messages, config, registry=registry)
-        else:
-            gen = run_stream(messages, config, registry=registry, cancel_event=cancel_event)
+        run_stream_kwargs: Dict[str, Any] = {}
+        if cancel_event is not None:
+            run_stream_kwargs["cancel_event"] = cancel_event
+        if steering_provider is not None:
+            run_stream_kwargs["steering_provider"] = consume_steering_for_stream
+        if queue_provider is not None:
+            run_stream_kwargs["queue_provider"] = queue_provider
+        gen = run_stream(messages, config, registry=registry, **run_stream_kwargs)
     except OperationCancelled:
         yield _sse(_run_cancel_event())
         _sync_active_runtime_history(session_id, run_history, mode)
@@ -2681,7 +2769,9 @@ def _stream_agent_response(
                             "call_id": event.call_id or "",
                             "name": event.tool_name or call.get("name", ""),
                             "arguments": call.get("arguments", {}),
-                            "result": _truncate_tool_record(event.result),
+                            "result": _truncate_tool_record(
+                                transcript_result_compactor.compact(event.tool_name, event.result)
+                            ),
                             "status": result_status,
                             "summary": result_label,
                         },
@@ -2705,6 +2795,25 @@ def _stream_agent_response(
                     mode=mode,
                     reason="assistant_content",
                 )
+
+            if isinstance(event, RuntimeStatusEvent) and event.phase in {"steering_applied", "queued_followup_started"}:
+                applied = event.details.get("followups") if isinstance(event.details, dict) else []
+                applied_count = 0
+                for item in applied if isinstance(applied, list) else []:
+                    message = str(item.get("message") or "").strip() if isinstance(item, dict) else ""
+                    if not message:
+                        continue
+                    run_history.append(_new_message("user", message))
+                    applied_count += 1
+                if applied_count:
+                    _save_runtime_history_checkpoint(
+                        session_id,
+                        history=run_history,
+                        compact_state=runtime_compact_state,
+                        mode=mode,
+                        reason="steering_applied",
+                        runtime={"count": applied_count},
+                    )
 
             payload = _event_payload(event)
             if isinstance(event, ToolCallEvent):
@@ -2875,6 +2984,8 @@ def _run_registry_worker(run_id: str) -> None:
                 run_id=str(run.get("id") or ""),
                 turn_id=str(run.get("turn_id") or ""),
                 message_id=str(run.get("assistant_id") or ""),
+                steering_provider=lambda: _consume_run_steering(run),
+                queue_provider=lambda: _consume_run_queue(run),
             )
             for chunk in generator:
                 if run.get("cancel_requested"):
@@ -3140,12 +3251,16 @@ def diagnostics_tool_audit() -> Any:
 @app.route("/runs", methods=["GET"])
 def list_runs() -> Any:
     session_id = str(request.args.get("session_id") or request.args.get("sessionId") or "").strip()
+    active_only = str(request.args.get("active_only") or request.args.get("activeOnly") or "").strip().lower() in {"1", "true", "yes", "on"}
     with _runs_lock:
         runs = list(_runs.values())
     if session_id:
         runs = [run for run in runs if run.get("session_id") == session_id]
+    if active_only:
+        runs = [run for run in runs if str(run.get("status") or "") not in _RUN_TERMINAL_STATES]
     runs.sort(key=lambda run: float(run.get("created_at") or 0), reverse=True)
-    return jsonify({"runs": [_run_public_payload(run) for run in runs[:50]]})
+    limit = 500 if active_only else 50
+    return jsonify({"runs": [_run_public_payload(run) for run in runs[:limit]]})
 
 
 @app.route("/runs", methods=["POST"])
@@ -3252,6 +3367,97 @@ def run_events(run_id: str) -> Any:
     accept = str(request.headers.get("Accept") or "").lower()
     schema = "v2" if requested_schema in {"2", "v2", "metis.agent_event.v2"} or "metis.agent-event.v2" in accept else "v1"
     return _run_events_response(run, after_seq, schema=schema)
+
+
+@app.route("/runs/<run_id>/followups", methods=["POST"])
+def create_run_followup(run_id: str) -> Any:
+    run = _get_run(run_id)
+    if run is None:
+        return jsonify({"ok": False, "error": "run not found"}), 404
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message") or "").strip()
+    behavior = str(data.get("behavior") or "queue").strip().lower()
+    if not message:
+        return jsonify({"ok": False, "error": "follow-up message is required"}), 400
+    if behavior not in {"queue", "steer"}:
+        return jsonify({"ok": False, "error": "behavior must be queue or steer"}), 400
+    with run["condition"]:
+        if str(run.get("status") or "") in _RUN_TERMINAL_STATES:
+            return jsonify({"ok": False, "error": "run is already finished"}), 409
+        pending_count = sum(
+            1
+            for item in list(run.get("followups") or [])
+            if isinstance(item, dict) and str(item.get("status") or "pending") == "pending"
+        )
+        if pending_count >= 5:
+            return jsonify({"ok": False, "error": "follow-up queue is full", "max_followups": 5}), 409
+        now = time.time()
+        item = {
+            "id": str(data.get("id") or data.get("followup_id") or uuid.uuid4().hex),
+            "message": message,
+            "behavior": behavior,
+            "status": "pending",
+            "created_at": now,
+            "updated_at": now,
+        }
+        run.setdefault("followups", []).append(item)
+        run["updated_at"] = now
+        run["condition"].notify_all()
+    return jsonify({"ok": True, "followup": _run_followup_public_payload(item), "run": _run_public_payload(run)})
+
+
+@app.route("/runs/<run_id>/followups/<followup_id>", methods=["PATCH"])
+def update_run_followup(run_id: str, followup_id: str) -> Any:
+    run = _get_run(run_id)
+    if run is None:
+        return jsonify({"ok": False, "error": "run not found"}), 404
+    data = request.get_json(silent=True) or {}
+    behavior = str(data.get("behavior") or "").strip().lower()
+    if behavior not in {"queue", "steer"}:
+        return jsonify({"ok": False, "error": "behavior must be queue or steer"}), 400
+    with run["condition"]:
+        item = next(
+            (
+                candidate
+                for candidate in list(run.get("followups") or [])
+                if isinstance(candidate, dict) and str(candidate.get("id") or "") == followup_id
+            ),
+            None,
+        )
+        if item is None:
+            return jsonify({"ok": False, "error": "follow-up not found"}), 404
+        if str(item.get("status") or "pending") != "pending":
+            return jsonify({"ok": False, "error": "follow-up has already been applied"}), 409
+        item["behavior"] = behavior
+        item["updated_at"] = time.time()
+        run["updated_at"] = item["updated_at"]
+        run["condition"].notify_all()
+    return jsonify({"ok": True, "followup": _run_followup_public_payload(item)})
+
+
+@app.route("/runs/<run_id>/followups/<followup_id>", methods=["DELETE"])
+def delete_run_followup(run_id: str, followup_id: str) -> Any:
+    run = _get_run(run_id)
+    if run is None:
+        return jsonify({"ok": False, "error": "run not found"}), 404
+    with run["condition"]:
+        followups = list(run.get("followups") or [])
+        item = next(
+            (
+                candidate
+                for candidate in followups
+                if isinstance(candidate, dict) and str(candidate.get("id") or "") == followup_id
+            ),
+            None,
+        )
+        if item is None:
+            return jsonify({"ok": False, "error": "follow-up not found"}), 404
+        if str(item.get("status") or "pending") != "pending":
+            return jsonify({"ok": False, "error": "follow-up has already been applied"}), 409
+        run["followups"] = [candidate for candidate in followups if candidate is not item]
+        run["updated_at"] = time.time()
+        run["condition"].notify_all()
+    return jsonify({"ok": True, "followup_id": followup_id})
 
 
 @app.route("/runs/<run_id>/cancel", methods=["POST", "DELETE"])
@@ -4712,14 +4918,19 @@ def compact() -> Any:
     history = list(session.history)
     current_state = _normalize_compact_state(session.compact_state)
     before_context = _model_context_for_history(history, current_state)
-    keep_recent = max(0, min(_safe_int(data.get("keep_recent") or data.get("keepRecent"), 4), 24))
+    keep_recent = max(0, min(_safe_int(data.get("keep_recent") or data.get("keepRecent"), 6), 24))
     boundary_index = (
         len(history)
         if compact_mode == "full"
-        else max(0, len(history) - keep_recent)
+        else context_recent_turn_boundary(history, keep_recent_turns=keep_recent)
     )
-    source_context = history if compact_mode in {"full", "partial_older"} else history[boundary_index:]
-    if len(before_context) <= keep_recent + 2:
+    if compact_mode == "full":
+        source_context = history
+    elif compact_mode == "partial_recent":
+        source_context = history[boundary_index:]
+    else:
+        source_context = history[:boundary_index]
+    if len(source_context) <= 2:
         payload = _compact_status_payload(
             ok=False,
             before_context_messages=len(before_context),
@@ -4729,10 +4940,9 @@ def compact() -> Any:
         _runtime_state.last_compact_status = payload
         return jsonify(payload)
 
-    result_keep_recent = 0 if compact_mode == "full" else keep_recent
-    result = _compact_history(source_context, keep_recent=result_keep_recent)
+    result = _compact_history(source_context, keep_recent=0)
     if result is None:
-        result = _mechanical_compact(source_context, keep_recent=result_keep_recent)
+        result = _mechanical_compact(source_context, keep_recent=0)
 
     summary = _compact_summary_from_messages(result)
     boundary_message_id = ""
@@ -5119,6 +5329,7 @@ app.register_blueprint(feature_bp)
 app.register_blueprint(session_bp)
 app.register_blueprint(workspace_bp)
 app.register_blueprint(preview_bridge_bp)
+app.register_blueprint(marketplace_bp)
 app.register_blueprint(artifact_bp)
 
 try:

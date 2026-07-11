@@ -116,7 +116,15 @@ def test_compact_v2_modes_shape_model_context() -> None:
     older_state = build_compact_state_v2(history, summary="older summary", keep_recent=3, mode="partial_older")
     older_context = model_context_for_history(history, older_state)
     assert older_context[0]["role"] == "system"
-    assert [message["id"] for message in older_context[1:]] == ["m6", "m7", "m8"]
+    assert [message["id"] for message in older_context if message.get("id")] == [
+        "m1",
+        "m3",
+        "m4",
+        "m5",
+        "m6",
+        "m7",
+        "m8",
+    ]
 
     recent_state = build_compact_state_v2(
         history,
@@ -125,13 +133,20 @@ def test_compact_v2_modes_shape_model_context() -> None:
         boundary_index=5,
     )
     recent_context = model_context_for_history(history, recent_state)
-    assert [message["id"] for message in recent_context[:-1]] == ["m1", "m2", "m3", "m4", "m5"]
-    assert recent_context[-1]["role"] == "system"
+    assert [message["id"] for message in recent_context if message.get("id")] == [
+        "m1",
+        "m2",
+        "m3",
+        "m4",
+        "m5",
+        "m7",
+    ]
+    assert any(message["role"] == "system" and "recent summary" in str(message["content"]) for message in recent_context)
 
     full_state = build_compact_state_v2(history, summary="full summary", mode="full")
     full_context = model_context_for_history(history, full_state)
-    assert len(full_context) == 1
     assert full_context[0]["role"] == "system"
+    assert [message["id"] for message in full_context if message.get("id")] == ["m1", "m3", "m5", "m7"]
 
 
 def test_prompt_runtime_profile_tool_contract_and_workers(tmp_path) -> None:

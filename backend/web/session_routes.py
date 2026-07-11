@@ -214,7 +214,11 @@ def create_session() -> Any:
     save_active_session()
     data = request.get_json(silent=True) or {}
     mode = data.get("mode", "chat")
-    session = get_session_manager().create_session(workspace_id=state.active_workspace_id or "", mode=mode)
+    workspace_id = state.active_workspace_id or ""
+    if "workspace_id" in data:
+        workspace_id = str(data.get("workspace_id") or "")
+        state.active_workspace_id = workspace_id
+    session = get_session_manager().create_session(workspace_id=workspace_id, mode=mode)
     state.activate_session(session.id, history=[], compact_state=dict(session.compact_state), mode=session.mode)
     clear_read_tracking()
     return jsonify(
@@ -320,7 +324,7 @@ def switch_session(session_id: str) -> Any:
             os.chdir(workspace.path)
         state.active_workspace_id = workspace.id
     elif not session.workspace_id:
-        state.active_workspace_id = state.active_workspace_id or ""
+        state.active_workspace_id = ""
     state.activate_session(
         session.id,
         history=list(session.history),

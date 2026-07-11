@@ -1,0 +1,31 @@
+{
+  "name": "workspace-toolkit",
+  "version": "1.0.0",
+  "description": "Document workflows with a configurable local filesystem MCP server.",
+  "author": {
+    "name": "Metis",
+    "url": "https://github.com/linyeping/Metis"
+  },
+  "homepage": "https://github.com/linyeping/Metis",
+  "repository": "https://github.com/linyeping/Metis",
+  "license": "MIT",
+  "keywords": ["documents", "filesystem", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Workspace Toolkit",
+    "shortDescription": "Documents Skill plus Filesystem MCP",
+    "longDescription": "Create and inspect documents while using a separately configured filesystem MCP server.",
+    "developerName": "Metis",
+    "category": "Productivity",
+    "capabilities": ["Documents", "Local files"],
+    "defaultPrompt": [
+      "Create and verify a document in my workspace.",
+      "Review the documents in the configured folder."
+    ],
+    "websiteURL": "https://github.com/linyeping/Metis",
+    "brandColor": "#10B981",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg"
+  }
+}

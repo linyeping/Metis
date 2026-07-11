@@ -122,6 +122,27 @@ class ToolCallingBackend(CrashingStreamBackend):
         )
 
 
+class SteeringBackend(CrashingStreamBackend):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.requests: List[List[Dict[str, Any]]] = []
+
+    def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        timeout: float = 120.0,
+    ) -> Generator[str, None, LLMResponse]:
+        self.calls += 1
+        self.requests.append(list(messages))
+        if False:
+            yield ""
+        return LLMResponse(content="first answer" if self.calls == 1 else "guided answer")
+
+
 @pytest.fixture
 def isolated_flask_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("METIS_HOME", str(tmp_path / ".metis-home"))
@@ -265,6 +286,26 @@ def test_chat_sse_fake_provider_emits_runtime_status_done_and_done_marker(isolat
     assert "content_delta" in [event["kind"] for event in events]
     assert "content" in [event["kind"] for event in events]
     assert events[-1]["kind"] == "done"
+
+
+def test_create_session_can_explicitly_avoid_inheriting_active_workspace(isolated_flask_app: Any) -> None:
+    app, session_manager = isolated_flask_app
+    active_workspace_id = web_app._runtime_state.active_workspace_id
+
+    with app.test_client() as client:
+        inherited_response = client.post("/sessions", json={"mode": "code"})
+        unscoped_response = client.post("/sessions", json={"mode": "cowork", "workspace_id": ""})
+
+    assert inherited_response.status_code == 200
+    inherited = session_manager.get_session(inherited_response.get_json()["id"])
+    assert inherited is not None
+    assert inherited.workspace_id == active_workspace_id
+
+    assert unscoped_response.status_code == 200
+    unscoped = session_manager.get_session(unscoped_response.get_json()["id"])
+    assert unscoped is not None
+    assert unscoped.workspace_id == ""
+    assert web_app._runtime_state.active_workspace_id == ""
 
 
 def test_chat_sse_stream_crash_emits_failed_error_done_and_done_marker(
@@ -1092,6 +1133,110 @@ def test_run_registry_cancel_endpoint_marks_active_run_canceling(isolated_flask_
     assert payload["ok"] is True
     assert payload["run_id"] == run_id
     assert payload["status"] in {"canceling", "canceled", "done"}
+
+
+def test_agent_stream_applies_steering_at_next_safe_model_boundary() -> None:
+    backend = SteeringBackend()
+    provider_calls = 0
+
+    def steering_provider() -> List[Dict[str, Any]]:
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 2:
+            return [{"id": "followup-steer", "message": "change direction now"}]
+        return []
+
+    events = list(
+        real_run_stream(
+            [{"role": "user", "content": "start"}],
+            AgentConfig(llm_backend="fake", llm_model="fake", max_turns=4),
+            registry=ToolRegistry(),
+            backend=backend,
+            steering_provider=steering_provider,
+        )
+    )
+
+    content = [event.text for event in events if getattr(event, "type", "") == "content"]
+    steering = [event for event in events if getattr(event, "phase", "") == "steering_applied"]
+    assert content == ["first answer", "guided answer"]
+    assert len(steering) == 1
+    assert steering[0].details["followup_ids"] == ["followup-steer"]
+    assert backend.calls == 2
+    assert any(message.get("role") == "user" and message.get("content") == "change direction now" for message in backend.requests[1])
+
+
+def test_agent_stream_processes_queued_followup_in_the_same_run() -> None:
+    backend = SteeringBackend()
+    queue_calls = 0
+
+    def queue_provider() -> List[Dict[str, Any]]:
+        nonlocal queue_calls
+        queue_calls += 1
+        if queue_calls == 1:
+            return [{"id": "followup-queue", "message": "next queued task"}]
+        return []
+
+    events = list(
+        real_run_stream(
+            [{"role": "user", "content": "start"}],
+            AgentConfig(llm_backend="fake", llm_model="fake", max_turns=4),
+            registry=ToolRegistry(),
+            backend=backend,
+            queue_provider=queue_provider,
+        )
+    )
+
+    content = [event.text for event in events if getattr(event, "type", "") == "content"]
+    queued = [event for event in events if getattr(event, "phase", "") == "queued_followup_started"]
+    assert content == ["first answer", "guided answer"]
+    assert len(queued) == 1
+    assert queued[0].details["followup_ids"] == ["followup-queue"]
+    assert backend.calls == 2
+    assert any(message.get("role") == "user" and message.get("content") == "next queued task" for message in backend.requests[1])
+
+
+def test_run_followup_api_limits_updates_and_consumes_steering(
+    isolated_flask_app: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, _session_manager = isolated_flask_app
+    monkeypatch.setattr(web_app, "_start_run_thread", lambda run: None)
+
+    with app.test_client() as client:
+        created = client.post("/runs", json={"message": "start follow-up test"})
+        assert created.status_code == 200
+        run_id = created.get_json()["run_id"]
+
+        for index in range(5):
+            added = client.post(
+                f"/runs/{run_id}/followups",
+                json={"id": f"followup-{index}", "message": f"message {index}", "behavior": "queue"},
+            )
+            assert added.status_code == 200
+
+        full = client.post(
+            f"/runs/{run_id}/followups",
+            json={"id": "followup-overflow", "message": "overflow", "behavior": "queue"},
+        )
+        assert full.status_code == 409
+
+        changed = client.patch(
+            f"/runs/{run_id}/followups/followup-0",
+            json={"behavior": "steer"},
+        )
+        assert changed.status_code == 200
+        assert changed.get_json()["followup"]["behavior"] == "steer"
+
+        removed = client.delete(f"/runs/{run_id}/followups/followup-1")
+        assert removed.status_code == 200
+
+    run = web_app._get_run(run_id)
+    assert run is not None
+    consumed = web_app._consume_run_steering(run)
+    assert [item["id"] for item in consumed] == ["followup-0"]
+    assert next(item for item in run["followups"] if item["id"] == "followup-0")["status"] == "applied"
+    queued = web_app._consume_run_queue(run)
+    assert [item["id"] for item in queued] == ["followup-2"]
 
 
 def test_run_registry_preserves_chat_surface_mode_for_active_session(

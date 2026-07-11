@@ -234,3 +234,21 @@ class TestHeadTail:
     def test_within_budget_unchanged(self, compactor):
         result = "short result"
         assert compactor.compact("unknown_tool", result) == result
+
+
+class TestRecoverableArchive:
+    def test_truncated_tool_result_is_archived_for_reread(self, tmp_path):
+        compactor = ResultCompactor(
+            workspace_root=str(tmp_path),
+            session_id="session-a",
+        )
+        result = "\n".join(f"line {index}: {'x' * 80}" for index in range(200))
+
+        compacted = compactor.compact("execute_bash_command", result)
+
+        archive_dir = tmp_path / ".metis" / "artifacts" / "tool-results" / "session-a"
+        archived = list(archive_dir.glob("execute_bash_command-*.txt"))
+        assert len(archived) == 1
+        assert archived[0].read_text(encoding="utf-8") == result
+        assert "Full tool result archived" in compacted
+        assert archived[0].name in compacted

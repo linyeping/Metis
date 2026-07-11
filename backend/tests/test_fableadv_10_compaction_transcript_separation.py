@@ -94,12 +94,15 @@ def test_manual_compact_preserves_history_and_writes_compact_state(
 ) -> None:
     app, session_manager = isolated_flask_app
     session = session_manager.create_session("Compact transcript", workspace_id=web_app._runtime_state.active_workspace_id)
-    original_history = _history()
+    # Eight user/assistant pairs leave two older turns to summarize when the
+    # default six recent user turns remain fully preserved.
+    original_history = _history(16)
     session_manager.update_session(session.id, history=original_history)
     web_app._runtime_state.activate_session(session.id, history=list(original_history), mode="auto")
 
     def fake_compact(history: List[Dict[str, Any]], keep_recent: int = 4, **_: Any) -> List[Dict[str, Any]]:
-        return [{"role": "system", "content": "[Context Summary]\nmessages 1-4"}] + history[-keep_recent:]
+        assert keep_recent == 0
+        return [{"role": "system", "content": "[Context Summary]\nmessages 1-4"}]
 
     monkeypatch.setattr(web_app, "_compact_history", fake_compact)
 
@@ -115,9 +118,10 @@ def test_manual_compact_preserves_history_and_writes_compact_state(
     assert saved.history == original_history
     assert saved.compact_state["version"] == 2
     assert saved.compact_state["summary"].startswith("[Context Summary]")
-    assert saved.compact_state["boundary_index"] == len(original_history) - 4
-    assert saved.compact_state["boundary_message_id"] == original_history[-4]["id"]
-    assert saved.compact_state["preserved_message_ids"] == [message["id"] for message in original_history[-4:]]
+    assert saved.compact_state["boundary_index"] == 4
+    assert saved.compact_state["boundary_message_id"] == "m5"
+    assert saved.compact_state["preserved_message_ids"] == [message["id"] for message in original_history[4:]]
+    assert saved.compact_state["preserved_user_message_ids"] == ["m1", "m3"]
     assert payload["version"] == 2
     assert web_app._runtime_state.chat_history == original_history
 
@@ -202,7 +206,15 @@ def test_chat_sync_renders_v2_compact_state_for_model_context(
     model_messages = captured["messages"]
     assert model_messages[0]["content"].startswith(COMPACT_MARKER)
     assert "## Changed Files" in model_messages[0]["content"]
-    assert [message["content"] for message in model_messages[1:-1]] == [f"message-{index}" for index in range(5, 9)]
+    assert "Preserved User Intent Ledger" in model_messages[1]["content"]
+    assert [message["content"] for message in model_messages[2:-1]] == [
+        "message-1",
+        "message-3",
+        "message-5",
+        "message-6",
+        "message-7",
+        "message-8",
+    ]
     assert model_messages[-1]["content"] == "next message"
 
 
