@@ -8,6 +8,7 @@
 - First-run provider setup now uses the production provider registry, with Universal Model API presented first.
 - Right-rail workspace cards start closed, browser activity stays hidden until a real Preview URL exists, and Settings saves in place.
 - Appearance themes now use visible three-color palette swatches, while About and tool settings use clearer spacing and hierarchy.
+- Theme swatches now use each theme's real surface, primary accent, and secondary accent colors instead of repeating background, gold, and text colors across the catalogue.
 
 ## Performance and navigation
 
