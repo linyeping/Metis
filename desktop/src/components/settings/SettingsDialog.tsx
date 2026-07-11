@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, BarChart3, Copy, Cpu, Globe, HardDrive, Info, MessageSquare, Minus, Monitor, Palette, Plug, Search, Settings2, Square, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionWritableRoot,
@@ -765,26 +764,16 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     }
   };
 
+  if (!open) return null;
+
   return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <motion.div
-          className="modal-layer settings-page-layer"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: { duration: 0.16 } }}
-          transition={{ duration: 0.18 }}
-        >
-          <motion.section
+        <div className="modal-layer settings-page-layer">
+          <section
             className="settings-dialog"
             data-active-section={active}
             role="dialog"
             aria-modal="true"
             aria-label={tr(language, 'settingsTitle')}
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -6, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
             <header className="titlebar settings-window-titlebar" aria-label={t('窗口控制')}>
               <div className="titlebar-brand" aria-hidden="true" />
@@ -868,9 +857,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
                 </div>
               </main>
             </div>
-          </motion.section>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          </section>
+        </div>
   );
 }

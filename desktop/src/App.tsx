@@ -119,6 +119,7 @@ export function App() {
   const workspaceMenuOpen = useUiStore(state => state.workspaceMenuOpen);
   const appDialog = useUiStore(state => state.appDialog);
   const activeResearchReportJobId = useUiStore(state => state.activeResearchReportJobId);
+  const webPreviewUrl = useUiStore(state => state.webPreviewUrl);
   const pushToast = useUiStore(state => state.pushToast);
   const loadSessions = useSessionStore(state => state.load);
   const sessions = useSessionStore(state => state.sessions);
@@ -311,15 +312,16 @@ export function App() {
     let cancelled = false;
     const setFrozen = useUiStore.getState().setPreviewFrozenSrc;
     void (async () => {
-      if (occluded) {
+      if (occluded && webPreviewUrl) {
         try {
           const shot = await window.metis?.previewCapture?.();
           if (!cancelled && shot?.ok && shot.dataUrl) setFrozen(shot.dataUrl);
         } catch {
           /* 截图失败就退回原行为（可能短暂空白），不致命 */
         }
-        if (cancelled) return;
-        await window.metis?.previewSetOccluded?.(true);
+      }
+      if (occluded) {
+        if (!cancelled) await window.metis?.previewSetOccluded?.(true);
       } else {
         await window.metis?.previewSetOccluded?.(false);
         if (!cancelled) setFrozen(null);
@@ -328,7 +330,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, activeResearchReportJobId, firstRun, bootState.status, backendReady]);
+  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, activeResearchReportJobId, firstRun, bootState.status, backendReady, webPreviewUrl]);
 
   useEffect(() => {
     let lastEscapeAt = 0;
@@ -372,7 +374,14 @@ export function App() {
     return () => window.removeEventListener('metis:settings-refresh', onSettingsRefresh);
   }, [refresh]);
 
-  const mainContent = activeSection === 'chat' ? <MetisThread /> : activeSection === 'cron' ? <CronPanel /> : <SectionMain section={activeSection} />;
+  const startupBlocking = firstRun || bootState.status !== 'ready' || !backendReady;
+  const mainContent = startupBlocking
+    ? null
+    : activeSection === 'chat'
+      ? <MetisThread />
+      : activeSection === 'cron'
+        ? <CronPanel />
+        : <SectionMain section={activeSection} />;
   const main = (
     <div className="main-panel-transition-shell" data-mode={appMode} data-section={activeSection}>
       <AnimatePresence initial={false} custom={panelTransitionDirection}>

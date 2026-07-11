@@ -61,6 +61,7 @@ interface MessageMeta {
 export function MetisThread() {
   const runtime = useMetisRuntime();
   const appMode = useUiStore(state => state.appMode);
+  const settingsOpen = useUiStore(state => state.settingsOpen);
   const memoryNotice = useChatStore(state => state.memoryNotice);
   const clearMemoryNotice = useChatStore(state => state.clearMemoryNotice);
   const todoNotice = useChatStore(state => state.todoNotice);
@@ -134,9 +135,9 @@ export function MetisThread() {
         data-mode={appMode}
         ref={shellRef}
       >
-        <ChatAuroraBackdrop visible={appMode === 'chat'} />
-        <CoworkBackdrop visible={appMode === 'cowork'} />
-        <CodeGridBackdrop visible={appMode === 'code'} />
+        <ChatAuroraBackdrop visible={appMode === 'chat' && !settingsOpen} />
+        <CoworkBackdrop visible={appMode === 'cowork' && !settingsOpen} />
+        <CodeGridBackdrop visible={appMode === 'code' && !settingsOpen} />
         <header className="thread-context-header" aria-label={t('当前会话')}>
           <AnimatePresence initial={false} mode="wait">
             <motion.div

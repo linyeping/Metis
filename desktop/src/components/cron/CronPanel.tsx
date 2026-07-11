@@ -188,10 +188,16 @@ export function CronPanel() {
           <h2>{t('自动化')}</h2>
           <p>{t('定时运行 prompt，结果会保存成会话。')}</p>
         </div>
-        <button type="button" onClick={() => void load()}>
-          <RotateCcw size={14} />
-          {t('刷新')}
-        </button>
+        <div className="cron-header-actions">
+          <div className="cron-summary" aria-label={t('任务概览')}>
+            <span><strong>{stats.total}</strong>{t('任务')}</span>
+            <span><strong>{stats.enabled}</strong>{t('启用')}</span>
+            <span>{t('下次运行')} <strong>{t(formatTime(stats.nextRun))}</strong></span>
+          </div>
+          <button type="button" onClick={() => void load()} title={t('刷新')}>
+            <RotateCcw size={14} />
+          </button>
+        </div>
       </header>
       {error && (
         <div className="cron-error">
@@ -199,12 +205,6 @@ export function CronPanel() {
           <span>{error}</span>
         </div>
       )}
-      <section className="cron-metrics">
-        <Metric label={t('任务')} value={String(stats.total)} />
-        <Metric label={t('启用')} value={String(stats.enabled)} />
-        <Metric label={t('最近运行')} value={t(formatTime(stats.lastRun))} />
-        <Metric label={t('下次运行')} value={t(formatTime(stats.nextRun))} />
-      </section>
       <section className="cron-form">
         <input className="cron-name-input" value={name} placeholder={t('任务名称')} onChange={event => setName(event.target.value)} />
         <select className="cron-schedule-select" value={schedule} onChange={event => setSchedule(event.target.value)}>
@@ -246,7 +246,7 @@ export function CronPanel() {
           {validationMessage || t('填写 prompt 后，Metis 会按所选计划运行并把结果保存成新会话。')}
         </p>
       </section>
-      <section className="cron-list">
+      <section className="cron-list" data-empty={tasks.length === 0}>
         {tasks.length === 0 && (
           <article className="zone-empty">
             <Clock3 size={18} />
@@ -312,15 +312,6 @@ export function CronPanel() {
         ))}
       </section>
     </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <article>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
   );
 }
 
