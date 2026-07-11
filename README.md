@@ -4,111 +4,97 @@
 
 # Metis · 墨提斯
 
-**一个会写代码、跑终端、操控网页与桌面的本地 AI 智能体**
+**把模型接入代码、终端、浏览器与 Windows 桌面，让任务从一句话走到可验证的结果。**
 
-> 智者不喧，巧者不竭。
+[![Release](https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square)](https://github.com/linyeping/Metis/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/linyeping/Metis/actions/workflows/ci.yml)
+![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white)
+![Local First](https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square)
+![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square)
 
-![Electron](https://img.shields.io/badge/Electron-40-47848F?logo=electron&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
-![Python](https://img.shields.io/badge/Python-Flask%20%2B%20SSE-3776AB?logo=python&logoColor=white)
-![i18n](https://img.shields.io/badge/i18n-中文%20%2F%20English-C9A24B)
-![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B)
+**[下载 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [查看更新](desktop/release/RELEASE_NOTES_v26.7.11.md) · [English](README.en.md)**
 
-**由 [linyeping](https://github.com/linyeping) 打造**
-
-产品方向与部分设计思路致谢：[Serein](https://github.com/Serein0812)
-
-**中文 · [English](README.en.md)**
+由 [linyeping](https://github.com/linyeping) 打造 · 产品方向与部分设计思路致谢 [Serein](https://github.com/Serein0812)
 
 </div>
 
 ---
 
-## 这是什么
+## 从目标到结果
 
-**Metis** 是一个桌面端 AI 工作台。它由 Electron + React 渲染层和本机 Python 智能体后端组成，模型通过 DeepSeek 或任意 OpenAI-compatible API 调用。你给它一个目标，它会规划步骤、调用工具、观察结果并继续推进。
+Metis 不是给聊天窗口再加几个按钮，而是一套运行在本机的 **AI 执行工作台**。它把模型推理、项目上下文、工具调用、权限控制和结果验证放进同一条桌面工作流：
 
-Metis 的重点不是只聊天，而是把工作真的做完：
+```text
+目标 -> 计划 -> 执行 -> 观察 -> 验证 -> 交付
+             ^                 |
+             +---- 继续迭代 ----+
+```
 
-- 阅读、搜索、修改代码，生成 diff，并运行测试验证。
-- 操控终端、Git、文件系统、本地项目和开发服务器。
-- 通过右侧 Preview Browser 检查网页、点击、输入、截图、抓 console/network/DOM 诊断。
-- 通过 `/computer` 操控 Windows 桌面软件，完成原生应用和跨软件流程。
-- 用工具活动、任务清单、权限门禁和审计日志把执行过程透明地展示出来。
+你可以让它理解仓库、修改文件、运行命令、检查网页、操作 Windows 应用，并把 diff、测试、截图、日志和产物作为完成证据。整个过程保留会话、任务状态与审计记录，长任务中断后也能继续。
 
-Metis 本身无需账号、无强制登录、无遥测。第三方连接器使用标准 OAuth，token 加密保存在本机。
-
----
-
-## 26.7.11
-
-- 更新桌面端、托盘与安装包图标为新的圆角花朵标识。
-- Store 使用彩色连接器标识，并为工具展示具体的能力说明。
-- 可在设置中选择关闭窗口时询问、最小化到托盘或直接退出，默认仍为最小化到托盘。
-- 优化 Chat、Cowork、Code 的切换路径，避免重复加载和快速切换时的会话错位。
+> **Local-first by design**：文件、命令与桌面操作在本机执行；Metis 无强制账号、无内置遥测，API Key 与 OAuth Token 不经过 Metis 中转服务。
 
 ---
 
-## 最近核心能力
+## 获取 Metis
 
-### Computer Use 桌面操控
+| | |
+|---|---|
+| 当前版本 | **26.7.11** |
+| 系统 | Windows 10 / 11 64 位 |
+| 安装包 | [下载 Metis-Setup-26.7.11.exe](https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe) |
+| 模型 | DeepSeek 或任意 OpenAI-compatible API |
 
-`/computer` 面向 Windows 桌面应用和跨软件流程。当前实现采用：
-
-- **Win2 runtime**：优先使用窗口级 Win32 能力，按目标窗口观察和执行，减少全屏坐标漂移。
-- **结构化 action loop**：`observe -> plan -> act -> verify`，每次动作后重新观察并验证目标是否推进。
-- **多源观察**：窗口截图、窗口清单、可访问性/结构化观察、必要时回退视觉识别。
-- **Desktop Expert**：复杂桌面任务会委托给 `desktop_expert`，使用桌面专用工具集和更长轮次预算。
-- **接管提示与活动卡**：执行时显示屏幕接管提示，聊天内工具活动会展示每一步状态、耗时和结果。
-- **完成态修复**：工具结果丢失或 ID 变形时，会合并回原运行中工具卡；整轮结束时不再残留“desktop expert 正在运行”的假状态。
-
-### Preview Browser / Browser Use
-
-`/browser` 使用右侧 Preview Browser 完成本地网页和文件的自动化测试：
-
-- 自动识别当前活跃 dev server，优先读取 `METIS_DESKTOP_DEV_SERVER`，并扫描常见端口如 `5173/5174/3000/4200/8000/8080`。
-- 支持导航、点击、输入、DOM 观察、截图、刷新和右栏当前 URL 复用。
-- 可抓取 console error/warning、network failed request、页面 JS exception、DOM 摘要、标题、URL、viewport 和截图证据。
-- 内置 Browser Verifier：检查元素是否存在/可见、按钮是否可点击、输入框是否可输入、页面是否白屏、console 是否有 error、截图是否纯白/纯黑。
-- Browser Activity 面板默认折叠，只在需要时展开，避免压缩真实网页预览空间。
-
-### OAuth 与连接器
-
-Metis 已具备连接器框架和 OAuth 基础设施：
-
-- Electron 主进程负责 OAuth 回调、token 加密存储和安全边界。
-- 设置页有连接器入口，支持后续 Gmail、GitHub 等第三方能力接入。
-- token 不写入日志、不进入模型上下文、不经过中转服务。
-
-### Context Engineering 与长任务稳定性
-
-- 自动压缩上下文，保留任务摘要和可恢复边界。
-- 工具结果可压缩，避免长输出把模型上下文撑爆。
-- 支持运行恢复、后台 run 追踪、心跳重连和会话级 checkpoint。
-- 工具契约统一为 SSE event contract，前端和后端用同一套事件语义。
+当前安装包尚未代码签名，Windows SmartScreen 可能显示提示。请从本仓库的 GitHub Release 下载并核对发布版本。
 
 ---
 
-## 功能一览
+## 三种工作面
+
+Metis 将不同强度的任务分到三个独立但连续的工作面，而不是把所有交互塞进一条聊天流。
+
+| 工作面 | 适合处理 | 执行模型 |
+|---|---|---|
+| **Chat** | 问答、分析、检索、轻量文件处理 | 快速响应，按需调用工具 |
+| **Cowork** | 多步骤交付、资料整理、跨工具协作 | 计划驱动，可拆分子任务并汇总证据 |
+| **Code** | 仓库理解、代码修改、测试与构建 | 工作区感知，围绕 diff 与验证闭环 |
+
+会话、工作区和草稿按模式隔离；快速切换不会让旧请求覆盖当前记录，也不会把另一个模式的工作区错误带入新任务。
+
+## 可验证的执行能力
+
+| 能力域 | Metis 如何工作 | 可检查的结果 |
+|---|---|---|
+| **Code & Terminal** | 搜索代码、结构化编辑、执行 Git/CLI、运行测试与构建 | diff、终端输出、测试结论、生成文件 |
+| **Preview Browser** | 导航、点击、输入、DOM 观察，并收集 console/network 异常 | 页面状态、截图、DOM、控制台与网络证据 |
+| **Computer Use** | 基于窗口观察执行鼠标键盘操作，按 `observe -> act -> verify` 循环推进 | 操作轨迹、窗口截图、步骤状态与结果 |
+| **Store & Connectors** | 安装技能、工具和外部服务连接器，展示具体能力说明 | 可追溯来源、彩色品牌标识、连接状态 |
+| **Long-running Work** | 上下文压缩、checkpoint、后台 run、心跳重连与恢复 | 可恢复会话、任务进度、压缩边界与产物 |
+
+## 可信执行边界
+
+- **本机优先**：文件系统、终端、浏览器和桌面工具在用户设备上运行。
+- **权限分层**：读取、写入、删除、外部提交等动作按风险进入许可策略与审批流程。
+- **过程可见**：工具卡展示状态、耗时、摘要和可展开结果，后台任务有独立活动视图。
+- **凭据隔离**：API Key 与 OAuth Token 不写入日志、不进入模型上下文；OAuth Token 加密存储。
+- **结果导向**：任务完成不只依赖模型声明，而是结合测试、diff、截图、日志或产物验证。
+
+## 26.7.11 版本亮点
+
+- 全面启用新的圆角花朵品牌标识，覆盖桌面端、托盘、Store 与 Windows 安装包。
+- Store 使用彩色连接器 Logo，并为插件与工具提供具体、可搜索的中英文能力说明。
+- 设置中新增关闭窗口行为：询问、最小化到托盘或直接退出；默认仍为最小化到托盘。
+- 重构 Chat / Cowork / Code 导航链路，减少重复加载并防止快速切换时的会话竞态。
+
+---
+
+## 产品界面
 
 <div align="center">
 <img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
 </div>
 
-| 模块 | 说明 |
-|---|---|
-| 智能体循环 | 计划、工具调用、观察、续写，支持截断续写、延迟工具激活和运行恢复 |
-| 代码工具 | 读写文件、搜索代码、语义索引、AST/patch 修改、测试运行、diff 预览 |
-| 终端工具 | 本地命令执行、环境诊断、构建和测试排查 |
-| Browser Use | 右侧 Preview Browser 自动化、DOM/截图/console/network 诊断和验收 |
-| Computer Use | Win2 桌面操控、窗口观察、鼠标键盘执行、视觉 fallback、Desktop Expert |
-| 任务清单 | 自动展示当前计划、进行中步骤和完成情况 |
-| 工具活动 | 每个工具卡展示状态、摘要、耗时、错误提示和可展开详情 |
-| 权限模式 | 请求批准、替我审批、完全访问，按风险分级拦截敏感动作 |
-| OAuth 连接器 | 本机 OAuth 回调、加密 token 存储，为 Gmail/GitHub 等能力预留 |
-| 国际化 | 中文 / English 双语界面和文档 |
-| 打包分发 | PyInstaller 打包 Python 后端，electron-builder 生成 Windows 安装包 |
+界面围绕持续工作设计：中心线程承载目标和结果，右侧工作台承载 Preview、Diff、Terminal、Files 与后台 Activity，设置中心统一管理模型、权限、运行时、连接器和桌面行为。
 
 ---
 

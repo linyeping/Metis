@@ -4,102 +4,95 @@
 
 # Metis · 墨提斯
 
-**A local desktop AI agent that writes code, runs terminals, controls browsers, and operates Windows apps.**
+**Connect models to code, terminals, browsers, and Windows, then carry a goal through to verifiable results.**
 
-> The wise stay quiet; the skilled never run dry.
+[![Release](https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square)](https://github.com/linyeping/Metis/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/linyeping/Metis/actions/workflows/ci.yml)
+![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white)
+![Local First](https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square)
+![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square)
 
-![Electron](https://img.shields.io/badge/Electron-40-47848F?logo=electron&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
-![Python](https://img.shields.io/badge/Python-Flask%20%2B%20SSE-3776AB?logo=python&logoColor=white)
-![i18n](https://img.shields.io/badge/i18n-中文%20%2F%20English-C9A24B)
-![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B)
+**[Download 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [Release notes](desktop/release/RELEASE_NOTES_v26.7.11.md) · [中文](README.md)**
 
-**Built by [linyeping](https://github.com/linyeping)**
-
-Product direction and part of the design thinking: [Serein](https://github.com/Serein0812)
-
-**[中文](README.md) · English**
+Built by [linyeping](https://github.com/linyeping) · Product direction and design acknowledgements: [Serein](https://github.com/Serein0812)
 
 </div>
 
 ---
 
-## What is Metis
+## From Intent to Evidence
 
-**Metis** is a desktop AI workbench. It combines an Electron + React renderer with a local Python agent backend, and calls models through DeepSeek or any OpenAI-compatible API endpoint. Give it a goal and it plans steps, calls tools, observes results, and keeps going until the task is handled.
+Metis is not a chat window with a few tool buttons. It is a **local AI execution workbench** that brings reasoning, project context, tool calls, permission control, and verification into one desktop workflow:
 
-Metis is meant to do the work, not only talk about it:
+```text
+Goal -> Plan -> Execute -> Observe -> Verify -> Deliver
+          ^                              |
+          +--------- iterate ------------+
+```
 
-- Read, search, and edit code, produce diffs, and run tests for verification.
-- Control terminals, Git, the filesystem, local projects, and development servers.
-- Use the right-side Preview Browser to inspect pages, click, type, screenshot, and collect console/network/DOM diagnostics.
-- Use `/computer` to operate Windows desktop software and cross-application workflows.
-- Show execution transparently through tool activity, task lists, permission gates, and audit logs.
+It can understand a repository, edit files, run commands, inspect web applications, operate Windows software, and attach diffs, tests, screenshots, logs, and generated artifacts as completion evidence. Sessions, task state, and audit history remain available so long-running work can recover instead of restarting from zero.
 
-Metis itself requires no account, no forced login, and no telemetry. Third-party connectors use standard OAuth, with tokens encrypted and stored locally.
-
----
-
-## Current Core Capabilities
-
-### Computer Use
-
-`/computer` is designed for Windows desktop applications and cross-software workflows. The current implementation uses:
-
-- **Win2 runtime**: prefers window-level Win32 automation and observes/acts relative to the target window, reducing full-screen coordinate drift.
-- **Structured action loop**: `observe -> plan -> act -> verify`, with a fresh observation after meaningful actions.
-- **Multi-source observation**: window screenshots, window inventory, accessibility/structured observation, and vision fallback when needed.
-- **Desktop Expert**: complex desktop tasks are delegated to `desktop_expert`, which has desktop-specific tools and a longer turn budget.
-- **Takeover overlay and activity cards**: active desktop control is visible, and chat tool cards show status, duration, and result.
-- **Completion-state hardening**: if a tool result loses or mutates its call id, it is merged back into the running tool card; completed runs no longer leave a stale "desktop expert running" state.
-
-### Preview Browser / Browser Use
-
-`/browser` uses the right-side Preview Browser for local web and file automation:
-
-- Automatically detects the active dev server, prefers `METIS_DESKTOP_DEV_SERVER`, and scans common ports such as `5173/5174/3000/4200/8000/8080`.
-- Supports navigation, clicking, typing, DOM observation, screenshots, reloads, and reuse of the right rail's current URL.
-- Captures console errors/warnings, failed network requests, page JavaScript exceptions, DOM summaries, title, URL, viewport, and screenshot evidence.
-- Includes a Browser Verifier for element existence/visibility, clickable buttons, writable inputs, blank-page checks, console-error checks, and pure white/black screenshot checks.
-- Browser Activity is collapsed by default so it does not squeeze the live page preview.
-
-### OAuth and Connectors
-
-Metis now has a connector framework and OAuth foundation:
-
-- The Electron main process handles OAuth callbacks, encrypted token storage, and security boundaries.
-- The Settings UI includes connector entry points for future Gmail, GitHub, and similar integrations.
-- Tokens are not written to logs, not injected into model context, and not routed through a relay service.
-
-### Context Engineering and Long-Run Stability
-
-- Automatic context compaction preserves task summaries and recoverable boundaries.
-- Tool results can be compacted so long outputs do not consume the entire model context.
-- Run recovery, background run tracking, heartbeat reconnects, and session checkpoints are built in.
-- Tool contracts use a unified SSE event contract shared by backend and frontend.
+> **Local-first by design**: filesystem, terminal, browser, and desktop actions run on your machine. Metis requires no platform account, ships no built-in telemetry, and does not relay API keys or OAuth tokens through a Metis service.
 
 ---
 
-## Feature Overview
+## Get Metis
+
+| | |
+|---|---|
+| Current release | **26.7.11** |
+| Platform | Windows 10 / 11, 64-bit |
+| Installer | [Download Metis-Setup-26.7.11.exe](https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe) |
+| Model access | DeepSeek or any OpenAI-compatible API |
+
+The installer is not code-signed yet, so Windows SmartScreen may display a warning. Download from this repository's GitHub Release and verify the release version.
+
+## Three Work Surfaces
+
+Metis separates different kinds of work into three focused surfaces instead of forcing every workflow through one conversation stream.
+
+| Surface | Best for | Execution model |
+|---|---|---|
+| **Chat** | Questions, analysis, research, and lightweight file work | Fast response with tools activated as needed |
+| **Cowork** | Multi-step deliverables, research synthesis, and cross-tool work | Plan-driven execution with sub-tasks and evidence aggregation |
+| **Code** | Repository understanding, implementation, tests, and builds | Workspace-aware execution centered on diffs and verification |
+
+Sessions, workspaces, and drafts are isolated by mode. Rapid navigation cannot let an older request overwrite the visible session or leak another mode's workspace into a new task.
+
+## Verifiable Execution
+
+| Capability | How Metis works | What you can inspect |
+|---|---|---|
+| **Code & Terminal** | Searches code, performs structured edits, runs Git/CLI commands, tests, and builds | Diffs, terminal output, test conclusions, generated files |
+| **Preview Browser** | Navigates, clicks, types, observes DOM state, and captures console/network failures | Page state, screenshots, DOM, console, and network evidence |
+| **Computer Use** | Operates mouse and keyboard from window-level observations in an `observe -> act -> verify` loop | Action trail, window captures, step state, and results |
+| **Store & Connectors** | Installs skills, tools, and service connectors with concrete capability descriptions | Traceable source, brand identity, and connection state |
+| **Long-running Work** | Compacts context, checkpoints sessions, tracks background runs, reconnects, and resumes | Recoverable sessions, progress, compaction boundaries, artifacts |
+
+## Trust Boundaries
+
+- **Local-first execution**: filesystem, terminal, browser, and desktop tools run on the user's device.
+- **Layered permissions**: reads, writes, deletes, and external submissions flow through risk-aware policy and approval controls.
+- **Inspectable activity**: tool cards expose status, duration, summaries, and expandable results; background runs have a dedicated activity view.
+- **Credential isolation**: API keys and OAuth tokens are excluded from logs and model context; OAuth tokens are encrypted at rest.
+- **Evidence over claims**: completion can be grounded in tests, diffs, screenshots, logs, or generated artifacts rather than model text alone.
+
+## What's New in 26.7.11
+
+- Rolled out the new rounded flower identity across the desktop app, tray, Store, and Windows installer.
+- Added colored connector branding and concrete, searchable capability descriptions in Chinese and English.
+- Added configurable close-window behavior: ask, minimize to tray, or quit. Minimize to tray remains the default.
+- Reworked Chat / Cowork / Code navigation to reduce duplicate loads and prevent stale-session races during rapid switching.
+
+---
+
+## Product Interface
 
 <div align="center">
 <img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
 </div>
 
-| Module | Description |
-|---|---|
-| Agent loop | Planning, tool calls, observation, continuation, truncation recovery, deferred tool activation, and run recovery |
-| Code tools | File read/write, code search, semantic index, AST/patch edits, test execution, and diff preview |
-| Terminal tools | Local command execution, environment diagnostics, build and test debugging |
-| Browser Use | Right-side Preview Browser automation, DOM/screenshot/console/network diagnostics, and verification |
-| Computer Use | Win2 desktop automation, window observation, mouse/keyboard execution, vision fallback, Desktop Expert |
-| Task lists | Live plan, active steps, and completion state |
-| Tool activity | Per-tool status, summary, duration, error hints, and expandable details |
-| Permission modes | Ask for approval, approve on my behalf, or full access, with risk-based gating |
-| OAuth connectors | Local OAuth callback, encrypted token storage, and groundwork for Gmail/GitHub integrations |
-| Internationalization | Chinese / English UI and documentation |
-| Packaging | PyInstaller backend bundle plus electron-builder Windows installer |
+The interface is organized for continuous work: the central thread carries goals and outcomes; the right workbench hosts Preview, Diff, Terminal, Files, and background Activity; Settings centralizes models, permissions, runtime management, connectors, and desktop behavior.
 
 ---
 
