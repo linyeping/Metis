@@ -6,11 +6,13 @@
 
 **Connect models to code, terminals, browsers, and Windows, then carry a goal through to verifiable results.**
 
-[![Release](https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square)](https://github.com/linyeping/Metis/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/linyeping/Metis/actions/workflows/ci.yml)
-![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white)
-![Local First](https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square)
-![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square)
+<p>
+  <a href="https://github.com/linyeping/Metis/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square" /></a>
+  <a href="https://github.com/linyeping/Metis/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI" /></a>
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white" />
+  <img alt="Local First" src="https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square" />
+  <img alt="License" src="https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square" />
+</p>
 
 **[Download 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [Release notes](desktop/release/RELEASE_NOTES_v26.7.11.md) · [中文](README.md)**
 
@@ -18,85 +20,133 @@ Built by [linyeping](https://github.com/linyeping) · Product direction and desi
 
 </div>
 
+<br />
+
+<h2 align="center">From Intent to Evidence</h2>
+
+<p align="center">
+  Metis is not a chat window with a few tool buttons. It is a local <b>AI execution workbench</b>.<br />
+  Reasoning, project context, tool calls, permission control, and verification live in one desktop workflow.
+</p>
+
+<p align="center">
+  <kbd>Goal</kbd> &nbsp;→&nbsp; <kbd>Plan</kbd> &nbsp;→&nbsp; <kbd>Execute</kbd> &nbsp;→&nbsp; <kbd>Observe</kbd> &nbsp;→&nbsp; <kbd>Verify</kbd> &nbsp;→&nbsp; <kbd>Deliver</kbd>
+</p>
+
+<p align="center">
+  <sub>Understand repositories, edit files, run commands, inspect web apps, operate Windows software, and attach diffs, tests, screenshots, logs, and artifacts as evidence.</sub>
+</p>
+
+<p align="center">
+  <b>Local-first by design</b><br />
+  <sub>Filesystem, terminal, browser, and desktop actions run locally. No platform account, no built-in telemetry, and no Metis relay for API keys or OAuth tokens.</sub>
+</p>
+
+<br />
+
+<h2 align="center">Get Metis</h2>
+
+<p align="center">
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="Download Metis 26.7.11" src="https://img.shields.io/badge/Download_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="Release notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+</p>
+
+<p align="center">
+  <b>Windows 10 / 11 · 64-bit · DeepSeek / OpenAI-compatible API</b><br />
+  <sub>The installer is not code-signed yet, so Windows SmartScreen may warn. Download only from this repository's GitHub Release.</sub>
+</p>
+
+<br />
+
+<h2 align="center">Three Work Surfaces</h2>
+
+<p align="center">Different levels of work get focused but continuous surfaces instead of one overloaded conversation stream.</p>
+
+<table width="100%">
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <img alt="Chat" src="https://img.shields.io/badge/CHAT-Ask_%26_Explore-4F7CAC?style=for-the-badge" /><br /><br />
+      <b>Fast understanding and light execution</b><br />
+      <sub>Questions, analysis, research, and file work<br />Tools activate only when needed</sub>
+    </td>
+    <td width="34%" align="center" valign="top">
+      <img alt="Cowork" src="https://img.shields.io/badge/COWORK-Plan_%26_Deliver-2E8B72?style=for-the-badge" /><br /><br />
+      <b>Plan-driven multi-step delivery</b><br />
+      <sub>Decompose work and coordinate tools<br />Aggregate evidence and final artifacts</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img alt="Code" src="https://img.shields.io/badge/CODE-Build_%26_Verify-8A6BBE?style=for-the-badge" /><br /><br />
+      <b>Repository-centered engineering loop</b><br />
+      <sub>Understand, implement, test, and build<br />Deliver with diffs and verification</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>Sessions, workspaces, and drafts are isolated by mode. Rapid navigation cannot let stale requests overwrite the active session or leak another workspace.</sub></p>
+
+<br />
+
+<h2 align="center">Verifiable Execution</h2>
+
+<table width="100%">
+  <tr>
+    <td width="33%" align="center" valign="top"><b>Code & Terminal</b><br /><br /><sub>Code search, structured edits, Git / CLI, tests, and builds<br /><br /><b>Evidence:</b> diffs, terminal output, test results, generated files</sub></td>
+    <td width="34%" align="center" valign="top"><b>Preview Browser</b><br /><br /><sub>Navigation, interaction, DOM observation, console / network diagnostics<br /><br /><b>Evidence:</b> page state, screenshots, DOM, and failures</sub></td>
+    <td width="33%" align="center" valign="top"><b>Computer Use</b><br /><br /><sub>Mouse and keyboard execution from window-level observations<br /><br /><b>Evidence:</b> action trail, captures, and step state</sub></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center" valign="top"><b>Store & Connectors</b><br /><br /><sub>Skills, tools, and external service connectors<br /><br /><b>Evidence:</b> traceable source, capabilities, connection state</sub></td>
+    <td width="34%" align="center" valign="top"><b>Long-running Work</b><br /><br /><sub>Context compaction, checkpoints, background runs, reconnect, and resume<br /><br /><b>Evidence:</b> progress, recovery boundaries, artifacts</sub></td>
+    <td width="33%" align="center" valign="top"><b>Safety & Evidence</b><br /><br /><sub>Risk tiers, approvals, credential isolation, and activity auditing<br /><br /><b>Principle:</b> verify with tests, diffs, screenshots, or logs</sub></td>
+  </tr>
+</table>
+
+<br />
+
+<h2 align="center">Trust Boundaries</h2>
+
+<table width="100%">
+  <tr>
+    <td width="50%" align="center" valign="top"><b>Local-first</b><br /><sub>Filesystem, terminal, browser, and desktop tools run on the user's device</sub></td>
+    <td width="50%" align="center" valign="top"><b>Layered permissions</b><br /><sub>Reads, writes, deletes, and submissions follow risk-aware approvals</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top"><b>Inspectable activity</b><br /><sub>Tool status, duration, summaries, results, and background runs remain visible</sub></td>
+    <td width="50%" align="center" valign="top"><b>Credential isolation</b><br /><sub>API keys and OAuth tokens stay out of logs and model context</sub></td>
+  </tr>
+</table>
+
+<br />
+
+<details>
+  <summary><b>What's new in 26.7.11</b></summary>
+  <br />
+  <ul>
+    <li>Rolled out the rounded flower identity across the app, tray, Store, and installer.</li>
+    <li>Added colored connector branding and searchable capability descriptions.</li>
+    <li>Added ask, minimize-to-tray, and quit behaviors for closing the window.</li>
+    <li>Reworked Chat / Cowork / Code navigation to prevent duplicate loads and stale-session races.</li>
+  </ul>
+</details>
+
+<br />
+
 ---
 
-## From Intent to Evidence
-
-Metis is not a chat window with a few tool buttons. It is a **local AI execution workbench** that brings reasoning, project context, tool calls, permission control, and verification into one desktop workflow:
-
-```text
-Goal -> Plan -> Execute -> Observe -> Verify -> Deliver
-          ^                              |
-          +--------- iterate ------------+
-```
-
-It can understand a repository, edit files, run commands, inspect web applications, operate Windows software, and attach diffs, tests, screenshots, logs, and generated artifacts as completion evidence. Sessions, task state, and audit history remain available so long-running work can recover instead of restarting from zero.
-
-> **Local-first by design**: filesystem, terminal, browser, and desktop actions run on your machine. Metis requires no platform account, ships no built-in telemetry, and does not relay API keys or OAuth tokens through a Metis service.
-
----
-
-## Get Metis
-
-| | |
-|---|---|
-| Current release | **26.7.11** |
-| Platform | Windows 10 / 11, 64-bit |
-| Installer | [Download Metis-Setup-26.7.11.exe](https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe) |
-| Model access | DeepSeek or any OpenAI-compatible API |
-
-The installer is not code-signed yet, so Windows SmartScreen may display a warning. Download from this repository's GitHub Release and verify the release version.
-
-## Three Work Surfaces
-
-Metis separates different kinds of work into three focused surfaces instead of forcing every workflow through one conversation stream.
-
-| Surface | Best for | Execution model |
-|---|---|---|
-| **Chat** | Questions, analysis, research, and lightweight file work | Fast response with tools activated as needed |
-| **Cowork** | Multi-step deliverables, research synthesis, and cross-tool work | Plan-driven execution with sub-tasks and evidence aggregation |
-| **Code** | Repository understanding, implementation, tests, and builds | Workspace-aware execution centered on diffs and verification |
-
-Sessions, workspaces, and drafts are isolated by mode. Rapid navigation cannot let an older request overwrite the visible session or leak another mode's workspace into a new task.
-
-## Verifiable Execution
-
-| Capability | How Metis works | What you can inspect |
-|---|---|---|
-| **Code & Terminal** | Searches code, performs structured edits, runs Git/CLI commands, tests, and builds | Diffs, terminal output, test conclusions, generated files |
-| **Preview Browser** | Navigates, clicks, types, observes DOM state, and captures console/network failures | Page state, screenshots, DOM, console, and network evidence |
-| **Computer Use** | Operates mouse and keyboard from window-level observations in an `observe -> act -> verify` loop | Action trail, window captures, step state, and results |
-| **Store & Connectors** | Installs skills, tools, and service connectors with concrete capability descriptions | Traceable source, brand identity, and connection state |
-| **Long-running Work** | Compacts context, checkpoints sessions, tracks background runs, reconnects, and resumes | Recoverable sessions, progress, compaction boundaries, artifacts |
-
-## Trust Boundaries
-
-- **Local-first execution**: filesystem, terminal, browser, and desktop tools run on the user's device.
-- **Layered permissions**: reads, writes, deletes, and external submissions flow through risk-aware policy and approval controls.
-- **Inspectable activity**: tool cards expose status, duration, summaries, and expandable results; background runs have a dedicated activity view.
-- **Credential isolation**: API keys and OAuth tokens are excluded from logs and model context; OAuth tokens are encrypted at rest.
-- **Evidence over claims**: completion can be grounded in tests, diffs, screenshots, logs, or generated artifacts rather than model text alone.
-
-## What's New in 26.7.11
-
-- Rolled out the new rounded flower identity across the desktop app, tray, Store, and Windows installer.
-- Added colored connector branding and concrete, searchable capability descriptions in Chinese and English.
-- Added configurable close-window behavior: ask, minimize to tray, or quit. Minimize to tray remains the default.
-- Reworked Chat / Cowork / Code navigation to reduce duplicate loads and prevent stale-session races during rapid switching.
-
----
-
-## Product Interface
+<h2 align="center">Product Interface</h2>
 
 <div align="center">
 <img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
 </div>
 
-The interface is organized for continuous work: the central thread carries goals and outcomes; the right workbench hosts Preview, Diff, Terminal, Files, and background Activity; Settings centralizes models, permissions, runtime management, connectors, and desktop behavior.
+<p align="center">
+  The central thread carries goals and outcomes; the right workbench hosts Preview, Diff, Terminal, Files, and background Activity.<br />
+  <sub>Settings centralizes models, permissions, runtime management, connectors, and desktop behavior.</sub>
+</p>
 
 ---
 
-## Architecture
+<h2 align="center">Architecture</h2>
 
 <div align="center">
 <img src="backend/assets/Architecture.png" alt="Architecture" width="100%" />

@@ -6,11 +6,13 @@
 
 **把模型接入代码、终端、浏览器与 Windows 桌面，让任务从一句话走到可验证的结果。**
 
-[![Release](https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square)](https://github.com/linyeping/Metis/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/linyeping/Metis/actions/workflows/ci.yml)
-![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white)
-![Local First](https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square)
-![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square)
+<p>
+  <a href="https://github.com/linyeping/Metis/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square" /></a>
+  <a href="https://github.com/linyeping/Metis/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI" /></a>
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white" />
+  <img alt="Local First" src="https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square" />
+  <img alt="License" src="https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square" />
+</p>
 
 **[下载 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [查看更新](desktop/release/RELEASE_NOTES_v26.7.11.md) · [English](README.en.md)**
 
@@ -18,87 +20,133 @@
 
 </div>
 
+<br />
+
+<h2 align="center">从目标到结果</h2>
+
+<p align="center">
+  Metis 不是给聊天窗口再加几个按钮，而是一套运行在本机的 <b>AI 执行工作台</b>。<br />
+  它把模型推理、项目上下文、工具调用、权限控制和结果验证放进同一条桌面工作流。
+</p>
+
+<p align="center">
+  <kbd>目标</kbd> &nbsp;→&nbsp; <kbd>计划</kbd> &nbsp;→&nbsp; <kbd>执行</kbd> &nbsp;→&nbsp; <kbd>观察</kbd> &nbsp;→&nbsp; <kbd>验证</kbd> &nbsp;→&nbsp; <kbd>交付</kbd>
+</p>
+
+<p align="center">
+  <sub>理解仓库、修改文件、运行命令、检查网页、操作 Windows 应用，并以 diff、测试、截图、日志和产物作为完成证据。</sub>
+</p>
+
+<p align="center">
+  <b>Local-first by design</b><br />
+  <sub>文件、命令与桌面操作在本机执行；无强制账号、无内置遥测，API Key 与 OAuth Token 不经过 Metis 中转服务。</sub>
+</p>
+
+<br />
+
+<h2 align="center">获取 Metis</h2>
+
+<p align="center">
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="Download Metis 26.7.11" src="https://img.shields.io/badge/下载_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="Release notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+</p>
+
+<p align="center">
+  <b>Windows 10 / 11 · 64 位 · DeepSeek / OpenAI-compatible API</b><br />
+  <sub>安装包尚未代码签名，Windows SmartScreen 可能显示提示。请仅从本仓库的 GitHub Release 下载。</sub>
+</p>
+
+<br />
+
+<h2 align="center">三种工作面</h2>
+
+<p align="center">不同强度的任务拥有独立但连续的工作面，不必全部挤进一条聊天流。</p>
+
+<table width="100%">
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <img alt="Chat" src="https://img.shields.io/badge/CHAT-Ask_%26_Explore-4F7CAC?style=for-the-badge" /><br /><br />
+      <b>快速理解与轻量执行</b><br />
+      <sub>问答、分析、检索与文件处理<br />按需激活工具，保持响应直接</sub>
+    </td>
+    <td width="34%" align="center" valign="top">
+      <img alt="Cowork" src="https://img.shields.io/badge/COWORK-Plan_%26_Deliver-2E8B72?style=for-the-badge" /><br /><br />
+      <b>计划驱动的多步骤交付</b><br />
+      <sub>拆分子任务、跨工具协作<br />汇总过程证据与最终产物</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img alt="Code" src="https://img.shields.io/badge/CODE-Build_%26_Verify-8A6BBE?style=for-the-badge" /><br /><br />
+      <b>围绕仓库的工程闭环</b><br />
+      <sub>理解代码、修改文件、运行测试<br />以 diff 与验证结果完成交付</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>会话、工作区和草稿按模式隔离；快速切换不会让旧请求覆盖当前记录，也不会串入其他模式的工作区。</sub></p>
+
+<br />
+
+<h2 align="center">可验证的执行能力</h2>
+
+<table width="100%">
+  <tr>
+    <td width="33%" align="center" valign="top"><b>Code & Terminal</b><br /><br /><sub>代码搜索、结构化编辑、Git / CLI、测试与构建<br /><br /><b>证据：</b>diff、终端输出、测试结论、生成文件</sub></td>
+    <td width="34%" align="center" valign="top"><b>Preview Browser</b><br /><br /><sub>导航、点击、输入、DOM 观察、console / network 诊断<br /><br /><b>证据：</b>页面状态、截图、DOM 与错误记录</sub></td>
+    <td width="33%" align="center" valign="top"><b>Computer Use</b><br /><br /><sub>基于窗口观察执行鼠标键盘操作<br /><br /><b>证据：</b>操作轨迹、窗口截图、步骤状态</sub></td>
+  </tr>
+  <tr>
+    <td width="33%" align="center" valign="top"><b>Store & Connectors</b><br /><br /><sub>技能、工具与外部服务连接器<br /><br /><b>证据：</b>可追溯来源、能力说明、连接状态</sub></td>
+    <td width="34%" align="center" valign="top"><b>Long-running Work</b><br /><br /><sub>上下文压缩、checkpoint、后台 run、重连与恢复<br /><br /><b>证据：</b>会话进度、恢复边界、任务产物</sub></td>
+    <td width="33%" align="center" valign="top"><b>Safety & Evidence</b><br /><br /><sub>风险分层、权限审批、凭据隔离与活动审计<br /><br /><b>原则：</b>结果由测试、diff、截图或日志验证</sub></td>
+  </tr>
+</table>
+
+<br />
+
+<h2 align="center">可信执行边界</h2>
+
+<table width="100%">
+  <tr>
+    <td width="50%" align="center" valign="top"><b>本机优先</b><br /><sub>文件系统、终端、浏览器和桌面工具在用户设备上运行</sub></td>
+    <td width="50%" align="center" valign="top"><b>权限分层</b><br /><sub>读取、写入、删除与外部提交按风险进入审批流程</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center" valign="top"><b>过程可见</b><br /><sub>工具状态、耗时、摘要、结果与后台任务均可回看</sub></td>
+    <td width="50%" align="center" valign="top"><b>凭据隔离</b><br /><sub>API Key 与 OAuth Token 不进入日志和模型上下文</sub></td>
+  </tr>
+</table>
+
+<br />
+
+<details>
+  <summary><b>26.7.11 版本亮点</b></summary>
+  <br />
+  <ul>
+    <li>全面启用新的圆角花朵品牌标识，覆盖桌面端、托盘、Store 与 Windows 安装包。</li>
+    <li>Store 使用彩色连接器 Logo，并提供具体、可搜索的中英文能力说明。</li>
+    <li>新增关闭窗口行为：询问、最小化到托盘或直接退出。</li>
+    <li>重构 Chat / Cowork / Code 导航链路，减少重复加载与快速切换竞态。</li>
+  </ul>
+</details>
+
+<br />
+
 ---
 
-## 从目标到结果
-
-Metis 不是给聊天窗口再加几个按钮，而是一套运行在本机的 **AI 执行工作台**。它把模型推理、项目上下文、工具调用、权限控制和结果验证放进同一条桌面工作流：
-
-```text
-目标 -> 计划 -> 执行 -> 观察 -> 验证 -> 交付
-             ^                 |
-             +---- 继续迭代 ----+
-```
-
-你可以让它理解仓库、修改文件、运行命令、检查网页、操作 Windows 应用，并把 diff、测试、截图、日志和产物作为完成证据。整个过程保留会话、任务状态与审计记录，长任务中断后也能继续。
-
-> **Local-first by design**：文件、命令与桌面操作在本机执行；Metis 无强制账号、无内置遥测，API Key 与 OAuth Token 不经过 Metis 中转服务。
-
----
-
-## 获取 Metis
-
-| | |
-|---|---|
-| 当前版本 | **26.7.11** |
-| 系统 | Windows 10 / 11 64 位 |
-| 安装包 | [下载 Metis-Setup-26.7.11.exe](https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe) |
-| 模型 | DeepSeek 或任意 OpenAI-compatible API |
-
-当前安装包尚未代码签名，Windows SmartScreen 可能显示提示。请从本仓库的 GitHub Release 下载并核对发布版本。
-
----
-
-## 三种工作面
-
-Metis 将不同强度的任务分到三个独立但连续的工作面，而不是把所有交互塞进一条聊天流。
-
-| 工作面 | 适合处理 | 执行模型 |
-|---|---|---|
-| **Chat** | 问答、分析、检索、轻量文件处理 | 快速响应，按需调用工具 |
-| **Cowork** | 多步骤交付、资料整理、跨工具协作 | 计划驱动，可拆分子任务并汇总证据 |
-| **Code** | 仓库理解、代码修改、测试与构建 | 工作区感知，围绕 diff 与验证闭环 |
-
-会话、工作区和草稿按模式隔离；快速切换不会让旧请求覆盖当前记录，也不会把另一个模式的工作区错误带入新任务。
-
-## 可验证的执行能力
-
-| 能力域 | Metis 如何工作 | 可检查的结果 |
-|---|---|---|
-| **Code & Terminal** | 搜索代码、结构化编辑、执行 Git/CLI、运行测试与构建 | diff、终端输出、测试结论、生成文件 |
-| **Preview Browser** | 导航、点击、输入、DOM 观察，并收集 console/network 异常 | 页面状态、截图、DOM、控制台与网络证据 |
-| **Computer Use** | 基于窗口观察执行鼠标键盘操作，按 `observe -> act -> verify` 循环推进 | 操作轨迹、窗口截图、步骤状态与结果 |
-| **Store & Connectors** | 安装技能、工具和外部服务连接器，展示具体能力说明 | 可追溯来源、彩色品牌标识、连接状态 |
-| **Long-running Work** | 上下文压缩、checkpoint、后台 run、心跳重连与恢复 | 可恢复会话、任务进度、压缩边界与产物 |
-
-## 可信执行边界
-
-- **本机优先**：文件系统、终端、浏览器和桌面工具在用户设备上运行。
-- **权限分层**：读取、写入、删除、外部提交等动作按风险进入许可策略与审批流程。
-- **过程可见**：工具卡展示状态、耗时、摘要和可展开结果，后台任务有独立活动视图。
-- **凭据隔离**：API Key 与 OAuth Token 不写入日志、不进入模型上下文；OAuth Token 加密存储。
-- **结果导向**：任务完成不只依赖模型声明，而是结合测试、diff、截图、日志或产物验证。
-
-## 26.7.11 版本亮点
-
-- 全面启用新的圆角花朵品牌标识，覆盖桌面端、托盘、Store 与 Windows 安装包。
-- Store 使用彩色连接器 Logo，并为插件与工具提供具体、可搜索的中英文能力说明。
-- 设置中新增关闭窗口行为：询问、最小化到托盘或直接退出；默认仍为最小化到托盘。
-- 重构 Chat / Cowork / Code 导航链路，减少重复加载并防止快速切换时的会话竞态。
-
----
-
-## 产品界面
+<h2 align="center">产品界面</h2>
 
 <div align="center">
 <img src="backend/assets/Feature%20Showcase.png" alt="Feature Showcase" width="100%" />
 </div>
 
-界面围绕持续工作设计：中心线程承载目标和结果，右侧工作台承载 Preview、Diff、Terminal、Files 与后台 Activity，设置中心统一管理模型、权限、运行时、连接器和桌面行为。
+<p align="center">
+  中心线程承载目标和结果，右侧工作台承载 Preview、Diff、Terminal、Files 与后台 Activity。<br />
+  <sub>设置中心统一管理模型、权限、运行时、连接器和桌面行为。</sub>
+</p>
 
 ---
 
-## 架构
+<h2 align="center">架构</h2>
 
 <div align="center">
 <img src="backend/assets/Architecture.png" alt="Architecture" width="100%" />
