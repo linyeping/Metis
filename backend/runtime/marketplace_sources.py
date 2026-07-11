@@ -5,13 +5,12 @@ import base64
 import json
 import mimetypes
 import re
-import shutil
 import subprocess
 import tempfile
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 

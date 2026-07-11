@@ -49,7 +49,7 @@ def test_backend_data_paths_follow_metis_home(monkeypatch: Any, tmp_path: Path) 
     from backend.web.runtime_state import RuntimeState
     from backend.web.session_db import MetisSessionDB, default_data_root
 
-    helpers.init_shared_state(RuntimeState())
+    monkeypatch.setattr(helpers, "_runtime_state", RuntimeState())
 
     assert Path(default_data_root()) == home.resolve()
     assert Path(sessions._sessions_dir()) == home.resolve() / "sessions"
