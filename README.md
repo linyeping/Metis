@@ -7,11 +7,11 @@
 **把模型接入代码、终端、浏览器与 Windows 桌面，让任务从一句话走到可验证的结果。**
 
 <p>
-  <a href="https://github.com/linyeping/Metis/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/linyeping/Metis?display_name=tag&sort=semver&style=flat-square" /></a>
-  <a href="https://github.com/linyeping/Metis/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/linyeping/Metis/ci.yml?branch=main&style=flat-square&label=CI" /></a>
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-10%20%2F%2011-357EC7?style=flat-square&logo=windows11&logoColor=white" />
-  <img alt="Local First" src="https://img.shields.io/badge/Execution-Local--first-2E8B72?style=flat-square" />
-  <img alt="License" src="https://img.shields.io/badge/License-PolyForm%20Noncommercial-C9A24B?style=flat-square" />
+  <img alt="Electron 40" src="https://img.shields.io/badge/Electron-40-47848F?style=flat-square&logo=electron&logoColor=white" />
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=111111" />
+  <img alt="TypeScript 6" src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white" />
+  <img alt="Python 3.11" src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" />
+  <img alt="Flask SSE" src="https://img.shields.io/badge/Flask-SSE-2E8B72?style=flat-square&logo=flask&logoColor=white" />
 </p>
 
 **[下载 26.7.11](https://github.com/linyeping/Metis/releases/tag/v26.7.11) · [查看更新](desktop/release/RELEASE_NOTES_v26.7.11.md) · [English](README.en.md)**
