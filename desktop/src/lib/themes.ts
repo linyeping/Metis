@@ -469,4 +469,32 @@ export const themeLabels: Record<ThemeName, { en: string; zh: string }> = {
   'crimson-reliquary': { en: 'Crimson Reliquary', zh: '绯红圣匣' },
 };
 
+/**
+ * Three representative colors shown in Appearance settings. These use each
+ * theme's actual surface, primary accent, and secondary accent instead of its
+ * text color, so related themes remain visually distinguishable at a glance.
+ */
+export const themeSwatches: Record<ThemeName, readonly [string, string, string]> = {
+  'templar-silver': ['#E3E0D8', '#C49A5C', '#4A6B5A'],
+  'paladin-ivory': ['#F0EDE7', '#B8923F', '#3D6352'],
+  'crusader-parchment': ['#DDD7CA', '#D4A44B', '#686156'],
+  'cathedral-obsidian': ['#19191F', '#E8B96A', '#5A8A70'],
+  'midnight-forge': ['#222230', '#F0C070', '#5D9078'],
+  'void-chapel': ['#0F0F14', '#D4A650', '#4F7D64'],
+  'rose-gold': ['#F0E8DB', '#C9A24B', '#C06A78'],
+  'rose-gold-dark': ['#181113', '#E8B96A', '#DD8C9C'],
+  'gold-slate': ['#181D2A', '#E8B96A', '#6E8BB5'],
+  'gold-plum': ['#1D1626', '#E8B96A', '#A98BD0'],
+  'gold-azure': ['#DCE0EA', '#C49A5C', '#4A6585'],
+  'gold-graphite': ['#222224', '#E0B868', '#8A8F98'],
+  'gold-jade': ['#D8E0D2', '#C49A5C', '#3F7A5E'],
+  'gold-clay': ['#E6D9C8', '#C9A24B', '#B5663F'],
+  'gold-wisteria': ['#DFD8E6', '#C49A5C', '#8466B0'],
+  'gold-pine': ['#17201C', '#E8B96A', '#4FB08A'],
+  'frost-obsidian': ['#E7EEF6', '#6B7684', '#02060D'],
+  'obsidian-pearl': ['#050505', '#82827C', '#FDFDF8'],
+  'mistbound-jade': ['#D8E5DE', '#4D8A73', '#426A82'],
+  'crimson-reliquary': ['#211719', '#B86A5D', '#8F5A67'],
+};
+
 export const themeNames = Object.keys(themes) as ThemeName[];

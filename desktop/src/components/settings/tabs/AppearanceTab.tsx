@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Keyboard, Moon, Palette, Sun, Type } from 'lucide-react';
-import { themeLabels, themeMode, themeNames, themes } from '../../../lib/themes';
+import { themeLabels, themeMode, themeNames, themes, themeSwatches } from '../../../lib/themes';
 import type { FontFamily, Language, ThemeName } from '../../../lib/types';
 import { tr } from '../../../lib/i18n';
 import { FontSizeControl } from '../FontSizeControl';
@@ -109,7 +109,7 @@ export const AppearanceTab = memo(function AppearanceTab({
             {themeNames
               .filter(name => themeMode[name] === appearanceMode)
               .map(name => {
-                const palette = themes[name];
+                const swatches = themeSwatches[name];
                 return (
                   <button
                     type="button"
@@ -120,9 +120,7 @@ export const AppearanceTab = memo(function AppearanceTab({
                     onClick={() => onThemeChange(name)}
                   >
                     <span className="appearance-theme-swatches" aria-hidden="true">
-                      <i style={{ background: palette['--bg'] }} />
-                      <i style={{ background: palette['--accent'] }} />
-                      <i style={{ background: palette['--text'] }} />
+                      {swatches.map(color => <i key={color} style={{ background: color }} />)}
                     </span>
                     <strong>{themeLabels[name][language]}</strong>
                   </button>
