@@ -72,7 +72,7 @@
 
     // ── CONFIG：与 Cowork 完全相同 ──────────────────────────────────────────
     const CONFIG = {
-        dotSpacing:     13.5,
+        dotSpacing:     17,
         speed:          0.92,
         noiseScale:     0.0026,
         contrastPower:  5.6,
@@ -97,7 +97,7 @@
             container.appendChild(canvas);
             context = canvas.getContext('2d');
         }
-        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.35);
         canvas.width  = Math.round(width  * pixelRatio);
         canvas.height = Math.round(height * pixelRatio);
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -114,8 +114,23 @@
         }
     }
 
+    let active = false;
+    let frameId = 0;
+    let lastFrameAt = 0;
+    const frameInterval = 1000 / 30;
+
+    function scheduleFrame() {
+        if (active && !document.hidden && !frameId) frameId = requestAnimationFrame(draw);
+    }
+
     function draw(timestamp) {
-        requestAnimationFrame(draw);
+        frameId = 0;
+        if (!active || document.hidden) return;
+        if (timestamp - lastFrameAt < frameInterval) {
+            scheduleFrame();
+            return;
+        }
+        lastFrameAt = timestamp;
         const t = timestamp * 0.00105 * CONFIG.speed;
         context.clearRect(0, 0, width, height);
 
@@ -152,6 +167,7 @@
             context.arc(point.x + warpX * 5.4, point.y + warpY * 5.0, 1.16 + alpha * 0.12, 0, Math.PI * 2);
             context.fill();
         }
+        scheduleFrame();
     }
 
     function resize() {
@@ -162,8 +178,13 @@
     }
 
     window.addEventListener('resize', resize);
+    window.addEventListener('message', event => {
+        if (event.data?.type !== 'metis-backdrop-active') return;
+        active = Boolean(event.data.active) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        scheduleFrame();
+    });
+    document.addEventListener('visibilitychange', scheduleFrame);
     resize();
-    requestAnimationFrame(draw);
 </script>
 </body>
 </html>

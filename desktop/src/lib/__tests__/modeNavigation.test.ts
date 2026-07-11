@@ -13,11 +13,9 @@ const mocks = vi.hoisted(() => {
   };
   const sessionState = {
     activeSessionId: 'chat-1' as string | null,
-    rememberModeState: vi.fn(),
-    prepareModeSession: vi.fn((mode: 'chat' | 'cowork' | 'code') => {
-      const sessionId = mode === 'chat' ? 'chat-1' : mode === 'cowork' ? 'cowork-1' : 'code-1';
-      sessionState.activeSessionId = sessionId;
-      return { sessionId, workspaceId: '', draft: false };
+    prepareFreshModeDraft: vi.fn(() => {
+      sessionState.activeSessionId = null;
+      return { sessionId: null, workspaceId: '', draft: true } as const;
     }),
     prepareSessionSelection: vi.fn((mode: 'chat' | 'cowork' | 'code', sessionId: string) => {
       sessionState.activeSessionId = sessionId;
@@ -94,29 +92,14 @@ describe('mode navigation performance path', () => {
     });
   });
 
-  it('switches immediately and revalidates a restored snapshot with one message load', async () => {
+  it('switches immediately into a clean unscoped draft without backend work', async () => {
     navigateAppMode('cowork');
     expect(mocks.uiState.appMode).toBe('cowork');
     expect(mocks.chatState.clearLocal).toHaveBeenCalledTimes(1);
-    await vi.runAllTimersAsync();
-    expect(mocks.switchSession).toHaveBeenCalledWith('cowork-1');
+    expect(mocks.sessionState.prepareFreshModeDraft).toHaveBeenCalledWith('cowork');
+    expect(mocks.sessionState.activeSessionId).toBeNull();
+    expect(mocks.switchSession).not.toHaveBeenCalled();
     expect(mocks.chatState.loadSession).not.toHaveBeenCalled();
-
-    Object.assign(mocks.chatState, {
-      messages: [{ id: 'cowork-message' }],
-      composerText: 'cowork draft',
-      loadedSessionId: 'cowork-1',
-    });
-    navigateAppMode('chat');
-
-    expect(mocks.uiState.appMode).toBe('chat');
-    expect(mocks.chatState.loadedSessionId).toBe('chat-1');
-    expect(mocks.chatState.composerText).toBe('chat draft');
-    await vi.runAllTimersAsync();
-
-    expect(mocks.switchSession).toHaveBeenLastCalledWith('chat-1');
-    expect(mocks.chatState.loadSession).toHaveBeenCalledTimes(1);
-    expect(mocks.chatState.loadSession).toHaveBeenCalledWith('chat-1', { force: true });
   });
 
   it('does not reload the already active session', async () => {
@@ -127,14 +110,14 @@ describe('mode navigation performance path', () => {
     expect(mocks.chatState.loadSession).not.toHaveBeenCalled();
   });
 
-  it('serializes backend switches so the latest mode is applied last', async () => {
+  it('serializes explicit session selections so the latest selection is applied last', async () => {
     const coworkSwitch = deferred<undefined>();
     mocks.switchSession.mockImplementationOnce(() => coworkSwitch.promise).mockResolvedValueOnce(undefined);
 
-    navigateAppMode('cowork');
-    await vi.runAllTimersAsync();
-    navigateAppMode('code');
-    await vi.runAllTimersAsync();
+    navigateToSession('cowork-1', 'cowork');
+    await Promise.resolve();
+    navigateToSession('code-1', 'code');
+    await Promise.resolve();
 
     expect(mocks.switchSession).toHaveBeenCalledTimes(1);
     expect(mocks.switchSession).toHaveBeenNthCalledWith(1, 'cowork-1');
@@ -145,6 +128,8 @@ describe('mode navigation performance path', () => {
 
     expect(mocks.switchSession).toHaveBeenCalledTimes(2);
     expect(mocks.switchSession).toHaveBeenNthCalledWith(2, 'code-1');
+    expect(mocks.chatState.loadSession).toHaveBeenCalledTimes(1);
+    expect(mocks.chatState.loadSession).toHaveBeenCalledWith('code-1');
   });
 });
 

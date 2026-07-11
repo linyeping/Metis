@@ -27,6 +27,7 @@ interface SessionState {
   newSession: () => Promise<string | null>;
   startDraftSession: (workspaceId?: string | null) => void;
   rememberModeState: (mode: AppMode) => void;
+  prepareFreshModeDraft: (mode: AppMode) => { sessionId: null; workspaceId: ''; draft: true };
   prepareModeSession: (mode: AppMode) => { sessionId: string | null; workspaceId: string; draft: boolean };
   prepareSessionSelection: (mode: AppMode, sessionId: string) => { sessionId: string | null; workspaceId: string; draft: boolean };
   activateModeSession: (mode: AppMode) => Promise<void>;
@@ -110,6 +111,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   rememberModeState: mode => {
     rememberExplicitModeState(mode, get().activeSessionId, get().activeWorkspaceId);
+  },
+  prepareFreshModeDraft: mode => {
+    const state = get();
+    const activeSessionByMode = { ...state.activeSessionByMode, [mode]: DRAFT_SESSION_ID };
+    const activeWorkspaceByMode = { ...state.activeWorkspaceByMode };
+    delete activeWorkspaceByMode[mode];
+    writeModeRecord('metis.activeSessionByMode', activeSessionByMode);
+    writeModeRecord('metis.activeWorkspaceByMode', activeWorkspaceByMode);
+    set({
+      activeSessionByMode,
+      activeWorkspaceByMode,
+      activeSessionId: null,
+      activeWorkspaceId: '',
+    });
+    return { sessionId: null, workspaceId: '', draft: true };
   },
   prepareModeSession: mode => {
     const state = get();

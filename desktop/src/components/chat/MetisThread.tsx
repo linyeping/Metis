@@ -111,10 +111,6 @@ export function MetisThread() {
     [activeSessionId, subagents],
   );
   const [hiddenSubagentSignature, setHiddenSubagentSignature] = useState('');
-  // 每种模式的 backdrop 一旦挂载就不再卸载（避免切换时 iframe 重载闪烁）
-  const [mountedBackdrops, setMountedBackdrops] = useState<Set<string>>(
-    () => new Set([appMode]),
-  );
   const showSubagentStrip = Boolean(subagentSignature && hiddenSubagentSignature !== subagentSignature);
   const messageComponents = useMemo<ThreadMessageComponents>(
     () => ({
@@ -129,15 +125,6 @@ export function MetisThread() {
     [appMode, runtimeStatus],
   );
 
-  // 切换到新模式后延迟挂载其 backdrop（避免首帧闪烁）
-  useEffect(() => {
-    if (mountedBackdrops.has(appMode)) return undefined;
-    const timer = window.setTimeout(() => {
-      setMountedBackdrops(prev => new Set([...prev, appMode]));
-    }, appMode === 'chat' ? 600 : 900);
-    return () => window.clearTimeout(timer);
-  }, [appMode, mountedBackdrops]);
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div
@@ -147,9 +134,9 @@ export function MetisThread() {
         data-mode={appMode}
         ref={shellRef}
       >
-        {mountedBackdrops.has('chat')   && <ChatAuroraBackdrop visible={appMode === 'chat'}   />}
-        {mountedBackdrops.has('cowork') && <CoworkBackdrop      visible={appMode === 'cowork'} />}
-        {mountedBackdrops.has('code')   && <CodeGridBackdrop    visible={appMode === 'code'}   />}
+        <ChatAuroraBackdrop visible={appMode === 'chat'} />
+        <CoworkBackdrop visible={appMode === 'cowork'} />
+        <CodeGridBackdrop visible={appMode === 'code'} />
         <header className="thread-context-header" aria-label={t('当前会话')}>
           <AnimatePresence initial={false} mode="wait">
             <motion.div
@@ -231,8 +218,21 @@ function runtimeStatusForDock(status: RuntimeStatus | null, appMode: AppMode): R
 }
 
 function CoworkBackdrop({ visible }: { visible: boolean }) {
+  return <AnimatedBackdrop className="cowork-backdrop" url={coworkBackdropUrl} visible={visible} />;
+}
+
+function ChatAuroraBackdrop({ visible }: { visible: boolean }) {
+  return <AnimatedBackdrop className="chat-aurora-backdrop" url={chatAuroraUrl} visible={visible} />;
+}
+
+function CodeGridBackdrop({ visible }: { visible: boolean }) {
+  return <AnimatedBackdrop className="code-grid-backdrop" url={codeGridUrl} visible={visible} />;
+}
+
+function AnimatedBackdrop({ className, url, visible }: { className: string; url: string; visible: boolean }) {
   const appearanceMode = useUiStore(state => state.appearanceMode);
   const theme = useUiStore(state => state.theme);
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
   const src = useMemo(() => {
     const palette = themes[theme] || themes['cathedral-obsidian'];
     const params = new URLSearchParams({
@@ -242,56 +242,18 @@ function CoworkBackdrop({ visible }: { visible: boolean }) {
       accent: palette['--accent-ink'] || palette['--accent'] || '',
       border: palette['--border'] || '',
     });
-    return `${coworkBackdropUrl}?${params.toString()}`;
-  }, [appearanceMode, theme]);
+    return `${url}?${params.toString()}`;
+  }, [appearanceMode, theme, url]);
+
+  const syncVisibility = useCallback(() => {
+    frameRef.current?.contentWindow?.postMessage({ type: 'metis-backdrop-active', active: visible }, '*');
+  }, [visible]);
+
+  useEffect(syncVisibility, [syncVisibility]);
 
   return (
-    <div className="cowork-backdrop" aria-hidden="true" data-visible={visible}>
-      <iframe src={src} tabIndex={-1} title="" />
-    </div>
-  );
-}
-
-function ChatAuroraBackdrop({ visible }: { visible: boolean }) {
-  const appearanceMode = useUiStore(state => state.appearanceMode);
-  const theme          = useUiStore(state => state.theme);
-  const src = useMemo(() => {
-    const palette = themes[theme] || themes['cathedral-obsidian'];
-    const p = new URLSearchParams({
-      mode:   appearanceMode,
-      bg:     palette['--bg']                               || '',
-      text:   palette['--text']                             || '',
-      accent: palette['--accent-ink'] || palette['--accent'] || '',
-      border: palette['--border']                           || '',
-    });
-    return `${chatAuroraUrl}?${p.toString()}`;
-  }, [appearanceMode, theme]);
-
-  return (
-    <div className="chat-aurora-backdrop" aria-hidden="true" data-visible={visible}>
-      <iframe src={src} tabIndex={-1} title="" />
-    </div>
-  );
-}
-
-function CodeGridBackdrop({ visible }: { visible: boolean }) {
-  const appearanceMode = useUiStore(state => state.appearanceMode);
-  const theme          = useUiStore(state => state.theme);
-  const src = useMemo(() => {
-    const palette = themes[theme] || themes['cathedral-obsidian'];
-    const p = new URLSearchParams({
-      mode:   appearanceMode,
-      bg:     palette['--bg']                               || '',
-      text:   palette['--text']                             || '',
-      accent: palette['--accent-ink'] || palette['--accent'] || '',
-      border: palette['--border']                           || '',
-    });
-    return `${codeGridUrl}?${p.toString()}`;
-  }, [appearanceMode, theme]);
-
-  return (
-    <div className="code-grid-backdrop" aria-hidden="true" data-visible={visible}>
-      <iframe src={src} tabIndex={-1} title="" />
+    <div className={className} aria-hidden="true" data-visible={visible}>
+      <iframe ref={frameRef} src={src} tabIndex={-1} title="" onLoad={syncVisibility} />
     </div>
   );
 }

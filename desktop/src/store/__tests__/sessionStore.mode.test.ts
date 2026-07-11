@@ -80,6 +80,26 @@ describe('sessionStore mode drafts', () => {
     expect(useSessionStore.getState().activeWorkspaceId).toBe('');
   });
 
+  it('always prepares a mode switch as a fresh global draft', () => {
+    useSessionStore.setState({
+      sessions: [{ id: 'old-cowork', title: 'Old', workspaceId: 'workspace-1', mode: 'cowork', messageCount: 4, createdAt: 1, updatedAt: 2 }],
+      activeSessionId: 'old-cowork',
+      activeWorkspaceId: 'workspace-1',
+      activeSessionByMode: { cowork: 'old-cowork' },
+      activeWorkspaceByMode: { cowork: 'workspace-1' },
+    });
+
+    const target = useSessionStore.getState().prepareFreshModeDraft('cowork');
+
+    expect(target).toEqual({ sessionId: null, workspaceId: '', draft: true });
+    expect(useSessionStore.getState().activeSessionId).toBeNull();
+    expect(useSessionStore.getState().activeWorkspaceId).toBe('');
+    expect(useSessionStore.getState().activeWorkspaceByMode.cowork).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem('metis.activeSessionByMode') || '{}')).toEqual({
+      cowork: '__metis_draft_session__',
+    });
+  });
+
   it('keeps workspace scope when the new conversation comes from a workspace row', async () => {
     useUiStore.setState({ appMode: 'code' });
     useSessionStore.getState().startDraftSession('workspace-2');

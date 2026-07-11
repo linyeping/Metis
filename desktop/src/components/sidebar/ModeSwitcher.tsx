@@ -18,9 +18,16 @@ const MODES: Array<{ id: AppMode; icon: React.ComponentType<{ size?: number; str
 export function ModeSwitcher() {
   const appMode = useUiStore(state => state.appMode);
   const language = useUiStore(state => state.language);
+  const activeIndex = MODES.findIndex(mode => mode.id === appMode);
 
   return (
-    <div className="mode-switcher" role="tablist" aria-label={language === 'zh' ? '模式' : 'Mode'}>
+    <div
+      className="mode-switcher"
+      role="tablist"
+      aria-label={language === 'zh' ? '模式' : 'Mode'}
+      style={{ '--mode-index': activeIndex } as React.CSSProperties}
+    >
+      <span className="mode-switcher-pill" aria-hidden="true" />
       {MODES.map(mode => {
         const Icon = mode.icon;
         const active = appMode === mode.id;
@@ -40,7 +47,6 @@ export function ModeSwitcher() {
               navigateAppMode(mode.id);
             }}
           >
-            {active && <span className="mode-switcher-pill" />}
             <span className="mode-switcher-tab-content">
               <Icon size={14} />
               <span className="mode-switcher-label">{label}</span>
