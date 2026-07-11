@@ -194,6 +194,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const [updateMessage, setUpdateMessage] = useState('');
   const [updateReady, setUpdateReady] = useState(false);
   const [filter, setFilter] = useState('');
+  const [saveComplete, setSaveComplete] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -355,11 +356,12 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
         await saveMemory(memory);
       }
       await onSaved?.();
-      setOpen(false);
+      setSaveComplete(true);
+      window.setTimeout(() => setSaveComplete(false), 1800);
     } finally {
       setSaving(false);
     }
-  }, [apiKey, memory, onSaved, setOpen, settings]);
+  }, [apiKey, memory, onSaved, settings]);
 
   const checkProvider = useCallback(async (deepProbe = false) => {
     if (!settings) return;
@@ -855,7 +857,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
                       {t('取消')}
                     </button>
                     <button type="button" className="primary" disabled={saving || !settings} onClick={() => void save()}>
-                      {saving ? t('保存中...') : tr(language, 'saveSettings')}
+                      {saving ? t('保存中...') : saveComplete ? t('已保存') : tr(language, 'saveSettings')}
                     </button>
                   </div>
                 </header>

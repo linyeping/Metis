@@ -1,4 +1,4 @@
-import { AlertTriangle, FileText, RefreshCw, Terminal } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 import logo from '../../assets/logo.png';
 import type { BootEvent, BootState } from '../../lib/types';
 import { useT } from '../../hooks/useT';
@@ -29,7 +29,8 @@ export function BootOverlay({ state, onRetry, onOpenLog }: BootOverlayProps) {
           <img src={logo} alt="" />
           <div>
             <span>Metis Desktop</span>
-            <h1>{failed ? state.error?.title || t('后端启动失败') : t('正在启动 Metis 后端')}</h1>
+            <h1>{failed ? state.error?.title || t('启动失败') : t('正在准备工作区')}</h1>
+            {!failed && <p>{t('正在完成启动检查，请稍候。')}</p>}
           </div>
         </div>
 
@@ -52,17 +53,24 @@ export function BootOverlay({ state, onRetry, onOpenLog }: BootOverlayProps) {
           </pre>
         )}
 
-        <div className="boot-log-head">
-          <span>
-            <Terminal size={15} />
-            {t('后端日志')}
-          </span>
-          {state.logPath && <em>{state.logPath}</em>}
-        </div>
+        {!failed && (
+          <div className="boot-status-list" aria-label={t('启动进度')}>
+            <span data-active="true"><ShieldCheck size={16} />{t('检查本地运行环境')}</span>
+            <span data-active={state.events.length > 1}><CheckCircle2 size={16} />{t('载入工作区服务')}</span>
+            <span data-active={state.status === 'ready'}><CheckCircle2 size={16} />{t('准备界面')}</span>
+          </div>
+        )}
 
-        <pre className="boot-log">
-          {lines.length ? lines.join('\n') : t('等待启动事件...')}
-        </pre>
+        {failed && (
+          <details className="boot-diagnostics">
+            <summary>{t('查看技术诊断')}</summary>
+            <div className="boot-log-head">
+              <span>{t('启动记录')}</span>
+              {state.logPath && <em>{state.logPath}</em>}
+            </div>
+            <pre className="boot-log">{lines.length ? lines.join('\n') : t('暂无启动记录')}</pre>
+          </details>
+        )}
 
         {failed && (
           <div className="boot-actions">

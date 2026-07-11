@@ -464,21 +464,27 @@ export function RightRail({ backendReady }: RightRailProps) {
   }, [updateWebPreviewTab]);
 
   const refreshBrowserActivity = useCallback(async () => {
-    if (!window.metis?.previewActivity || !rightRailOpen || !webCardVisible) return;
+    if (!window.metis?.previewActivity || !rightRailOpen || !webCardVisible || !webPreviewUrl) {
+      setBrowserActivity(null);
+      return;
+    }
     try {
       const result = await window.metis.previewActivity({ limit: 24 });
       if (result?.ok) setBrowserActivity(result);
     } catch {
       // Activity is observational; preview itself should not be disturbed if this fails.
     }
-  }, [rightRailOpen, webCardVisible]);
+  }, [rightRailOpen, webCardVisible, webPreviewUrl]);
 
   useEffect(() => {
-    if (!rightRailOpen || !webCardVisible) return;
+    if (!rightRailOpen || !webCardVisible || !webPreviewUrl) {
+      setBrowserActivity(null);
+      return;
+    }
     void refreshBrowserActivity();
     const timer = window.setInterval(() => void refreshBrowserActivity(), 1600);
     return () => window.clearInterval(timer);
-  }, [refreshBrowserActivity, rightRailOpen, webCardVisible]);
+  }, [refreshBrowserActivity, rightRailOpen, webCardVisible, webPreviewUrl]);
 
   useEffect(() => {
     if (!rightRailOpen || !webCardVisible || !previewState?.activity_seq) return;
@@ -1498,7 +1504,7 @@ export function RightRail({ backendReady }: RightRailProps) {
           {activeWebTab.error}
         </p>
       )}
-      {browserActivity && browserActivity.items.length > 0 && (
+      {webPreviewUrl && browserActivity && browserActivity.items.length > 0 && (
         <BrowserActivityPanel activity={browserActivity} t={t} />
       )}
       {webPreviewUrl ? (

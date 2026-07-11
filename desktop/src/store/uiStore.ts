@@ -244,8 +244,14 @@ function storedLanguage(): Language {
 }
 
 function storedAppMode(): AppMode {
+  const startupMode = localStorage.getItem('metis.startupMode') as AppMode | null;
+  if (startupMode === 'chat' || startupMode === 'cowork' || startupMode === 'code') return startupMode;
   const value = localStorage.getItem('metis.appMode') as AppMode | null;
   return value === 'cowork' || value === 'code' ? value : 'chat';
+}
+
+function storedSidebarOpen(): boolean {
+  return localStorage.getItem('metis.startupSidebarOpen') !== 'false';
 }
 
 function storedCodeExecutionProfile(): RunExecutionProfile {
@@ -267,12 +273,12 @@ function storedNumber(key: string, fallback: number, min: number, max: number): 
 }
 
 const defaultWorkspaceCardVisibility: WorkspaceCardVisibility = {
-  web: true,
+  web: false,
   terminal: false,
-  files: true,
-  diff: true,
-  activity: true,
-  plan: true,
+  files: false,
+  diff: false,
+  activity: false,
+  plan: false,
   tool: false,
   research: false,
   session: false,
@@ -334,6 +340,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function storedWorkspaceCardVisibility(): WorkspaceCardVisibility {
+  if (localStorage.getItem('metis.workspaceCardsDefaultClosedV2') !== '1') {
+    localStorage.setItem('metis.workspaceCardsDefaultClosedV2', '1');
+    localStorage.setItem('metis.workspaceCardVisibility', JSON.stringify(defaultWorkspaceCardVisibility));
+    return { ...defaultWorkspaceCardVisibility };
+  }
   return {
     ...defaultWorkspaceCardVisibility,
     ...storedJson<Partial<WorkspaceCardVisibility>>('metis.workspaceCardVisibility', {}, isRecord),
@@ -436,7 +447,7 @@ export const useUiStore = create<UiState>(set => ({
   rightRailOpen: hasVisibleWorkspaceCard(initialWorkspaceCardVisibility),
   rightRailWidth: 780,
   rightRailMode: 'files',
-  sidebarOpen: true,
+  sidebarOpen: storedSidebarOpen(),
   sidebarWidth: storedNumber('metis.sidebarWidth', 280, 220, 380),
   sideChatOpen: false,
   sideChatWidth: storedNumber('metis.sideChatWidth', 320, 286, 320),

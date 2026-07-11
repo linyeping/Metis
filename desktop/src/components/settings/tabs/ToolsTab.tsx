@@ -27,7 +27,7 @@ export const ToolsTab = memo(function ToolsTab({
 }: ToolsTabProps) {
   const t = useT();
   return (
-    <div className="settings-card-grid">
+    <div className="settings-card-grid tools-settings-grid">
       {capabilities && (
         <div className="tool-tier-bar">
           <span className="tier-label">Tier {capabilities.tier}</span>

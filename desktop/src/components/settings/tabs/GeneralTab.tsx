@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from 'react';
-import { AppWindow } from 'lucide-react';
+import { AppWindow, LayoutPanelLeft, Rocket } from 'lucide-react';
 import { useT } from '../../../hooks/useT';
-import type { WindowCloseBehavior } from '../../../lib/types';
+import type { AppMode, WindowCloseBehavior } from '../../../lib/types';
 
 export const GeneralTab = memo(function GeneralTab() {
   const t = useT();
@@ -9,6 +9,8 @@ export const GeneralTab = memo(function GeneralTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [startupMode, setStartupMode] = useState(() => localStorage.getItem('metis.startupMode') || 'remember');
+  const [startupSidebarOpen, setStartupSidebarOpen] = useState(() => localStorage.getItem('metis.startupSidebarOpen') !== 'false');
 
   useEffect(() => {
     let disposed = false;
@@ -44,6 +46,17 @@ export const GeneralTab = memo(function GeneralTab() {
     }
   };
 
+  const updateStartupMode = (value: string) => {
+    setStartupMode(value);
+    if (value === 'remember') localStorage.removeItem('metis.startupMode');
+    else localStorage.setItem('metis.startupMode', value as AppMode);
+  };
+
+  const updateStartupSidebar = (value: boolean) => {
+    setStartupSidebarOpen(value);
+    localStorage.setItem('metis.startupSidebarOpen', String(value));
+  };
+
   return (
     <div className="settings-card-grid general-settings-grid">
       <section className="settings-section">
@@ -68,6 +81,34 @@ export const GeneralTab = memo(function GeneralTab() {
           </select>
         </div>
         {error && <p className="section-desc section-desc-warning" role="alert">{error}</p>}
+      </section>
+      <section className="settings-section">
+        <div className="settings-section-header">
+          <Rocket size={16} className="section-icon" />
+          <h3>{t('启动偏好')}</h3>
+        </div>
+        <div className="window-close-behavior-row">
+          <div className="window-close-behavior-copy">
+            <strong>{t('启动界面')}</strong>
+            <p>{t('选择每次打开 Metis 时首先进入的工作模式。')}</p>
+          </div>
+          <select value={startupMode} onChange={event => updateStartupMode(event.currentTarget.value)}>
+            <option value="remember">{t('记住上次模式')}</option>
+            <option value="chat">Chat</option>
+            <option value="cowork">Cowork</option>
+            <option value="code">Code</option>
+          </select>
+        </div>
+        <label className="general-toggle-row">
+          <span>
+            <LayoutPanelLeft size={16} />
+            <span>
+              <strong>{t('启动时展开侧栏')}</strong>
+              <small>{t('关闭后以更专注的主工作区启动。')}</small>
+            </span>
+          </span>
+          <input type="checkbox" checked={startupSidebarOpen} onChange={event => updateStartupSidebar(event.currentTarget.checked)} />
+        </label>
       </section>
     </div>
   );

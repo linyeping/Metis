@@ -1,7 +1,8 @@
 import { memo } from 'react';
-import { ExternalLink, Info, Wrench } from 'lucide-react';
+import { Activity, ExternalLink, Info, ShieldCheck, Wrench } from 'lucide-react';
 import type { DiagnosticsPayload, StoragePayload } from '../../../lib/types';
 import { useT } from '../../../hooks/useT';
+import logo from '../../../assets/logo.png';
 
 type AppInfo = {
   name: string;
@@ -46,24 +47,29 @@ export const AboutTab = memo(function AboutTab({
   return (
     <div className="settings-card-grid about-panel">
       <section className="settings-section">
-        <div className="settings-section-header">
-          <Info size={16} className="section-icon" />
-          <h3>Metis Desktop</h3>
+        <div className="about-product-hero">
+          <img src={logo} alt="" />
+          <span>
+            <small>{t('桌面智能工作区')}</small>
+            <h3>Metis Desktop</h3>
+            <p>{t('对话、协作和编码集中在一个安静可靠的桌面环境中。')}</p>
+          </span>
+          <em>v{appInfo?.version || '26.7.11'}</em>
         </div>
-        <p className="section-desc">{t('版本')} {appInfo?.version || '26.7.11'}</p>
-        <p className="section-desc">{appInfo?.packaged ? t('已安装版本') : t('开发模式')} · Electron + React + Python</p>
-        <div className="about-open-source-grid">
+        <div className="about-status-grid">
           <article>
-            <span>{t('开源协议')}</span>
-            <strong>PolyForm NC</strong>
+            <ShieldCheck size={16} />
+            <span><strong>{t('本地优先')}</strong><small>{t('密钥和工作数据保存在本机')}</small></span>
           </article>
           <article>
-            <span>{t('项目主页')}</span>
-            <strong>GitHub</strong>
-            <small>{(appInfo?.githubHome || 'https://github.com/linyeping/Metis').replace(/^https?:\/\//, '')}</small>
+            <Activity size={16} />
+            <span><strong>{appInfo?.packaged ? t('正式版本') : t('开发模式')}</strong><small>{t('当前安装通道')}</small></span>
+          </article>
+          <article>
+            <Info size={16} />
+            <span><strong>PolyForm NC</strong><small>{t('开源协议')}</small></span>
           </article>
         </div>
-        {appInfo?.updateUrl && <p className="section-desc">{t('更新源')} {appInfo.updateUrl}</p>}
         <div className="about-actions">
           <button type="button" onClick={() => void window.metis?.openExternal?.(appInfo?.githubHome || 'https://github.com/linyeping/Metis')}>
             <ExternalLink size={14} />
@@ -85,15 +91,11 @@ export const AboutTab = memo(function AboutTab({
           <Wrench size={16} className="section-icon" />
           <h3>{t('发布诊断')}</h3>
         </div>
-        <p className="section-desc">{t('生成不含密钥的诊断包，包含版本、平台、后端日志、工具调用、Preview 错误和截图证据摘要。')}</p>
+        <p className="section-desc">{t('遇到问题时生成不含密钥的支持包，便于定位故障。')}</p>
         <div className="diagnostics-grid">
           <article>
             <span>{t('后端状态')}</span>
             <strong>{diagnostics?.backend.status || 'unknown'}</strong>
-          </article>
-          <article>
-            <span>{t('后端端口')}</span>
-            <strong>{diagnostics?.backend.port || '-'}</strong>
           </article>
           <article>
             <span>{t('终端后端')}</span>
@@ -104,19 +106,13 @@ export const AboutTab = memo(function AboutTab({
             <strong>{storage?.source || '-'}</strong>
           </article>
         </div>
-        <label>
-          <span>{t('Metis 数据')}</span>
-          <code>{storage?.metisHome || t('等待诊断数据')}</code>
-        </label>
-        <label>
-          <span>{t('Electron 数据')}</span>
-          <code>{storage?.electronUserData || t('等待诊断数据')}</code>
-        </label>
-        <label>
-          <span>{t('后端日志')}</span>
-          <code>{diagnostics?.backend.logPath || t('等待诊断数据')}</code>
-        </label>
-        <pre>{diagnostics?.backend.logTail || t('暂无后端日志。')}</pre>
+        <details className="diagnostics-details">
+          <summary>{t('高级诊断信息')}</summary>
+          <label><span>{t('Metis 数据')}</span><code>{storage?.metisHome || t('等待诊断数据')}</code></label>
+          <label><span>{t('Electron 数据')}</span><code>{storage?.electronUserData || t('等待诊断数据')}</code></label>
+          <label><span>{t('后端日志')}</span><code>{diagnostics?.backend.logPath || t('等待诊断数据')}</code></label>
+          <pre>{diagnostics?.backend.logTail || t('暂无后端日志。')}</pre>
+        </details>
         <div className="diagnostics-actions">
           <button type="button" onClick={() => void onRefreshDiagnostics()}>
             {t('刷新诊断')}

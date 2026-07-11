@@ -40,7 +40,7 @@ export const TerminalTab = memo(function TerminalTab({ documentConverters, onRef
   }, [onSettingsChange, settings]);
 
   return (
-    <div className="settings-card-grid">
+    <div className="settings-card-grid terminal-settings-grid">
       {/* ── Shell ────────────────────────────────────────────────── */}
       <details className="settings-section settings-disclosure terminal-settings-disclosure" open>
         <summary>

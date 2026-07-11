@@ -104,18 +104,31 @@ export const AppearanceTab = memo(function AppearanceTab({
           })}
         </div>
         <div className="appearance-theme-panel">
-          <label>
-            <span>{t('当前模式主题')}</span>
-            <select value={currentModeTheme} onChange={event => onThemeChange(event.target.value as ThemeName)}>
-              {themeNames
-                .filter(name => themeMode[name] === appearanceMode)
-                .map(name => (
-                  <option value={name} key={name}>
-                    {themeLabels[name][language]}
-                  </option>
-                ))}
-            </select>
-          </label>
+          <span className="appearance-theme-label">{t('当前模式主题')}</span>
+          <div className="appearance-theme-options" role="listbox" aria-label={t('当前模式主题')}>
+            {themeNames
+              .filter(name => themeMode[name] === appearanceMode)
+              .map(name => {
+                const palette = themes[name];
+                return (
+                  <button
+                    type="button"
+                    key={name}
+                    role="option"
+                    aria-selected={currentModeTheme === name}
+                    data-active={currentModeTheme === name}
+                    onClick={() => onThemeChange(name)}
+                  >
+                    <span className="appearance-theme-swatches" aria-hidden="true">
+                      <i style={{ background: palette['--bg'] }} />
+                      <i style={{ background: palette['--accent'] }} />
+                      <i style={{ background: palette['--text'] }} />
+                    </span>
+                    <strong>{themeLabels[name][language]}</strong>
+                  </button>
+                );
+              })}
+          </div>
         </div>
       </section>
       <section className="settings-section">

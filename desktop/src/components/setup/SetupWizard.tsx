@@ -42,6 +42,7 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
   const [checking, setChecking] = useState(false);
   const zh = language === 'zh';
   const cleanedApiKey = stripConfigWhitespace(apiKey);
+  const visibleProviders = setupProviders(providers.length ? providers : fallbackProviders());
 
   useEffect(() => {
     void getProviderStatus().then(status => setProviders(status.providers));
@@ -121,10 +122,13 @@ export function SetupWizard({ onDone }: SetupWizardProps) {
             <div className="setup-page">
               <h2>{zh ? '选择供应商' : 'Choose provider'}</h2>
               <div className="provider-grid">
-                {Children.toArray((providers.length ? providers : fallbackProviders()).map(provider => (
+                {Children.toArray(visibleProviders.map(provider => (
                   <button type="button" data-active={backend === provider.providerId} onClick={() => selectProvider(provider.providerId)}>
-                    <strong>{t(provider.displayName)}</strong>
-                    <span>{provider.defaultModel || provider.backendType}</span>
+                    <span className="provider-grid-title">
+                      <strong>{t(provider.displayName)}</strong>
+                      <em>{provider.openaiCompatible ? (zh ? '兼容 API' : 'Compatible API') : provider.backendType}</em>
+                    </span>
+                    <span>{provider.defaultModel || (zh ? '连接后读取模型' : 'Discover models after connection')}</span>
                   </button>
                 )))}
               </div>
@@ -240,6 +244,17 @@ function fallbackProviders(): ProviderProfile[] {
       modelNotes: {},
     },
   ];
+}
+
+function setupProviders(providers: ProviderProfile[]): ProviderProfile[] {
+  const preferredOrder = ['openai-compatible', 'deepseek', 'openai', 'anthropic', 'gemini', 'kimi', 'zhipu-glm', 'bailian', 'doubao', 'ollama'];
+  return providers
+    .filter(provider => provider.providerId !== 'fake' && provider.providerId !== 'custom-openai')
+    .sort((left, right) => {
+      const leftIndex = preferredOrder.indexOf(left.providerId);
+      const rightIndex = preferredOrder.indexOf(right.providerId);
+      return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
+    });
 }
 
 function verificationFromResult(result: ProviderValidation, zh: boolean): VerificationState {
