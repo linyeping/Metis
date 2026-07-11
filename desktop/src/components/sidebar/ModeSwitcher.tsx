@@ -1,4 +1,3 @@
-import { LayoutGroup, motion } from 'framer-motion';
 import { Code2 } from 'lucide-react';
 import { ChatBubbleIcon, CoworkTaskIcon } from '../icons/MetisIcons';
 import { navigateAppMode } from '../../lib/modeNavigation';
@@ -21,42 +20,34 @@ export function ModeSwitcher() {
   const language = useUiStore(state => state.language);
 
   return (
-    <LayoutGroup id="mode-switcher">
-      <div className="mode-switcher" role="tablist" aria-label={language === 'zh' ? '模式' : 'Mode'}>
-        {MODES.map(mode => {
-          const Icon = mode.icon;
-          const active = appMode === mode.id;
-          const label = language === 'zh' ? mode.zh : mode.en;
-          return (
-            <button
-              key={mode.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              aria-label={label}
-              title={label}
-              className="mode-switcher-tab"
-              data-active={active}
-              onClick={() => {
-                if (active) return;
-                navigateAppMode(mode.id);
-              }}
-            >
-              {active && (
-                <motion.span
-                  className="mode-switcher-pill"
-                  layoutId="mode-switcher-pill"
-                  transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.72 }}
-                />
-              )}
-              <span className="mode-switcher-tab-content">
-                <Icon size={14} />
-                <span className="mode-switcher-label">{label}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </LayoutGroup>
+    <div className="mode-switcher" role="tablist" aria-label={language === 'zh' ? '模式' : 'Mode'}>
+      {MODES.map(mode => {
+        const Icon = mode.icon;
+        const active = appMode === mode.id;
+        const label = language === 'zh' ? mode.zh : mode.en;
+        return (
+          <button
+            key={mode.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-label={label}
+            title={label}
+            className="mode-switcher-tab"
+            data-active={active}
+            onClick={() => {
+              if (active) return;
+              navigateAppMode(mode.id);
+            }}
+          >
+            {active && <span className="mode-switcher-pill" />}
+            <span className="mode-switcher-tab-content">
+              <Icon size={14} />
+              <span className="mode-switcher-label">{label}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }

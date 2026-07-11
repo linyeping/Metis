@@ -93,4 +93,30 @@ describe('messagesFromSession tool records', () => {
 
     expect(toolResultStatus(result)).toBe('success');
   });
+
+  it('restores persisted image attachments from multimodal session history', () => {
+    const session = baseSession([
+      {
+        id: 'u-image',
+        role: 'user',
+        content: [
+          { type: 'text', text: '看一下这张图' },
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,YWJj' } },
+        ],
+      },
+    ]);
+
+    const [message] = messagesFromSession(session);
+
+    expect(message.content).toBe('看一下这张图');
+    expect(message.attachments).toHaveLength(1);
+    expect(message.attachments?.[0]).toMatchObject({
+      kind: 'image',
+      mime: 'image/png',
+      extension: '.png',
+      size: 3,
+      dataUrl: 'data:image/png;base64,YWJj',
+      status: 'ready',
+    });
+  });
 });

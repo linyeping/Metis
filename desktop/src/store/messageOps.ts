@@ -207,7 +207,7 @@ export function messagesFromSession(session: Session): ChatMessage[] {
     if (message.role === 'user' || message.role === 'assistant' || message.role === 'tool' || message.role === 'system') {
       const role = message.role === 'tool' ? 'assistant' : message.role;
       const content = contentToText(message.content);
-      const parsedUserContent = message.role === 'user' ? parseUserAttachmentContent(content, index) : null;
+      const parsedUserContent = message.role === 'user' ? parseUserMessageContent(message.content, index) : null;
       if (role === 'assistant' && pendingTools.length > 0) {
         // Attach accumulated tool cards to this assistant turn.
         messages.push({
@@ -293,6 +293,78 @@ export function singleUserHistoryNotice(session: Session, recovery: ChatRunRecov
 export function buildUserDisplayContent(text: string, attachments: ParsedFile[]): string {
   if (text) return text;
   return attachments.length > 0 ? '请分析附件。' : '';
+}
+
+function parseUserMessageContent(content: unknown, index: number): { content: string; attachments: ParsedFile[] } {
+  const imageAttachments = parseImageAttachmentContent(content, index);
+  const readableContent = contentToText(content);
+  const visibleContent = imageAttachments.length > 0
+    ? readableContent
+        .split('\n')
+        .filter(line => line.trim() !== '[图片附件]' && line.trim() !== '[Image attachment]')
+        .join('\n')
+        .trim()
+    : readableContent;
+  const parsed = parseUserAttachmentContent(visibleContent, index);
+  return {
+    content: parsed.content,
+    attachments: [...imageAttachments, ...parsed.attachments],
+  };
+}
+
+function parseImageAttachmentContent(content: unknown, messageIndex: number): ParsedFile[] {
+  if (!Array.isArray(content)) return [];
+  const attachments: ParsedFile[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+    const row = block as { type?: unknown; image_url?: unknown };
+    if (row.type !== 'image_url' || !row.image_url || typeof row.image_url !== 'object') continue;
+    const src = (row.image_url as { url?: unknown }).url;
+    if (typeof src !== 'string' || !src.startsWith('data:image/')) continue;
+    const mime = dataUrlMime(src);
+    const extension = imageExtension(mime);
+    const imageIndex = attachments.length;
+    attachments.push({
+      path: `history-image-${messageIndex}-${imageIndex}${extension}`,
+      name: `图片 ${imageIndex + 1}${extension}`,
+      extension,
+      size: dataUrlByteSize(src),
+      kind: 'image',
+      mime,
+      text: `[Image: 图片 ${imageIndex + 1}${extension}]`,
+      dataUrl: src,
+      status: 'ready',
+      truncated: false,
+    });
+  }
+  return attachments;
+}
+
+function dataUrlMime(value: string): string {
+  const match = value.match(/^data:([^;,]+)/i);
+  return match?.[1]?.toLowerCase() || 'image/png';
+}
+
+function imageExtension(mime: string): string {
+  const subtype = mime.split('/')[1]?.toLowerCase() || 'png';
+  if (subtype === 'jpeg') return '.jpg';
+  if (subtype === 'svg+xml') return '.svg';
+  return /^\w+$/.test(subtype) ? `.${subtype}` : '.png';
+}
+
+function dataUrlByteSize(value: string): number {
+  const commaIndex = value.indexOf(',');
+  if (commaIndex < 0) return 0;
+  const payload = value.slice(commaIndex + 1);
+  if (!/;base64,/i.test(value.slice(0, commaIndex + 1))) {
+    try {
+      return new TextEncoder().encode(decodeURIComponent(payload)).length;
+    } catch {
+      return payload.length;
+    }
+  }
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor(payload.length * 3 / 4) - padding);
 }
 
 function parseUserAttachmentContent(content: string, index: number): { content: string; attachments: ParsedFile[] } {

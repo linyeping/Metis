@@ -483,19 +483,51 @@ export function UserMessage() {
 
 export function UserAttachmentList({ attachments }: { attachments: ParsedFile[] }) {
   const t = useT();
+  const setImageAttachmentPreview = useUiStore(state => state.setImageAttachmentPreview);
   return (
     <div className="message-attachment-list" aria-label={t('附件')}>
-      {attachments.map(attachment => (
-        <article className="message-attachment-card" key={attachment.path || attachment.name}>
-          <span className="message-attachment-icon" data-kind={attachment.kind}>
-            {attachment.kind === 'image' ? <ImageIcon size={15} /> : <FileText size={15} />}
-          </span>
-          <span>
-            <strong title={attachment.name}>{attachment.name}</strong>
-            <small>{attachmentMeta(attachment)}</small>
-          </span>
-        </article>
-      ))}
+      {attachments.map(attachment => {
+        const previewable = attachment.kind === 'image' && Boolean(attachment.dataUrl);
+        const content = (
+          <>
+            <span className="message-attachment-icon" data-kind={attachment.kind}>
+              {attachment.kind === 'image' && attachment.dataUrl ? (
+                <img src={attachment.dataUrl} alt="" />
+              ) : attachment.kind === 'image' ? (
+                <ImageIcon size={15} />
+              ) : (
+                <FileText size={15} />
+              )}
+            </span>
+            <span>
+              <strong title={attachment.name}>{attachment.name}</strong>
+              <small>{attachmentMeta(attachment)}</small>
+            </span>
+          </>
+        );
+        if (!previewable || !attachment.dataUrl) {
+          return (
+            <article className="message-attachment-card" key={attachment.path || attachment.name}>
+              {content}
+            </article>
+          );
+        }
+        return (
+          <button
+            type="button"
+            className="message-attachment-card"
+            key={attachment.path || attachment.name}
+            aria-label={`${t('预览图片')} ${attachment.name}`}
+            onClick={() => setImageAttachmentPreview({
+              src: attachment.dataUrl || '',
+              name: attachment.name,
+              mime: attachment.mime,
+            })}
+          >
+            {content}
+          </button>
+        );
+      })}
     </div>
   );
 }

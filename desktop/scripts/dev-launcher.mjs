@@ -11,17 +11,7 @@ const preferredPort = normalizePort(process.env.METIS_DESKTOP_DEV_PORT, 5174);
 const rendererUrl = port => `http://${host}:${port}`;
 const viteCli = path.join(desktopRoot, 'node_modules', 'vite', 'bin', 'vite.js');
 const electronCli = path.join(desktopRoot, 'node_modules', 'electron', 'cli.js');
-const electronArgs = [
-  '--no-sandbox',
-  '--disable-gpu-sandbox',
-  '--in-process-gpu',
-  '--disable-gpu',
-  '--disable-gpu-compositing',
-  '--use-gl=swiftshader',
-  '--enable-unsafe-swiftshader',
-  '--disable-features=VizDisplayCompositor',
-  '.',
-];
+const electronArgs = ['.'];
 
 let renderer = null;
 let electron = null;

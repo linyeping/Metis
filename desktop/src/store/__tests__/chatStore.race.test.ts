@@ -6,11 +6,16 @@ vi.mock('../../lib/api', () => ({
   chatStream: vi.fn(async () => undefined),
   compactConversation: vi.fn(async () => ({})),
   createRun: vi.fn(async () => runPayload()),
+  createRunFollowup: vi.fn(async (_runId: string, body: { id: string; message: string; behavior: 'queue' | 'steer' }) => ({ ...body, status: 'pending', createdAt: 1, updatedAt: 1 })),
   createSession: vi.fn(async () => sessionMeta('session-new')),
+  deleteRunFollowup: vi.fn(async () => undefined),
   deleteSession: vi.fn(async () => undefined),
   getActiveSessionRun: vi.fn(async () => ({ ok: false, run: null })),
+  getAwaySummary: vi.fn(async () => ({ ok: false, summary: null })),
   getCompactStatus: vi.fn(async () => ({ running: false })),
   getComposerDeepResearchEnabled: vi.fn(async () => false),
+  getPromptSuggestions: vi.fn(async () => ({ ok: false, suggestions: [] })),
+  getRun: vi.fn(async () => runPayload({ status: 'done' })),
   getSession: vi.fn(async () => sessionPayload('session-new', [])),
   getSessions: vi.fn(async () => ({
     sessions: [sessionMeta('session-new')],
@@ -28,6 +33,7 @@ vi.mock('../../lib/api', () => ({
   startChatRun: vi.fn(async () => runPayload()),
   switchSession: vi.fn(async () => undefined),
   switchWorkspace: vi.fn(async () => undefined),
+  updateRunFollowup: vi.fn(async (_runId: string, id: string, behavior: 'queue' | 'steer') => ({ id, message: '', behavior, status: 'pending', createdAt: 1, updatedAt: 1 })),
   clearWorkspaceSessions: vi.fn(async () => undefined),
   createWorkspace: vi.fn(async () => ({ id: 'workspace-1', name: 'Workspace', path: '', createdAt: 1, updatedAt: 1 })),
 }));
@@ -36,7 +42,7 @@ const api = await import('../../lib/api');
 const { useChatStore } = await import('../chatStore');
 const { useSessionStore } = await import('../sessionStore');
 const { useUiStore } = await import('../uiStore');
-const { clearActiveRunController, processedRunSeq } = await import('../runManager');
+const { clearActiveRunController, processedRunSeq, setActiveRunController } = await import('../runManager');
 
 describe('chatStore loadSession runtime correctness', () => {
   beforeEach(() => {
@@ -71,6 +77,9 @@ describe('chatStore loadSession runtime correctness', () => {
       pendingSendSessionId: null,
       usage: null,
       contextLedger: null,
+      followupBehavior: 'queue',
+      followupsBySession: {},
+      pausedFollowupSessions: {},
     });
     vi.mocked(api.getActiveSessionRun).mockResolvedValue({ ok: false, run: null });
   });
@@ -105,6 +114,57 @@ describe('chatStore loadSession runtime correctness', () => {
       surface_mode: 'chat',
       deep_research: true,
     }));
+  });
+
+  it('adds a running follow-up with the selected queue behavior', async () => {
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    const controller = new AbortController();
+    setActiveRunController('session-1', { assistantId: 'assistant-1', controller, runId: 'run-1' });
+    useChatStore.setState({
+      composerText: 'do this after the current turn',
+      streaming: true,
+      runSessionId: 'session-1',
+      controller,
+    });
+
+    await useChatStore.getState().submitFollowup('queue');
+
+    expect(api.createRunFollowup).toHaveBeenCalledWith('run-1', expect.objectContaining({
+      message: 'do this after the current turn',
+      behavior: 'queue',
+    }));
+    expect(useChatStore.getState().composerText).toBe('');
+    expect(useChatStore.getState().followupsBySession['session-1']).toHaveLength(1);
+    expect(useChatStore.getState().followupsBySession['session-1'][0].behavior).toBe('queue');
+  });
+
+  it('stopping pauses queued work and converts unapplied steering to queue', async () => {
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    const controller = new AbortController();
+    setActiveRunController('session-1', { assistantId: 'assistant-1', controller, runId: 'run-1' });
+    useChatStore.setState({
+      streaming: true,
+      runSessionId: 'session-1',
+      controller,
+      followupsBySession: {
+        'session-1': [{
+          id: 'followup-steer',
+          message: 'change direction',
+          behavior: 'steer',
+          status: 'pending',
+          createdAt: 1,
+          updatedAt: 1,
+          runId: 'run-1',
+        }],
+      },
+    });
+
+    useChatStore.getState().stop();
+
+    const followup = useChatStore.getState().followupsBySession['session-1'][0];
+    expect(followup.behavior).toBe('queue');
+    expect(followup.status).toBe('paused');
+    expect(useChatStore.getState().pausedFollowupSessions['session-1']).toBe(true);
   });
 
   it('send uses local_vm execution profile for Code mode when enabled', async () => {
@@ -216,6 +276,26 @@ describe('chatStore loadSession runtime correctness', () => {
 
     expect(api.getSession).toHaveBeenCalledWith('session-1');
     expect(useChatStore.getState().messages.map(message => message.content)).toEqual(['backend user', 'backend assistant']);
+  });
+
+  it('ignores an older session load after the active session changes', async () => {
+    const first = deferred<Session>();
+    const second = deferred<Session>();
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    vi.mocked(api.getSession).mockImplementation(sessionId => sessionId === 'session-1' ? first.promise : second.promise);
+
+    const firstLoad = useChatStore.getState().loadSession('session-1');
+    await waitUntil(() => vi.mocked(api.getSession).mock.calls.length === 1);
+    useSessionStore.setState({ activeSessionId: 'session-new' });
+    const secondLoad = useChatStore.getState().loadSession('session-new');
+    second.resolve(sessionPayload('session-new', [{ role: 'user', content: 'new active transcript' }]));
+    await secondLoad;
+    first.resolve(sessionPayload('session-1', [{ role: 'user', content: 'stale transcript' }]));
+    await firstLoad;
+
+    expect(useChatStore.getState().loadedSessionId).toBe('session-new');
+    expect(useChatStore.getState().messages.some(message => message.content === 'new active transcript')).toBe(true);
+    expect(useChatStore.getState().messages.some(message => message.content === 'stale transcript')).toBe(false);
   });
 });
 

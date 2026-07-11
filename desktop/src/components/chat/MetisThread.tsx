@@ -9,6 +9,7 @@ import {
   ThreadPrimitive,
   useAuiState,
 } from '@assistant-ui/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronDown, Code2 } from 'lucide-react';
 import { ChatBubbleIcon, CoworkTaskIcon } from '../icons/MetisIcons';
 import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -19,7 +20,10 @@ import { useMetisRuntime } from '../../runtime/metisRuntime';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
+import { useT } from '../../hooks/useT';
 import { Composer } from './Composer';
+import { ImageAttachmentPreview } from './ImageAttachmentPreview';
+import { PendingFollowups } from './PendingFollowups';
 import { AssistantMessage, SystemMessage, UserMessage } from './MessageBubble';
 import { AwaySummaryNotice, ContextOrganizingNotice, LearningNotice, RunRecoveryNotice, RuntimeStatusBar, TodoNotice } from './NoticeCards';
 import { SubagentGroup } from './SubagentGroup';
@@ -72,6 +76,20 @@ export function MetisThread() {
   const subagents = useChatStore(state => state.subagents);
   const runtimeStatus = useChatStore(state => state.runtimeStatus);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
+  const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
+  const sessions = useSessionStore(state => state.sessions);
+  const workspaces = useSessionStore(state => state.workspaces);
+  const t = useT();
+  const activeSession = activeSessionId ? sessions.find(session => session.id === activeSessionId) : null;
+  const contextWorkspaceId = appMode === 'chat'
+    ? ''
+    : activeSession
+      ? activeSession.workspaceId
+      : activeWorkspaceId;
+  const activeWorkspace = contextWorkspaceId ? workspaces.find(workspace => workspace.id === contextWorkspaceId) : null;
+  const threadTitle = activeSession?.title?.trim() || t('新对话');
+  const workspaceName = activeWorkspace?.name?.trim() || '';
+  const threadContextKey = `${activeSessionId || 'draft'}:${threadTitle}:${contextWorkspaceId}:${workspaceName}`;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -122,10 +140,32 @@ export function MetisThread() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className="thread-shell" data-compacting={compacting} data-mode={appMode} ref={shellRef}>
+      <div
+        className="thread-shell"
+        data-away-summary={Boolean(awaySummary)}
+        data-compacting={compacting}
+        data-mode={appMode}
+        ref={shellRef}
+      >
         {mountedBackdrops.has('chat')   && <ChatAuroraBackdrop visible={appMode === 'chat'}   />}
         {mountedBackdrops.has('cowork') && <CoworkBackdrop      visible={appMode === 'cowork'} />}
         {mountedBackdrops.has('code')   && <CodeGridBackdrop    visible={appMode === 'code'}   />}
+        <header className="thread-context-header" aria-label={t('当前会话')}>
+          <AnimatePresence initial={false} mode="wait">
+            <motion.div
+              className="thread-context-copy"
+              key={threadContextKey}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 3 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <strong title={threadTitle}>{threadTitle}</strong>
+              {workspaceName && <span title={workspaceName}>{workspaceName}</span>}
+            </motion.div>
+          </AnimatePresence>
+        </header>
+        <ImageAttachmentPreview contextKey={`${appMode}:${activeSessionId || 'draft'}`} />
         {memoryNotice && (
           <LearningNotice notice={memoryNotice} onDismiss={clearMemoryNotice} />
         )}
@@ -163,6 +203,7 @@ export function MetisThread() {
         <div className="thread-dock" ref={dockRef}>
           {showSubagentStrip && <SubagentGroup items={subagents} onDismiss={() => setHiddenSubagentSignature(subagentSignature)} />}
           {dockRuntimeStatus && <RuntimeStatusBar status={dockRuntimeStatus} />}
+          <PendingFollowups />
           <Composer />
         </div>
       </div>

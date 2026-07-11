@@ -40,6 +40,12 @@ interface ToolPreview {
   content: string;
 }
 
+export interface ImageAttachmentPreview {
+  src: string;
+  name: string;
+  mime: string;
+}
+
 export interface WebPreviewTab {
   id: string;
   url: string;
@@ -115,6 +121,7 @@ interface UiState {
   modelPickerOpen: boolean;
   workspaceMenuOpen: boolean;
   previewFrozenSrc: string | null;
+  imageAttachmentPreview: ImageAttachmentPreview | null;
   rightRailOpen: boolean;
   rightRailWidth: number;
   rightRailMode: RightRailMode;
@@ -160,6 +167,7 @@ interface UiState {
   setModelPickerOpen: (open: boolean) => void;
   setWorkspaceMenuOpen: (open: boolean) => void;
   setPreviewFrozenSrc: (src: string | null) => void;
+  setImageAttachmentPreview: (preview: ImageAttachmentPreview | null) => void;
   setRightRailOpen: (open: boolean) => void;
   setRightRailWidth: (width: number) => void;
   setRightRailMode: (mode: RightRailMode) => void;
@@ -251,7 +259,9 @@ function storedFontFamily(): FontFamily {
 }
 
 function storedNumber(key: string, fallback: number, min: number, max: number): number {
-  const value = Number(localStorage.getItem(key));
+  const stored = localStorage.getItem(key);
+  if (stored === null || stored.trim() === '') return fallback;
+  const value = Number(stored);
   if (!Number.isFinite(value)) return fallback;
   return clampNumber(Math.round(value), min, max);
 }
@@ -422,6 +432,7 @@ export const useUiStore = create<UiState>(set => ({
   modelPickerOpen: false,
   workspaceMenuOpen: false,
   previewFrozenSrc: null,
+  imageAttachmentPreview: null,
   rightRailOpen: hasVisibleWorkspaceCard(initialWorkspaceCardVisibility),
   rightRailWidth: 780,
   rightRailMode: 'files',
@@ -505,6 +516,7 @@ export const useUiStore = create<UiState>(set => ({
   setModelPickerOpen: modelPickerOpen => set({ modelPickerOpen }),
   setWorkspaceMenuOpen: workspaceMenuOpen => set({ workspaceMenuOpen }),
   setPreviewFrozenSrc: previewFrozenSrc => set({ previewFrozenSrc }),
+  setImageAttachmentPreview: imageAttachmentPreview => set({ imageAttachmentPreview }),
   setRightRailOpen: rightRailOpen => set({ rightRailOpen }),
   setRightRailWidth: rightRailWidth => set({ rightRailWidth: Math.min(Math.max(rightRailWidth, 420), 1180) }),
   setRightRailMode: rightRailMode =>

@@ -255,6 +255,7 @@ export function App() {
       void loadChatSession(null);
       return;
     }
+    if (useChatStore.getState().loadedSessionId === activeSessionId) return;
     void loadChatSession(activeSessionId);
   }, [activeSessionId, appMode, loadChatSession, sessions]);
 

@@ -3,9 +3,12 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 contextBridge.exposeInMainWorld('metis', {
   backendPort: () => ipcRenderer.invoke('metis:backend-port'),
   window: action => ipcRenderer.invoke('metis:window', action),
+  getWindowCloseBehavior: () => ipcRenderer.invoke('metis:window-close-behavior'),
+  setWindowCloseBehavior: behavior => ipcRenderer.invoke('metis:set-window-close-behavior', behavior),
   pickFolder: () => ipcRenderer.invoke('metis:pick-folder'),
   pickPythonExe: () => ipcRenderer.invoke('metis:pick-python-exe'),
   saveFile: payload => ipcRenderer.invoke('metis:save-file', payload),
+  saveBinaryFile: payload => ipcRenderer.invoke('metis:save-binary-file', payload),
   openExternal: url => ipcRenderer.invoke('metis:open-external', url),
   openPath: path => ipcRenderer.invoke('metis:open-path', path),
   bootState: () => ipcRenderer.invoke('metis:boot-state'),
@@ -53,6 +56,9 @@ contextBridge.exposeInMainWorld('metis', {
   connectorAuthorize: (service, options) => ipcRenderer.invoke('metis:connector-authorize', service, options),
   connectorStatus: () => ipcRenderer.invoke('metis:connector-status'),
   connectorDisconnect: service => ipcRenderer.invoke('metis:connector-disconnect', service),
+  extensionSecretsSave: (extensionId, values) => ipcRenderer.invoke('metis:extension-secrets-save', extensionId, values),
+  extensionSecretsStatus: extensionId => ipcRenderer.invoke('metis:extension-secrets-status', extensionId),
+  extensionSecretsDelete: extensionId => ipcRenderer.invoke('metis:extension-secrets-delete', extensionId),
   getPathForFile: file => {
     try {
       return webUtils.getPathForFile(file) || ''

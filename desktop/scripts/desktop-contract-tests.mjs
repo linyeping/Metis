@@ -125,10 +125,9 @@ test('DeepSeek, slash menu, cache dashboard, and release gates stay wired', () =
   assert.match(mainPrompt, /Public vs Diagnostic Details/);
   assert.match(mainPrompt, /do not expose internal runtime implementation details/);
 
-  assert.match(rightRail, /contextLedger/);
-  assert.match(rightRail, /cacheHitRate/);
-  assert.match(rightRail, /label=\{t\('Cache'\)\}/);
-  assert.match(css, /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(72px,\s*1fr\)\)/);
+  assert.match(composer, /contextLedger/);
+  assert.match(composer, /cacheHitTokens/);
+  assert.match(composer, /缓存命中/);
 });
 
 test('Runtime Manager productization stays wired', () => {
@@ -161,11 +160,8 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(builder, /runtime-pack is NO LONGER bundled/);
   assert.match(builder, /METIS_RUNTIME_PACK_URL/);
   assert.match(settings, /RuntimeTab/);
-  assert.match(settings, /Metis Runtime Manager/);
-  assert.match(settings, /VM Runtime Pack/);
-  assert.match(settings, /本地 VM 基础条件/);
-  assert.match(settings, /MetisRuntime WSL 是 local_vm 的第一版可用 runner/);
-  assert.match(settings, /不是 HCS direct runner/);
+  assert.match(settings, /RuntimeTab/);
+  assert.match(settings, /准备 Metis Runtime Bundle/);
   assert.match(settings, /Code 执行策略/);
   assert.match(settings, /Code 命令使用 local_vm/);
   assert.match(settings, /setCodeExecutionProfile\(event\.target\.checked \? 'local_vm' : 'local_worktree'\)/);
@@ -337,9 +333,19 @@ test('electron window keeps hardened renderer defaults', () => {
   assert.match(security, /nodeIntegration:\s*false/);
   assert.match(security, /sandbox:\s*true/);
   assert.match(security, /webSecurity:\s*true/);
-  // P0：swiftshader 软件渲染在沙箱下崩溃(黑屏)，打包版必须关闭沙箱。锁死此修复以防回归。
+  // Windows uses SwiftShader because the native D3D GPU process crashes on
+  // affected systems. DirectComposition must stay disabled so rendered frames
+  // are actually presented to the HWND instead of appearing black.
+  assert.match(main, /METIS_GRAPHICS_MODE/);
+  assert.match(main, /if \(forceSoftwareRendering\)/);
+  assert.match(main, /appendSwitch\(['"]use-angle['"], ['"]swiftshader['"]\)/);
+  assert.match(main, /appendSwitch\(['"]enable-unsafe-swiftshader['"]\)/);
+  assert.match(main, /appendSwitch\(['"]disable-direct-composition['"]\)/);
+  assert.doesNotMatch(main, /app\.disableHardwareAcceleration\(\)/);
   assert.match(main, /appendSwitch\(['"]no-sandbox['"]\)/);
   assert.match(main, /appendSwitch\(['"]disable-gpu-sandbox['"]\)/);
+  assert.doesNotMatch(main, /appendSwitch\(['"]disable-gpu-compositing['"]\)/);
+  assert.doesNotMatch(main, /appendSwitch\(['"]disable-features['"], ['"]VizDisplayCompositor['"]\)/);
   assert.match(main, /setWindowOpenHandler/);
   assert.match(main, /will-navigate/);
 });
@@ -612,12 +618,11 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(chatStore, /coworkPlan/);
   assert.match(sseParser, /coworkPlanFromRuntimeStatus/);
   assert.match(coworkActivity, /CoworkActivityPanel/);
-  assert.match(coworkActivity, /cowork-plan-list/);
+  assert.match(coworkActivity, /cowork-subrun-list/);
   assert.match(coworkActivity, /worktreeId/);
   assert.match(coworkActivity, /artifactRows/);
-  assert.match(coworkActivity, /getWorktreeDiff/);
-  assert.match(coworkActivity, /promoteWorktree/);
-  assert.match(coworkActivity, /cowork-diff-actions/);
+  assert.match(coworkActivity, /cowork-evidence-pills/);
+  assert.match(coworkActivity, /localVmArtifacts/);
   assert.match(rightRail, /renderActivityPanel/);
   assert.match(rightRail, /cards:\s*\['activity', 'plan', 'research', 'session'\]/);
   assert.match(rightRail, /activity-inline-tool-output/);
@@ -627,7 +632,6 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(css, /\.activity-pane/);
   assert.match(css, /\.cowork-activity-panel/);
   assert.match(css, /\.cowork-subrun-card/);
-  assert.match(css, /\.cowork-diff-actions/);
   assert.match(css, /\.subagent-strip-main/);
   assert.match(css, /\.subagent-activity-panel/);
   assert.match(css, /width:\s*min\(var\(--chat-column-width\),\s*100%\)/);
@@ -678,7 +682,7 @@ test('file change diff workbench and custom OpenAI relay stay wired', () => {
   assert.match(settings, /custom-openai/);
   assert.match(setup, /custom-openai/);
   assert.match(setup, /apiKeyFormatHint/);
-  assert.match(setup, /setApiKey\(value => value\.trim\(\)\)/);
+  assert.match(setup, /setApiKey\(stripConfigWhitespace\(event\.target\.value\)\)/);
   assert.match(setup, /setup-verification/);
   assert.match(api, /export async function verifyFirstRun/);
   assert.match(api, /return providerValidationFromRecord\(data\)/);
@@ -759,13 +763,20 @@ test('NEW-83 appearance font size controls stay wired', () => {
   assert.match(uiStore, /codeFontSize/);
   assert.match(uiStore, /metis\.uiFontSize/);
   assert.match(uiStore, /metis\.codeFontSize/);
+  assert.match(uiStore, /stored === null \|\| stored\.trim\(\) === ''/);
+  assert.match(uiStore, /storedNumber\('metis\.uiFontSize', 14, 12, 18\)/);
   assert.match(theme, /--ui-font-size/);
+  assert.match(theme, /--ui-font-size-2xs/);
+  assert.match(theme, /--ui-font-size-md/);
+  assert.match(theme, /--ui-font-size-display/);
   assert.match(theme, /--code-font-size/);
   assert.match(settings, /FontSizeControl/);
   assert.match(settings, /UI 字号/);
   assert.match(settings, /代码字号/);
   assert.match(css, /--ui-font-size:\s*14px/);
   assert.match(css, /--code-font-size:\s*12px/);
+  assert.match(css, /\.settings-panel\s*\{[\s\S]*scrollbar-width:\s*none/);
+  assert.match(css, /\.settings-panel::-webkit-scrollbar\s*\{[\s\S]*display:\s*none/);
   assert.match(css, /\.settings-size-row/);
   assert.match(css, /\.message-bubble,[\s\S]*\.markdown-body,[\s\S]*\.composer textarea/);
   assert.match(smoke, /new83-ui-font-size-applies/);
@@ -913,7 +924,8 @@ test('NEW-87 abortable provider and tool isolation stays wired', () => {
   assert.match(cancellation, /def cancellation_context/);
   assert.match(realBackend, /"cancel_event": threading\.Event\(\)/);
   assert.match(realBackend, /cancel_event\.set\(\)/);
-  assert.match(realBackend, /run_stream\(messages, config, registry=registry, cancel_event=cancel_event\)/);
+  assert.match(realBackend, /run_stream\(messages, config, registry=registry, \*\*run_stream_kwargs\)/);
+  assert.match(realBackend, /run_stream_kwargs\["cancel_event"\] = cancel_event/);
   assert.match(agentLoop, /cancel_event: Optional\[threading\.Event\]/);
   assert.match(agentLoop, /backend\.chat_stream/);
   assert.match(agentLoop, /stream_kwargs\["cancel_event"\]/);
@@ -1767,8 +1779,20 @@ test('NEW-69 context compaction and handoff control stays wired', () => {
   assert.match(runRecovery, /metis\.chat\.compactHandoff\./);
   assert.match(component, /composer-context-orb/);
   assert.doesNotMatch(component, /composer-context-compact/);
+  assert.match(component, /row\.details && row\.details\.length > 0 && expanded\[row\.id\]/);
   assert.match(css, /\.composer-context-popover/);
+  assert.match(css, /width: min\(200px, calc\(100vw - 20px\)\)/);
+  assert.match(css, /grid-template-columns: 8px minmax\(0, 1fr\) 42px 32px/);
+  assert.match(css, /\.composer-context-list \{[\s\S]*?display: flex;[\s\S]*?flex-direction: column;[\s\S]*?gap: 0;/);
+  assert.match(css, /\.composer-context-row \{[\s\S]*?height: 16px;[\s\S]*?min-height: 16px;/);
+  assert.doesNotMatch(css, /min-height: calc\(var\(--ui-font-size\) \+ 20px\)/);
+  assert.match(css, /--control-h-xs:\s*22px/);
+  assert.match(css, /--control-h-sm:\s*28px/);
+  assert.match(css, /--control-h-md:\s*34px/);
+  assert.match(css, /--control-h-lg:\s*40px/);
+  assert.match(css, /\.composer-context-row em,\s*\.composer-context-row b \{[\s\S]*?white-space: nowrap/);
   assert.match(smoke, /new69-context-compact-handoff-saved/);
+  assert.match(smoke, /new69-context-popover-rows-are-compact/);
   assert.match(fakeBackend, /fakeCompactSmokeSession/);
   assert.match(fakeBackend, /pathname === '\/compact'/);
   assert.match(fakeBackend, /pathname === '\/compact\/status'/);
@@ -2097,16 +2121,25 @@ test('NEW-80 Codex-like composer layout stays wired', () => {
   assert.match(composer, /composer-toolbar-right/);
   assert.match(composer, /<Plus size=\{isCodeMode \? 18 : 22\}/);
   assert.match(composer, /<ArrowUp size=\{20\}/);
-  assert.match(composer, /aria-label=\{streaming \? t\('停止生成'\) : t\('发送消息'\)\}/);
+  assert.match(composer, /aria-label=\{streaming \? \(followupBehavior === 'queue'/);
+  assert.match(composer, /className="icon-button composer-stop-button"/);
+  assert.match(composer, /onClick=\{stop\}/);
   assert.match(css, /\.composer\s*\{[\s\S]*flex-direction:\s*column/);
   assert.match(css, /--chat-column-width:\s*820px/);
   assert.match(css, /\.thread-window\s*\{[\s\S]*width:\s*min\(var\(--chat-column-width\),\s*100%\)/);
   assert.match(css, /\.composer\s*\{[\s\S]*width:\s*min\(var\(--chat-column-width\),\s*100%\)/);
-  assert.match(css, /\.send-button\s*\{[\s\S]*border-radius:\s*999px/);
+  assert.match(css, /\.send-button\s*\{[\s\S]*border-radius:\s*var\(--radius-pill\)/);
   assert.match(smoke, /new80-composer-column-layout/);
   assert.match(smoke, /new80-composer-textarea-full-width/);
   assert.match(smoke, /new80-composer-circular-send-button/);
   assert.match(doc, /Codex-Like Composer Layout/);
+});
+
+test('pending followups keep a stable empty store snapshot', () => {
+  const pendingFollowups = read('src/components/chat/PendingFollowups.tsx');
+  assert.match(pendingFollowups, /const EMPTY_FOLLOWUPS/);
+  assert.match(pendingFollowups, /state\.followupsBySession\[sessionId\] \?\? EMPTY_FOLLOWUPS/);
+  assert.doesNotMatch(pendingFollowups, /followupsBySession\[sessionId\]\s*\|\|\s*\[\]/);
 });
 
 test('NEW-81 composer sidebar and zone polish stays wired', () => {
@@ -2128,10 +2161,11 @@ test('NEW-81 composer sidebar and zone polish stays wired', () => {
   assert.match(sections, /zone-header-actions/);
   assert.match(css, /\.sidebar-search-row/);
   assert.match(css, /\.sidebar-folder-button/);
-  assert.match(css, /min-height:\s*40px/);
+  assert.match(css, /\.side-chat-boundary\s*\{[\s\S]*min-height:\s*var\(--control-h-lg\)/);
   assert.match(css, /max-height:\s*min\(38vh,\s*320px\)/);
   assert.match(css, /\.zone-header-actions/);
-  assert.match(css, /\.zone-pill\s*\{[\s\S]*border-radius:\s*10px/);
+  assert.match(css, /\.zone-pill\s*\{[\s\S]*min-height:\s*var\(--control-h-md\)/);
+  assert.match(css, /\.zone-pill\s*\{[\s\S]*border-radius:\s*var\(--radius-lg\)/);
   assert.match(smoke, /new81-composer-default-height-compact/);
   assert.match(smoke, /new81-chat-sidebar-folder-icon-removed/);
   assert.match(smoke, /new81-sidebar-top-new-chat-removed/);
@@ -2367,7 +2401,7 @@ test('NEW-104 cardized side chat and preview toolbar stays wired', () => {
   assert.match(rightRail, /className="web-external-button"/);
   assert.match(css, /\.side-chat-rail\[data-open='true'\]\s*\{[\s\S]*padding:\s*6px/);
   assert.match(css, /\.side-chat-rail \.side-chat-pane\s*\{[\s\S]*border:\s*1px solid/);
-  assert.match(css, /\.side-chat-rail \.side-chat-pane\s*\{[\s\S]*border-radius:\s*8px/);
+  assert.match(css, /\.side-chat-rail \.side-chat-pane\s*\{[\s\S]*border-radius:\s*var\(--radius-md\)/);
   assert.match(css, /\.web-url-bar\s*\{[\s\S]*grid-template-columns:\s*auto auto minmax\(52px,\s*1fr\) auto auto auto/);
   assert.match(css, /\.web-more-menu/);
   assert.match(css, /\.web-browser-toolbar\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*24px\)/);
@@ -2621,6 +2655,101 @@ test('NEW-119 panel toggles close blank rails and avoid delayed layout rebound',
   assert.doesNotMatch(appShell, /sideChatLayoutHold|rightRailLayoutHold/);
   assert.match(doc, /NEW-119/);
   assert.match(doc, /Completed/);
+});
+
+test('compact window keeps only the central workspace visible', () => {
+  const electronMain = read('electron/main.cjs');
+  const titlebar = read('src/components/shell/Titlebar.tsx');
+  const css = read('src/index.css');
+  const compactLayout = css.match(
+    /@media \(max-width: 980px\) \{[\s\S]*?\.shell-body,[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*?\.thread-shell \{[\s\S]*?--chat-column-gutter:\s*clamp\(16px, 4vw, 32px\);[\s\S]*?\n\}/,
+  );
+
+  assert.match(electronMain, /minWidth:\s*480/);
+  assert.match(titlebar, /className="titlebar-layout-button"/);
+  assert.ok(compactLayout, 'compact layout should collapse to one central workspace column');
+  assert.match(compactLayout[0], /\.secondary-panel,[\s\S]*?\.right-rail \{\s*display:\s*none;/);
+  assert.match(compactLayout[0], /\.titlebar-layout-button,[\s\S]*?\.titlebar-session-workspace-button \{\s*display:\s*none !important;/);
+});
+
+test('window controls reflect maximize state and chat scrollbar stays subtle', () => {
+  const titlebar = read('src/components/shell/Titlebar.tsx');
+  const settings = read('src/components/settings/SettingsDialog.tsx');
+  const windowStateHook = read('src/hooks/useWindowState.ts');
+  const css = read('src/index.css');
+
+  assert.match(windowStateHook, /window\.metis\?\.onWindowState\?\.\(setWindowState\)/);
+  assert.match(titlebar, /isMaximized \|\| isFullScreen \? <Copy size=\{13\} \/> : <Square size=\{13\} \/>/);
+  assert.match(settings, /isMaximized \|\| isFullScreen \? <Copy size=\{13\} \/> : <Square size=\{13\} \/>/);
+  assert.match(css, /\.thread-viewport::-webkit-scrollbar \{\s*width:\s*6px;/);
+  assert.match(css, /\.thread-viewport:hover::-webkit-scrollbar-thumb/);
+});
+
+test('UI design tokens own control states, typography, surfaces, and responsive tiers', () => {
+  const css = read('src/index.css');
+  const themes = read('src/lib/themes.ts');
+
+  assert.match(css, /--control-hover-bg:/);
+  assert.match(css, /--control-active-bg:/);
+  assert.match(css, /--focus-ring-color:/);
+  assert.match(css, /:where\(\.control-xs, \.control-sm, \.control-md, \.control-lg\):active:not\(:disabled\)/);
+  assert.match(css, /button:focus-visible,[\s\S]*outline:\s*2px solid var\(--focus-ring-color\)/);
+  assert.match(css, /input:disabled,[\s\S]*opacity:\s*var\(--control-disabled-opacity\)/);
+  assert.match(css, /button:disabled:not\(\[data-progress='true'\]\)[\s\S]*opacity:\s*var\(--control-disabled-opacity\)/);
+  assert.match(css, /--radius-xs:\s*5px/);
+  assert.match(css, /--radius-xl:\s*16px/);
+  assert.match(css, /--motion-fast:\s*120ms/);
+  assert.match(css, /--motion-base:\s*160ms/);
+  assert.match(css, /--motion-slow:\s*220ms/);
+  assert.match(css, /--text-secondary:\s*var\(--text-muted\)/);
+  assert.match(css, /--surface-hover:/);
+  assert.match(css, /\.perm-warning-dialog \{[\s\S]*box-shadow:\s*var\(--elevation-lg\), var\(--edge-highlight\)/);
+  assert.doesNotMatch(css, /@media \(prefers-color-scheme: light\)/);
+  assert.equal((themes.match(/'--accent-contrast':/g) || []).length, 20);
+  assert.equal((themes.match(/'--text-muted':/g) || []).length, 20);
+  assert.equal((themes.match(/'--text-faint':/g) || []).length, 20);
+  assert.doesNotMatch(css, /@media \(max-width: (?:820|900)px\)/);
+  assert.doesNotMatch(css, /@container \(max-width: 340px\)/);
+});
+
+test('thread header shows workspace only for explicitly scoped cowork and code sessions', () => {
+  const thread = read('src/components/chat/MetisThread.tsx');
+  const sidebar = read('src/components/sidebar/Sidebar.tsx');
+  const sessionStore = read('src/store/sessionStore.ts');
+  const api = read('src/lib/api.ts');
+  const sessionRoutes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'session_routes.py'), 'utf8');
+  const css = read('src/index.css');
+
+  assert.match(thread, /const threadTitle = activeSession\?\.title\?\.trim\(\) \|\| t\('新对话'\)/);
+  assert.match(thread, /const contextWorkspaceId = appMode === 'chat'/);
+  assert.match(thread, /\? activeSession\.workspaceId/);
+  assert.match(thread, /const workspaceName = activeWorkspace\?\.name\?\.trim\(\) \|\| ''/);
+  assert.doesNotMatch(thread, /activeWorkspace\?\.path/);
+  assert.match(thread, /<AnimatePresence initial=\{false\} mode="wait">/);
+  assert.match(thread, /className="thread-context-copy"/);
+  assert.match(sidebar, /startDraftSession\(workspaceId \|\| null\)/);
+  assert.match(sidebar, /session-list-unscoped/);
+  assert.match(sessionStore, /startDraftSession: \(workspaceId = null\)/);
+  assert.match(sessionStore, /const createWorkspaceId = appMode === 'chat' \|\| draft \? modeWorkspaceId : undefined/);
+  assert.match(api, /payload\.workspace_id = workspaceId \|\| ''/);
+  assert.match(sessionRoutes, /if "workspace_id" in data:/);
+  assert.match(sessionRoutes, /state\.active_workspace_id = ""/);
+  assert.match(css, /grid-template-rows:\s*var\(--thread-context-header-height\) minmax\(0, 1fr\)/);
+  assert.match(css, /\.thread-context-copy span/);
+  assert.match(css, /\.session-list-unscoped/);
+});
+
+test('compact away summary occupies layout space instead of covering messages', () => {
+  const thread = read('src/components/chat/MetisThread.tsx');
+  const css = read('src/index.css');
+
+  assert.match(thread, /data-away-summary=\{Boolean\(awaySummary\)\}/);
+  assert.match(
+    css,
+    /\.thread-shell\[data-away-summary='true'\] \{\s*grid-template-rows:\s*var\(--thread-context-header-height\) auto minmax\(0, 1fr\)/,
+  );
+  assert.match(css, /\.away-summary-notice \{\s*position:\s*relative;\s*inset:\s*auto;/);
+  assert.match(css, /\.away-summary-notice p \{[\s\S]*?-webkit-line-clamp:\s*1;/);
 });
 
 test('FABLEADV-12 skills system stays wired end-to-end', () => {

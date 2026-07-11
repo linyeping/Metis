@@ -36,7 +36,10 @@ export type AppMode = 'chat' | 'cowork' | 'code';
 
 export type RunExecutionProfile = 'local_direct' | 'local_worktree' | 'local_vm';
 
+export type WindowCloseBehavior = 'ask' | 'tray' | 'quit';
+
 export type SettingsSection =
+  | 'general'
   | 'appearance'
   | 'conversation'
   | 'model'
@@ -685,6 +688,18 @@ export interface TerminalEventPayload {
 
 export type ChatRunStatus = 'queued' | 'running' | 'canceling' | 'done' | 'failed' | 'canceled' | string;
 
+export type ChatFollowupBehavior = 'queue' | 'steer';
+export type ChatFollowupStatus = 'pending' | 'applied' | 'sending' | 'paused' | string;
+
+export interface ChatRunFollowup {
+  id: string;
+  message: string;
+  behavior: ChatFollowupBehavior;
+  status: ChatFollowupStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ChatRunPayload {
   ok?: boolean;
   runId: string;
@@ -715,6 +730,7 @@ export interface ChatRunPayload {
   finishedAt: number;
   eventCount: number;
   lastSeq: number;
+  followups?: ChatRunFollowup[];
   error: string;
 }
 
@@ -1687,6 +1703,10 @@ export interface SkillSummary {
   disallowedTools: string[];
   preview: string;
   files: SkillFileEntry[];
+  iconSmall: string;
+  iconLarge: string;
+  iconDataUrl: string;
+  brandColor: string;
 }
 
 export interface SkillDetail extends SkillSummary {
@@ -1740,6 +1760,80 @@ export interface McpStatusPayload {
   enabled: boolean;
   servers: McpServerStatus[];
   configSources: McpConfigSource[];
+}
+
+export type MarketplaceItemKind = 'skill' | 'mcp' | 'plugin';
+
+export interface MarketplaceEnvironmentVariable {
+  name: string;
+  description: string;
+  required: boolean;
+  secret: boolean;
+  default: string;
+}
+
+export interface MarketplaceMcpDefinition {
+  serverName: string;
+  command: string;
+  args: string[];
+  url: string;
+  environmentVariables: MarketplaceEnvironmentVariable[];
+}
+
+export interface MarketplaceItem {
+  id: string;
+  kind: MarketplaceItemKind;
+  name: string;
+  version: string;
+  description: string;
+  descriptions: Record<string, string>;
+  content: string;
+  publisher: string;
+  category: string;
+  featured: boolean;
+  brandColor: string;
+  iconDataUrl: string;
+  sourceType: string;
+  sourceUrl: string;
+  marketplaceSource: string;
+  marketplaceName: string;
+  license: string;
+  revision: string;
+  trust: string;
+  homepage: string;
+  installed: boolean;
+  enabled: boolean;
+  needsSetup: boolean;
+  installedVersion: string;
+  updateAvailable: boolean;
+  error: string;
+  configuredEnv: string[];
+  mcp?: MarketplaceMcpDefinition;
+  components: MarketplaceItem[];
+}
+
+export interface MarketplaceSource {
+  id: string;
+  name: string;
+  adapter: 'openai' | 'anthropic' | 'metis';
+  repository: string;
+  manifestUrl: string;
+  ref: string;
+  trust: string;
+  brandColor: string;
+  builtin: boolean;
+  enabled: boolean;
+  lastRefreshedAt: number;
+  revision: string;
+  itemCount: number;
+  error: string;
+}
+
+export interface MarketplaceCatalog {
+  schema: string;
+  items: MarketplaceItem[];
+  counts: Record<MarketplaceItemKind, number>;
+  nextCursor: string;
 }
 
 export interface DeskStatusPayload {

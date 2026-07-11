@@ -2,11 +2,11 @@ import {
   Check,
   ChevronRight,
   Columns3,
+  Copy,
   FileCode,
   Folder,
   Globe,
   List,
-  Maximize2,
   Minus,
   Network,
   PanelLeft,
@@ -23,6 +23,7 @@ import {
   type WorkspaceCardShortcut,
 } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
+import { useWindowState } from '../../hooks/useWindowState';
 
 const titlebarWorkspaceCardOptions: Array<{ id: WorkspaceCardId; label: string; icon: typeof Globe }> = [
   { id: 'web', label: 'Preview', icon: Globe },
@@ -55,6 +56,7 @@ export function Titlebar() {
   const toggleWorkspaceCard = useUiStore(state => state.toggleWorkspaceCard);
   const setWorkspaceMenuOpen = useUiStore(state => state.setWorkspaceMenuOpen);
   const t = useT();
+  const { isFullScreen, isMaximized } = useWindowState();
   const [cardMenuOpen, setCardMenuOpen] = useState(false);
   const cardMenuRef = useRef<HTMLDivElement | null>(null);
   const showWorkspaceCards = appMode !== 'chat';
@@ -152,7 +154,13 @@ export function Titlebar() {
       <div className="titlebar-brand" aria-hidden="true" />
       <div className="titlebar-center" aria-hidden="true" />
       <div className="titlebar-actions">
-        <button type="button" title={t('左栏')} data-active={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)}>
+        <button
+          type="button"
+          className="titlebar-layout-button"
+          title={t('左栏')}
+          data-active={sidebarOpen}
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
           <PanelLeft size={15} />
         </button>
         {showWorkspaceCards && <div className="titlebar-cards-menu-wrap" ref={cardMenuRef}>
@@ -217,9 +225,9 @@ export function Titlebar() {
           <Minus size={15} />
         </button>
         <button type="button" title={t('最大化或还原')} onClick={() => void window.metis.window('toggle-maximize')}>
-          {false ? <Square size={13} /> : <Maximize2 size={14} />}
+          {isMaximized || isFullScreen ? <Copy size={13} /> : <Square size={13} />}
         </button>
-        <button type="button" title={t('隐藏到托盘')} onClick={() => void window.metis.window('hide')}>
+        <button type="button" title={t('关闭')} onClick={() => void window.metis.window('close')}>
           <X size={15} />
         </button>
       </div>

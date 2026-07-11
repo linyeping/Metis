@@ -480,7 +480,7 @@ function runtimeSeverity(phase: string): RuntimeStatus['severity'] {
   if (phase === 'timeout' || phase === 'timed_out' || phase === 'tool_timeout') return 'error';
   if (phase === 'retrying' || phase === 'sse_reconnecting' || phase === 'cancel_requested' || phase === 'canceled' || phase === 'cancelled') return 'warning';
   if (phase === 'completed') return 'done';
-  if (phase === 'tool_running' || phase === 'streaming' || phase === 'llm_request' || phase === 'compact_started') return 'working';
+  if (phase === 'tool_running' || phase === 'streaming' || phase === 'llm_request' || phase === 'compact_started' || phase === 'steering_applied' || phase === 'queued_followup_started') return 'working';
   return 'info';
 }
 
@@ -495,6 +495,8 @@ function runtimeDisplay(phase: string, message: string, toolName: string): strin
   if (phase === 'retrying') return '正在重试...';
   if (phase === 'sse_reconnecting') return message || '事件流断开，正在重连...';
   if (phase === 'cancel_requested') return '正在取消...';
+  if (phase === 'steering_applied') return '已应用引导，继续运行...';
+  if (phase === 'queued_followup_started') return '开始处理下一条排队消息...';
   if (phase === 'canceled' || phase === 'cancelled') return message || '已取消';
   if (phase === 'timeout' || phase === 'timed_out' || phase === 'tool_timeout') return message ? `已超时: ${message}` : '已超时';
   if (phase === 'completed') return '已完成';

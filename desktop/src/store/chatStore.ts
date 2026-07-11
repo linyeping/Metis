@@ -9,23 +9,29 @@ import {
   autoTitleSession,
   cancelChatRun,
   compactConversation,
+  createRunFollowup,
   createRun,
+  deleteRunFollowup,
   getActiveSessionRun,
   getAwaySummary,
   getCompactStatus,
   getComposerDeepResearchEnabled,
   getPromptSuggestions,
+  getRun,
   getSession,
   getSessionCheckpoints,
   parseUpload,
   rewindSession,
   runEventStream,
   undoTurn,
+  updateRunFollowup,
 } from '../lib/api';
 import { buildUserContent } from '../lib/chatUtils';
 import type {
   ChatMemoryNotice,
   ChatMessage,
+  ChatFollowupBehavior,
+  ChatRunFollowup,
   ChatRunPayload,
   CompactStatusPayload,
   ChatRunRecoverySnapshot,
@@ -84,11 +90,21 @@ import {
 
 const PENDING_SEND_SESSION = '__pending_send_session__';
 
+export type PendingChatFollowup = ChatRunFollowup & { runId: string };
+
 type RewindMode = 'conversation' | 'files' | 'both';
 
 function executionProfileForSurface(surfaceMode: string): RunExecutionProfile {
   if (surfaceMode === 'code') return useUiStore.getState().codeExecutionProfile === 'local_vm' ? 'local_vm' : 'local_worktree';
   return 'local_direct';
+}
+
+function storedFollowupBehavior(): ChatFollowupBehavior {
+  try {
+    return localStorage.getItem('metis.followupBehavior') === 'steer' ? 'steer' : 'queue';
+  } catch {
+    return 'queue';
+  }
 }
 
 interface ChatState {
@@ -114,6 +130,9 @@ interface ChatState {
   pendingSendSessionId: string | null;
   usage: ChatTokenUsage | null;
   contextLedger: ContextLedger | null;
+  followupBehavior: ChatFollowupBehavior;
+  followupsBySession: Record<string, PendingChatFollowup[]>;
+  pausedFollowupSessions: Record<string, boolean>;
   setComposerText: (value: string) => void;
   addFiles: (files: FileList | File[]) => Promise<void>;
   removeAttachment: (path: string) => void;
@@ -135,9 +154,16 @@ interface ChatState {
   rewindToMessage: (messageId: string) => Promise<void>;
   undoLastTurn: () => Promise<void>;
   send: (overrideText?: string) => Promise<void>;
+  submitFollowup: (behaviorOverride?: ChatFollowupBehavior) => Promise<void>;
+  setFollowupBehavior: (behavior: ChatFollowupBehavior) => void;
+  updateFollowupBehavior: (followupId: string, behavior: ChatFollowupBehavior) => Promise<void>;
+  removeFollowup: (followupId: string) => Promise<void>;
+  runNextFollowup: (sessionId?: string) => Promise<void>;
   stop: () => void;
   clearLocal: () => void;
 }
+
+let loadSessionSequence = 0;
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
@@ -162,7 +188,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingSendSessionId: null,
   usage: null,
   contextLedger: null,
+  followupBehavior: storedFollowupBehavior(),
+  followupsBySession: {},
+  pausedFollowupSessions: {},
   setComposerText: composerText => set({ composerText }),
+  setFollowupBehavior: followupBehavior => {
+    try {
+      localStorage.setItem('metis.followupBehavior', followupBehavior);
+    } catch {
+      // Ignore unavailable storage (tests/private contexts).
+    }
+    set({ followupBehavior });
+  },
   addFiles: async files => {
     const incoming = Array.from(files).slice(0, 5);
     set(state => {
@@ -294,6 +331,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   clearSubagents: () => set({ subagents: [], coworkPlan: null }),
   loadSession: async (sessionId, options = {}) => {
+    const requestSequence = ++loadSessionSequence;
     if (!sessionId) {
       set({
         attachments: [],
@@ -335,7 +373,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     const session = await getSession(sessionId);
+    if (requestSequence !== loadSessionSequence) return;
+    const activeSessionId = useSessionStore.getState().activeSessionId;
+    if (activeSessionId && activeSessionId !== sessionId) return;
     const activeRun = await getActiveSessionRun(sessionId).catch(() => ({ ok: false, run: null }));
+    if (requestSequence !== loadSessionSequence) return;
+    const latestActiveSessionId = useSessionStore.getState().activeSessionId;
+    if (latestActiveSessionId && latestActiveSessionId !== sessionId) return;
     const activeRunInfo = activeRun.run && !TERMINAL_RUN_STATUSES.has(activeRun.run.status) ? activeRun.run : null;
     const nextMessages = messagesFromSession(session);
     const recoverySnapshot = readRecoverySnapshot(sessionId);
@@ -356,6 +400,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
     const retainedPlanTodos = activeRunInfo && get().loadedSessionId === sessionId ? get().planTodos : [];
+    const syncedFollowups = activeRunInfo
+      ? (activeRunInfo.followups || [])
+          .filter(item => item.status === 'pending')
+          .map(item => ({ ...item, runId: activeRunInfo.runId }))
+      : get().followupsBySession[sessionId] || [];
     set({
       attachments: [],
       composerText: '',
@@ -375,6 +424,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       loadedSessionId: sessionId,
       runSessionId: activeRunInfo ? sessionId : null,
       controller: activeRunInfo ? getActiveRunController(sessionId)?.controller || null : null,
+      followupsBySession: { ...get().followupsBySession, [sessionId]: syncedFollowups },
     });
     if (activeRunInfo) {
       attachRunStream(activeRunInfo, sessionId);
@@ -430,6 +480,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return;
     }
+    set(state => ({
+      pausedFollowupSessions: { ...state.pausedFollowupSessions, [sessionId]: false },
+    }));
 
     const now = Date.now();
     const assistantId = `assistant-${now}`;
@@ -473,6 +526,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     persistRecoverySnapshot(sessionId, assistantId, now);
     setActiveRunController(sessionId, { assistantId, controller, runId: '' });
 
+    let completedNormally = false;
     try {
       const deepResearch = await getComposerDeepResearchEnabled().catch(() => false);
       const surfaceMode = useUiStore.getState().appMode;
@@ -486,7 +540,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         deep_research: deepResearch,
       });
       setActiveRunController(sessionId, { assistantId, controller, runId: run.runId });
+      await syncFollowupsToRun(sessionId, run.runId);
       await runEventStream(run.runId, event => handleRunEvent(run.runId, event, assistantId, sessionId, processedRunSeq, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal);
+      const finalRun = await getRun(run.runId).catch(() => null);
+      completedNormally = finalRun?.status === 'done';
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
       await autoTitleSession(sessionId).catch(() => null);
       await useSessionStore.getState().load();
@@ -519,7 +576,127 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (isActiveSession(sessionId)) {
         updateAssistant(assistantId, current => ({ ...current, pending: false }));
       }
+      if (completedNormally && !get().pausedFollowupSessions[sessionId]) {
+        window.setTimeout(() => { void get().runNextFollowup(sessionId); }, 0);
+      }
     }
+  },
+  submitFollowup: async behaviorOverride => {
+    const sessionId = useSessionStore.getState().activeSessionId;
+    const state = get();
+    const text = state.composerText.trim();
+    if (!sessionId || !state.streaming || !text) return;
+    if (state.attachments.length > 0) {
+      useUiStore.getState().pushToast({
+        title: '运行中消息暂不支持附件',
+        description: '请等待当前任务结束后再发送附件。',
+        type: 'warning',
+        sessionId,
+      });
+      return;
+    }
+    const existing = state.followupsBySession[sessionId] || [];
+    if (existing.filter(item => item.status === 'pending' || item.status === 'paused').length >= 5) {
+      useUiStore.getState().pushToast({
+        title: '待处理消息已满',
+        description: '最多保留 5 条，请先删除或等待一条消息被处理。',
+        type: 'warning',
+        sessionId,
+      });
+      return;
+    }
+    const activeRun = getActiveRunController(sessionId);
+    if (!activeRun?.runId) {
+      useUiStore.getState().pushToast({
+        title: '任务正在启动',
+        description: '运行通道准备完成后即可排队或引导。',
+        type: 'info',
+        sessionId,
+      });
+      return;
+    }
+    const behavior = behaviorOverride || state.followupBehavior;
+    const optimistic: PendingChatFollowup = {
+      id: `followup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      message: text,
+      behavior,
+      status: 'pending',
+      createdAt: Date.now() / 1000,
+      updatedAt: Date.now() / 1000,
+      runId: activeRun.runId,
+    };
+    set(current => ({
+      composerText: '',
+      followupsBySession: {
+        ...current.followupsBySession,
+        [sessionId]: [...(current.followupsBySession[sessionId] || []), optimistic],
+      },
+    }));
+    try {
+      const saved = await createRunFollowup(activeRun.runId, {
+        id: optimistic.id,
+        message: optimistic.message,
+        behavior: optimistic.behavior,
+      });
+      replaceFollowup(sessionId, optimistic.id, { ...saved, runId: activeRun.runId });
+    } catch (error) {
+      removeFollowupLocal(sessionId, optimistic.id);
+      set(current => ({ composerText: current.composerText.trim() ? current.composerText : text }));
+      useUiStore.getState().pushToast({
+        title: '消息未加入待处理区',
+        description: formatError(error),
+        type: 'error',
+        sessionId,
+      });
+    }
+  },
+  updateFollowupBehavior: async (followupId, behavior) => {
+    const sessionId = useSessionStore.getState().activeSessionId;
+    if (!sessionId) return;
+    const item = (get().followupsBySession[sessionId] || []).find(candidate => candidate.id === followupId);
+    if (!item || item.behavior === behavior || item.status !== 'pending') return;
+    replaceFollowup(sessionId, followupId, { ...item, behavior, updatedAt: Date.now() / 1000 });
+    try {
+      const saved = await updateRunFollowup(item.runId, followupId, behavior);
+      replaceFollowup(sessionId, followupId, { ...saved, runId: item.runId });
+    } catch (error) {
+      replaceFollowup(sessionId, followupId, item);
+      useUiStore.getState().pushToast({ title: '无法切换处理方式', description: formatError(error), type: 'error', sessionId });
+    }
+  },
+  removeFollowup: async followupId => {
+    const sessionId = useSessionStore.getState().activeSessionId;
+    if (!sessionId) return;
+    const item = (get().followupsBySession[sessionId] || []).find(candidate => candidate.id === followupId);
+    if (!item) return;
+    removeFollowupLocal(sessionId, followupId);
+    try {
+      if (item.runId) await deleteRunFollowup(item.runId, item.id);
+    } catch (error) {
+      set(current => ({
+        followupsBySession: {
+          ...current.followupsBySession,
+          [sessionId]: [...(current.followupsBySession[sessionId] || []), item]
+            .sort((left, right) => left.createdAt - right.createdAt),
+        },
+      }));
+      useUiStore.getState().pushToast({ title: '无法删除待处理消息', description: formatError(error), type: 'error', sessionId });
+    }
+  },
+  runNextFollowup: async requestedSessionId => {
+    const sessionId = requestedSessionId || useSessionStore.getState().activeSessionId;
+    if (!sessionId || hasActiveRunController(sessionId)) return;
+    if (useSessionStore.getState().activeSessionId !== sessionId) {
+      set(state => ({ pausedFollowupSessions: { ...state.pausedFollowupSessions, [sessionId]: true } }));
+      return;
+    }
+    const items = get().followupsBySession[sessionId] || [];
+    const next = items.find(item => item.behavior === 'queue' && (item.status === 'pending' || item.status === 'paused'));
+    if (!next) return;
+    removeFollowupLocal(sessionId, next.id);
+    if (next.runId) void deleteRunFollowup(next.runId, next.id).catch(() => null);
+    set(state => ({ pausedFollowupSessions: { ...state.pausedFollowupSessions, [sessionId]: false } }));
+    await get().send(next.message);
   },
   stop: () => {
     const sessionId = get().runSessionId || useSessionStore.getState().activeSessionId;
@@ -533,7 +710,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       clearActiveRunController(sessionId, activeRun.assistantId);
     }
     refreshActiveRunUiState();
-    set({ runtimeStatus: null });
+    if (sessionId) {
+      set(state => ({
+        runtimeStatus: null,
+        pausedFollowupSessions: { ...state.pausedFollowupSessions, [sessionId]: true },
+        followupsBySession: {
+          ...state.followupsBySession,
+          [sessionId]: (state.followupsBySession[sessionId] || []).map(item => ({
+            ...item,
+            behavior: item.behavior === 'steer' ? 'queue' : item.behavior,
+            status: 'paused',
+          })),
+        },
+      }));
+    } else {
+      set({ runtimeStatus: null });
+    }
   },
   clearLocal: () =>
     set({
@@ -564,6 +756,50 @@ export const useChatStore = create<ChatState>((set, get) => ({
 // Bind store references for sseParser (breaks circular import)
 _bindChatStore(useChatStore);
 _bindSessionStore(useSessionStore);
+
+function replaceFollowup(sessionId: string, followupId: string, next: PendingChatFollowup): void {
+  useChatStore.setState(state => ({
+    followupsBySession: {
+      ...state.followupsBySession,
+      [sessionId]: (state.followupsBySession[sessionId] || []).map(item => item.id === followupId ? next : item),
+    },
+  }));
+}
+
+function removeFollowupLocal(sessionId: string, followupId: string): void {
+  useChatStore.setState(state => ({
+    followupsBySession: {
+      ...state.followupsBySession,
+      [sessionId]: (state.followupsBySession[sessionId] || []).filter(item => item.id !== followupId),
+    },
+  }));
+}
+
+async function syncFollowupsToRun(sessionId: string, runId: string): Promise<void> {
+  const items = (useChatStore.getState().followupsBySession[sessionId] || [])
+    .filter(item => item.status === 'pending' || item.status === 'paused');
+  for (const item of items) {
+    if (item.runId === runId && item.status === 'pending') continue;
+    try {
+      const saved = await createRunFollowup(runId, {
+        id: item.id,
+        message: item.message,
+        behavior: item.behavior,
+      });
+      replaceFollowup(sessionId, item.id, { ...saved, runId });
+      if (item.runId && item.runId !== runId) {
+        void deleteRunFollowup(item.runId, item.id).catch(() => null);
+      }
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: '待处理消息同步失败',
+        description: formatError(error),
+        type: 'error',
+        sessionId,
+      });
+    }
+  }
+}
 
 async function rewindToCheckpoint(target: { messageId?: string; checkpointId?: string }): Promise<void> {
   const ui = useUiStore.getState();
@@ -730,8 +966,11 @@ function attachRunStream(run: ChatRunPayload, sessionId: string): void {
   persistRecoverySnapshot(sessionId, assistantId, (run.createdAt || Date.now() / 1000) * 1000);
   refreshActiveRunUiState();
   void (async () => {
+    let completedNormally = false;
     try {
       await runEventStream(run.runId, event => handleRunEvent(run.runId, event, assistantId, sessionId, processedRunSeq, persistBackgroundRunSnapshot, persistCurrentRecoverySnapshot), controller.signal, processedRunSeq.get(run.runId) || 0);
+      const finalRun = await getRun(run.runId).catch(() => null);
+      completedNormally = finalRun?.status === 'done';
       flushAssistantText(assistantId, sessionId, persistBackgroundRunSnapshot);
       await autoTitleSession(sessionId).catch(() => null);
       await useSessionStore.getState().load();
@@ -750,6 +989,9 @@ function attachRunStream(run: ChatRunPayload, sessionId: string): void {
       refreshActiveRunUiState();
       if (isActiveSession(sessionId)) {
         updateAssistant(assistantId, current => ({ ...current, pending: false }));
+      }
+      if (completedNormally && !useChatStore.getState().pausedFollowupSessions[sessionId]) {
+        window.setTimeout(() => { void useChatStore.getState().runNextFollowup(sessionId); }, 0);
       }
     }
   })();

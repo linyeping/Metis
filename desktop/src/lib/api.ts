@@ -7,6 +7,7 @@ import type {
   ArtifactsPayload,
   AutoTitlePayload,
   AwaySummaryPayload,
+  ChatRunFollowup,
   ChatRunPayload,
   ChatRunsPayload,
   ChatStreamEvent,
@@ -19,6 +20,11 @@ import type {
   FileChangeRevertResult,
   FirstRunStatus,
   MemoryPayload,
+  MarketplaceCatalog,
+  MarketplaceEnvironmentVariable,
+  MarketplaceItem,
+  MarketplaceItemKind,
+  MarketplaceSource,
   McpConfigSource,
   McpServerStatus,
   McpStatusPayload,
@@ -599,10 +605,12 @@ export async function getSessions(): Promise<SessionsPayload> {
   };
 }
 
-export async function createSession(mode: string = 'chat'): Promise<{ id: string; workspaceId: string }> {
+export async function createSession(mode: string = 'chat', workspaceId?: string | null): Promise<{ id: string; workspaceId: string }> {
+  const payload: Record<string, unknown> = { mode };
+  if (workspaceId !== undefined) payload.workspace_id = workspaceId || '';
   const data = await requestJson<Record<string, unknown>>('/sessions', {
     method: 'POST',
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify(payload),
   });
   return { id: stringValue(data.id), workspaceId: stringValue(data.workspace_id) };
 }
@@ -1791,6 +1799,184 @@ export async function deleteSkill(skillId: string): Promise<void> {
   await requestJson(`/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
 }
 
+export async function getMarketplaceCatalog(options: { query?: string; kind?: MarketplaceItemKind | 'all'; source?: string } = {}): Promise<MarketplaceCatalog> {
+  const query = new URLSearchParams();
+  if (options.query) query.set('q', options.query);
+  if (options.kind && options.kind !== 'all') query.set('kind', options.kind);
+  if (options.source && options.source !== 'all') query.set('source', options.source);
+  const data = await requestJson<Record<string, unknown>>(`/marketplace/catalog${query.size ? `?${query}` : ''}`);
+  return marketplaceCatalogFromRecord(data);
+}
+
+export async function searchMarketplaceMcp(search = '', cursor = ''): Promise<MarketplaceCatalog> {
+  const query = new URLSearchParams({ limit: '24' });
+  if (search) query.set('search', search);
+  if (cursor) query.set('cursor', cursor);
+  const data = await requestJson<Record<string, unknown>>(`/marketplace/mcp-registry?${query}`);
+  const metadata = recordValue(data.metadata);
+  const items = Array.isArray(data.items) ? data.items.map(value => marketplaceItemFromRecord(recordValue(value))) : [];
+  return {
+    schema: 'metis.marketplace.v1',
+    items,
+    counts: { skill: 0, mcp: items.length, plugin: 0 },
+    nextCursor: stringValue(metadata.nextCursor ?? metadata.next_cursor ?? metadata.cursor),
+  };
+}
+
+export async function installMarketplaceItem(itemId: string): Promise<MarketplaceItem> {
+  return marketplaceMutation(`/marketplace/items/${encodeURIComponent(itemId)}/install`, 'POST');
+}
+
+export async function configureMarketplaceItem(itemId: string, values: Record<string, unknown>, secretConfigured: string[] = []): Promise<MarketplaceItem> {
+  return marketplaceMutation(`/marketplace/items/${encodeURIComponent(itemId)}/configure`, 'POST', { values, secretConfigured });
+}
+
+export async function setMarketplaceItemEnabled(itemId: string, enabled: boolean): Promise<MarketplaceItem> {
+  return marketplaceMutation(`/marketplace/items/${encodeURIComponent(itemId)}/${enabled ? 'enable' : 'disable'}`, 'POST');
+}
+
+export async function uninstallMarketplaceItem(itemId: string): Promise<MarketplaceItem> {
+  return marketplaceMutation(`/marketplace/items/${encodeURIComponent(itemId)}`, 'DELETE');
+}
+
+export async function installMarketplaceSource(source: string): Promise<MarketplaceItem> {
+  return marketplaceMutation('/marketplace/install-source', 'POST', { source });
+}
+
+export async function getMarketplaceSources(): Promise<MarketplaceSource[]> {
+  const data = await requestJson<Record<string, unknown>>('/marketplace/sources');
+  return (Array.isArray(data.sources) ? data.sources : []).map(value => marketplaceSourceFromRecord(recordValue(value)));
+}
+
+export async function addMarketplaceSource(name: string, url: string, adapter = ''): Promise<MarketplaceSource> {
+  const data = await requestJson<Record<string, unknown>>('/marketplace/sources', {
+    method: 'POST',
+    body: JSON.stringify({ name, url, adapter }),
+  });
+  return marketplaceSourceFromRecord(recordValue(data.source));
+}
+
+export async function deleteMarketplaceSource(sourceId: string): Promise<void> {
+  await requestJson(`/marketplace/sources/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
+}
+
+export async function refreshMarketplaceSource(sourceId: string): Promise<MarketplaceSource> {
+  const data = await requestJson<Record<string, unknown>>(`/marketplace/sources/${encodeURIComponent(sourceId)}/refresh`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  }, {
+    timeoutMs: 240_000,
+    timeoutMessage: '市场来源刷新超时',
+  });
+  return marketplaceSourceFromRecord(recordValue(data.source));
+}
+
+async function marketplaceMutation(path: string, method: 'POST' | 'DELETE', body: Record<string, unknown> = {}): Promise<MarketplaceItem> {
+  const data = await requestJson<Record<string, unknown>>(path, {
+    method,
+    body: method === 'POST' ? JSON.stringify(body) : undefined,
+  }, {
+    timeoutMs: 180_000,
+    timeoutMessage: '扩展操作超时',
+  });
+  return marketplaceItemFromRecord(recordValue(data.item));
+}
+
+function marketplaceCatalogFromRecord(data: Record<string, unknown>): MarketplaceCatalog {
+  const items = Array.isArray(data.items) ? data.items.map(value => marketplaceItemFromRecord(recordValue(value))) : [];
+  const counts = recordValue(data.counts);
+  return {
+    schema: stringValue(data.schema),
+    items,
+    counts: {
+      skill: numberValue(counts.skill),
+      mcp: numberValue(counts.mcp),
+      plugin: numberValue(counts.plugin),
+    },
+    nextCursor: '',
+  };
+}
+
+function marketplaceItemFromRecord(row: Record<string, unknown>): MarketplaceItem {
+  const source = recordValue(row.source);
+  const rawDescriptions = recordValue(row.descriptions);
+  const rawMcp = recordValue(row.mcp);
+  const variables: MarketplaceEnvironmentVariable[] = (Array.isArray(rawMcp.environmentVariables) ? rawMcp.environmentVariables : []).map(value => {
+    const variable = recordValue(value);
+    return {
+      name: stringValue(variable.name),
+      description: stringValue(variable.description),
+      required: Boolean(variable.required ?? variable.isRequired),
+      secret: Boolean(variable.secret ?? variable.isSecret),
+      default: stringValue(variable.default),
+    };
+  }).filter(variable => Boolean(variable.name));
+  const kindValue = stringValue(row.kind);
+  const kind: MarketplaceItemKind = kindValue === 'mcp' || kindValue === 'plugin' ? kindValue : 'skill';
+  const components = Array.isArray(row.components) ? row.components.map(value => marketplaceItemFromRecord(recordValue(value))) : [];
+  return {
+    id: stringValue(row.id),
+    kind,
+    name: stringValue(row.name),
+    version: stringValue(row.version),
+    description: stringValue(row.description),
+    descriptions: Object.fromEntries(
+      Object.entries(rawDescriptions)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()))
+        .map(([language, value]) => [language, value.trim()]),
+    ),
+    content: stringValue(row.content),
+    publisher: stringValue(row.publisher),
+    category: stringValue(row.category),
+    featured: Boolean(row.featured),
+    brandColor: stringValue(row.brandColor ?? row.brand_color) || '#64748B',
+    iconDataUrl: stringValue(row.iconDataUrl ?? row.icon_data_url),
+    sourceType: stringValue(source.type),
+    sourceUrl: stringValue(source.url),
+    marketplaceSource: stringValue(source.marketplace),
+    marketplaceName: stringValue(row.marketplaceName ?? row.marketplace_name),
+    license: stringValue(row.license),
+    revision: stringValue(row.revision ?? source.revision),
+    trust: stringValue(row.trust),
+    homepage: stringValue(row.homepage),
+    installed: Boolean(row.installed),
+    enabled: Boolean(row.enabled),
+    needsSetup: Boolean(row.needsSetup ?? row.needs_setup),
+    installedVersion: stringValue(row.installedVersion ?? row.installed_version),
+    updateAvailable: Boolean(row.updateAvailable ?? row.update_available),
+    error: stringValue(row.error),
+    configuredEnv: stringArray(row.configuredEnv ?? row.configured_env),
+    mcp: Object.keys(rawMcp).length ? {
+      serverName: stringValue(rawMcp.serverName ?? rawMcp.server_name),
+      command: stringValue(rawMcp.command),
+      args: stringArray(rawMcp.args),
+      url: stringValue(rawMcp.url),
+      environmentVariables: variables,
+    } : undefined,
+    components,
+  };
+}
+
+function marketplaceSourceFromRecord(row: Record<string, unknown>): MarketplaceSource {
+  const adapterValue = stringValue(row.adapter);
+  return {
+    id: stringValue(row.id),
+    name: stringValue(row.name),
+    adapter: adapterValue === 'openai' || adapterValue === 'anthropic' ? adapterValue : 'metis',
+    repository: stringValue(row.repository),
+    manifestUrl: stringValue(row.manifestUrl ?? row.manifest_url),
+    ref: stringValue(row.ref) || 'main',
+    trust: stringValue(row.trust),
+    brandColor: stringValue(row.brandColor ?? row.brand_color) || '#64748B',
+    builtin: Boolean(row.builtin),
+    enabled: row.enabled !== false,
+    lastRefreshedAt: numberValue(row.lastRefreshedAt ?? row.last_refreshed_at),
+    revision: stringValue(row.revision),
+    itemCount: numberValue(row.itemCount ?? row.item_count),
+    error: stringValue(row.error),
+  };
+}
+
 function skillSummaryFromRecord(row: Record<string, unknown>): SkillSummary {
   return {
     id: stringValue(row.id),
@@ -1808,6 +1994,10 @@ function skillSummaryFromRecord(row: Record<string, unknown>): SkillSummary {
     disallowedTools: stringArray(row.disallowed_tools ?? row.disallowedTools),
     preview: stringValue(row.preview),
     files: skillFilesFromValue(row.files),
+    iconSmall: stringValue(row.icon_small ?? row.iconSmall),
+    iconLarge: stringValue(row.icon_large ?? row.iconLarge),
+    iconDataUrl: stringValue(row.icon_data_url ?? row.iconDataUrl),
+    brandColor: stringValue(row.brand_color ?? row.brandColor),
   };
 }
 
@@ -2868,6 +3058,12 @@ export async function listRuns(sessionId = ''): Promise<ChatRunsPayload> {
   return { runs };
 }
 
+export async function listActiveRuns(): Promise<ChatRunsPayload> {
+  const data = await requestJson<Record<string, unknown>>('/runs?active_only=1');
+  const runs = Array.isArray(data.runs) ? data.runs.map(item => chatRunFromRecord(recordValue(item))) : [];
+  return { runs };
+}
+
 export async function getChatRuns(sessionId = ''): Promise<ChatRunsPayload> {
   return listRuns(sessionId);
 }
@@ -2893,6 +3089,36 @@ export async function cancelRun(runId: string): Promise<ChatRunPayload> {
 
 export async function cancelChatRun(runId: string): Promise<ChatRunPayload> {
   return cancelRun(runId);
+}
+
+export async function createRunFollowup(
+  runId: string,
+  body: { id: string; message: string; behavior: 'queue' | 'steer' },
+): Promise<ChatRunFollowup> {
+  const data = await requestJson<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}/followups`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return chatRunFollowupFromRecord(recordValue(data.followup));
+}
+
+export async function updateRunFollowup(
+  runId: string,
+  followupId: string,
+  behavior: 'queue' | 'steer',
+): Promise<ChatRunFollowup> {
+  const data = await requestJson<Record<string, unknown>>(
+    `/runs/${encodeURIComponent(runId)}/followups/${encodeURIComponent(followupId)}`,
+    { method: 'PATCH', body: JSON.stringify({ behavior }) },
+  );
+  return chatRunFollowupFromRecord(recordValue(data.followup));
+}
+
+export async function deleteRunFollowup(runId: string, followupId: string): Promise<void> {
+  await requestJson<Record<string, unknown>>(
+    `/runs/${encodeURIComponent(runId)}/followups/${encodeURIComponent(followupId)}`,
+    { method: 'DELETE' },
+  );
 }
 
 export async function resumeRun(runId: string): Promise<ChatRunPayload> {
@@ -3070,7 +3296,22 @@ function chatRunFromRecord(data: Record<string, unknown>): ChatRunPayload {
     finishedAt: numberValue(data.finished_at ?? data.finishedAt),
     eventCount: numberValue(data.event_count ?? data.eventCount),
     lastSeq: numberValue(data.last_seq ?? data.lastSeq),
+    followups: Array.isArray(data.followups)
+      ? data.followups.map(item => chatRunFollowupFromRecord(recordValue(item)))
+      : [],
     error: stringValue(data.error),
+  };
+}
+
+function chatRunFollowupFromRecord(data: Record<string, unknown>): ChatRunFollowup {
+  const behavior = stringValue(data.behavior) === 'steer' ? 'steer' : 'queue';
+  return {
+    id: stringValue(data.id),
+    message: stringValue(data.message),
+    behavior,
+    status: stringValue(data.status) || 'pending',
+    createdAt: numberValue(data.created_at ?? data.createdAt),
+    updatedAt: numberValue(data.updated_at ?? data.updatedAt),
   };
 }
 

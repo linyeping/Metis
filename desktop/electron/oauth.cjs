@@ -74,6 +74,61 @@ function registerConnectorIpc({ app, ipcMain, safeStorage, shell }) {
   ipcMain.handle('metis:connector-authorize', async (_event, service, options = {}) =>
     authorizeConnector({ app, safeStorage, shell, service, options })
   )
+  ipcMain.handle('metis:extension-secrets-save', async (_event, extensionId, values = {}) =>
+    saveExtensionSecrets({ app, safeStorage, extensionId, values })
+  )
+  ipcMain.handle('metis:extension-secrets-status', async (_event, extensionId) =>
+    extensionSecretsStatus({ app, safeStorage, extensionId })
+  )
+  ipcMain.handle('metis:extension-secrets-delete', async (_event, extensionId) =>
+    deleteExtensionSecrets({ app, extensionId })
+  )
+}
+
+async function saveExtensionSecrets({ app, safeStorage, extensionId, values }) {
+  if (!isEncryptionAvailable(safeStorage)) return { ok: false, error: 'safeStorage unavailable' }
+  const id = safeExtensionId(extensionId)
+  if (!id) return { ok: false, error: 'invalid extension id' }
+  const clean = {}
+  try {
+    const existingEncrypted = await fs.readFile(extensionSecretPath(app, id), 'utf8')
+    const existingPlaintext = safeStorage.decryptString(Buffer.from(existingEncrypted, 'base64'))
+    const existing = JSON.parse(existingPlaintext)
+    for (const [name, value] of Object.entries(existing.values || {})) {
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && String(value || '').trim()) clean[name] = String(value).trim()
+    }
+  } catch {}
+  for (const [name, value] of Object.entries(values && typeof values === 'object' ? values : {})) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue
+    const secret = String(value || '').trim()
+    if (secret) clean[name] = secret
+  }
+  if (Object.keys(clean).length === 0) return { ok: false, error: 'no extension secrets provided' }
+  const encrypted = safeStorage.encryptString(JSON.stringify({ values: clean })).toString('base64')
+  const target = extensionSecretPath(app, id)
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  await fs.writeFile(target, encrypted, { encoding: 'utf8', mode: 0o600 })
+  return { ok: true, extensionId: id, envNames: Object.keys(clean) }
+}
+
+async function extensionSecretsStatus({ app, safeStorage, extensionId }) {
+  const id = safeExtensionId(extensionId)
+  if (!id) return { ok: false, configured: false, envNames: [] }
+  try {
+    const encrypted = await fs.readFile(extensionSecretPath(app, id), 'utf8')
+    const plaintext = safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+    const parsed = JSON.parse(plaintext)
+    return { ok: true, configured: true, envNames: Object.keys(parsed.values || {}) }
+  } catch {
+    return { ok: true, configured: false, envNames: [] }
+  }
+}
+
+async function deleteExtensionSecrets({ app, extensionId }) {
+  const id = safeExtensionId(extensionId)
+  if (!id) return { ok: false, error: 'invalid extension id' }
+  await fs.rm(extensionSecretPath(app, id), { force: true })
+  return { ok: true, extensionId: id }
 }
 
 async function connectorStatus({ app, safeStorage }) {
@@ -324,6 +379,34 @@ async function decryptStoredConnectorTokens({ app, safeStorage }) {
   return out
 }
 
+async function decryptStoredExtensionSecrets({ app, safeStorage }) {
+  const out = {}
+  if (!isEncryptionAvailable(safeStorage)) return out
+  const root = path.join(app.getPath('userData'), 'extensions')
+  let files = []
+  try {
+    files = await fs.readdir(root)
+  } catch {
+    return out
+  }
+  for (const file of files.sort()) {
+    if (!file.endsWith('.enc')) continue
+    try {
+      const encrypted = await fs.readFile(path.join(root, file), 'utf8')
+      const plaintext = safeStorage.decryptString(Buffer.from(encrypted, 'base64'))
+      const parsed = JSON.parse(plaintext)
+      for (const [name, value] of Object.entries(parsed.values || {})) {
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && String(value || '').trim() && !out[name]) {
+          out[name] = String(value).trim()
+        }
+      }
+    } catch {
+      // Ignore unreadable extension secret files and never log plaintext.
+    }
+  }
+  return out
+}
+
 async function hasStoredSecret(app, service) {
   try {
     const stat = await fs.stat(secretPath(app, service))
@@ -335,6 +418,14 @@ async function hasStoredSecret(app, service) {
 
 function secretPath(app, service) {
   return path.join(app.getPath('userData'), 'connectors', `${connectorFor(service).service}.enc`)
+}
+
+function extensionSecretPath(app, extensionId) {
+  return path.join(app.getPath('userData'), 'extensions', `${safeExtensionId(extensionId)}.enc`)
+}
+
+function safeExtensionId(value) {
+  return String(value || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 120)
 }
 
 function connectorFor(service) {
@@ -361,7 +452,11 @@ module.exports = {
   CONNECTORS,
   authorizeConnector,
   connectorStatus,
+  deleteExtensionSecrets,
+  decryptStoredExtensionSecrets,
   decryptStoredConnectorTokens,
   disconnectConnector,
+  extensionSecretsStatus,
   registerConnectorIpc,
+  saveExtensionSecrets,
 }

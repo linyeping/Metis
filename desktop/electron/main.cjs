@@ -26,6 +26,13 @@ const {
   previewLayoutIntent,
   previewOcclusionRestoreIntent
 } = require('./preview-state.cjs')
+const {
+  DEFAULT_CLOSE_BEHAVIOR,
+  loadWindowPreferences,
+  normalizeCloseBehavior,
+  saveWindowPreferences,
+  windowPreferencesPath
+} = require('./window-preferences.cjs')
 
 let autoUpdater = null
 try {
@@ -80,6 +87,8 @@ const previewLoadedUrls = new Map()
 const previewElementCache = new Map()
 let previewBridgeLoopId = 0
 let tray = null
+let closeBehavior = DEFAULT_CLOSE_BEHAVIOR
+let closePromptOpen = false
 let backendPort = null
 let bootRunning = false
 let bootStatus = 'idle'
@@ -118,24 +127,24 @@ try {
   nodePty = require('node-pty')
 } catch {}
 
-app.disableHardwareAcceleration()
-app.commandLine.appendSwitch('in-process-gpu')
-app.commandLine.appendSwitch('disable-gpu')
-app.commandLine.appendSwitch('disable-gpu-compositing')
-app.commandLine.appendSwitch('use-gl', 'swiftshader')
-app.commandLine.appendSwitch('enable-unsafe-swiftshader')
-app.commandLine.appendSwitch('disable-features', 'VizDisplayCompositor')
-// --no-sandbox is required: swiftshader soft-rendering crashes the renderer
-// with sandbox enabled (exit code 0x80000003 → black screen on packaged builds).
-// Security posture with --no-sandbox:
-//   KEPT:   contextIsolation:true  → JS context between renderer and preload is isolated
-//   KEPT:   nodeIntegration:false  → renderer cannot directly access Node.js APIs
-//   KEPT:   webSecurity:true       → same-origin policy enforced
-//   LOST:   OS-level process sandbox (ChromeSandbox) → renderer runs without OS-level jail
-// Practical risk: an XSS in renderer JS still cannot reach Node.js (contextIsolation blocks it).
-// Tracking: remove --no-sandbox once Electron adds targeted swiftshader sandbox exemption.
-app.commandLine.appendSwitch('no-sandbox')
-app.commandLine.appendSwitch('disable-gpu-sandbox')
+// The current Windows/Electron combination crashes the native D3D GPU process
+// with 0x80000003. Keep Chromium's GPU compositor and Viz alive, but route ANGLE
+// through SwiftShader. Electron's disableHardwareAcceleration API is intentionally not
+// used: Electron translates it to --disable-gpu-compositing, which produces a
+// live renderer that paints a permanently black frame on this system.
+const requestedGraphicsMode = String(process.env.METIS_GRAPHICS_MODE || '').trim().toLowerCase()
+const forceSoftwareRendering = requestedGraphicsMode === 'software'
+  || (!requestedGraphicsMode && process.platform === 'win32')
+if (forceSoftwareRendering) {
+  app.commandLine.appendSwitch('use-angle', 'swiftshader')
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+  app.commandLine.appendSwitch('disable-direct-composition')
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+  process.stdout.write('[graphics] SwiftShader ANGLE compositor enabled (DirectComposition disabled)\n')
+} else {
+  process.stdout.write('[graphics] hardware acceleration enabled\n')
+}
 
 const storageInfo = resolveDataRootInfo()
 try {
@@ -159,7 +168,17 @@ if (!gotSingleInstanceLock) {
 }
 
 function log(message) {
-  process.stdout.write(`${String(message).trimEnd()}\n`)
+  const text = String(message).trimEnd()
+  process.stdout.write(`${text}\n`)
+  try {
+    const logDir = path.join(storageInfo.metisHome, 'logs')
+    fsSync.mkdirSync(logDir, { recursive: true })
+    fsSync.appendFileSync(
+      path.join(logDir, 'metis-desktop.log'),
+      `${new Date().toISOString()} ${text}\n`,
+      'utf8'
+    )
+  } catch {}
 }
 
 function delay(ms) {
@@ -2785,6 +2804,68 @@ function iconPath(filename = 'logo.png') {
   return path.join(process.resourcesPath, 'icons', filename)
 }
 
+function closePreferencesPath() {
+  return windowPreferencesPath(app.getPath('userData'))
+}
+
+function loadCloseBehavior() {
+  closeBehavior = loadWindowPreferences(closePreferencesPath()).closeBehavior
+}
+
+function persistCloseBehavior(value) {
+  const next = normalizeCloseBehavior(value)
+  closeBehavior = saveWindowPreferences(closePreferencesPath(), { closeBehavior: next }).closeBehavior
+  return closeBehavior
+}
+
+function hideMainWindowToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  hidePreviewView()
+  mainWindow.hide()
+}
+
+function quitFromWindowClose() {
+  app.isQuitting = true
+  setImmediate(() => app.quit())
+}
+
+function handleMainWindowClose(event) {
+  if (app.isQuitting) return
+
+  event.preventDefault()
+  if (closeBehavior === 'tray') {
+    hideMainWindowToTray()
+    return
+  }
+  if (closeBehavior === 'quit') {
+    quitFromWindowClose()
+    return
+  }
+  if (closePromptOpen || !mainWindow || mainWindow.isDestroyed()) return
+
+  closePromptOpen = true
+  void dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: '关闭 Metis',
+    message: '关闭窗口后要执行什么操作？',
+    detail: '可以随时在“设置 > 通用”中更改默认关闭行为。',
+    buttons: ['最小化到托盘', '退出应用', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  }).then(result => {
+    if (result.response === 0) {
+      hideMainWindowToTray()
+    } else if (result.response === 1) {
+      quitFromWindowClose()
+    }
+  }).catch(error => {
+    log(`[window] close prompt failed: ${error?.message || error}`)
+  }).finally(() => {
+    closePromptOpen = false
+  })
+}
+
 function broadcastWindowState() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
@@ -2805,7 +2886,7 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1240,
     height: 820,
-    minWidth: 980,
+    minWidth: 480,
     minHeight: 640,
     title: 'Metis',
     frame: false,
@@ -2848,13 +2929,7 @@ async function createWindow() {
   mainWindow.on('leave-full-screen', broadcastWindowState)
   mainWindow.on('restore', broadcastWindowState)
 
-  mainWindow.on('close', event => {
-    if (!app.isQuitting) {
-      event.preventDefault()
-      hidePreviewView()
-      mainWindow.hide()
-    }
-  })
+  mainWindow.on('close', handleMainWindowClose)
 
   mainWindow.on('closed', () => {
     disposePreviewView()
@@ -2879,6 +2954,24 @@ async function createWindow() {
     log(`[renderer] gone reason=${details.reason} exitCode=${details.exitCode}`)
   })
   mainWindow.webContents.on('unresponsive', () => log('[renderer] unresponsive'))
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    log(`[renderer] preload error path=${preloadPath} error=${error?.stack || error?.message || error}`)
+  })
+  mainWindow.webContents.on('console-message', (_event, levelOrDetails, message, line, sourceId) => {
+    const details = levelOrDetails && typeof levelOrDetails === 'object'
+      ? levelOrDetails
+      : { level: levelOrDetails, message, lineNumber: line, sourceId }
+    const level = String(details.level || 'log')
+    const text = String(details.message || '').trim()
+    if (!text) return
+    if (process.env.METIS_DESKTOP_DEV_SERVER || level === 'error' || level === 'warning') {
+      log(`[renderer:${level}] ${text}${details.sourceId ? ` (${details.sourceId}:${details.lineNumber || 0})` : ''}`)
+    }
+  })
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (errorCode === -3 || isMainFrame === false) return
+    log(`[renderer] load failed code=${errorCode} error=${errorDescription} url=${validatedURL}`)
+  })
   mainWindow.webContents.on('did-finish-load', () => {
     for (const event of bootEvents) {
       mainWindow?.webContents.send('metis:boot-event', event)
@@ -3727,6 +3820,8 @@ ipcMain.handle('metis:window', (_event, action) => {
     mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
   } else if (action === 'hide') {
     mainWindow.hide()
+  } else if (action === 'close') {
+    mainWindow.close()
   } else if (action === 'quit') {
     app.isQuitting = true
     app.quit()
@@ -3734,6 +3829,15 @@ ipcMain.handle('metis:window', (_event, action) => {
 
   broadcastWindowState()
   return { ok: true }
+})
+
+ipcMain.handle('metis:window-close-behavior', () => ({ behavior: closeBehavior }))
+ipcMain.handle('metis:set-window-close-behavior', (_event, value) => {
+  try {
+    return { ok: true, behavior: persistCloseBehavior(value) }
+  } catch (error) {
+    return { ok: false, behavior: closeBehavior, error: error?.message || String(error) }
+  }
 })
 
 ipcMain.handle('metis:pick-folder', async () => {
@@ -3776,6 +3880,40 @@ ipcMain.handle('metis:save-file', async (_event, payload = {}) => {
   }
   await fs.writeFile(result.filePath, String(payload.content || ''), 'utf8')
   return { canceled: false, path: result.filePath }
+})
+
+ipcMain.handle('metis:save-binary-file', async (_event, payload = {}) => {
+  if (!mainWindow) {
+    return { canceled: true }
+  }
+  const dataUrl = String(payload.dataUrl || '')
+  const match = dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i)
+  if (!match) {
+    return { canceled: false, error: 'invalid image data' }
+  }
+  const encoded = match[2].replace(/\s+/g, '')
+  if (!encoded || !/^[a-z0-9+/]*={0,2}$/i.test(encoded)) {
+    return { canceled: false, error: 'invalid image encoding' }
+  }
+  const requestedName = String(payload.defaultPath || 'image.png').trim().replace(/\\/g, '/')
+  const defaultPath = path.basename(requestedName) || 'image.png'
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath,
+    filters: payload.filters || [{ name: 'Image', extensions: ['png'] }]
+  })
+  if (result.canceled || !result.filePath) {
+    return { canceled: true }
+  }
+  try {
+    const content = Buffer.from(encoded, 'base64')
+    if (!content.length || content.length > 100 * 1024 * 1024) {
+      return { canceled: false, error: 'image size is invalid or exceeds 100 MB' }
+    }
+    await fs.writeFile(result.filePath, content)
+    return { canceled: false, path: result.filePath }
+  } catch (error) {
+    return { canceled: false, error: error?.message || String(error) }
+  }
 })
 
 ipcMain.handle('metis:open-external', (_event, url) => {
@@ -3907,6 +4045,7 @@ app.whenReady().then(async () => {
     return
   }
   nativeTheme.themeSource = 'system'
+  loadCloseBehavior()
   migrateApiKeyToSafeStorage()
   await createWindow()
   createTray()

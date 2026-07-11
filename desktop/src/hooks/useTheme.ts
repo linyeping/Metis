@@ -35,9 +35,16 @@ export function useTheme(): void {
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty('--ui-font-size', `${uiFontSize}px`);
-    root.style.setProperty('--ui-font-size-sm', `${Math.max(10, uiFontSize - 2)}px`);
+    root.style.setProperty('--ui-font-size-2xs', `${Math.max(9, uiFontSize - 4)}px`);
     root.style.setProperty('--ui-font-size-xs', `${Math.max(9, uiFontSize - 3)}px`);
+    root.style.setProperty('--ui-font-size-sm', `${Math.max(10, uiFontSize - 2)}px`);
+    root.style.setProperty('--ui-font-size-md', `${Math.max(11, uiFontSize - 1)}px`);
     root.style.setProperty('--ui-font-size-lg', `${uiFontSize + 1}px`);
+    root.style.setProperty('--ui-font-size-xl', `${uiFontSize + 2}px`);
+    root.style.setProperty('--ui-font-size-2xl', `${uiFontSize + 4}px`);
+    root.style.setProperty('--ui-font-size-heading', `${uiFontSize + 8}px`);
+    root.style.setProperty('--ui-font-size-title', `${uiFontSize + 10}px`);
+    root.style.setProperty('--ui-font-size-display', `${uiFontSize + 18}px`);
     root.style.setProperty('--code-font-size', `${codeFontSize}px`);
   }, [codeFontSize, uiFontSize]);
 }

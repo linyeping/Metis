@@ -128,12 +128,12 @@ export function ChatListPanel() {
                   {t('进入对话')}
                 </button>
               </div>
-              <div style={{ padding: '16px', color: 'var(--text-secondary)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+              <div className="chat-history-preview">
+                <div className="chat-history-preview-title">
                   <Clock size={16} />
                   <strong>{t('历史预览 (开发中)')}</strong>
                 </div>
-                <div style={{ background: 'var(--bg-tertiary)', padding: '12px', borderRadius: '6px', fontSize: '13px' }}>
+                <div className="chat-history-preview-placeholder">
                   [占位] {t('这里将展示会话的历史内容预览')}...
                 </div>
               </div>

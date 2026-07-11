@@ -104,6 +104,34 @@ describe('getSessions', () => {
   });
 });
 
+describe('getMarketplaceCatalog', () => {
+  it('preserves localized marketplace descriptions from the backend', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      schema: 'metis.marketplace.v1',
+      counts: { skill: 0, mcp: 0, plugin: 1 },
+      items: [{
+        id: 'openai:linear',
+        kind: 'plugin',
+        name: 'Linear',
+        version: '1.0.0',
+        description: 'Find and reference issues and projects.',
+        descriptions: {
+          en: 'Find and reference issues and projects.',
+          zh: '查找并引用 Linear 中的问题、项目和相关上下文。',
+        },
+        source: { type: 'remote-plugin', marketplace: 'openai-plugins' },
+      }],
+    }));
+
+    const result = await api.getMarketplaceCatalog({ source: 'openai-plugins' });
+
+    expect(result.items[0].descriptions).toEqual({
+      en: 'Find and reference issues and projects.',
+      zh: '查找并引用 Linear 中的问题、项目和相关上下文。',
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // createSession
 // ---------------------------------------------------------------------------
@@ -122,6 +150,21 @@ describe('createSession', () => {
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toContain('/sessions');
     expect(opts.method).toBe('POST');
+  });
+
+  it('can explicitly create a session without a workspace', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      id: 'unscoped-session',
+      workspace_id: '',
+    }));
+
+    await api.createSession('cowork', null);
+
+    const [, opts] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(opts.body))).toEqual({
+      mode: 'cowork',
+      workspace_id: '',
+    });
   });
 });
 

@@ -7,12 +7,14 @@ import {
   ChevronRight,
   ClipboardList,
   CornerDownLeft,
+  CornerDownRight,
   FileText,
   Folder,
   FolderOpen,
   Hand,
   Image as ImageIcon,
   Loader2,
+  ListPlus,
   Unlock,
   Pencil,
   Plus,
@@ -48,7 +50,7 @@ import {
 } from '../../lib/api';
 import { contextLimitForModel, contextWindowLevel, contextWindowPercent, estimateContextTokens, formatTokenCount } from '../../lib/contextWindow';
 import { filterSlashWorkflowCommands, moveSlashSelection } from '../../lib/slashCommands';
-import type { ContextLedger, ContextLedgerDetail, ParsedFile, PermissionAccessMode, ProviderModel, RuntimeSettings, SkillSummary } from '../../lib/types';
+import type { ChatFollowupBehavior, ContextLedger, ContextLedgerDetail, ParsedFile, PermissionAccessMode, ProviderModel, RuntimeSettings, SkillSummary } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
@@ -66,6 +68,10 @@ interface ComposerModelEntry {
   id: string;
   model: string;
   active: boolean;
+}
+
+function oppositeFollowupBehavior(behavior: ChatFollowupBehavior): ChatFollowupBehavior {
+  return behavior === 'queue' ? 'steer' : 'queue';
 }
 
 function buildComposerModelList(models: ProviderModel[], settings: RuntimeSettings | null): ComposerModelEntry[] {
@@ -158,6 +164,9 @@ export function Composer() {
   const streaming = useChatStore(state => state.streaming);
   const setText = useChatStore(state => state.setComposerText);
   const send = useChatStore(state => state.send);
+  const submitFollowup = useChatStore(state => state.submitFollowup);
+  const followupBehavior = useChatStore(state => state.followupBehavior);
+  const setFollowupBehavior = useChatStore(state => state.setFollowupBehavior);
   const stop = useChatStore(state => state.stop);
   const addFiles = useChatStore(state => state.addFiles);
   const removeAttachment = useChatStore(state => state.removeAttachment);
@@ -179,8 +188,9 @@ export function Composer() {
   const [currentModel, setCurrentModel] = useState('');
   const pendingAttachment = attachments.some(file => file.status === 'parsing');
   const readyAttachmentCount = attachments.filter(file => !file.status || file.status === 'ready').length;
-  const sendDisabled = !streaming && (pendingAttachment || (!text.trim() && readyAttachmentCount === 0));
-  const sendReady = streaming || !sendDisabled;
+  const sendDisabled = pendingAttachment
+    || (streaming ? !text.trim() || attachments.length > 0 : !text.trim() && readyAttachmentCount === 0);
+  const sendReady = !sendDisabled;
   const showPromptSuggestions = promptSuggestions.length > 0 && !text.trim() && !streaming;
   const isCodeMode = appMode === 'code';
   const activeWorkspace = activeWorkspaceId ? workspaces.find(workspace => workspace.id === activeWorkspaceId) : null;
@@ -413,7 +423,12 @@ export function Composer() {
     if (event.key !== 'Enter') return;
     if (event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    void send();
+    if (streaming) {
+      const behavior = event.ctrlKey ? oppositeFollowupBehavior(followupBehavior) : followupBehavior;
+      void submitFollowup(behavior);
+    } else {
+      void send();
+    }
   };
 
   const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
@@ -462,17 +477,40 @@ export function Composer() {
       type="button"
       data-code={isCodeMode}
       data-streaming={streaming}
-      aria-label={streaming ? t('停止生成') : t('发送消息')}
-      title={streaming ? t('停止生成') : t('发送消息')}
+      aria-label={streaming ? (followupBehavior === 'queue' ? t('加入队列') : t('引导当前任务')) : t('发送消息')}
+      title={streaming ? `${followupBehavior === 'queue' ? t('加入队列') : t('引导当前任务')} · Ctrl+Enter ${t('执行相反操作')}` : t('发送消息')}
       disabled={sendDisabled}
       animate={sendControls}
       whileTap={!sendDisabled ? { scale: 0.9 } : undefined}
       transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-      onClick={() => (streaming ? stop() : void send())}
+      onClick={() => (streaming ? void submitFollowup() : void send())}
     >
-      {streaming ? <Square size={15} /> : isCodeMode ? <CornerDownLeft size={17} /> : <ArrowUp size={20} />}
+      {isCodeMode ? <CornerDownLeft size={17} /> : <ArrowUp size={20} />}
     </motion.button>
   );
+  const followupControls = streaming ? (
+    <div className="composer-followup-controls">
+      <button
+        className="composer-followup-mode"
+        type="button"
+        data-behavior={followupBehavior}
+        title={t('点击切换跟进行为')}
+        onClick={() => setFollowupBehavior(oppositeFollowupBehavior(followupBehavior))}
+      >
+        {followupBehavior === 'queue' ? <ListPlus size={12} /> : <CornerDownRight size={12} />}
+        <span>{followupBehavior === 'queue' ? t('排队') : t('引导')}</span>
+      </button>
+      <button
+        className="icon-button composer-stop-button"
+        type="button"
+        aria-label={t('停止生成')}
+        title={t('停止生成')}
+        onClick={stop}
+      >
+        <Square size={12} />
+      </button>
+    </div>
+  ) : null;
   const composerPlaceholder = appMode === 'chat'
     ? t('随便问点什么...')
     : t('让 Metis 在这个项目里开始工作...');
@@ -482,6 +520,7 @@ export function Composer() {
       className="composer-wrap"
       data-dragging-files={draggingFiles}
       data-mode={appMode}
+      data-streaming={streaming}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -665,7 +704,7 @@ export function Composer() {
           onKeyDown={handleKeyDown}
         />
         {isCodeMode ? (
-          <div className="composer-send-row">{sendButton}</div>
+          <div className="composer-send-row">{followupControls}{sendButton}</div>
         ) : (
           <div className="composer-toolbar">
             <div className="composer-toolbar-left">
@@ -676,6 +715,7 @@ export function Composer() {
             <div className="composer-toolbar-right">
               <ComposerModelMenu />
               <ComposerContextOrb model={currentModel} />
+              {followupControls}
               {sendButton}
             </div>
           </div>
@@ -700,9 +740,32 @@ export function Composer() {
 
 function AttachmentCard({ file, onRemove }: { file: ParsedFile; onRemove: (path: string) => void }) {
   const t = useT();
+  const setImageAttachmentPreview = useUiStore(state => state.setImageAttachmentPreview);
   const status = file.status || 'ready';
+  const previewable = status === 'ready' && file.kind === 'image' && Boolean(file.dataUrl);
+  const openPreview = () => {
+    if (!previewable || !file.dataUrl) return;
+    setImageAttachmentPreview({
+      src: file.dataUrl,
+      name: file.name,
+      mime: file.mime,
+    });
+  };
   return (
-    <article className="attachment-card" data-status={status}>
+    <article
+      className="attachment-card"
+      data-previewable={previewable}
+      data-status={status}
+      role={previewable ? 'button' : undefined}
+      tabIndex={previewable ? 0 : undefined}
+      aria-label={previewable ? `${t('预览图片')} ${file.name}` : undefined}
+      onClick={openPreview}
+      onKeyDown={event => {
+        if (!previewable || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        openPreview();
+      }}
+    >
       <span className="attachment-thumb" data-kind={file.kind}>
         {file.kind === 'image' && file.dataUrl ? (
           <img src={file.dataUrl} alt="" />
@@ -719,7 +782,16 @@ function AttachmentCard({ file, onRemove }: { file: ParsedFile; onRemove: (path:
         <small>{attachmentStatusText(file, t)}</small>
       </span>
       {status === 'parsing' && <Loader2 className="spin attachment-spinner" size={14} />}
-      <button type="button" className="attachment-remove" aria-label={`${t('移除')} ${file.name}`} onClick={() => onRemove(file.path)}>
+      <button
+        type="button"
+        className="attachment-remove"
+        aria-label={`${t('移除')} ${file.name}`}
+        onClick={event => {
+          event.stopPropagation();
+          onRemove(file.path);
+        }}
+        onKeyDown={event => event.stopPropagation()}
+      >
         <X size={13} />
       </button>
     </article>
@@ -1191,7 +1263,7 @@ function ComposerContextOrb({ model }: { model: string }) {
                   <em>{formatTokenCount(row.tokens)}</em>
                   <b>{row.countText || formatContextPercent(row.tokens, limit)}</b>
                 </button>
-                {row.details?.length && expanded[row.id] && (
+                {row.details && row.details.length > 0 && expanded[row.id] && (
                   <div className="composer-context-children">
                     {row.details.map(detail => (
                       <div className="composer-context-child" key={`${row.id}:${detail.name}`}>

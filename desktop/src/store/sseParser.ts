@@ -44,6 +44,7 @@ type LazyStore = {
     runSessionId: string | null;
     subagents: ChatSubagentEvent[];
     todoNotice: ChatTodoNotice | null;
+    followupsBySession?: Record<string, Array<{ id: string; message: string; behavior: string; status: string }>>;
   };
   setState: (partial: Record<string, unknown>) => void;
 };
@@ -103,6 +104,12 @@ export function applyChatEvent(
     return;
   } else if (normalized.kind === 'runtime_status' && normalized.runtimeStatus) {
     flushAssistantText(assistantId, sessionId, persistSnapshot);
+    if (['steering_applied', 'queued_followup_started'].includes(normalized.runtimeStatus.phase) && sessionId) {
+      const ids = Array.isArray(normalized.runtimeStatus.details?.followup_ids)
+        ? normalized.runtimeStatus.details.followup_ids.map(String)
+        : [];
+      applyFollowupToTimeline(assistantId, sessionId, ids, normalized.runtimeStatus.details?.followups);
+    }
     setRuntimeStatus(normalized.runtimeStatus);
     const terminal = runtimeTerminalToolFinalizer(normalized.runtimeStatus);
     if (terminal) {
@@ -333,6 +340,93 @@ function finalizeAssistantTextSegment(messageId: string, text: string): void {
         ? [...parts.slice(0, -1), { ...last, text }]
         : [...parts, { type: 'text' as const, text }];
     return { ...message, content: textFromParts(nextParts), parts: nextParts };
+  });
+}
+
+function applyFollowupToTimeline(
+  assistantId: string,
+  sessionId: string,
+  ids: string[],
+  rawFollowups: unknown,
+): void {
+  const state = chatStore().getState();
+  const followupsBySession = state.followupsBySession || {};
+  const localFollowups = followupsBySession[sessionId] || [];
+  const eventFollowups = Array.isArray(rawFollowups)
+    ? rawFollowups
+        .map(item => {
+          if (!item || typeof item !== 'object') return null;
+          const record = item as Record<string, unknown>;
+          const message = String(record.message || '').trim();
+          if (!message) return null;
+          return { id: String(record.id || ''), message };
+        })
+        .filter((item): item is { id: string; message: string } => Boolean(item))
+    : [];
+  const applied = eventFollowups.length > 0
+    ? eventFollowups
+    : localFollowups
+        .filter(item => ids.includes(item.id) && item.message.trim())
+        .map(item => ({ id: item.id, message: item.message.trim() }));
+
+  const nextFollowups = ids.length > 0
+    ? localFollowups.filter(item => !ids.includes(item.id))
+    : localFollowups;
+  if (applied.length === 0) {
+    chatStore().setState({
+      followupsBySession: { ...followupsBySession, [sessionId]: nextFollowups },
+    });
+    return;
+  }
+
+  const assistantIndex = state.messages.findIndex(message => message.id === assistantId);
+  if (assistantIndex < 0) {
+    chatStore().setState({
+      followupsBySession: { ...followupsBySession, [sessionId]: nextFollowups },
+    });
+    return;
+  }
+
+  const currentAssistant = state.messages[assistantIndex];
+  const segmentKey = applied.map(item => item.id).filter(Boolean).join('-') || String(Date.now());
+  const hasAssistantActivity = Boolean(
+    currentAssistant.content
+      || currentAssistant.parts?.length
+      || currentAssistant.tools?.length,
+  );
+  const createdAt = Date.now();
+  const replacement: ChatMessage[] = [];
+  if (hasAssistantActivity) {
+    replacement.push({
+      ...currentAssistant,
+      id: `${assistantId}-segment-${segmentKey}`,
+      pending: false,
+    });
+  }
+  applied.forEach((item, index) => {
+    replacement.push({
+      id: item.id || `${assistantId}-followup-${createdAt}-${index}`,
+      role: 'user',
+      content: item.message,
+      createdAt: createdAt + index,
+    });
+  });
+  replacement.push({
+    id: assistantId,
+    role: 'assistant',
+    content: '',
+    createdAt: createdAt + applied.length,
+    pending: true,
+    tools: [],
+  });
+
+  chatStore().setState({
+    messages: [
+      ...state.messages.slice(0, assistantIndex),
+      ...replacement,
+      ...state.messages.slice(assistantIndex + 1),
+    ],
+    followupsBySession: { ...followupsBySession, [sessionId]: nextFollowups },
   });
 }
 

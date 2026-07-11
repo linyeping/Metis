@@ -61,6 +61,19 @@ async function injectConnectorTokens(backendEnv) {
     // best-effort; connectors simply stay unconnected from the backend's view
   }
 }
+
+async function injectExtensionSecrets(backendEnv) {
+  try {
+    const { app, safeStorage } = require('electron')
+    const { decryptStoredExtensionSecrets } = require('./oauth.cjs')
+    const secrets = await decryptStoredExtensionSecrets({ app, safeStorage })
+    for (const [envVar, value] of Object.entries(secrets)) {
+      if (envVar && value && !backendEnv[envVar]) backendEnv[envVar] = value
+    }
+  } catch {
+    // best-effort; extensions that need configuration remain disabled
+  }
+}
 let fakeServer = null
 let fakeServerPort = null
 let fakeDeskEnabled = true
@@ -3642,6 +3655,7 @@ async function startBackend(emit = () => {}) {
   // Inject connector tokens so backend/runtime/connectors/token_store.py can
   // read them. Desktop owns safeStorage; the backend can't decrypt blobs itself.
   await injectConnectorTokens(backendEnv)
+  await injectExtensionSecrets(backendEnv)
 
   child = spawn(exe, args, {
     cwd,

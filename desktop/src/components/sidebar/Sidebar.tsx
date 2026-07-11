@@ -1,6 +1,6 @@
 import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
 import { createElement, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
-import { getActiveSessionRun } from '../../lib/api';
+import { listActiveRuns } from '../../lib/api';
 import { navigateToSession } from '../../lib/modeNavigation';
 import type { ChatRunStatus, SessionMeta, Workspace } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
@@ -34,18 +34,24 @@ export function Sidebar() {
   const [menu, setMenu] = useState<string | null>(null);
   const [runStatuses, setRunStatuses] = useState<Record<string, ChatRunStatus>>({});
 
+  const modeSessions = useMemo(
+    () => sessions.filter(session => session.mode === appMode || (appMode === 'chat' && !session.mode)),
+    [appMode, sessions],
+  );
+  const unscopedModeSessions = useMemo(
+    () => modeSessions.filter(session => !session.workspaceId),
+    [modeSessions],
+  );
   const grouped = useMemo(() => {
-    const filteredSessions = sessions.filter(s => s.mode === appMode);
-    const workspaceIds = new Set(filteredSessions.map(s => s.workspaceId).filter(Boolean));
+    const workspaceIds = new Set(modeSessions.map(session => session.workspaceId).filter(Boolean));
     if (activeWorkspaceId) workspaceIds.add(activeWorkspaceId);
 
     const relevantWorkspaces = workspaces.filter(w => workspaceIds.has(w.id));
-    const fallback = relevantWorkspaces.length ? relevantWorkspaces : [{ id: activeWorkspaceId || '', name: '当前工作区', path: '', createdAt: 0, updatedAt: 0 }];
-    return fallback.map(workspace => ({
+    return relevantWorkspaces.map(workspace => ({
       workspace,
-      sessions: filteredSessions.filter(session => (session.workspaceId || '') === (workspace.id || '')),
+      sessions: modeSessions.filter(session => session.workspaceId === workspace.id),
     }));
-  }, [activeWorkspaceId, appMode, sessions, workspaces]);
+  }, [activeWorkspaceId, modeSessions, workspaces]);
 
   const openFolder = async () => {
     const path = await window.metis.pickFolder();
@@ -59,30 +65,35 @@ export function Sidebar() {
     if (workspaceId && workspaceId !== activeWorkspaceId) {
       await selectWorkspace(workspaceId);
     }
-    startDraftSession();
+    startDraftSession(workspaceId || null);
     clearChat();
   };
 
   useEffect(() => {
     let disposed = false;
-    const sessionIds = sessions.map(session => session.id).filter(Boolean);
+    let refreshInFlight = false;
+    const sessionIds = modeSessions.map(session => session.id).filter(Boolean);
     if (sessionIds.length === 0) {
       setRunStatuses({});
       return undefined;
     }
 
     const refresh = async () => {
-      const entries = await Promise.all(
-        sessionIds.map(async sessionId => {
-          const payload = await getActiveSessionRun(sessionId).catch(() => ({ ok: false, run: null }));
-          const status = payload.run?.status || '';
-          return [sessionId, isActiveRunStatus(status) ? status : ''] as const;
-        }),
-      );
-      if (disposed) return;
-      setRunStatuses(
-        Object.fromEntries(entries.filter(([, status]) => Boolean(status))),
-      );
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      try {
+        const sessionIdSet = new Set(sessionIds);
+        const payload = await listActiveRuns().catch(() => ({ runs: [] }));
+        if (disposed) return;
+        const next: Record<string, ChatRunStatus> = {};
+        for (const run of payload.runs) {
+          if (!sessionIdSet.has(run.sessionId) || next[run.sessionId] || !isActiveRunStatus(run.status)) continue;
+          next[run.sessionId] = run.status;
+        }
+        setRunStatuses(next);
+      } finally {
+        refreshInFlight = false;
+      }
     };
 
     void refresh();
@@ -91,14 +102,12 @@ export function Sidebar() {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [sessions]);
-
-  const chatSessions = useMemo(() => sessions.filter(s => s.mode === 'chat' || !s.mode), [sessions]);
+  }, [modeSessions]);
 
   return (
     <div className="sidebar">
       <ModeSwitcher />
-      <div className="sidebar-mode-surface" key={appMode} data-mode={appMode}>
+      <div className="sidebar-mode-surface" data-mode={appMode}>
         <SidebarNav />
         <div className="sidebar-search-row" data-has-folder={appMode !== 'chat'}>
           <SessionSearch />
@@ -111,9 +120,9 @@ export function Sidebar() {
 
         <div className="workspace-list">
           {appMode === 'chat' ? (
-            <div className="session-list" style={{ padding: '8px 12px' }}>
-              {chatSessions.length === 0 && <p className="empty-line">{t('暂无会话')}</p>}
-              {chatSessions.slice(0, 20).map(session =>
+            <div className="session-list session-list-chat">
+              {modeSessions.length === 0 && <p className="empty-line">{t('暂无会话')}</p>}
+              {modeSessions.slice(0, 20).map(session =>
                 createElement(SessionRow, {
                   key: session.id,
                   active: session.id === activeSessionId,
@@ -123,33 +132,49 @@ export function Sidebar() {
                   session,
                 })
               )}
-              {chatSessions.length > 20 && (
+              {modeSessions.length > 20 && (
                 <button className="sidebar-view-all" type="button" onClick={() => setActiveSection('chat-list')}>
                   {t('查看全部')} <ChevronRight size={14} />
                 </button>
               )}
             </div>
           ) : (
-            grouped.map(group =>
-              createElement(WorkspaceGroup, {
-                key: group.workspace.id || 'default',
-                activeSessionId,
-                activeWorkspaceId,
-                clearWorkspace,
-                createChat,
-                deleteSessionById,
-                group,
-                loadChatSession,
-                menu,
-                open,
-                renameSessionById,
-                removeWorkspaceById,
-                runStatuses,
-                selectWorkspace,
-                setMenu,
-                setOpen,
-              }),
-            )
+            <>
+              {unscopedModeSessions.length > 0 && (
+                <div className="session-list session-list-unscoped">
+                  {unscopedModeSessions.map(session =>
+                    createElement(SessionRow, {
+                      key: session.id,
+                      active: session.id === activeSessionId,
+                      deleteSessionById,
+                      renameSessionById,
+                      runStatus: runStatuses[session.id] || '',
+                      session,
+                    }),
+                  )}
+                </div>
+              )}
+              {grouped.map(group =>
+                createElement(WorkspaceGroup, {
+                  key: group.workspace.id,
+                  activeSessionId,
+                  activeWorkspaceId,
+                  clearWorkspace,
+                  createChat,
+                  deleteSessionById,
+                  group,
+                  loadChatSession,
+                  menu,
+                  open,
+                  renameSessionById,
+                  removeWorkspaceById,
+                  runStatuses,
+                  selectWorkspace,
+                  setMenu,
+                  setOpen,
+                }),
+              )}
+            </>
           )}
         </div>
       </div>

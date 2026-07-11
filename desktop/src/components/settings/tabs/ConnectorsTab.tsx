@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, KeyRound, Plug, Power, PowerOff, RefreshCw, Unplug, Zap } from 'lucide-react';
+import { KeyRound, Plug, Power, PowerOff, RefreshCw, Unplug, Zap } from 'lucide-react';
 import type { ConnectorAuthorizeResult, ConnectorServiceStatus, ConnectorStatusPayload } from '../../../lib/types';
 import {
   type BackendConnector,
@@ -9,6 +9,7 @@ import {
   testConnector,
 } from '../../../lib/api';
 import { useT } from '../../../hooks/useT';
+import { ConnectorLogo } from '../../connectors/ConnectorLogo';
 
 export const ConnectorsTab = memo(function ConnectorsTab() {
   const t = useT();
@@ -195,10 +196,12 @@ function ConnectorCard({
   return (
     <section className="settings-section connector-card" data-connected={service.connected} data-active={active}>
       <div className="settings-section-header">
-        <CheckCircle2 size={16} className="section-icon" />
+        <ConnectorLogo serviceId={service.service} active={active} className="connector-card-glyph" />
         <h3>{service.displayName}</h3>
-        <span className="connector-state">{active ? t('运行中') : service.connected ? t('已连接') : t('未连接')}</span>
-        {active && backend ? <span className="connector-state">{backend.toolsCount} {t('个工具')}</span> : null}
+        <span className="connector-state-stack">
+          <span className="connector-state">{active ? t('运行中') : service.connected ? t('已连接') : t('未连接')}</span>
+          {active && backend ? <span className="connector-state">{backend.toolsCount} {t('个工具')}</span> : null}
+        </span>
       </div>
       <div className="connector-meta">
         <span>{service.scopes.join(' · ') || t('无额外 scope')}</span>

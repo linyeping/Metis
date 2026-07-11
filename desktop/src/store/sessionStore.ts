@@ -25,7 +25,7 @@ interface SessionState {
   error: string | null;
   load: () => Promise<void>;
   newSession: () => Promise<string | null>;
-  startDraftSession: () => void;
+  startDraftSession: (workspaceId?: string | null) => void;
   rememberModeState: (mode: AppMode) => void;
   prepareModeSession: (mode: AppMode) => { sessionId: string | null; workspaceId: string; draft: boolean };
   prepareSessionSelection: (mode: AppMode, sessionId: string) => { sessionId: string | null; workspaceId: string; draft: boolean };
@@ -77,29 +77,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   newSession: async () => {
     const appMode = useUiStore.getState().appMode;
-    const modeWorkspaceId = get().activeWorkspaceByMode[appMode] || get().activeWorkspaceId;
+    const draft = isDraftSessionId(get().activeSessionByMode[appMode] || '');
+    const modeWorkspaceId = draft
+      ? get().activeWorkspaceByMode[appMode] || ''
+      : get().activeWorkspaceByMode[appMode] || get().activeWorkspaceId;
     if (modeWorkspaceId) {
       await switchWorkspace(modeWorkspaceId).catch(() => null);
     }
-    const created = await createSession(appMode);
+    const createWorkspaceId = appMode === 'chat' || draft ? modeWorkspaceId : undefined;
+    const created = await createSession(appMode, createWorkspaceId);
     await get().load();
     rememberExplicitModeState(appMode, created.id || null, created.workspaceId || modeWorkspaceId || '');
     return created.id || null;
   },
-  startDraftSession: () => {
+  startDraftSession: (workspaceId = null) => {
     const appMode = useUiStore.getState().appMode;
     set(state => {
       const activeSessionByMode = { ...state.activeSessionByMode, [appMode]: DRAFT_SESSION_ID };
       const activeWorkspaceByMode = { ...state.activeWorkspaceByMode };
-      const workspaceId = state.activeWorkspaceId || state.activeWorkspaceByMode[appMode] || '';
-      if (workspaceId) activeWorkspaceByMode[appMode] = workspaceId;
+      const draftWorkspaceId = workspaceId || '';
+      if (draftWorkspaceId) activeWorkspaceByMode[appMode] = draftWorkspaceId;
+      else delete activeWorkspaceByMode[appMode];
       writeModeRecord('metis.activeSessionByMode', activeSessionByMode);
       writeModeRecord('metis.activeWorkspaceByMode', activeWorkspaceByMode);
       return {
         activeSessionByMode,
         activeWorkspaceByMode,
         activeSessionId: null,
-        activeWorkspaceId: workspaceId || state.activeWorkspaceId,
+        activeWorkspaceId: draftWorkspaceId,
       };
     });
   },
@@ -108,20 +113,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   prepareModeSession: mode => {
     const state = get();
-    const modeWorkspaceId = state.activeWorkspaceByMode[mode] || state.activeWorkspaceId || '';
     const rememberedSessionId = state.activeSessionByMode[mode] || '';
+    const rememberedDraft = isDraftSessionId(rememberedSessionId);
+    const modeWorkspaceId = rememberedDraft
+      ? state.activeWorkspaceByMode[mode] || ''
+      : state.activeWorkspaceByMode[mode] || state.activeWorkspaceId || '';
 
-    if (isDraftSessionId(rememberedSessionId)) {
-      set({ activeSessionId: null, activeWorkspaceId: modeWorkspaceId || state.activeWorkspaceId });
-      return { sessionId: null, workspaceId: modeWorkspaceId || state.activeWorkspaceId, draft: true };
+    if (rememberedDraft) {
+      set({ activeSessionId: null, activeWorkspaceId: modeWorkspaceId });
+      return { sessionId: null, workspaceId: modeWorkspaceId, draft: true };
     }
 
     const rememberedSession = state.sessions.find(session => session.id === rememberedSessionId && session.mode === mode) || null;
     const preferred = rememberedSession || findPreferredModeSession(state.sessions, mode, modeWorkspaceId);
     if (preferred) {
-      const workspaceId = preferred.workspaceId || modeWorkspaceId || state.activeWorkspaceId;
+      const workspaceId = preferred.workspaceId || '';
       const activeSessionByMode = { ...state.activeSessionByMode, [mode]: preferred.id };
-      const activeWorkspaceByMode = workspaceId ? { ...state.activeWorkspaceByMode, [mode]: workspaceId } : { ...state.activeWorkspaceByMode };
+      const activeWorkspaceByMode = { ...state.activeWorkspaceByMode };
+      if (workspaceId) activeWorkspaceByMode[mode] = workspaceId;
+      else delete activeWorkspaceByMode[mode];
       writeModeRecord('metis.activeSessionByMode', activeSessionByMode);
       writeModeRecord('metis.activeWorkspaceByMode', activeWorkspaceByMode);
       set({
@@ -151,9 +161,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const targetSession = state.sessions.find(session => session.id === sessionId && session.mode === mode) || null;
     if (!targetSession) return get().prepareModeSession(mode);
 
-    const workspaceId = targetSession.workspaceId || state.activeWorkspaceByMode[mode] || state.activeWorkspaceId || '';
+    const workspaceId = targetSession.workspaceId || '';
     const activeSessionByMode = { ...state.activeSessionByMode, [mode]: targetSession.id };
-    const activeWorkspaceByMode = workspaceId ? { ...state.activeWorkspaceByMode, [mode]: workspaceId } : { ...state.activeWorkspaceByMode };
+    const activeWorkspaceByMode = { ...state.activeWorkspaceByMode };
+    if (workspaceId) activeWorkspaceByMode[mode] = workspaceId;
+    else delete activeWorkspaceByMode[mode];
     writeModeRecord('metis.activeSessionByMode', activeSessionByMode);
     writeModeRecord('metis.activeWorkspaceByMode', activeWorkspaceByMode);
     set({
@@ -249,13 +261,14 @@ function rememberExplicitModeState(mode: AppMode, sessionId: string | null, work
     const activeWorkspaceByMode = { ...state.activeWorkspaceByMode };
     if (sessionId) activeSessionByMode[mode] = sessionId;
     if (workspaceId) activeWorkspaceByMode[mode] = workspaceId;
+    else delete activeWorkspaceByMode[mode];
     writeModeRecord('metis.activeSessionByMode', activeSessionByMode);
     writeModeRecord('metis.activeWorkspaceByMode', activeWorkspaceByMode);
     return {
       activeSessionByMode,
       activeWorkspaceByMode,
       activeSessionId: mode === useUiStore.getState().appMode && sessionId ? sessionId : state.activeSessionId,
-      activeWorkspaceId: mode === useUiStore.getState().appMode && workspaceId ? workspaceId : state.activeWorkspaceId,
+      activeWorkspaceId: mode === useUiStore.getState().appMode ? workspaceId : state.activeWorkspaceId,
     };
   });
 }
@@ -294,6 +307,7 @@ function reconcileModeState(input: {
   if (backendActive && backendMode && !draftModes.has(backendMode)) {
     activeSessionByMode[backendMode] = backendActive.id;
     if (backendActive.workspaceId) activeWorkspaceByMode[backendMode] = backendActive.workspaceId;
+    else delete activeWorkspaceByMode[backendMode];
   }
 
   for (const mode of APP_MODES) {
@@ -309,6 +323,7 @@ function reconcileModeState(input: {
     if (preferred) {
       activeSessionByMode[mode] = preferred.id;
       if (preferred.workspaceId) activeWorkspaceByMode[mode] = preferred.workspaceId;
+      else delete activeWorkspaceByMode[mode];
     } else {
       delete activeSessionByMode[mode];
     }

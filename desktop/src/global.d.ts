@@ -18,6 +18,7 @@ import type {
   TerminalRunPayload,
   TerminalRunResult,
   TerminalSessionPayload,
+  WindowCloseBehavior,
 } from './lib/types';
 
 export {};
@@ -128,7 +129,12 @@ declare global {
       connectorAuthorize: (service: string, options?: { token?: string; clientId?: string; scope?: string; secrets?: Record<string, string> }) => Promise<ConnectorAuthorizeResult>;
       connectorStatus: () => Promise<ConnectorStatusPayload>;
       connectorDisconnect: (service: string) => Promise<{ ok: boolean; service?: string; error?: string }>;
-      window: (action: 'minimize' | 'toggle-maximize' | 'hide' | 'quit') => Promise<{ ok: boolean }>;
+      extensionSecretsSave: (extensionId: string, values: Record<string, string>) => Promise<{ ok: boolean; extensionId?: string; envNames?: string[]; error?: string }>;
+      extensionSecretsStatus: (extensionId: string) => Promise<{ ok: boolean; configured: boolean; envNames: string[] }>;
+      extensionSecretsDelete: (extensionId: string) => Promise<{ ok: boolean; extensionId?: string; error?: string }>;
+      window: (action: 'minimize' | 'toggle-maximize' | 'hide' | 'close' | 'quit') => Promise<{ ok: boolean }>;
+      getWindowCloseBehavior: () => Promise<{ behavior: WindowCloseBehavior }>;
+      setWindowCloseBehavior: (behavior: WindowCloseBehavior) => Promise<{ ok: boolean; behavior: WindowCloseBehavior; error?: string }>;
       pickFolder: () => Promise<string | null>;
       pickPythonExe: () => Promise<string | null>;
       saveFile: (payload: {
@@ -136,6 +142,11 @@ declare global {
         defaultPath?: string;
         filters?: Array<{ name: string; extensions: string[] }>;
       }) => Promise<{ canceled: boolean; path?: string }>;
+      saveBinaryFile: (payload: {
+        dataUrl: string;
+        defaultPath?: string;
+        filters?: Array<{ name: string; extensions: string[] }>;
+      }) => Promise<{ canceled: boolean; path?: string; error?: string }>;
       openExternal: (url: string) => Promise<{ ok: boolean }>;
       openPath: (path: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
       getPathForFile: (file: File) => string;

@@ -921,6 +921,37 @@ async function verifyContextCompactionControl(checks: SmokeCheck[]): Promise<voi
   );
 }
 
+async function verifyContextPopoverLayout(checks: SmokeCheck[]): Promise<void> {
+  await waitForCondition(() => Boolean(document.querySelector('.composer-context-orb')), 'context layout orb visible');
+  const orb = document.querySelector<HTMLButtonElement>('.composer-context-orb');
+  if (orb?.getAttribute('aria-expanded') !== 'true') orb?.click();
+  await waitForCondition(() => Boolean(document.querySelector('.composer-context-popover')), 'context layout popover visible');
+
+  const contextList = document.querySelector<HTMLElement>('.composer-context-list');
+  const contextRows = Array.from(document.querySelectorAll<HTMLElement>('.composer-context-row'));
+  const contextRowRects = contextRows.map(row => row.getBoundingClientRect());
+  const contextRowGaps = contextRowRects.slice(1).map((rect, index) => rect.top - contextRowRects[index].bottom);
+  const contextListStyle = contextList ? getComputedStyle(contextList) : null;
+  record(
+    checks,
+    'new69-context-popover-rows-are-compact',
+    contextListStyle?.display === 'flex' &&
+      contextListStyle.flexDirection === 'column' &&
+      contextRowRects.length === 7 &&
+      contextRowRects.every(rect => rect.height <= 16.5) &&
+      contextRowGaps.every(gap => Math.abs(gap) <= 0.5),
+    JSON.stringify({
+      display: contextListStyle?.display || '',
+      flexDirection: contextListStyle?.flexDirection || '',
+      heights: contextRowRects.map(rect => Number(rect.height.toFixed(2))),
+      gaps: contextRowGaps.map(gap => Number(gap.toFixed(2))),
+      listHeight: Number((contextList?.getBoundingClientRect().height || 0).toFixed(2)),
+    }),
+  );
+  orb?.click();
+  await waitForCondition(() => !document.querySelector('.composer-context-popover'), 'context layout popover closes');
+}
+
 async function verifyProviderUsageAndModels(checks: SmokeCheck[]): Promise<void> {
   const catalog = await getProviderModels({
     backend: 'custom-openai',
@@ -1602,6 +1633,25 @@ async function verifyDeveloperWorkflowPolish(checks: SmokeCheck[]): Promise<void
     rootStyle.getPropertyValue('--code-font-size').trim() === '14px',
     rootStyle.getPropertyValue('--code-font-size'),
   );
+  record(
+    checks,
+    'ui-typography-scale-applies',
+    rootStyle.getPropertyValue('--ui-font-size-2xs').trim() === '12px' &&
+      rootStyle.getPropertyValue('--ui-font-size-md').trim() === '15px' &&
+      rootStyle.getPropertyValue('--ui-font-size-display').trim() === '34px',
+    JSON.stringify({
+      xxs: rootStyle.getPropertyValue('--ui-font-size-2xs').trim(),
+      md: rootStyle.getPropertyValue('--ui-font-size-md').trim(),
+      display: rootStyle.getPropertyValue('--ui-font-size-display').trim(),
+    }),
+  );
+  const titlebarControlHeight = document.querySelector<HTMLElement>('.titlebar-actions > button')?.getBoundingClientRect().height || 0;
+  record(
+    checks,
+    'ui-control-sm-height-stays-fixed',
+    titlebarControlHeight > 27.5 && titlebarControlHeight < 28.5,
+    String(titlebarControlHeight),
+  );
   ui.setSettingsSection('appearance');
   ui.setSettingsOpen(true);
   await waitForCondition(
@@ -1616,6 +1666,13 @@ async function verifyDeveloperWorkflowPolish(checks: SmokeCheck[]): Promise<void
     'new83-appearance-font-size-controls-visible',
     appearanceText.includes('UI 字号') && appearanceText.includes('代码字号') && document.querySelectorAll('.settings-size-row').length >= 2,
     appearanceText,
+  );
+  const settingsControlHeight = document.querySelector<HTMLElement>('.settings-panel select')?.getBoundingClientRect().height || 0;
+  record(
+    checks,
+    'ui-control-md-height-stays-fixed',
+    settingsControlHeight > 33.5 && settingsControlHeight < 34.5,
+    String(settingsControlHeight),
   );
   ui.setSettingsOpen(false);
   ui.setUiFontSize(14);
@@ -3414,6 +3471,7 @@ export async function runRendererSmoke(): Promise<void> {
     await waitForBoot(checks);
     await prepareStores(checks);
     await verifyComposerUploadAndRegressionFixes(checks);
+    await verifyContextPopoverLayout(checks);
     await verifyCommandPalette(checks);
     await verifySessionSearch(checks);
     await verifyMotionHooks(checks);

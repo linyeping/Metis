@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, BarChart3, Cpu, Globe, HardDrive, Info, Maximize2, MessageSquare, Minus, Monitor, Palette, Plug, Search, Terminal, Wrench, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, Copy, Cpu, Globe, HardDrive, Info, MessageSquare, Minus, Monitor, Palette, Plug, Search, Settings2, Square, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionWritableRoot,
   createPermissionRule,
@@ -56,7 +56,9 @@ import type {
 import { tr } from '../../lib/i18n';
 import { useUiStore } from '../../store/uiStore';
 import { useT } from '../../hooks/useT';
+import { useWindowState } from '../../hooks/useWindowState';
 import { settingsNavGroups, stripConfigWhitespace, type PermissionRuleDraft } from './settingsShared';
+import { GeneralTab } from './tabs/GeneralTab';
 import { AppearanceTab } from './tabs/AppearanceTab';
 import { ConversationTab } from './tabs/ConversationTab';
 import { ModelTab } from './tabs/ModelTab';
@@ -89,6 +91,7 @@ let providerStatusCache: CacheEntry<ProviderStatusPayload> | null = null;
 let permissionsCache: CacheEntry<PermissionStatePayload> | null = null;
 
 const sectionIcons: Record<SettingsSection, typeof Palette> = {
+  general: Settings2,
   appearance: Palette,
   conversation: MessageSquare,
   model: Cpu,
@@ -103,6 +106,7 @@ const sectionIcons: Record<SettingsSection, typeof Palette> = {
 };
 
 const sectionDescriptions: Record<SettingsSection, string> = {
+  general: '窗口关闭和应用级行为。',
   appearance: '主题、语言、字体和界面密度。',
   conversation: '记忆、自动技能和对话行为。',
   model: '供应商、模型、API 地址和推理参数。',
@@ -156,6 +160,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
   const setFontFamily = useUiStore(state => state.setFontFamily);
   const language = useUiStore(state => state.language);
   const t = useT();
+  const { isFullScreen, isMaximized } = useWindowState();
   const setLanguage = useUiStore(state => state.setLanguage);
   const uiFontSize = useUiStore(state => state.uiFontSize);
   const setUiFontSize = useUiStore(state => state.setUiFontSize);
@@ -593,6 +598,8 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
 
   const renderSettingsContent = (section: SettingsSection) => {
     switch (section) {
+      case 'general':
+        return <GeneralTab />;
       case 'appearance':
         return (
           <AppearanceTab
@@ -784,9 +791,9 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
                   <Minus size={15} />
                 </button>
                 <button type="button" title={t('最大化或还原')} onClick={() => void window.metis.window('toggle-maximize')}>
-                  <Maximize2 size={14} />
+                  {isMaximized || isFullScreen ? <Copy size={13} /> : <Square size={13} />}
                 </button>
-                <button type="button" title={t('隐藏到托盘')} onClick={() => void window.metis.window('hide')}>
+                <button type="button" title={t('关闭')} onClick={() => void window.metis.window('close')}>
                   <X size={15} />
                 </button>
               </div>

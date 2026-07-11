@@ -10,6 +10,7 @@ function bindParserState() {
     runSessionId: string | null;
     subagents: [];
     todoNotice: ChatTodoNotice | null;
+    followupsBySession: Record<string, Array<{ id: string; message: string; behavior: string; status: string }>>;
   } = {
     messages: [
       {
@@ -25,6 +26,7 @@ function bindParserState() {
     runSessionId: 'session-1',
     subagents: [],
     todoNotice: null,
+    followupsBySession: {},
   };
   const store = {
     getState: () => state,
@@ -36,6 +38,40 @@ function bindParserState() {
 }
 
 describe('sseParser ordered message parts', () => {
+  it('moves an applied follow-up from the pending card into the live timeline', () => {
+    const state = bindParserState();
+    state.messages[0].content = 'First answer';
+    state.followupsBySession['session-1'] = [
+      { id: 'followup-1', message: 'Do the next task', behavior: 'queue', status: 'pending' },
+      { id: 'followup-2', message: 'Keep this pending', behavior: 'steer', status: 'pending' },
+    ];
+
+    applyChatEvent(
+      {
+        type: 'runtime_status',
+        payload: {
+          phase: 'queued_followup_started',
+          details: {
+            followup_ids: ['followup-1'],
+            followups: [{ id: 'followup-1', message: 'Do the next task' }],
+          },
+        },
+      },
+      'assistant-1',
+      'session-1',
+      () => undefined,
+      () => undefined,
+    );
+
+    expect(state.followupsBySession['session-1'].map(item => item.id)).toEqual(['followup-2']);
+    expect(state.messages.map(item => [item.role, item.content, item.pending])).toEqual([
+      ['assistant', 'First answer', false],
+      ['user', 'Do the next task', undefined],
+      ['assistant', '', true],
+    ]);
+    expect(state.messages[2].id).toBe('assistant-1');
+  });
+
   it('keeps narration before tools and corrects only the latest text segment', () => {
     const state = bindParserState();
     const persistSnapshot = () => undefined;

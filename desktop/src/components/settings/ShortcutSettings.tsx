@@ -43,8 +43,8 @@ export function ShortcutSettings() {
   }, [recording, setShortcut]);
 
   return (
-    <div className="shortcut-settings" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <p className="settings-hint" style={{ opacity: 0.7, fontSize: 12 }}>
+    <div className="shortcut-settings">
+      <p className="settings-hint shortcut-settings-hint">
         {t('右上角工作区卡片的开关快捷键。主键为')} {isMacPlatform ? '⌘' : 'Ctrl'}
         {t('，点「录制」后按下组合键（可加 Shift）。')}
       </p>
@@ -52,22 +52,11 @@ export function ShortcutSettings() {
         const sc = shortcuts[id];
         const isRecording = recording === id;
         return (
-          <div
-            key={id}
-            className="shortcut-row"
-            style={{ display: 'flex', alignItems: 'center', gap: 10 }}
-          >
-            <span style={{ width: 96 }}>{CARD_LABELS[id]}</span>
+          <div key={id} className="shortcut-row">
+            <span className="shortcut-label">{CARD_LABELS[id]}</span>
             <kbd
-              style={{
-                minWidth: 110,
-                padding: '3px 8px',
-                borderRadius: 6,
-                border: '1px solid var(--border, #ddd)',
-                fontSize: 12,
-                textAlign: 'center',
-                opacity: isRecording ? 1 : sc ? 1 : 0.5,
-              }}
+              className="shortcut-binding"
+              data-empty={!isRecording && !sc}
             >
               {isRecording ? t('按下组合键…') : sc ? shortcutLabel(sc) : t('未设置')}
             </kbd>
