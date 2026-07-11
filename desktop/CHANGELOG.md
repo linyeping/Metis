@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning after the first public release.
 
+## [26.7.11] - 2026-07-11
+
+### Added
+
+- Added configurable close-window behavior: ask, minimize to tray, or quit.
+- Added detailed localized Store descriptions and colored connector logos.
+
+### Changed
+
+- Replaced the desktop, tray, and installer icon with the rounded flower mark.
+- Improved Chat, Cowork, and Code switching to avoid duplicate loads and stale session state.
+
 ## [3.0.0] - Unreleased
 
 ### Added
