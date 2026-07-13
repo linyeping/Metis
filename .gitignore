@@ -61,7 +61,6 @@ backend/var/
 backend/build/
 backend/output/
 backend/others/
-docs/dev-log/
 .codex-acceptance/
 .agent_todos.json
 NEWUPDATE.md

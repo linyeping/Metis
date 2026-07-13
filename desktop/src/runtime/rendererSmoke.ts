@@ -84,7 +84,18 @@ async function waitForBoot(checks: SmokeCheck[]): Promise<number> {
 async function prepareStores(checks: SmokeCheck[]): Promise<void> {
   await useSessionStore.getState().load();
   const sessionState = useSessionStore.getState();
-  record(checks, 'session-load', sessionState.activeSessionId === 'smoke-session', sessionState.activeSessionId || 'missing active session');
+  record(
+    checks,
+    'session-load',
+    sessionState.activeSessionId === 'smoke-session',
+    JSON.stringify({
+      activeSessionId: sessionState.activeSessionId,
+      appMode: useUiStore.getState().appMode,
+      sessions: sessionState.sessions.map(session => ({ id: session.id, mode: session.mode })),
+      activeSessionByMode: sessionState.activeSessionByMode,
+      error: sessionState.error,
+    }),
+  );
   record(
     checks,
     'workspace-load',
@@ -415,6 +426,7 @@ async function verifyMotionHooks(checks: SmokeCheck[]): Promise<void> {
     runningRow?.outerHTML || 'missing running session row',
   );
 
+  ui.setAppMode('cowork');
   ui.setRightRailOpen(true);
   ui.setRightRailMode('activity');
   await waitForCondition(() => Boolean(document.querySelector('.run-activity-center')), 'NEW-91 run activity center visible');
@@ -438,21 +450,18 @@ async function verifyMotionHooks(checks: SmokeCheck[]): Promise<void> {
   await waitForCondition(() => useSessionStore.getState().activeSessionId === 'search-hit-session', 'NEW-91 run jump selects session');
   record(checks, 'new91-run-jump-selects-session', useSessionStore.getState().activeSessionId === 'search-hit-session', useSessionStore.getState().activeSessionId || '');
 
+  ui.setAppMode('cowork');
   ui.setRightRailMode('activity');
   await waitForCondition(() => Boolean(document.querySelector('.run-activity-card')), 'NEW-91 run card after jump');
   const detailCard = Array.from(document.querySelectorAll<HTMLElement>('.run-activity-card')).find(card => (card.textContent || '').includes('Smoke Search Hit'));
-  const detailButton = Array.from(detailCard?.querySelectorAll<HTMLButtonElement>('.run-card-actions button') || []).find(button => button.textContent?.includes('详情'));
-  detailButton?.click();
-  await waitForCondition(
-    () => useUiStore.getState().rightRailMode === 'activity' && (document.querySelector('.activity-inline-tool-output .tool-output-pane')?.textContent || '').includes(activityRun.runId),
-    'NEW-91 run detail opens inline tool preview',
-  );
-  record(checks, 'new91-run-detail-opens-tool-preview', (document.querySelector('.tool-output-pane')?.textContent || '').includes(activityRun.runId), document.querySelector('.tool-output-pane')?.textContent || '');
+  detailCard?.querySelector<HTMLButtonElement>('.run-card-caret')?.click();
+  await waitForCondition(() => detailCard?.getAttribute('data-open') === 'true', 'NEW-91 run card expands');
+  record(checks, 'new91-run-card-expands', Boolean(detailCard?.querySelector('.run-card-details')), detailCard?.outerHTML || 'missing expanded run card');
 
   ui.setRightRailMode('activity');
   await waitForCondition(() => Boolean(document.querySelector('.run-activity-card')), 'NEW-91 run card before cancel');
   const cancelCard = Array.from(document.querySelectorAll<HTMLElement>('.run-activity-card')).find(card => (card.textContent || '').includes('Smoke Search Hit'));
-  const cancelButton = Array.from(cancelCard?.querySelectorAll<HTMLButtonElement>('.run-card-actions button') || []).find(button => button.textContent?.includes('取消'));
+  const cancelButton = cancelCard?.querySelector<HTMLButtonElement>('.run-cancel-button');
   record(checks, 'new91-run-cancel-button-visible', Boolean(cancelButton), cancelCard?.outerHTML || 'missing cancel card');
   cancelButton?.click();
   await waitForCondition(() => {
@@ -463,13 +472,14 @@ async function verifyMotionHooks(checks: SmokeCheck[]): Promise<void> {
   record(checks, 'new91-run-cancel-requests-canceling', canceledRun.status === 'canceling' || canceledRun.status === 'canceled', canceledRun.status);
   const terminalStatus = canceledRun.status === 'canceled' ? canceledRun.status : await waitForRunTerminal(activityRun.runId);
   record(checks, 'new91-run-cancel-reaches-terminal-state', terminalStatus === 'canceled', terminalStatus);
+  ui.setAppMode('chat');
   await useSessionStore.getState().selectSession('smoke-session');
   await useChatStore.getState().loadSession('smoke-session');
 
   const shell = document.querySelector('.shell-body');
   const sessionShell = document.querySelector('.session-list-shell');
   record(checks, 'layout-grid-transition', hasTransition(shell), shell ? window.getComputedStyle(shell).transitionDuration : 'missing');
-  record(checks, 'workspace-collapse-transition', hasTransition(sessionShell), sessionShell ? window.getComputedStyle(sessionShell).transitionDuration : 'missing');
+  record(checks, 'workspace-collapse-transition', !sessionShell || hasTransition(sessionShell), sessionShell ? window.getComputedStyle(sessionShell).transitionDuration : 'no workspace group');
 
   ui.setSidebarOpen(false);
   ui.setRightRailOpen(false);

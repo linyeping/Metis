@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,6 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const vitePort = Number(process.env.METIS_PERF_VITE_PORT || 5188);
 const rendererUrl = `http://127.0.0.1:${vitePort}`;
+const electronFlags = String(process.env.METIS_ELECTRON_FLAGS || '').trim().split(/\s+/).filter(Boolean);
 
 function log(prefix, data) {
   const text = data.toString('utf8');
@@ -72,10 +75,13 @@ function stop(child) {
 
 async function main() {
   const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
+  const perfDataRoot = path.join(os.tmpdir(), 'metis-desktop-perf-cache');
+  fs.mkdirSync(perfDataRoot, { recursive: true });
   let perfResult = null;
 
   const vite = spawnChild('vite', process.execPath, [
     viteBin,
+    'preview',
     '--host',
     '127.0.0.1',
     '--port',
@@ -87,20 +93,12 @@ async function main() {
   try {
     await waitForHttp(rendererUrl);
 
-    const electron = spawn(electronBinary, [
-      '--no-sandbox',
-      '--disable-gpu-sandbox',
-      '--in-process-gpu',
-      '--disable-gpu',
-      '--disable-gpu-compositing',
-      '--use-gl=swiftshader',
-      '--enable-unsafe-swiftshader',
-      '--disable-features=VizDisplayCompositor',
-      '.',
-    ], {
+    const electron = spawn(electronBinary, [...electronFlags, '.'], {
       cwd: root,
       env: {
         ...process.env,
+        METIS_DATA_ROOT: perfDataRoot,
+        METIS_HOME: path.join(perfDataRoot, 'metis'),
         METIS_DESKTOP_DEV_SERVER: `${rendererUrl}/?metisPerf=1`,
         METIS_DESKTOP_PERF: '1',
         METIS_FAKE_BACKEND: '1',
@@ -158,4 +156,3 @@ main().catch(error => {
   process.stderr.write(`[perf:desktop] ${error.stack || error.message || String(error)}\n`);
   process.exit(1);
 });
-

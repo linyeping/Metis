@@ -728,28 +728,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   clearLocal: () =>
-    set({
-      messages: [],
-      attachments: [],
-      composerText: '',
-      memoryNotice: null,
-      todoNotice: null,
-      planTodos: [],
-      recoveryNotice: null,
-      awaySummary: null,
-      promptSuggestions: [],
-      compactStatus: null,
-      usage: null,
-      contextLedger: null,
-      runtimeStatus: null,
-      subagents: [],
-      coworkPlan: null,
-      error: null,
-      streaming: false,
-      controller: null,
-      loadedSessionId: null,
-      runSessionId: null,
-      pendingSendSessionId: null,
+    set(state => {
+      const alreadyClear =
+        state.messages.length === 0 &&
+        state.attachments.length === 0 &&
+        state.composerText === '' &&
+        state.memoryNotice === null &&
+        state.todoNotice === null &&
+        state.planTodos.length === 0 &&
+        state.recoveryNotice === null &&
+        state.awaySummary === null &&
+        state.promptSuggestions.length === 0 &&
+        state.compactStatus === null &&
+        state.usage === null &&
+        state.contextLedger === null &&
+        state.runtimeStatus === null &&
+        state.subagents.length === 0 &&
+        state.coworkPlan === null &&
+        state.error === null &&
+        !state.streaming &&
+        state.controller === null &&
+        state.loadedSessionId === null &&
+        state.runSessionId === null &&
+        state.pendingSendSessionId === null;
+      if (alreadyClear) return state;
+      return {
+        messages: [],
+        attachments: [],
+        composerText: '',
+        memoryNotice: null,
+        todoNotice: null,
+        planTodos: [],
+        recoveryNotice: null,
+        awaySummary: null,
+        promptSuggestions: [],
+        compactStatus: null,
+        usage: null,
+        contextLedger: null,
+        runtimeStatus: null,
+        subagents: [],
+        coworkPlan: null,
+        error: null,
+        streaming: false,
+        controller: null,
+        loadedSessionId: null,
+        runSessionId: null,
+        pendingSendSessionId: null,
+      };
     }),
 }));
 

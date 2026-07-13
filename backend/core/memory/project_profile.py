@@ -188,15 +188,13 @@ def _infer_structure(root: Path) -> List[str]:
     descriptions = {
         "backend": "backend/ — Python backend, runtime loop, tools, web routes, tests",
         "desktop": "desktop/ — Electron shell and React renderer",
-        "docs": "docs/ — project documentation and dev-log construction notes",
+        "docs": "docs/ — durable architecture, development, and protocol documentation",
         ".github": ".github/ — GitHub workflows and repository metadata",
     }
     out: List[str] = []
     for name, description in descriptions.items():
         if (root / name).exists():
             out.append(description)
-    if (root / "docs" / "dev-log").exists():
-        out.append("docs/dev-log/ — append-only implementation plans and construction logs")
     return out
 
 
@@ -248,7 +246,6 @@ def _default_design_decisions(root: Path, package: Dict[str, Any]) -> List[str]:
 def _default_user_preferences() -> List[str]:
     return [
         "Default to Chinese replies for this project.",
-        "Append to dev-log/MVP docs; do not overwrite prior construction notes.",
         "Do not stage or commit local runtime files such as .metis/audit, .metis/cache, .agent_todos.json, or NEWUPDATE.md.",
     ]
 

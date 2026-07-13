@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../lib/types';
+import { navigateAppMode } from '../lib/modeNavigation';
 import { useChatStore } from '../store/chatStore';
 import { useUiStore } from '../store/uiStore';
 import { TRANSCRIPT_REPLAY_FIXTURE } from './fixtures/transcriptReplayFixture';
@@ -279,7 +280,7 @@ async function measureFrames(durationMs: number, action: () => void): Promise<Fr
   const deltas: number[] = [];
   let previous = performance.now();
   let started = false;
-  const end = previous + durationMs;
+  let end = 0;
 
   return new Promise(resolve => {
     const tick = (now: number) => {
@@ -287,6 +288,7 @@ async function measureFrames(durationMs: number, action: () => void): Promise<Fr
       previous = now;
       if (!started) {
         started = true;
+        end = now + durationMs;
         action();
       }
       if (now < end) {
@@ -340,6 +342,7 @@ async function measureFramesDuring(action: () => Promise<void>): Promise<FrameSt
 
 async function measurePanelMotion(checks: PerfCheck[]): Promise<DesktopPerfMetrics['panelMotion']> {
   const ui = useUiStore.getState();
+  ui.setAppMode('cowork');
   ui.setActiveSection('chat');
   ui.setSidebarOpen(true);
   ui.setRightRailOpen(true);
@@ -371,6 +374,39 @@ async function measurePanelMotion(checks: PerfCheck[]): Promise<DesktopPerfMetri
     durationMs: 900,
     toggles,
   };
+}
+
+async function measureModeSwitch(checks: PerfCheck[]): Promise<void> {
+  const modes = ['chat', 'cowork', 'code'] as const;
+  const latencies: number[] = [];
+  const syncDurations: number[] = [];
+  await document.fonts?.ready.catch(() => undefined);
+  await delay(1800);
+  for (let index = 0; index < 6; index += 1) {
+    navigateAppMode(modes[(index + 1) % modes.length]);
+    await nextFrame();
+    await delay(120);
+  }
+  await nextFrame();
+  for (let index = 0; index < 6; index += 1) {
+    const startedAt = performance.now();
+    navigateAppMode(modes[(index + 1) % modes.length]);
+    syncDurations.push(performance.now() - startedAt);
+    await nextFrame();
+    latencies.push(performance.now() - startedAt);
+    await delay(120);
+  }
+  const sorted = latencies.slice().sort((left, right) => left - right);
+  const p95 = round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] || 0);
+  const max = round(Math.max(...latencies));
+  const backdropCount = document.querySelectorAll('.mode-backdrop').length;
+  const iframeCount = document.querySelectorAll('.mode-backdrop iframe').length;
+  record(
+    checks,
+    'perf-mode-switch-fast-path',
+    backdropCount === 1 && iframeCount <= 1 && p95 <= 100,
+    `switches=${latencies.length} backdrops=${backdropCount} iframes=${iframeCount} p95=${p95} max=${max} sync=${syncDurations.map(round).join(',')} frames=${latencies.map(round).join(',')}`,
+  );
 }
 
 async function measureComposerInput(checks: PerfCheck[]): Promise<DesktopPerfMetrics['composerInput']> {
@@ -529,6 +565,7 @@ async function measureRightRailToolPreview(checks: PerfCheck[]): Promise<Desktop
   const content = largeToolResult(999, 900);
   const lines = content.split(/\r?\n/).length;
   const ui = useUiStore.getState();
+  ui.setAppMode('cowork');
   ui.setActiveSection('chat');
   ui.setRightRailOpen(true);
   const start = performance.now();
@@ -756,6 +793,7 @@ export async function runRendererPerf(): Promise<void> {
   try {
     await waitForBoot(checks);
     await waitForCondition(() => Boolean(document.querySelector('.thread-viewport')), 'thread viewport');
+    await measureModeSwitch(checks);
 
     const metrics: DesktopPerfMetrics = {
       longThread: await measureLongThread(checks),

@@ -11,7 +11,7 @@ def _write_metis_fixture(root) -> None:
     desktop = root / "desktop"
     desktop.mkdir()
     (root / "backend").mkdir()
-    (root / "docs" / "dev-log").mkdir(parents=True)
+    (root / "docs").mkdir()
     (root / "pyproject.toml").write_text("[tool.ruff]\nline-length = 120\n", encoding="utf-8")
     (desktop / "package.json").write_text(
         json.dumps(
@@ -42,7 +42,7 @@ def test_project_profile_infers_commands_ports_and_preferences(tmp_path):
     assert profile.name == tmp_path.name
     assert profile.project_type == "Python backend + Electron/React TypeScript desktop"
     assert "backend/ — Python backend, runtime loop, tools, web routes, tests" in profile.structure
-    assert "docs/dev-log/ — append-only implementation plans and construction logs" in profile.structure
+    assert "docs/ — durable architecture, development, and protocol documentation" in profile.structure
     assert "cd desktop && npm run dev" in profile.startup_commands
     assert "python -m pytest" in profile.test_commands
     assert "cd desktop && npm run typecheck" in profile.test_commands

@@ -72,9 +72,9 @@ export function Sidebar() {
   useEffect(() => {
     let disposed = false;
     let refreshInFlight = false;
-    const sessionIds = modeSessions.map(session => session.id).filter(Boolean);
+    const sessionIds = sessions.map(session => session.id).filter(Boolean);
     if (sessionIds.length === 0) {
-      setRunStatuses({});
+      setRunStatuses(current => (Object.keys(current).length === 0 ? current : {}));
       return undefined;
     }
 
@@ -90,7 +90,7 @@ export function Sidebar() {
           if (!sessionIdSet.has(run.sessionId) || next[run.sessionId] || !isActiveRunStatus(run.status)) continue;
           next[run.sessionId] = run.status;
         }
-        setRunStatuses(next);
+        setRunStatuses(current => sameRunStatuses(current, next) ? current : next);
       } finally {
         refreshInFlight = false;
       }
@@ -102,7 +102,7 @@ export function Sidebar() {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [modeSessions]);
+  }, [sessions]);
 
   return (
     <div className="sidebar">
@@ -184,6 +184,12 @@ export function Sidebar() {
       </button>
     </div>
   );
+}
+
+function sameRunStatuses(left: Record<string, ChatRunStatus>, right: Record<string, ChatRunStatus>): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length && leftKeys.every(key => left[key] === right[key]);
 }
 
 interface WorkspaceGroupProps {

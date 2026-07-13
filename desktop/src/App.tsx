@@ -31,32 +31,20 @@ const emptyBootState: BootState = {
   logPath: '',
 };
 
-const modeOrder = {
-  chat: 0,
-  cowork: 1,
-  code: 2,
-} as const;
-
 const mainPanelTransition = {
   duration: 0.19,
   ease: [0.16, 1, 0.3, 1] as const,
 };
 
 const mainPanelVariants = {
-  enter: (direction: number) => ({
+  enter: (_direction: number) => ({
     opacity: 0,
-    x: direction === 0 ? 0 : direction * 18,
-    scale: 0.992,
   }),
   center: {
     opacity: 1,
-    x: 0,
-    scale: 1,
   },
-  exit: (direction: number) => ({
+  exit: (_direction: number) => ({
     opacity: 0,
-    x: direction === 0 ? 0 : direction * -14,
-    scale: 0.996,
   }),
 };
 
@@ -111,7 +99,6 @@ function applyBootEvent(state: BootState, event: BootEvent): BootState {
 export function App() {
   useTheme();
   const activeSection = useUiStore(state => state.activeSection);
-  const appMode = useUiStore(state => state.appMode);
   const setSideChatOpen = useUiStore(state => state.setSideChatOpen);
   const settingsOpen = useUiStore(state => state.settingsOpen);
   const commandOpen = useUiStore(state => state.commandOpen);
@@ -133,21 +120,7 @@ export function App() {
   const loadedPort = useRef<number | null>(null);
   // 用户「暂时跳过」首启向导后，本会话不再因 refresh 重新检测 first_run 而把向导弹回来。
   const firstRunDismissed = useRef(false);
-  const panelTransitionRef = useRef({ mode: appMode, section: activeSection, direction: 0 });
-  if (panelTransitionRef.current.mode !== appMode) {
-    panelTransitionRef.current = {
-      mode: appMode,
-      section: activeSection,
-      direction: Math.sign(modeOrder[appMode] - modeOrder[panelTransitionRef.current.mode]),
-    };
-  } else if (panelTransitionRef.current.section !== activeSection) {
-    panelTransitionRef.current = {
-      mode: appMode,
-      section: activeSection,
-      direction: 0,
-    };
-  }
-  const panelTransitionDirection = panelTransitionRef.current.direction;
+  const panelTransitionDirection = 0;
 
   const refresh = useCallback(async () => {
     await loadSessions();
@@ -251,6 +224,7 @@ export function App() {
   }, [pushToast]);
 
   useEffect(() => {
+    const appMode = useUiStore.getState().appMode;
     const activeSession = activeSessionId ? sessions.find(session => session.id === activeSessionId) : null;
     if (activeSession?.mode && activeSession.mode !== appMode) {
       void loadChatSession(null);
@@ -258,7 +232,7 @@ export function App() {
     }
     if (useChatStore.getState().loadedSessionId === activeSessionId) return;
     void loadChatSession(activeSessionId);
-  }, [activeSessionId, appMode, loadChatSession, sessions]);
+  }, [activeSessionId, loadChatSession, sessions]);
 
   // FABLEADV-34: 心跳探测——进程活着但 API 假死时也能显示"正在重新连接 x/5"并自动恢复。
   useEffect(() => {
@@ -383,13 +357,12 @@ export function App() {
         ? <CronPanel />
         : <SectionMain section={activeSection} />;
   const main = (
-    <div className="main-panel-transition-shell" data-mode={appMode} data-section={activeSection}>
+    <div className="main-panel-transition-shell" data-section={activeSection}>
       <AnimatePresence initial={false} custom={panelTransitionDirection}>
         <motion.div
           key={activeSection}
           className="main-panel-stage"
           data-section={activeSection}
-          data-mode={appMode}
           custom={panelTransitionDirection}
           variants={mainPanelVariants}
           initial="enter"

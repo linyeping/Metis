@@ -19,6 +19,7 @@
     const container = document.getElementById('container');
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('mode') === 'light' ? 'light' : 'dark';
+    let scene = 'chat';
 
     function normalizeHex(value, fallback) {
         const text = String(value || '').trim();
@@ -67,7 +68,7 @@
     document.body.style.background = palette.bg;
 
     const CONFIG = {
-        dotSpacing: 17,
+        dotSpacing: 22,
         speed: 0.92,
         noiseScale: 0.0026,
         contrastPower: 5.6,
@@ -76,13 +77,27 @@
         minAlpha: mode === 'light' ? 0.018 : 0.026
     };
 
+    const CHAT_SOURCES = [
+        { bx:0.22, by:0.30, ax:0.10, ay:0.08, px:0.0, py:1.2, sp:0.000095, freq:7.2, amp:0.52 },
+        { bx:0.78, by:0.25, ax:0.08, ay:0.10, px:2.1, py:0.4, sp:0.000075, freq:6.5, amp:0.48 },
+        { bx:0.50, by:0.72, ax:0.12, ay:0.07, px:1.0, py:2.8, sp:0.000110, freq:7.8, amp:0.55 },
+        { bx:0.18, by:0.70, ax:0.07, ay:0.09, px:3.3, py:0.9, sp:0.000085, freq:6.0, amp:0.40 },
+        { bx:0.82, by:0.68, ax:0.09, ay:0.06, px:0.7, py:3.1, sp:0.000100, freq:7.5, amp:0.44 },
+    ];
+
     let canvas = null;
     let context = null;
+    let renderWorker = null;
+    let requestedActive = false;
     let points = [];
     let width = window.innerWidth;
     let height = window.innerHeight;
 
     function buildCanvas() {
+        if (renderWorker) {
+            renderWorker.postMessage({ type: 'resize', width, height });
+            return;
+        }
         if (!canvas) {
             canvas = document.createElement('canvas');
             canvas.style.position = 'absolute';
@@ -90,20 +105,43 @@
             canvas.style.width = '100%';
             canvas.style.height = '100%';
             container.appendChild(canvas);
+            const workerUrl = params.get('worker');
+            if (workerUrl && typeof canvas.transferControlToOffscreen === 'function') {
+                renderWorker = new Worker(workerUrl);
+                const offscreenCanvas = canvas.transferControlToOffscreen();
+                renderWorker.postMessage({
+                    type: 'init',
+                    canvas: offscreenCanvas,
+                    width,
+                    height,
+                    config: CONFIG,
+                    dotRgb,
+                    ghostRgb,
+                }, [offscreenCanvas]);
+                return;
+            }
             context = canvas.getContext('2d');
         }
-        const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.35);
+        const pixelRatio = 1;
         canvas.width = Math.round(width * pixelRatio);
         canvas.height = Math.round(height * pixelRatio);
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     }
 
     function buildPoints() {
+        if (renderWorker) return;
         points = [];
         for (let y = -CONFIG.dotSpacing * 2; y <= height + CONFIG.dotSpacing * 2; y += CONFIG.dotSpacing) {
             let colIndex = 0;
             for (let x = -CONFIG.dotSpacing * 2; x <= width + CONFIG.dotSpacing * 2; x += CONFIG.dotSpacing) {
-                points.push({ x, y, colIndex });
+                points.push({
+                    x,
+                    y,
+                    colIndex,
+                    px: (x - width / 2) * CONFIG.noiseScale * 4.2,
+                    py: (y - height / 2) * CONFIG.noiseScale * 4.2,
+                    radial: Math.max(0.22, 1 - Math.hypot((x - width / 2) / width, (y - height / 2) / height) * 1.06),
+                });
                 colIndex += 1;
             }
         }
@@ -112,15 +150,23 @@
     let active = false;
     let frameId = 0;
     let lastFrameAt = 0;
-    const frameInterval = 1000 / 30;
+    let pauseUntil = 0;
+    const frameInterval = 1000 / 10;
+    const alphaBucketCount = 6;
+    const drawBuckets = Array.from({ length: alphaBucketCount * 2 }, () => []);
 
     function scheduleFrame() {
+        if (renderWorker) return;
         if (active && !document.hidden && !frameId) frameId = requestAnimationFrame(draw);
     }
 
     function draw(timestamp) {
         frameId = 0;
         if (!active || document.hidden) return;
+        if (timestamp < pauseUntil) {
+            scheduleFrame();
+            return;
+        }
         if (timestamp - lastFrameAt < frameInterval) {
             scheduleFrame();
             return;
@@ -128,29 +174,68 @@
         lastFrameAt = timestamp;
         const t = timestamp * 0.00105 * CONFIG.speed;
         context.clearRect(0, 0, width, height);
-
+        for (const bucket of drawBuckets) bucket.length = 0;
+        const chatSources = scene === 'chat'
+            ? CHAT_SOURCES.map(source => {
+                const sourceTime = timestamp * source.sp;
+                return {
+                    ...source,
+                    cx: (source.bx + Math.sin(sourceTime + source.px) * source.ax - 0.5) * (width * CONFIG.noiseScale * 4.2),
+                    cy: (source.by + Math.cos(sourceTime * 0.73 + source.py) * source.ay - 0.5) * (height * CONFIG.noiseScale * 4.2),
+                };
+            })
+            : null;
         for (const point of points) {
-            const px = (point.x - width / 2) * CONFIG.noiseScale * 4.2;
-            const py = (point.y - height / 2) * CONFIG.noiseScale * 4.2;
+            const px = point.px;
+            const py = point.py;
             const warpX = Math.sin(py * 0.92 + t * 0.54) * 0.42 + Math.cos(px * 0.58 - t * 0.38) * 0.26;
             const warpY = Math.cos(px * 0.84 - t * 0.46) * 0.34 - Math.sin(py * 0.62 + t * 0.42) * 0.24;
             const sx = px + warpX;
             const sy = py + warpY;
             let wave = 0;
-            wave += Math.sin(sx * 1.08 + t * 1.14) * Math.cos(sy * 0.98 - t * 0.88) * 0.72;
-            wave += Math.cos((sx + sy) * 1.42 - t * 0.86) * 0.22;
-            wave += Math.sin(sx * 2.46 - sy * 1.74 + t * 1.36) * 0.18;
-            const radial = Math.max(0.22, 1 - Math.hypot((point.x - width / 2) / width, (point.y - height / 2) / height) * 1.06);
+            if (scene === 'chat') {
+                for (const source of chatSources) {
+                    const dx = sx - source.cx;
+                    const dy = sy - source.cy;
+                    wave += Math.cos(Math.hypot(dx, dy) * source.freq - t * 2.6 + source.px) * source.amp;
+                }
+                wave /= 2.2;
+            } else if (scene === 'code') {
+                const distance = Math.hypot(sx, sy) * 2.8;
+                wave += Math.cos(distance * 1.40 - t * 1.60) * 0.68;
+                wave += Math.sin(distance * 2.80 - t * 2.80) * 0.20;
+                wave += Math.cos(sx * 1.10 - sy * 1.10 + t * 0.52) * 0.16;
+            } else {
+                wave += Math.sin(sx * 1.08 + t * 1.14) * Math.cos(sy * 0.98 - t * 0.88) * 0.72;
+                wave += Math.cos((sx + sy) * 1.42 - t * 0.86) * 0.22;
+                wave += Math.sin(sx * 2.46 - sy * 1.74 + t * 1.36) * 0.18;
+            }
             const shimmer = 0.94 + Math.sin(point.colIndex * 0.11 + t * 0.3) * 0.03;
-            const brightness = Math.max(0, (wave + 1.0) * 0.5) * (0.42 + radial * 0.68) * shimmer;
+            const brightness = Math.max(0, (wave + 1.0) * 0.5) * (0.42 + point.radial * 0.68) * shimmer;
             const alpha = Math.min(CONFIG.maxAlpha, Math.pow(brightness, CONFIG.contrastPower) * CONFIG.brightnessGain);
             if (alpha < CONFIG.minAlpha) continue;
 
-            context.beginPath();
-            const rgb = alpha > CONFIG.maxAlpha * 0.56 ? dotRgb : ghostRgb;
+            const normalizedAlpha = (alpha - CONFIG.minAlpha) / (CONFIG.maxAlpha - CONFIG.minAlpha);
+            const alphaBucket = Math.min(alphaBucketCount - 1, Math.floor(normalizedAlpha * alphaBucketCount));
+            const colorBucket = alpha > CONFIG.maxAlpha * 0.56 ? 1 : 0;
+            drawBuckets[colorBucket * alphaBucketCount + alphaBucket].push(
+                point.x + warpX * 5.4,
+                point.y + warpY * 5.0,
+                2.18 + alpha * 0.18,
+            );
+        }
+        for (let bucketIndex = 0; bucketIndex < drawBuckets.length; bucketIndex += 1) {
+            const bucket = drawBuckets[bucketIndex];
+            if (!bucket.length) continue;
+            const alphaIndex = bucketIndex % alphaBucketCount;
+            const alpha = CONFIG.minAlpha
+                + ((alphaIndex + 0.5) / alphaBucketCount) * (CONFIG.maxAlpha - CONFIG.minAlpha);
+            const rgb = bucketIndex >= alphaBucketCount ? dotRgb : ghostRgb;
             context.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
-            context.arc(point.x + warpX * 5.4, point.y + warpY * 5.0, 1.16 + alpha * 0.12, 0, Math.PI * 2);
-            context.fill();
+            for (let index = 0; index < bucket.length; index += 3) {
+                const size = bucket[index + 2];
+                context.fillRect(bucket[index] - size / 2, bucket[index + 1] - size / 2, size, size);
+            }
         }
         scheduleFrame();
     }
@@ -164,11 +249,31 @@
 
     window.addEventListener('resize', resize);
     window.addEventListener('message', event => {
-        if (event.data?.type !== 'metis-backdrop-active') return;
-        active = Boolean(event.data.active) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (event.data?.type !== 'metis-backdrop-state') return;
+        if (event.data.scene === 'chat' || event.data.scene === 'cowork' || event.data.scene === 'code') {
+            if (scene !== event.data.scene) pauseUntil = performance.now() + 180;
+            scene = event.data.scene;
+        }
+        requestedActive = Boolean(event.data.active);
+        active = requestedActive
+            && !document.hidden
+            && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (renderWorker) {
+            renderWorker.postMessage({ type: 'state', active, scene });
+            return;
+        }
         scheduleFrame();
     });
-    document.addEventListener('visibilitychange', scheduleFrame);
+    document.addEventListener('visibilitychange', () => {
+        active = requestedActive
+            && !document.hidden
+            && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (renderWorker) {
+            renderWorker.postMessage({ type: 'state', active, scene });
+            return;
+        }
+        scheduleFrame();
+    });
     resize();
 </script>
 </body>

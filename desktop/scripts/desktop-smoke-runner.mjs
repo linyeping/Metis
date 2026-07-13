@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +13,7 @@ const root = path.resolve(__dirname, '..');
 const vitePort = Number(process.env.METIS_SMOKE_VITE_PORT || 5187);
 const smokeTimeoutMs = Number(process.env.METIS_SMOKE_TIMEOUT_MS || 180000);
 const rendererUrl = `http://127.0.0.1:${vitePort}`;
+const electronFlags = String(process.env.METIS_ELECTRON_FLAGS || '').trim().split(/\s+/).filter(Boolean);
 
 function log(prefix, data) {
   const text = data.toString('utf8');
@@ -73,6 +76,7 @@ function stop(child) {
 
 async function main() {
   const viteBin = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
+  const smokeUserDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'metis-desktop-smoke-'));
   let smokeResult = null;
 
   const vite = spawnChild('vite', process.execPath, [
@@ -101,20 +105,12 @@ async function main() {
       }
     };
 
-    const electron = spawn(electronBinary, [
-      '--no-sandbox',
-      '--disable-gpu-sandbox',
-      '--in-process-gpu',
-      '--disable-gpu',
-      '--disable-gpu-compositing',
-      '--use-gl=swiftshader',
-      '--enable-unsafe-swiftshader',
-      '--disable-features=VizDisplayCompositor',
-      '.',
-    ], {
+    const electron = spawn(electronBinary, [...electronFlags, '.'], {
       cwd: root,
       env: {
         ...process.env,
+        METIS_DATA_ROOT: smokeUserDataDir,
+        METIS_HOME: path.join(smokeUserDataDir, 'metis'),
         METIS_DESKTOP_DEV_SERVER: `${rendererUrl}/?metisSmoke=1`,
         METIS_DESKTOP_SMOKE: '1',
         METIS_FAKE_BACKEND: '1',
@@ -164,6 +160,7 @@ async function main() {
     process.stdout.write(`METIS_SMOKE_RESULT:${JSON.stringify(smokeResult)}\n`);
   } finally {
     stop(vite);
+    fs.rmSync(smokeUserDataDir, { recursive: true, force: true });
   }
 }
 

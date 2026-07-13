@@ -14,6 +14,7 @@ const {
 } = require('./data-root.cjs')
 const { getBackendLogPath, startBackend, stopBackend, tailBackendLog } = require('./backend.cjs')
 const { registerConnectorIpc } = require('./oauth.cjs')
+const { applyGraphicsMode } = require('./graphics-mode.cjs')
 const {
   HARDENED_WEB_PREFERENCES,
   isAllowedAppNavigation,
@@ -127,24 +128,12 @@ try {
   nodePty = require('node-pty')
 } catch {}
 
-// The current Windows/Electron combination crashes the native D3D GPU process
-// with 0x80000003. Keep Chromium's GPU compositor and Viz alive, but route ANGLE
-// through SwiftShader. Electron's disableHardwareAcceleration API is intentionally not
-// used: Electron translates it to --disable-gpu-compositing, which produces a
-// live renderer that paints a permanently black frame on this system.
-const requestedGraphicsMode = String(process.env.METIS_GRAPHICS_MODE || '').trim().toLowerCase()
-const forceSoftwareRendering = requestedGraphicsMode === 'software'
-  || (!requestedGraphicsMode && process.platform === 'win32')
-if (forceSoftwareRendering) {
-  app.commandLine.appendSwitch('use-angle', 'swiftshader')
-  app.commandLine.appendSwitch('enable-unsafe-swiftshader')
-  app.commandLine.appendSwitch('disable-direct-composition')
-  app.commandLine.appendSwitch('no-sandbox')
-  app.commandLine.appendSwitch('disable-gpu-sandbox')
-  process.stdout.write('[graphics] SwiftShader ANGLE compositor enabled (DirectComposition disabled)\n')
-} else {
-  process.stdout.write('[graphics] hardware acceleration enabled\n')
-}
+// Native GPU processes currently crash with 0x80000003 on affected Windows
+// installations. Keep the verified compatibility path there; hardware remains the
+// default elsewhere and can be forced on Windows with METIS_GRAPHICS_MODE=hardware.
+applyGraphicsMode(app, process.env.METIS_GRAPHICS_MODE, message => {
+  process.stdout.write(`${message}\n`)
+})
 
 const storageInfo = resolveDataRootInfo()
 try {
@@ -163,7 +152,7 @@ if (!gotSingleInstanceLock) {
   app.quit()
 } else if (!isSmokeMode) {
   app.on('second-instance', () => {
-    showWindow()
+    showWindow('second-instance')
   })
 }
 
@@ -2900,7 +2889,7 @@ async function createWindow() {
   })
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
+    showWindow('ready-to-show')
     broadcastWindowState()
   })
 
@@ -2986,6 +2975,9 @@ async function createWindow() {
   } else {
     await mainWindow.loadURL(pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).toString())
   }
+  // ready-to-show can be missed on slow or recovering GPU processes. A completed
+  // main-frame load is a reliable final signal that the app should be visible.
+  showWindow('main-frame-loaded')
 }
 
 function createTray() {
@@ -3008,17 +3000,27 @@ function createTray() {
       }
     ])
   )
-  tray.on('double-click', showWindow)
+  tray.on('click', () => showWindow('tray-click'))
+  tray.on('double-click', () => showWindow('tray-double-click'))
 }
 
-function showWindow() {
+function showWindow(reason = 'unknown') {
   if (!mainWindow || mainWindow.isDestroyed()) {
+    const create = () => createWindow().catch(error => {
+      log(`[window] failed to create while revealing (${reason}): ${error?.message || error}`)
+    })
+    if (app.isReady()) {
+      void create()
+    } else {
+      void app.whenReady().then(create)
+    }
     return
   }
   if (mainWindow.isMinimized()) {
     mainWindow.restore()
   }
   mainWindow.show()
+  mainWindow.moveTop()
   mainWindow.focus()
 }
 
@@ -4052,7 +4054,7 @@ app.whenReady().then(async () => {
   configureAutoUpdates()
 })
 
-app.on('activate', showWindow)
+app.on('activate', () => showWindow('activate'))
 app.on('before-quit', () => {
   app.isQuitting = true
   clearBackendRestartTimer()

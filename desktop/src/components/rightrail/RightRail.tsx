@@ -34,7 +34,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth, resumeRun } from '../../lib/api';
 import { DOCUMENT_LIBRARY_EVENT, listDocumentLibraryItems, syncDocumentLibraryFromArtifacts, upsertDocumentLibraryItem, type DocumentLibraryItem } from '../../lib/documentLibrary';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
-import type { BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatSubagentEvent, ChatTodoItem, CoworkPlanSnapshot, CoworkPlanSubrun, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
+import { navigateToSession } from '../../lib/modeNavigation';
+import type { AppMode, BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatSubagentEvent, ChatTodoItem, CoworkPlanSnapshot, CoworkPlanSubrun, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
 import type { FileChangeRevertItem } from '../../lib/types';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useChatStore } from '../../store/chatStore';
@@ -269,7 +270,9 @@ function workspaceColumnWidth(
 }
 
 export function RightRail({ backendReady }: RightRailProps) {
-  const appMode = useUiStore(state => state.appMode);
+  // A closed rail stays mounted, but its full workbench must not rerender for
+  // every top-level mode switch. It catches up to the current mode when opened.
+  const appMode = useUiStore(state => (state.rightRailOpen ? state.appMode : 'chat'));
   const t = useT();
   const previewPath = useUiStore(state => state.previewPath);
   const previewFrozenSrc = useUiStore(state => state.previewFrozenSrc);
@@ -2555,8 +2558,11 @@ function RunActivityCenter({
 
   const jumpToRunSession = async (run: ChatRunPayload) => {
     if (!run.sessionId) return;
-    await selectSession(run.sessionId);
-    await loadChatSession(run.sessionId);
+    const sessionMode = sessionById.get(run.sessionId)?.mode;
+    const targetMode: AppMode = sessionMode === 'cowork' || sessionMode === 'code' || sessionMode === 'chat'
+      ? sessionMode
+      : useUiStore.getState().appMode;
+    navigateToSession(run.sessionId, targetMode);
   };
 
   const cancelRun = async (run: ChatRunPayload) => {

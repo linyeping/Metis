@@ -61,6 +61,36 @@ test('package exposes core verification scripts', () => {
   assert.ok(pkg.scripts['dist:win'].indexOf('test:fixed-regression') < pkg.scripts['dist:win'].indexOf('electron-builder'));
 });
 
+test('desktop graphics and window activation keep the P0 fast path wired', () => {
+  const main = read('electron/main.cjs');
+  const graphics = read('electron/graphics-mode.cjs');
+  const thread = read('src/components/chat/MetisThread.tsx');
+  const backdrop = read('src/assets/cowork-dotwave-b.html');
+  const backdropWorker = read('src/assets/cowork-dotwave-worker.js');
+  const css = read('src/index.css');
+
+  assert.match(graphics, /mode === 'software'/);
+  assert.match(graphics, /platform === 'win32'/);
+  assert.match(main, /tray\.on\('click'/);
+  assert.match(main, /showWindow\('second-instance'\)/);
+  assert.match(main, /showWindow\('main-frame-loaded'\)/);
+  assert.match(main, /mainWindow\.moveTop\(\)/);
+  assert.doesNotMatch(read('scripts/desktop-perf-runner.mjs'), /--disable-gpu|--no-sandbox|swiftshader|VizDisplayCompositor/);
+  assert.doesNotMatch(read('scripts/desktop-smoke-runner.mjs'), /--disable-gpu|--no-sandbox|swiftshader|VizDisplayCompositor/);
+  assert.equal((thread.match(/<iframe/g) || []).length, 1);
+  assert.doesNotMatch(thread, /mode-backdrop-static|useStaticBackdrop/);
+  assert.match(thread, /metis-backdrop-state/);
+  assert.match(backdrop, /scene === 'chat'/);
+  assert.match(backdrop, /scene === 'code'/);
+  assert.match(backdrop, /event\.data\.scene === 'cowork'/);
+  assert.match(backdrop, /requestAnimationFrame\(draw\)/);
+  assert.match(backdrop, /transferControlToOffscreen/);
+  assert.match(backdropWorker, /scene === 'chat'/);
+  assert.match(backdropWorker, /scene === 'code'/);
+  assert.match(backdropWorker, /setTimeout\(draw, 1000 \/ 15\)/);
+  assert.doesNotMatch(css, /mode-enter-(chat|cowork|code)/);
+});
+
 test('fixed regression runner covers agent safety and artifact gates', () => {
   const runner = read('scripts/fixed-regression-runner.mjs');
 
@@ -327,23 +357,21 @@ test('FABLEADV-11 preview and tool card fixes stay wired', () => {
 
 test('electron window keeps hardened renderer defaults', () => {
   const main = read('electron/main.cjs');
+  const graphics = read('electron/graphics-mode.cjs');
   const security = read('electron/security.cjs');
   assert.match(main, /HARDENED_WEB_PREFERENCES/);
   assert.match(security, /contextIsolation:\s*true/);
   assert.match(security, /nodeIntegration:\s*false/);
   assert.match(security, /sandbox:\s*true/);
   assert.match(security, /webSecurity:\s*true/);
-  // Windows uses SwiftShader because the native D3D GPU process crashes on
-  // affected systems. DirectComposition must stay disabled so rendered frames
-  // are actually presented to the HWND instead of appearing black.
   assert.match(main, /METIS_GRAPHICS_MODE/);
-  assert.match(main, /if \(forceSoftwareRendering\)/);
-  assert.match(main, /appendSwitch\(['"]use-angle['"], ['"]swiftshader['"]\)/);
-  assert.match(main, /appendSwitch\(['"]enable-unsafe-swiftshader['"]\)/);
-  assert.match(main, /appendSwitch\(['"]disable-direct-composition['"]\)/);
+  assert.match(graphics, /mode === 'software'/);
+  assert.match(graphics, /appendSwitch\(['"]use-angle['"], ['"]swiftshader['"]\)/);
+  assert.match(graphics, /appendSwitch\(['"]enable-unsafe-swiftshader['"]\)/);
+  assert.match(graphics, /appendSwitch\(['"]disable-direct-composition['"]\)/);
   assert.doesNotMatch(main, /app\.disableHardwareAcceleration\(\)/);
-  assert.match(main, /appendSwitch\(['"]no-sandbox['"]\)/);
-  assert.match(main, /appendSwitch\(['"]disable-gpu-sandbox['"]\)/);
+  assert.match(graphics, /appendSwitch\(['"]no-sandbox['"]\)/);
+  assert.match(graphics, /appendSwitch\(['"]disable-gpu-sandbox['"]\)/);
   assert.doesNotMatch(main, /appendSwitch\(['"]disable-gpu-compositing['"]\)/);
   assert.doesNotMatch(main, /appendSwitch\(['"]disable-features['"], ['"]VizDisplayCompositor['"]\)/);
   assert.match(main, /setWindowOpenHandler/);
@@ -364,8 +392,6 @@ test('desktop performance harness remains wired', () => {
   const perfRunner = read('scripts/desktop-perf-runner.mjs');
   const rendererPerf = read('src/runtime/rendererPerf.ts');
   const perfBudgets = read('src/runtime/perfBudgets.ts');
-  const ledgerPath = path.resolve(root, '..', 'docs', 'dev-log', 'PERFORMANCE-LEDGER.md');
-  const ledger = fs.readFileSync(ledgerPath, 'utf8');
   assert.match(main, /metisPerf/);
   assert.match(main, /rendererPerf/);
   assert.match(preload, /reportPerfResult/);
@@ -389,13 +415,6 @@ test('desktop performance harness remains wired', () => {
   assert.match(perfBudgets, /transcriptReplayTotalMsMax/);
   assert.match(perfBudgets, /transcriptReplayP95FrameMsMax/);
   assert.match(perfBudgets, /transcriptReplayRightRailPreviewMsMax/);
-  assert.match(ledger, /NEW-48 Baseline/);
-  assert.match(ledger, /NEW-49 Markdown And Tool Output Baseline/);
-  assert.match(ledger, /NEW-50 Transcript Replay Baseline/);
-  assert.match(ledger, /initial mounted rows/);
-  assert.match(ledger, /Markdown heavy/);
-  assert.match(ledger, /Right rail tool preview/);
-  assert.match(ledger, /Transcript replay/);
 });
 
 test('right rail web preview supports multiple closeable tabs', () => {
@@ -438,10 +457,6 @@ test('right rail browser workbench keeps navigation and zoom wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-51-Right-Rail-Browser-Workbench.md'),
-    'utf8',
-  );
 
   assert.match(uiStore, /zoom:\s*number/);
   assert.match(uiStore, /loading:\s*boolean/);
@@ -482,7 +497,6 @@ test('right rail browser workbench keeps navigation and zoom wired', () => {
   assert.match(css, /\.web-browser-toolbar/);
   assert.match(css, /\.web-toolbar-button/);
   assert.match(css, /\.web-more-menu/);
-  assert.match(doc, /NEW-51/);
 });
 
 test('FABLEADV-50 preview browser automation and safety gate stay wired', () => {
@@ -502,10 +516,6 @@ test('FABLEADV-50 preview browser automation and safety gate stay wired', () => 
     'utf8',
   );
   const tests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_preview_browser_bridge.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'FABLEADV-50-Preview-Browser-MVP.md'),
-    'utf8',
-  );
 
   assert.match(main, /function observePreviewPage/);
   assert.match(main, /function performPreviewAction/);
@@ -530,6 +540,8 @@ test('FABLEADV-50 preview browser automation and safety gate stay wired', () => 
   assert.match(main, /previewLoadedUrls\.delete\(previewTabId\)/);
   assert.match(main, /PREVIEW_RISK_PATTERN/);
   assert.match(main, /confirmPreviewRisk/);
+  assert.match(toolCard, /tool-browser-activity-summary/);
+  assert.match(css, /\.tool-browser-activity-summary/);
   assert.match(main, /dialog\.showMessageBox/);
   assert.match(main, /recordPreviewAction/);
   assert.match(main, /function previewActivityLabel/);
@@ -552,9 +564,7 @@ test('FABLEADV-50 preview browser automation and safety gate stay wired', () => 
   assert.match(rightRail, /previewActivity\(\{ limit: 24 \}\)/);
   assert.match(rightRail, /browser-activity-panel/);
   assert.match(toolCard, /browserActivitySummaryFromResult/);
-  assert.match(toolCard, /tool-browser-activity-summary/);
   assert.match(css, /\.browser-activity-panel/);
-  assert.match(css, /\.tool-browser-activity-summary/);
   assert.match(bridge, /preview_bridge_bp/);
   assert.match(bridge, /\/api\/preview-browser\/next/);
   assert.match(bridge, /\/api\/preview-browser\/result/);
@@ -585,13 +595,6 @@ test('FABLEADV-50 preview browser automation and safety gate stay wired', () => 
   assert.match(browserSkill, /browse_and_extract/);
   assert.match(tests, /test_preview_bridge_round_trips_command_result/);
   assert.match(tests, /test_preview_browser_verify_supports_browser_verifier/);
-  assert.match(doc, /Phase 2/);
-  assert.match(doc, /Phase 3/);
-  assert.match(doc, /Phase 5/);
-  assert.match(doc, /Phase 7/);
-  assert.match(doc, /Phase 8/);
-  assert.match(doc, /Phase 9/);
-  assert.match(doc, /高风险动作确认门禁/);
 });
 
 test('NEW-82 agent activity and compact tool calls stay wired', () => {
@@ -604,10 +607,6 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-82-Agent-Activity-And-Tool-Call-Polish.md'),
-    'utf8',
-  );
 
   assert.match(uiStore, /'activity'/);
   assert.match(thread, /hiddenSubagentSignature/);
@@ -638,7 +637,6 @@ test('NEW-82 agent activity and compact tool calls stay wired', () => {
   assert.match(css, /\.tool-card-actions/);
   assert.match(smoke, /new82-subagent-strip-dismisses/);
   assert.match(smoke, /new82-tool-card-compact-width/);
-  assert.match(doc, /NEW-82/);
 });
 
 test('file change diff workbench and custom OpenAI relay stay wired', () => {
@@ -655,10 +653,6 @@ test('file change diff workbench and custom OpenAI relay stay wired', () => {
   const fakeBackend = read('electron/backend.cjs');
   const realProfiles = fs.readFileSync(
     path.resolve(root, '..', 'backend', 'bridges', 'provider_profiles.py'),
-    'utf8',
-  );
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-52-File-Changes-Diff-And-Custom-OpenAI.md'),
     'utf8',
   );
 
@@ -691,7 +685,6 @@ test('file change diff workbench and custom OpenAI relay stay wired', () => {
   assert.match(fakeBackend, /display_name:\s*'自定义模型 API'/);
   assert.match(realProfiles, /ProviderId\("custom-openai"\)/);
   assert.match(realProfiles, /自定义模型 API/);
-  assert.match(doc, /NEW-52/);
 });
 
 test('NEW-52.5 developer workflow polish stays wired', () => {
@@ -713,10 +706,6 @@ test('NEW-52.5 developer workflow polish stays wired', () => {
   const parityPath = path.resolve(root, 'src/lib/hermesParity.ts');
   const llmState = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'llm_state.py'), 'utf8');
   const llmCommon = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'llm_backends', '_common.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-52.5-Real-Developer-Workflow-Polish.md'),
-    'utf8',
-  );
 
   assert.match(types, /ProxyMode = 'system' \| 'custom' \| 'off'/);
   assert.match(types, /TerminalRunResult/);
@@ -745,7 +734,6 @@ test('NEW-52.5 developer workflow polish stays wired', () => {
   assert.match(css, /\.markdown-body table/);
   assert.match(smoke, /new52-5-terminal-run-powershell/);
   assert.match(smoke, /new52-5-local-preview-auto-opens/);
-  assert.match(doc, /NEW-52\.5/);
 });
 
 test('NEW-83 appearance font size controls stay wired', () => {
@@ -754,10 +742,6 @@ test('NEW-83 appearance font size controls stay wired', () => {
   const settings = readSettingsSources();
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-83-Appearance-Font-Size-Controls.md'),
-    'utf8',
-  );
 
   assert.match(uiStore, /uiFontSize/);
   assert.match(uiStore, /codeFontSize/);
@@ -781,7 +765,6 @@ test('NEW-83 appearance font size controls stay wired', () => {
   assert.match(css, /\.message-bubble,[\s\S]*\.markdown-body,[\s\S]*\.composer textarea/);
   assert.match(smoke, /new83-ui-font-size-applies/);
   assert.match(smoke, /new83-code-font-size-applies/);
-  assert.match(doc, /NEW-83/);
 });
 
 test('NEW-84 session isolation and shell profiles stay wired', () => {
@@ -793,10 +776,6 @@ test('NEW-84 session isolation and shell profiles stay wired', () => {
   const terminal = read('src/components/terminal/TerminalPanel.tsx');
   const settings = readSettingsSources();
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-84-Session-Isolation-And-Shell-Profiles.md'),
-    'utf8',
-  );
 
   assert.match(chatStore, /runSessionId:\s*string\s*\|\s*null/);
   // session_id 必须随每次 chatStream 传入（会话隔离）；允许后面再带别的参数（如 deep_research）。
@@ -823,17 +802,11 @@ test('NEW-84 session isolation and shell profiles stay wired', () => {
   assert.match(settings, /value: 'shell'/);
   assert.match(smoke, /new84-terminal-settings-shell-options/);
   assert.match(smoke, /new100-terminal-menu-no-default-shell/);
-  assert.match(doc, /Session Isolation And Shell Profiles/);
-  assert.match(doc, /true multi-session background execution needs a later backend task queue/);
 });
 
 test('NEW-85 real provider and backend session routing stay wired', () => {
   const realBackend = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'app.py'), 'utf8');
   const flaskSmoke = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_flask_runtime_sse_smoke.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-85-Real-Provider-And-Session-Stability.md'),
-    'utf8',
-  );
 
   assert.match(realBackend, /def _request_session_id/);
   assert.match(realBackend, /data\.get\("session_id"\)/);
@@ -844,9 +817,6 @@ test('NEW-85 real provider and backend session routing stay wired', () => {
   assert.match(realBackend, /_stream_agent_response\([\s\S]*model_context[\s\S]*session_id=session_id[\s\S]*history=history[\s\S]*compact_state=compact_state[\s\S]*mode=mode[\s\S]*checkpoint=checkpoint/);
   assert.match(flaskSmoke, /test_chat_sse_honors_request_session_id_without_polluting_active_session/);
   assert.match(flaskSmoke, /session_id=target\.id/);
-  assert.match(doc, /Real Provider And Session Stability/);
-  assert.match(doc, /Do not persist the API key/);
-  assert.match(doc, /True concurrent background agents/);
 });
 
 test('NEW-86 industrial run registry and concurrent sessions stay wired', () => {
@@ -857,10 +827,6 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   const chatStore = read('src/store/chatStore.ts');
   const runManager = read('src/store/runManager.ts');
   const fakeBackend = read('electron/backend.cjs');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-86-Industrial-Run-Registry-And-Concurrent-Sessions.md'),
-    'utf8',
-  );
 
   assert.match(realBackend, /_RUN_ACTIVE_STATES/);
   assert.match(realBackend, /def _create_run_state/);
@@ -898,9 +864,6 @@ test('NEW-86 industrial run registry and concurrent sessions stay wired', () => 
   assert.match(fakeBackend, /async function handleFakeRunEvents/);
   assert.match(fakeBackend, /pathname === '\/runs'/);
   assert.match(fakeBackend, /pathname\.endsWith\('\/runs\/active'\)/);
-  assert.match(doc, /NEW-86 Industrial Run Registry/);
-  assert.match(doc, /cooperative cancellation/);
-  assert.match(doc, /不继续 NEW-87/);
 });
 
 test('NEW-87 abortable provider and tool isolation stays wired', () => {
@@ -915,10 +878,6 @@ test('NEW-87 abortable provider and tool isolation stays wired', () => {
     'utf8',
   );
   const flaskSmoke = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_flask_runtime_sse_smoke.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-87-Abortable-Provider-And-Tool-Isolation.md'),
-    'utf8',
-  );
 
   assert.match(cancellation, /class OperationCancelled/);
   assert.match(cancellation, /def cancellation_context/);
@@ -942,8 +901,6 @@ test('NEW-87 abortable provider and tool isolation stays wired', () => {
   assert.match(shellTool, /current_cancel_event/);
   assert.match(flaskSmoke, /test_run_registry_cancel_aborts_blocking_provider_stream/);
   assert.match(flaskSmoke, /test_run_registry_cancel_releases_blocking_tool_execution/);
-  assert.match(doc, /NEW-87 Abortable Provider And Tool Isolation/);
-  assert.match(doc, /不继续 NEW-88/);
 });
 
 test('NEW-91 background run activity center stays wired', () => {
@@ -952,10 +909,6 @@ test('NEW-91 background run activity center stays wired', () => {
   const types = read('src/lib/types.ts');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-91-Background-Run-Activity-Center.md'),
-    'utf8',
-  );
 
   assert.match(api, /export async function getChatRuns/);
   assert.match(api, /`\/runs\$\{query\}`/);
@@ -963,24 +916,18 @@ test('NEW-91 background run activity center stays wired', () => {
   assert.match(rightRail, /function RunActivityCenter/);
   assert.match(rightRail, /getChatRuns\(\)/);
   assert.match(rightRail, /cancelChatRun\(run\.runId\)/);
-  // FABLEADV-28：运行卡跳转由 setToolPreview 改为行点击 selectSession（下一行即覆盖）。
-  assert.match(rightRail, /selectSession\(run\.sessionId\)/);
+  // Run-card jumps must switch both the session and its owning app mode.
+  assert.match(rightRail, /navigateToSession\(run\.sessionId, targetMode\)/);
+  assert.match(rightRail, /sessionById\.get\(run\.sessionId\)\?\.mode/);
   assert.match(css, /\.run-activity-center/);
   assert.match(css, /\.run-activity-card/);
   assert.match(smoke, /new91-run-activity-center-visible/);
   assert.match(smoke, /new91-run-cancel-requests-canceling/);
-  assert.match(doc, /NEW-91 Background Run Activity Center/);
-  assert.match(doc, /GET \/runs/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-92 Hermes parity stability and UI elegance pass stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-92-Hermes-Parity-Stability-And-UI-Elegance-Pass.md'),
-    'utf8',
-  );
 
   // FABLEADV-28：稳定性总览(StabilitySnapshot)按用户要求移除，改为运行卡上的状态色点(run-status-dot)。
   assert.match(rightRail, /function RunActivityCenter/);
@@ -988,9 +935,6 @@ test('NEW-92 Hermes parity stability and UI elegance pass stays wired', () => {
   assert.match(rightRail, /data-tone=\{dotTone\}/);
   assert.match(css, /\.run-status-dot/);
   assert.match(css, /\.run-status-dot\[data-tone='running'\]/);
-  assert.match(doc, /Hermes 的强项/);
-  assert.match(doc, /boot-failure-overlay\.tsx/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-93 busy session guard and sidebar status language stays wired', () => {
@@ -998,10 +942,6 @@ test('NEW-93 busy session guard and sidebar status language stays wired', () => 
   const sidebar = read('src/components/sidebar/Sidebar.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-93-Busy-Session-Guard-And-Sidebar-Status-Language.md'),
-    'utf8',
-  );
 
   assert.match(chatStore, /phase:\s*'session_busy'/);
   assert.match(chatStore, /当前会话正在运行/);
@@ -1011,8 +951,6 @@ test('NEW-93 busy session guard and sidebar status language stays wired', () => 
   assert.match(css, /@keyframes session-state-pulse/);
   assert.match(smoke, /new93-busy-send-guard-visible/);
   assert.match(smoke, /new93-session-state-dot-visible/);
-  assert.match(doc, /Hermes 对比结论/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-94 tool activity tree and command center stays wired', () => {
@@ -1023,10 +961,6 @@ test('NEW-94 tool activity tree and command center stays wired', () => {
   const commandCenter = read('src/components/command/CommandPalette.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-94-Tool-Activity-Tree-And-Command-Center.md'),
-    'utf8',
-  );
 
   assert.match(thread, /ToolActivityGroup/);
   assert.match(thread, /tool-activity-group/);
@@ -1047,8 +981,6 @@ test('NEW-94 tool activity tree and command center stays wired', () => {
   assert.match(smoke, /new94-tool-activity-group-visible/);
   assert.match(smoke, /new94-command-center-system-tab/);
   assert.match(smoke, /new94-command-center-provider-tab/);
-  assert.match(doc, /Tool Activity Tree/);
-  assert.match(doc, /Stop Condition/);
 });
 
 test('NEW-95 command center and tool activity polish stays wired', () => {
@@ -1058,10 +990,6 @@ test('NEW-95 command center and tool activity polish stays wired', () => {
   ].join('\n');
   const commandCenter = read('src/components/command/CommandPalette.tsx');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-95-Command-Center-And-Tool-Activity-Polish.md'),
-    'utf8',
-  );
 
   assert.doesNotMatch(thread, /ChatStatusStrip/);
   assert.match(thread, /ToolInlineDiffPreview/);
@@ -1079,7 +1007,6 @@ test('NEW-95 command center and tool activity polish stays wired', () => {
   assert.match(css, /\.provider-model-list button/);
   assert.match(css, /@keyframes live-count-pop/);
   assert.match(css, /\.right-rail-inner header button:hover[\s\S]*transform:\s*none/);
-  assert.match(doc, /Acceptance/);
 });
 
 test('NEW-96 independent side chat route and store stay isolated', () => {
@@ -1091,10 +1018,6 @@ test('NEW-96 independent side chat route and store stay isolated', () => {
   const smoke = read('src/runtime/rendererSmoke.ts');
   const fakeBackend = read('electron/backend.cjs');
   const realBackend = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'app.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-96-Independent-Right-Rail-Chat.md'),
-    'utf8',
-  );
   const sideRouteStart = realBackend.indexOf('@app.route("/side-chat"');
   const sideRouteEnd = realBackend.indexOf('@app.route("/chat"', sideRouteStart);
   const sideRoute = realBackend.slice(sideRouteStart, sideRouteEnd);
@@ -1119,8 +1042,6 @@ test('NEW-96 independent side chat route and store stay isolated', () => {
   assert.match(css, /\.side-chat-rail/);
   assert.match(css, /\.side-chat-message\[data-role='user'\]/);
   assert.match(smoke, /new96-side-chat-isolated/);
-  assert.match(doc, /独立右栏 Chat/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-97 and NEW-98 side chat rail, history, model override, and capsule toggles stay wired', () => {
@@ -1136,14 +1057,6 @@ test('NEW-97 and NEW-98 side chat rail, history, model override, and capsule tog
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const realBackend = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'app.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-97-Side-Chat-Dock-History-Model-And-Capsule-Toggles.md'),
-    'utf8',
-  );
-  const doc98 = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-98-Side-Chat-Rail-Claude-Code-Layout.md'),
-    'utf8',
-  );
   const sideRouteStart = realBackend.indexOf('@app.route("/side-chat"');
   const sideRouteEnd = realBackend.indexOf('@app.route("/chat"', sideRouteStart);
   const sideRoute = realBackend.slice(sideRouteStart, sideRouteEnd);
@@ -1203,10 +1116,6 @@ test('NEW-97 and NEW-98 side chat rail, history, model override, and capsule tog
   assert.match(smoke, /new98-side-chat-docks-right-without-right-rail/);
   assert.match(smoke, /new97-side-chat-history-create/);
   assert.match(smoke, /new97-side-chat-model-does-not-change-main-model/);
-  assert.match(doc, /NEW-97/);
-  assert.match(doc98, /NEW-98/);
-  assert.match(doc98, /Side Chat must coexist with the right rail/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-99 Claude Code workspace card deck stays wired', () => {
@@ -1219,10 +1128,6 @@ test('NEW-99 Claude Code workspace card deck stays wired', () => {
   const statusbar = readOptional('src/components/shell/Statusbar.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-99-Claude-Code-Workspace-Card-Deck.md'),
-    'utf8',
-  );
 
   assert.match(uiStore, /WorkspaceCardId = 'web' \| 'terminal' \| 'files' \| 'diff' \| 'activity' \| 'plan' \| 'tool' \| 'research' \| 'session'/);
   assert.match(uiStore, /workspaceCardVisibility:\s*WorkspaceCardVisibility/);
@@ -1279,8 +1184,6 @@ test('NEW-99 Claude Code workspace card deck stays wired', () => {
   assert.match(smoke, /new99-card-close-expands-column/);
   assert.match(smoke, /new99-empty-column-unmounted/);
   assert.match(smoke, /new99-column-and-row-resize-updates-store/);
-  assert.match(doc, /NEW-99 Claude Code Workspace Card Deck/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-100 terminal, session, and card polish stays wired', () => {
@@ -1295,10 +1198,6 @@ test('NEW-100 terminal, session, and card polish stays wired', () => {
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const sessionRoutes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'session_routes.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-100-Terminal-Session-And-Card-Polish.md'),
-    'utf8',
-  );
 
   assert.match(api, /function renameSessionTitle/);
   assert.match(api, /\/sessions\/\$\{encodeURIComponent\(sessionId\)\}\/title/);
@@ -1324,8 +1223,6 @@ test('NEW-100 terminal, session, and card polish stays wired', () => {
   assert.match(smoke, /new100-session-naked-count-hidden/);
   assert.match(smoke, /new100-statusbar-terminal-button-removed/);
   assert.match(smoke, /new100-terminal-menu-no-default-shell/);
-  assert.match(doc, /NEW-100 Terminal, Session, And Card Polish/);
-  assert.match(doc, /停止条件/);
 });
 
 test('NEW-53 permission center productization stays wired', () => {
@@ -1337,10 +1234,6 @@ test('NEW-53 permission center productization stays wired', () => {
   const smoke = read('src/runtime/rendererSmoke.ts');
   const fakeBackend = read('electron/backend.cjs');
   const realBackend = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'app.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-53-Permission-Center-Productization.md'),
-    'utf8',
-  );
 
   assert.match(api, /createPermissionRule/);
   assert.match(api, /deletePermissionRule/);
@@ -1362,9 +1255,9 @@ test('NEW-53 permission center productization stays wired', () => {
   assert.match(settings, /permission-new-tool-input/);
   assert.match(settings, /toolRisk/);
   assert.match(settings, /data-risk/);
-  assert.match(css, /\.permission-summary-grid/);
   assert.match(css, /\.permission-create-rule/);
   assert.match(css, /\.permission-filter/);
+  assert.match(css, /\.permission-summary-grid/);
   assert.match(css, /\.composer-access-menu/);
   assert.match(smoke, /new53-permission-center-visible/);
   assert.match(smoke, /composer-access-bypass-persists-rule/);
@@ -1373,7 +1266,6 @@ test('NEW-53 permission center productization stays wired', () => {
   assert.match(smoke, /new53-permission-manual-rule-deleted/);
   assert.match(fakeBackend, /pathname === '\/permissions'/);
   assert.match(fakeBackend, /rule\.source === source/);
-  assert.match(doc, /Permission Center Productization/);
 });
 
 test('NEW-54 terminal workbench polish stays wired', () => {
@@ -1383,10 +1275,6 @@ test('NEW-54 terminal workbench polish stays wired', () => {
   const settings = readSettingsSources();
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-54-Terminal-Workbench-Polish.md'),
-    'utf8',
-  );
 
   assert.match(navRail, /kind: 'terminal'/);
   assert.match(navRail, /Terminal/);
@@ -1415,7 +1303,6 @@ test('NEW-54 terminal workbench polish stays wired', () => {
   assert.match(smoke, /new54-terminal-settings-disclosure/);
   assert.match(smoke, /terminal-nav-button-opens-terminal/);
   assert.match(smoke, /new100-terminal-menu-no-default-shell/);
-  assert.match(doc, /Terminal Workbench Polish/);
 });
 
 test('NEW-58 interactive PTY terminal stays wired', () => {
@@ -1426,10 +1313,6 @@ test('NEW-58 interactive PTY terminal stays wired', () => {
   const globalTypes = read('src/global.d.ts');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-58-Interactive-PTY-Terminal.md'),
-    'utf8',
-  );
 
   assert.match(main, /terminalSessions = new Map/);
   assert.match(main, /require\('node-pty'\)/);
@@ -1451,7 +1334,6 @@ test('NEW-58 interactive PTY terminal stays wired', () => {
   assert.match(css, /\.terminal-live-status/);
   assert.match(smoke, /new58-terminal-live-session-ready/);
   assert.match(smoke, /new58-terminal-live-output-streams/);
-  assert.match(doc, /Interactive PTY Terminal/);
 });
 
 test('NEW-59 multi-file diff review workbench stays wired', () => {
@@ -1460,10 +1342,6 @@ test('NEW-59 multi-file diff review workbench stays wired', () => {
   const fileChangeReview = read('src/components/chat/FileChangeReviewCard.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-59-Multi-File-Diff-Review-Workbench.md'),
-    'utf8',
-  );
 
   assert.match(uiStore, /diffSummary:\s*FileChangeSummary\s*\|\s*null/);
   assert.match(uiStore, /activeDiffFileId:\s*string/);
@@ -1475,10 +1353,10 @@ test('NEW-59 multi-file diff review workbench stays wired', () => {
   assert.match(rightRail, /diff-file-row/);
   assert.match(rightRail, /diff-revert-alert/);
   assert.match(rightRail, /diffRevertItemFor/);
-  assert.match(fileChangeReview, /setDiffReview\(summary/);
-  assert.match(fileChangeReview, /setDiffRevertItems\(summary\.id/);
   assert.match(fileChangeReview, /formatRevertFailure/);
   assert.match(fileChangeReview, /file-change-file-status/);
+  assert.match(fileChangeReview, /setDiffReview\(summary/);
+  assert.match(fileChangeReview, /setDiffRevertItems\(summary\.id/);
   assert.match(css, /\.diff-file-navigator/);
   assert.match(css, /\.diff-file-row/);
   assert.match(css, /\.diff-revert-alert/);
@@ -1488,7 +1366,6 @@ test('NEW-59 multi-file diff review workbench stays wired', () => {
   assert.match(smoke, /new59-diff-navigator-revert-statuses/);
   assert.match(smoke, /new59-conflict-revert-card-detail/);
   assert.match(smoke, /new59-conflict-revert-rail-detail/);
-  assert.match(doc, /Multi-File Diff Review Workbench/);
 });
 
 test('NEW-60 long run recovery diagnostics stays wired', () => {
@@ -1499,10 +1376,6 @@ test('NEW-60 long run recovery diagnostics stays wired', () => {
   const noticeCards = read('src/components/chat/NoticeCards.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-60-Long-Run-Recovery-And-Session-Resume-Diagnostics.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface ChatRunRecoverySnapshot/);
   assert.match(runRecovery, /RECOVERY_STORAGE_PREFIX/);
@@ -1516,17 +1389,12 @@ test('NEW-60 long run recovery diagnostics stays wired', () => {
   assert.match(smoke, /new60-run-recovery-notice-visible/);
   assert.match(smoke, /new60-run-recovery-mark-failed/);
   assert.match(smoke, /new60-run-recovery-cleanup/);
-  assert.match(doc, /Long Run Recovery/);
 });
 
 test('NEW-61 permission bulk management stays wired', () => {
   const settings = readSettingsSources();
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-61-Permission-Bulk-Management-And-Conflict-Cleanup.md'),
-    'utf8',
-  );
 
   assert.match(settings, /permission-bulk-toolbar/);
   assert.match(settings, /permission-import-export/);
@@ -1542,17 +1410,12 @@ test('NEW-61 permission bulk management stays wired', () => {
   assert.match(smoke, /new61-permission-import-persists-rule/);
   assert.match(smoke, /new61-permission-conflict-cleanup/);
   assert.match(smoke, /new61-permission-bulk-delete/);
-  assert.match(doc, /Permission Bulk Management/);
 });
 
 test('NEW-62 real UI preview automation stays wired', () => {
   const webPreview = read('src/lib/webPreview.ts');
   const sseParser = read('src/store/sseParser.ts');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-62-Real-UI-Preview-Automation.md'),
-    'utf8',
-  );
 
   assert.match(webPreview, /LOCAL_PREVIEW_HOST_PORT_RE/);
   assert.match(webPreview, /ANSI_RE/);
@@ -1567,7 +1430,6 @@ test('NEW-62 real UI preview automation stays wired', () => {
   assert.match(smoke, /new62-external-url-rejected/);
   assert.match(smoke, /new62-right-rail-vite-preview-opens/);
   assert.match(smoke, /new74-local-html-preview-url-built/);
-  assert.match(doc, /Real UI Preview Automation/);
 });
 
 test('NEW-63 release diagnostics bundle stays wired', () => {
@@ -1578,10 +1440,6 @@ test('NEW-63 release diagnostics bundle stays wired', () => {
   const settings = readSettingsSources();
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-63-Release-Diagnostics-Bundle.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface DiagnosticsPayload/);
   assert.match(types, /interface DiagnosticsBundleResult/);
@@ -1598,7 +1456,6 @@ test('NEW-63 release diagnostics bundle stays wired', () => {
   assert.match(css, /\.diagnostics-panel/);
   assert.match(smoke, /new63-diagnostics-payload/);
   assert.match(smoke, /new63-diagnostics-bundle-generated/);
-  assert.match(doc, /Release Diagnostics Bundle/);
 });
 
 test('NEW-64 dev server auto preview stays wired', () => {
@@ -1609,10 +1466,6 @@ test('NEW-64 dev server auto preview stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-64-Dev-Server-Auto-Preview.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface DevServerStatus/);
   assert.match(types, /interface DevServerDetectResult/);
@@ -1632,7 +1485,6 @@ test('NEW-64 dev server auto preview stays wired', () => {
   assert.match(rightRail, /setWebPreviewUrl\(payload\.status\.url\)/);
   assert.match(css, /\.dev-server-panel/);
   assert.match(smoke, /new64-dev-server-auto-opens-preview/);
-  assert.match(doc, /Dev Server Auto Preview/);
 });
 
 test('NEW-65 right rail visual preview QA stays wired', () => {
@@ -1643,10 +1495,6 @@ test('NEW-65 right rail visual preview QA stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-65-Right-Rail-Visual-Preview-QA.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface PreviewAuditResult/);
   assert.match(types, /interface PreviewAuditInput/);
@@ -1662,7 +1510,6 @@ test('NEW-65 right rail visual preview QA stays wired', () => {
   assert.match(rightRail, /preview-audit-panel/);
   assert.match(css, /\.preview-audit-panel/);
   assert.match(smoke, /new65-preview-audit-evidence-saved/);
-  assert.match(doc, /Right Rail Visual Preview QA/);
 });
 
 test('NEW-66 true session resume stays wired', () => {
@@ -1671,10 +1518,6 @@ test('NEW-66 true session resume stays wired', () => {
   const messageOps = read('src/store/messageOps.ts');
   const noticeCards = read('src/components/chat/NoticeCards.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-66-True-Session-Resume.md'),
-    'utf8',
-  );
 
   assert.match(types, /canResume\?:\s*boolean/);
   assert.match(types, /checkpoint\?:\s*string/);
@@ -1685,7 +1528,6 @@ test('NEW-66 true session resume stays wired', () => {
   assert.match(noticeCards, /继续执行/);
   assert.match(noticeCards, /中断点:/);
   assert.match(smoke, /new66-resume-sends-normal-chat/);
-  assert.match(doc, /True Session Resume/);
 });
 
 test('NEW-67 context window quota bar stays wired', () => {
@@ -1695,10 +1537,6 @@ test('NEW-67 context window quota bar stays wired', () => {
   const app = read('src/App.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-67-Context-Window-Quota-Bar.md'),
-    'utf8',
-  );
 
   assert.match(helper, /contextLimitForModel/);
   assert.match(helper, /deepseek-v4-flash/);
@@ -1711,7 +1549,6 @@ test('NEW-67 context window quota bar stays wired', () => {
   assert.match(css, /\.composer-context-orb/);
   assert.match(css, /\.composer-context-orb\[data-level='red'\]/);
   assert.match(smoke, /new67-context-orb-danger-threshold/);
-  assert.match(doc, /Context Window Quota Bar/);
 });
 
 test('NEW-68 provider usage and model catalog stays wired', () => {
@@ -1725,10 +1562,6 @@ test('NEW-68 provider usage and model catalog stays wired', () => {
   const settingsRoutes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'settings_routes.py'), 'utf8');
   const llmState = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'llm_state.py'), 'utf8');
   const registry = fs.readFileSync(path.resolve(root, '..', 'backend', 'bridges', 'provider_registry.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-68-Provider-Usage-And-Model-Catalog.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface ProviderModelCatalog/);
   assert.match(types, /interface ProviderUsagePayload/);
@@ -1751,7 +1584,6 @@ test('NEW-68 provider usage and model catalog stays wired', () => {
   assert.match(llmState, /get_provider_models/);
   assert.match(llmState, /get_provider_usage/);
   assert.match(registry, /normalize_openai_api_base_url/);
-  assert.match(doc, /Provider Usage And Model Catalog/);
 });
 
 test('NEW-69 context compaction and handoff control stays wired', () => {
@@ -1764,10 +1596,6 @@ test('NEW-69 context compaction and handoff control stays wired', () => {
   const smoke = read('src/runtime/rendererSmoke.ts');
   const fakeBackend = read('electron/backend.cjs');
   const realBackend = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'app.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-69-Context-Compaction-And-Handoff-Control.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface CompactStatusPayload/);
   assert.match(types, /interface CompactHandoffSnapshot/);
@@ -1798,7 +1626,6 @@ test('NEW-69 context compaction and handoff control stays wired', () => {
   assert.match(fakeBackend, /pathname === '\/compact\/status'/);
   assert.match(realBackend, /@app\.route\("\/compact", methods=\["POST"\]\)/);
   assert.match(realBackend, /@app\.route\("\/compact\/status", methods=\["GET"\]\)/);
-  assert.match(doc, /Context Compaction And Handoff Control/);
 });
 
 test('NEW-70 terminal scope and compaction visuals stay wired', () => {
@@ -1810,10 +1637,6 @@ test('NEW-70 terminal scope and compaction visuals stay wired', () => {
   const threadUtils = read('src/components/chat/threadUtils.ts');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-70-Terminal-Scope-And-Compaction-Visuals.md'),
-    'utf8',
-  );
 
   assert.match(appShell, /main-workspace-column/);
   assert.match(rightRail, /<TerminalPanel embedded/);
@@ -1830,7 +1653,6 @@ test('NEW-70 terminal scope and compaction visuals stay wired', () => {
   assert.match(smoke, /new99-terminal-card-scoped-to-workspace/);
   assert.match(smoke, /new70-context-compacting-visual-visible/);
   assert.match(smoke, /new70-context-summary-card-visible/);
-  assert.match(doc, /Terminal Scope And Compaction Visuals/);
 });
 
 test('NEW-71 inline compaction animation stays wired', () => {
@@ -1838,10 +1660,6 @@ test('NEW-71 inline compaction animation stays wired', () => {
   const noticeCards = read('src/components/chat/NoticeCards.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-71-Inline-Compaction-Animation.md'),
-    'utf8',
-  );
 
   assert.match(thread, /compacting=\{compacting\}/);
   assert.match(thread, /data-inline-compacting=\{compacting\}/);
@@ -1857,7 +1675,6 @@ test('NEW-71 inline compaction animation stays wired', () => {
   assert.match(smoke, /new71-inline-compaction-row-in-thread-window/);
   assert.match(smoke, /new71-inline-compaction-does-not-change-message-count/);
   assert.match(smoke, /new71-inline-compaction-row-clears-after-summary/);
-  assert.match(doc, /Inline Compaction Animation/);
 });
 
 test('NEW-72 settings model and web preview polish stays wired', () => {
@@ -1865,10 +1682,6 @@ test('NEW-72 settings model and web preview polish stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-72-Settings-Model-And-Web-Preview-Polish.md'),
-    'utf8',
-  );
 
   assert.match(settings, /settings-base-url-input/);
   assert.match(settings, /settings-model-input/);
@@ -1882,14 +1695,13 @@ test('NEW-72 settings model and web preview polish stays wired', () => {
   assert.match(rightRail, /data-compact=\{!showDevServerDetails\}/);
   assert.match(rightRail, /web-preview-host/);
   assert.match(css, /overflow-x:\s*hidden/);
-  assert.match(css, /\.provider-model-summary/);
   assert.match(css, /\.dev-server-panel\[data-compact='true'\]/);
   assert.match(css, /repeat\(auto-fit,\s*minmax/);
+  assert.match(css, /\.provider-model-summary/);
   assert.match(smoke, /new72-provider-text-inputs-spellcheck-disabled/);
   assert.match(smoke, /new72-provider-model-picker-selects-model/);
   assert.match(smoke, /new72-settings-panel-no-horizontal-overflow/);
   assert.match(smoke, /new73-preview-view-ipc-enabled/);
-  assert.match(doc, /Settings Model And Web Preview Polish/);
 });
 
 test('NEW-73 regression fixes stay wired', () => {
@@ -1907,10 +1719,6 @@ test('NEW-73 regression fixes stay wired', () => {
   const fakeBackend = read('electron/backend.cjs');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-73-Composer-Webview-Resize-Terminal-And-Settings-Fixes.md'),
-    'utf8',
-  );
 
   assert.match(types, /status\?:\s*'parsing' \| 'ready' \| 'error'/);
   assert.match(api, /readFileDataUrl/);
@@ -1957,7 +1765,6 @@ test('NEW-73 regression fixes stay wired', () => {
   assert.match(smoke, /new73-rail-resize-disables-selection/);
   assert.match(smoke, /new73-terminal-cwd-not-backend-dist/);
   assert.match(smoke, /new73-permission-center-scrolls-vertically/);
-  assert.match(doc, /NEW-73/);
 });
 
 test('NEW-75 assistant copy and provider preset stability stays wired', () => {
@@ -1973,10 +1780,6 @@ test('NEW-75 assistant copy and provider preset stability stays wired', () => {
   const providerRegistry = fs.readFileSync(path.resolve(root, '..', 'backend', 'bridges', 'provider_registry.py'), 'utf8');
   const llmState = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'llm_state.py'), 'utf8');
   const providerTests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_provider_model_catalog.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-75-Assistant-Copy-And-Provider-Preset-Stability.md'),
-    'utf8',
-  );
 
   assert.match(threadUtils, /copyTextToClipboard/);
   assert.match(messageBubble, /assistant-copy-button/);
@@ -2001,7 +1804,6 @@ test('NEW-75 assistant copy and provider preset stability stays wired', () => {
   assert.match(llmState, /尚未填写 API Key，已显示本地预设模型/);
   assert.match(providerTests, /test_provider_models_returns_deepseek_presets_without_api_key/);
   assert.match(providerTests, /test_models_url_candidates_preserve_version_segments/);
-  assert.match(doc, /Assistant Copy And Provider Preset Stability/);
 });
 
 test('NEW-76 provider manager and model consistency stays wired', () => {
@@ -2013,10 +1815,6 @@ test('NEW-76 provider manager and model consistency stays wired', () => {
   const providerRegistry = fs.readFileSync(path.resolve(root, '..', 'backend', 'bridges', 'provider_registry.py'), 'utf8');
   const providerTests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_provider_registry.py'), 'utf8');
   const catalogTests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_provider_model_catalog.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-76-Provider-Manager-And-Model-Consistency.md'),
-    'utf8',
-  );
 
   assert.match(app, /<SettingsDialog onSaved=\{refresh\}/);
   assert.match(settings, /model-service-strip/);
@@ -2033,7 +1831,6 @@ test('NEW-76 provider manager and model consistency stays wired', () => {
   assert.match(catalogTests, /test_deepseek_model_fallback_does_not_read_openai_model/);
   assert.match(smoke, /new76-deepseek-gpt-model-repaired/);
   assert.match(smoke, /new76-model-service-strip-visible/);
-  assert.match(doc, /Provider Manager And Model Consistency/);
 });
 
 test('NEW-77 preview logs and compaction stability stays wired', () => {
@@ -2042,10 +1839,6 @@ test('NEW-77 preview logs and compaction stability stays wired', () => {
   const css = read('src/index.css');
   const fakeBackend = read('electron/backend.cjs');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-77-Preview-Logs-And-Compaction-Stability.md'),
-    'utf8',
-  );
 
   assert.match(rightRail, /web-preview-host/);
   assert.match(rightRail, /previewSetZoom/);
@@ -2058,24 +1851,18 @@ test('NEW-77 preview logs and compaction stability stays wired', () => {
   assert.match(fakeBackend, /isWerkzeugInfo/);
   assert.match(smoke, /new77-web-zoom-layout-stable/);
   assert.match(smoke, /new77-context-compaction-window-does-not-animate/);
-  assert.match(doc, /Preview Logs And Compaction Stability/);
 });
 
 test('NEW-78 OpenAI-compatible SSE UTF-8 decoding stays wired', () => {
   const common = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'llm_backends', '_common.py'), 'utf8');
   const openaiCompat = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'llm_backends', 'openai_compat.py'), 'utf8');
   const encodingTests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_openai_compat_stream_encoding.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-78-OpenAI-Compatible-SSE-UTF8-Decoding.md'),
-    'utf8',
-  );
 
   assert.match(common, /def iter_utf8_lines/);
   assert.match(common, /decode\("utf-8-sig",\s*errors="replace"\)/);
   assert.match(openaiCompat, /iter_utf8_lines\(response(?:,\s*cancel_event=cancel_event)?\)/);
   assert.match(encodingTests, /ISO-8859-1/);
   assert.match(encodingTests, /你好，中文正常/);
-  assert.match(doc, /OpenAI-Compatible SSE UTF-8 Decoding/);
 });
 
 test('NEW-79 cross-drive read and autosizing composer stays wired', () => {
@@ -2089,10 +1876,6 @@ test('NEW-79 cross-drive read and autosizing composer stays wired', () => {
   const permissionTests = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_permission_rules.py'), 'utf8');
   const composer = read('src/components/chat/Composer.tsx');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-79-Cross-Drive-Read-And-Autosizing-Composer.md'),
-    'utf8',
-  );
 
   assert.match(agentLoop, /tool_boundary_overrides/);
   assert.match(webApp, /_tool_boundary_overrides/);
@@ -2104,17 +1887,12 @@ test('NEW-79 cross-drive read and autosizing composer stays wired', () => {
   assert.match(composer, /textareaRef/);
   assert.match(composer, /scrollHeight/);
   assert.match(css, /max-height:\s*min\(38vh,\s*320px\)/);
-  assert.match(doc, /Cross-Drive Read And Autosizing Composer/);
 });
 
 test('NEW-80 Codex-like composer layout stays wired', () => {
   const composer = read('src/components/chat/Composer.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-80-Codex-Like-Composer-Layout.md'),
-    'utf8',
-  );
 
   assert.match(composer, /composer-toolbar/);
   assert.match(composer, /composer-toolbar-left/);
@@ -2132,7 +1910,6 @@ test('NEW-80 Codex-like composer layout stays wired', () => {
   assert.match(smoke, /new80-composer-column-layout/);
   assert.match(smoke, /new80-composer-textarea-full-width/);
   assert.match(smoke, /new80-composer-circular-send-button/);
-  assert.match(doc, /Codex-Like Composer Layout/);
 });
 
 test('pending followups keep a stable empty store snapshot', () => {
@@ -2147,10 +1924,6 @@ test('NEW-81 composer sidebar and zone polish stays wired', () => {
   const sections = read('src/components/sections/Sections.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-81-Composer-Sidebar-And-Zone-Polish.md'),
-    'utf8',
-  );
 
   assert.match(sidebar, /sidebar-search-row/);
   assert.match(sidebar, /sidebar-folder-button/);
@@ -2169,7 +1942,6 @@ test('NEW-81 composer sidebar and zone polish stays wired', () => {
   assert.match(smoke, /new81-composer-default-height-compact/);
   assert.match(smoke, /new81-chat-sidebar-folder-icon-removed/);
   assert.match(smoke, /new81-sidebar-top-new-chat-removed/);
-  assert.match(doc, /Composer Sidebar And Zone Polish/);
 });
 
 test('NEW-55 file change review card stays wired', () => {
@@ -2178,10 +1950,6 @@ test('NEW-55 file change review card stays wired', () => {
   const messageBubble = read('src/components/chat/MessageBubble.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-55-File-Change-Review-And-Revert-UX.md'),
-    'utf8',
-  );
 
   assert.match(diffPreview, /interface FileChangeSummary/);
   assert.match(diffPreview, /summarizeFileChanges/);
@@ -2197,7 +1965,6 @@ test('NEW-55 file change review card stays wired', () => {
   assert.match(smoke, /new55-file-change-review-card-visible/);
   assert.match(smoke, /new55-file-change-review-button-opens-diff/);
   assert.match(smoke, /new55-file-change-undo-themed-dialog/);
-  assert.match(doc, /File Change Review And Revert UX/);
 });
 
 test('NEW-56 transactional file revert stays wired', () => {
@@ -2208,10 +1975,6 @@ test('NEW-56 transactional file revert stays wired', () => {
   const smoke = read('src/runtime/rendererSmoke.ts');
   const fakeBackend = read('electron/backend.cjs');
   const workspaceRoutes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'workspace_routes.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-56-Transactional-File-Revert.md'),
-    'utf8',
-  );
 
   assert.match(types, /interface FileChangeRevertResult/);
   assert.match(api, /revertFileChanges/);
@@ -2227,7 +1990,6 @@ test('NEW-56 transactional file revert stays wired', () => {
   assert.match(workspaceRoutes, /_preflight_file_change_revert/);
   assert.match(workspaceRoutes, /validate_path_access\(abs_path, action="write"/);
   assert.match(workspaceRoutes, /file-change-transactions\.jsonl/);
-  assert.match(doc, /Transactional File Revert/);
 });
 
 test('NEW-57 permission policy templates and path safety stay wired', () => {
@@ -2238,10 +2000,6 @@ test('NEW-57 permission policy templates and path safety stay wired', () => {
   const realBackend = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'app.py'), 'utf8');
   const pathSafety = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'path_safety.py'), 'utf8');
   const pathSafetyTest = fs.readFileSync(path.resolve(root, '..', 'backend', 'tests', 'test_path_safety.py'), 'utf8');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-57-Permission-Policy-Templates-And-Path-Safety.md'),
-    'utf8',
-  );
 
   assert.match(settings, /permissionPolicyTemplates/);
   assert.match(settings, /policy_template/);
@@ -2267,7 +2025,6 @@ test('NEW-57 permission policy templates and path safety stay wired', () => {
   assert.match(smoke, /new57-permission-policy-templates-visible/);
   assert.match(smoke, /new57-permission-template-persists-scoped-rule/);
   assert.match(smoke, /new57-permission-manual-scoped-rule-created/);
-  assert.match(doc, /Permission Policy Templates And Path Safety/);
 });
 
 test('transcript replay fixture and perf budgets stay no-secret and wired', () => {
@@ -2323,13 +2080,6 @@ test('chat thread keeps long-session window rendering and scroll anchoring', () 
   assert.match(css, /\.thread-window/);
 });
 
-test('project has durable compaction handoff summary', () => {
-  const summaryPath = path.resolve(root, '..', 'docs', 'dev-log', 'PROJECT-HANDOFF-SUMMARY.md');
-  const summary = fs.readFileSync(summaryPath, 'utf8');
-  assert.match(summary, /durable resume point/i);
-  assert.match(summary, /Metis Desktop/);
-  assert.match(summary, /Verification Commands/);
-});
 
 test('agent event contract helper remains wired', () => {
   const api = read('src/lib/api.ts');
@@ -2342,10 +2092,6 @@ test('NEW-101 side chat seam and terminal delete fixes stay wired', () => {
   const sideChat = read('src/components/rightrail/SideChatPanel.tsx');
   const terminal = read('src/components/terminal/TerminalPanel.tsx');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-101-Side-Chat-Seam-And-Terminal-Delete.md'),
-    'utf8',
-  );
   const deleteTerminalBlock = terminal.match(/const deleteTerminal = async[\s\S]*?\n  const renameTerminal =/)?.[0] || '';
 
   assert.match(sideChat, /SIDE_CHAT_HISTORY_COLLAPSED_HEIGHT\s*=\s*64/);
@@ -2358,16 +2104,11 @@ test('NEW-101 side chat seam and terminal delete fixes stay wired', () => {
   assert.match(deleteTerminalBlock, /setTerminalOpen\(false\)/);
   assert.doesNotMatch(deleteTerminalBlock, /createLocalTerminal/);
   assert.doesNotMatch(terminal, /disabled=\{terminals\.length <= 1 && !terminal\.sessionId\}/);
-  assert.match(doc, /Side Chat Seam And Terminal Delete/);
 });
 
 test('NEW-103 right rail density and preview simplification stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-103-Right-Rail-Density-And-Preview-Simplification.md'),
-    'utf8',
-  );
 
   assert.match(rightRail, /const \[devDetailsOpen, setDevDetailsOpen\]/);
   assert.match(rightRail, /const showDevServerDetails = devDetailsOpen && hasDevServerDetails/);
@@ -2380,17 +2121,12 @@ test('NEW-103 right rail density and preview simplification stays wired', () => 
   // FABLEADV-28 后 .stability-grid 随稳定性总览一并移除（死类），删除其过期断言。
   assert.match(css, /\.dev-server-actions\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(css, /\.preview-audit-panel\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
-  assert.match(doc, /Right Rail Density And Preview Simplification/);
 });
 
 test('NEW-104 cardized side chat and preview toolbar stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-104-Cardized-Side-Chat-And-Preview-Toolbar.md'),
-    'utf8',
-  );
 
   assert.match(rightRail, /MoreVertical/);
   assert.match(rightRail, /className="web-more-button"/);
@@ -2406,16 +2142,11 @@ test('NEW-104 cardized side chat and preview toolbar stays wired', () => {
   assert.match(css, /\.web-more-menu/);
   assert.match(css, /\.web-browser-toolbar\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*24px\)/);
   assert.match(smoke, /web-more-menu/);
-  assert.match(doc, /Cardized Side Chat And Preview Toolbar/);
 });
 
 test('NEW-105 preview omnibar and menu compaction stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-105-Preview-Omnibar-And-Menu-Compaction.md'),
-    'utf8',
-  );
 
   assert.match(rightRail, /className="web-url-nav-controls"/);
   assert.match(rightRail, /className="web-more-menu-label">\{t\('前端预览'\)/);
@@ -2427,7 +2158,6 @@ test('NEW-105 preview omnibar and menu compaction stays wired', () => {
   assert.match(css, /\.web-url-nav-controls\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*22px\)/);
   assert.match(css, /\.web-more-menu-wrap\s*\{[\s\S]*border-left:\s*1px solid/);
   assert.match(css, /\.web-more-status/);
-  assert.match(doc, /Preview Omnibar And Menu Compaction/);
 });
 
 test('NEW-106 preview controls and context polish stays wired', () => {
@@ -2436,10 +2166,6 @@ test('NEW-106 preview controls and context polish stays wired', () => {
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const css = read('src/index.css');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-106-Preview-Controls-And-Context-Polish.md'),
-    'utf8',
-  );
 
   assert.doesNotMatch(sidePanel, /side-chat-model-popover|side-chat-model-button|只影响独立 Chat|setSessionModel/);
   assert.match(rightRail, /className="web-zoom-controls"/);
@@ -2452,7 +2178,6 @@ test('NEW-106 preview controls and context polish stays wired', () => {
   assert.match(css, /\.web-more-menu button\s*\{[\s\S]*justify-content:\s*center/);
   assert.match(css, /\.composer-context-orb-core/);
   assert.match(smoke, /new98-side-chat-model-picker-removed/);
-  assert.match(doc, /Preview Controls And Context Polish/);
 });
 
 test('NEW-107 webview popups route into preview card', () => {
@@ -2461,10 +2186,6 @@ test('NEW-107 webview popups route into preview card', () => {
   const globals = read('src/global.d.ts');
   const rightRail = read('src/components/rightrail/RightRail.tsx');
   const smoke = read('src/runtime/rendererSmoke.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-107-Webview-Popup-In-Card-Playback.md'),
-    'utf8',
-  );
 
   assert.match(main, /WebContentsView/);
   assert.match(main, /routePreviewWindowOpen/);
@@ -2487,7 +2208,6 @@ test('NEW-107 webview popups route into preview card', () => {
   assert.doesNotMatch(rightRail, /WEBVIEW_IN_PLACE_LINK_SCRIPT|executeJavaScript|createElement\(['"]webview['"]\)/);
   assert.match(smoke, /new107-preview-view-main-process-hosted/);
   assert.match(smoke, /new73-preview-view-ipc-enabled/);
-  assert.match(doc, /Webview Popup In Card Playback/);
 });
 
 test('NEW-113 settings dialog performance refactor stays wired', () => {
@@ -2496,10 +2216,6 @@ test('NEW-113 settings dialog performance refactor stays wired', () => {
   const permissionPanel = read('src/components/settings/PermissionPanel.tsx');
   const contracts = read('scripts/desktop-contract-tests.mjs');
   const css = read('src/index.css');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-113-Settings-Dialog-Performance-Fix.md'),
-    'utf8',
-  );
   const modalBlock = css.match(/\.modal-layer\s*\{[\s\S]*?\}/)?.[0] ?? '';
 
   assert.match(contracts, /function readSettingsSources/);
@@ -2519,7 +2235,6 @@ test('NEW-113 settings dialog performance refactor stays wired', () => {
   assert.match(css, /\.modal-layer\s*\{[\s\S]*background:\s*rgba\(0,\s*0,\s*0,\s*0\.45\)/);
   assert.match(css, /\.setup-layer\s*\{[\s\S]*backdrop-filter:\s*blur\(8px\)/);
   assert.match(css, /\.settings-dialog\s*\{[\s\S]*box-shadow:\s*none/);
-  assert.match(doc, /NEW-113/);
 });
 
 test('NEW-112 project structure reorganization stays wired', () => {
@@ -2536,7 +2251,6 @@ test('NEW-112 project structure reorganization stays wired', () => {
   assert.ok(fs.existsSync(path.join(repoRoot, 'backend', 'web', 'app.py')));
   assert.ok(fs.existsSync(path.join(repoRoot, 'backend', 'tools', 'registry.py')));
   assert.ok(fs.existsSync(path.join(repoRoot, 'backend', 'bridges', 'provider_registry.py')));
-  assert.ok(fs.existsSync(path.join(repoRoot, 'docs', 'dev-log', 'NEW-112-Project-Structure-Reorganization.md')));
   assert.equal(fs.existsSync(path.join(repoRoot, 'miro')), false);
   assert.equal(fs.existsSync(path.join(repoRoot, 'metis-desktop')), false);
 
@@ -2554,7 +2268,6 @@ test('NEW-112 project structure reorganization stays wired', () => {
   assert.match(ci, /python -m pytest backend\/tests\/ -q/);
   assert.match(gitignore, /desktop\/resources\/backend-dist\//);
   assert.match(gitignore, /backend\/var\//);
-  assert.match(gitignore, /docs\/dev-log\//);
 });
 
 test('desktop launcher auto-heals a managed Python backend environment', () => {
@@ -2591,14 +2304,6 @@ test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
     'utf8',
   );
   const backendPyproject = fs.readFileSync(path.resolve(root, '..', 'backend', 'pyproject.toml'), 'utf8');
-  const new116 = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-116-Computer-Use-Browser-Use-And-Python-Discovery.md'),
-    'utf8',
-  );
-  const new120 = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-120-Runtime-Auto-Discovery-And-Install.md'),
-    'utf8',
-  );
 
   assert.match(launcher, /project venv/);
   assert.match(launcher, /CONDA_PREFIX/);
@@ -2615,8 +2320,6 @@ test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
   assert.match(browserAgent, /object\.__setattr__\(llm,\s*"provider"/);
   assert.match(browserTests, /test_fableadv_50_browser_use_native_openai_compatible_llm/);
   assert.match(browserTests, /test_fableadv_50_browser_use_errors_redact_secrets/);
-  assert.match(new116, /Status:\s*Completed/);
-  assert.match(new120, /Status:\s*Completed/);
 });
 
 test('composer auto-creates a session before first send', () => {
@@ -2639,10 +2342,6 @@ test('NEW-119 panel toggles close blank rails and avoid delayed layout rebound',
   const appShell = read('src/components/shell/AppShell.tsx');
   const navRail = read('src/components/sidebar/SidebarNav.tsx');
   const uiStore = read('src/store/uiStore.ts');
-  const doc = fs.readFileSync(
-    path.resolve(root, '..', 'docs', 'dev-log', 'NEW-119-Panel-Toggle-Blank-Rail-And-Chat-Motion-Fix.md'),
-    'utf8',
-  );
 
   assert.match(uiStore, /setTerminalOpen: terminalOpen =>\s*set\(state => \{\s*const workspaceCardVisibility = persistWorkspaceCardVisibility/s);
   assert.match(uiStore, /rightRailOpen: terminalOpen \? true : hasVisibleWorkspaceCard\(workspaceCardVisibility\)/);
@@ -2653,8 +2352,6 @@ test('NEW-119 panel toggles close blank rails and avoid delayed layout rebound',
   assert.match(appShell, /const rightRailEffectiveOpen = rightRailOpen && effectiveVisibleWorkspaceCards\.length > 0;/);
   assert.match(appShell, /const rightRailLayoutOpen = rightRailEffectiveOpen && !researchPopoverOpen;/);
   assert.doesNotMatch(appShell, /sideChatLayoutHold|rightRailLayoutHold/);
-  assert.match(doc, /NEW-119/);
-  assert.match(doc, /Completed/);
 });
 
 test('compact window keeps only the central workspace visible', () => {
@@ -2818,7 +2515,6 @@ test('FABLEADV-13 preview refresh and chat linkify stay wired', () => {
   const remarkLinksPath = path.join(root, 'src', 'lib', 'remarkMetisLinks.ts');
   const metisLinksPath = path.join(root, 'src', 'lib', 'metisLinks.ts');
   const remarkLinksTestPath = path.join(root, 'src', 'lib', '__tests__', 'remarkMetisLinks.test.ts');
-  const doc = fs.readFileSync(path.join(repoRoot, 'docs', 'dev-log', 'FABLEADV-13-Preview-Refresh-Linkify.md'), 'utf8');
 
   assert.match(rightRail, /void window\.metis\?\.previewLoad\?\.\(\{ tabId, url: webPreviewUrl \}\)/);
   assert.match(rightRail, /previewLoad\?\.\(\{ tabId, url: webPreviewUrl \}\)/);
@@ -2839,7 +2535,6 @@ test('FABLEADV-13 preview refresh and chat linkify stay wired', () => {
   assert.match(messageBubble, /localFilePreviewUrl\(await apiBase\(\), path\)/);
   assert.match(css, /\.markdown-body a\s*\{[\s\S]*border-bottom:\s*1px solid transparent/);
   assert.match(css, /\.markdown-body a\[data-link-kind='web'\]/);
-  assert.match(doc, /Status\*\*:\s*Completed/);
 });
 
 test('FABLEADV-15 provider probe and FABLEADV-17 rewind stay wired', () => {

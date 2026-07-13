@@ -114,6 +114,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   prepareFreshModeDraft: mode => {
     const state = get();
+    const alreadyFreshDraft =
+      isDraftSessionId(state.activeSessionByMode[mode] || '') &&
+      !state.activeWorkspaceByMode[mode] &&
+      state.activeSessionId === null &&
+      !state.activeWorkspaceId;
+    if (alreadyFreshDraft) {
+      return { sessionId: null, workspaceId: '', draft: true };
+    }
     const activeSessionByMode = { ...state.activeSessionByMode, [mode]: DRAFT_SESSION_ID };
     const activeWorkspaceByMode = { ...state.activeWorkspaceByMode };
     delete activeWorkspaceByMode[mode];

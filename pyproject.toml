@@ -16,7 +16,6 @@ extend-exclude = [
     "desktop/.dev-data",
     "desktop/resources/backend-build",
     "desktop/resources/backend-dist",
-    "docs/dev-log",
 ]
 
 [tool.ruff.lint]

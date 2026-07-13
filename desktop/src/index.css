@@ -416,6 +416,14 @@ button {
   will-change: grid-template-columns;
 }
 
+.metis-mode-switching .shell-body,
+.metis-mode-switching .right-rail,
+.metis-mode-switching .main-panel-stage,
+.metis-mode-switching .thread-shell {
+  animation: none !important;
+  transition: none !important;
+}
+
 .app-shell[data-sidebar-layout='false'] .shell-body {
   --sidebar-width: 0px;
   --sidebar-resizer-width: 0px;
@@ -658,29 +666,10 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  transform-origin: center;
-  will-change: opacity, transform;
-  backface-visibility: hidden;
+  will-change: opacity;
 }
-
-.thread-shell[data-mode='chat'] {
-  animation: mode-enter-chat 160ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.thread-shell[data-mode='cowork'] {
-  animation: mode-enter-cowork 160ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.thread-shell[data-mode='code'] {
-  animation: mode-enter-code 160ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes mode-enter-chat { from { opacity: 0.7; transform: translateY(5px); } }
-@keyframes mode-enter-cowork { from { opacity: 0.7; transform: translateY(5px); } }
-@keyframes mode-enter-code { from { opacity: 0.7; transform: translateY(5px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .thread-shell[data-mode],
   .mode-switcher-pill {
     animation: none;
     transition: none;
@@ -2099,23 +2088,18 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   content: '';
 }
 
-.cowork-backdrop {
+.mode-backdrop {
   position: absolute;
   inset: 0;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 120ms ease;
 }
 
-.cowork-backdrop::after {
-  content: none;
-}
-
-.cowork-backdrop canvas {
-  display: none;
-}
-
-.cowork-backdrop iframe {
+.mode-backdrop iframe {
   display: block;
   width: 100%;
   height: 100%;
@@ -2124,63 +2108,9 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   background: var(--bg);
 }
 
-.cowork-backdrop[data-visible='false'] {
+.mode-backdrop[data-visible='false'] {
   visibility: hidden;
   opacity: 0;
-}
-
-.cowork-backdrop[data-visible='false'] iframe {
-  display: none;
-}
-
-/* ── Chat Aurora 极光背景 ─────────────────────────────────────────────────── */
-.chat-aurora-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition: opacity 0.6s ease, visibility 0.6s ease;
-}
-.chat-aurora-backdrop iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  opacity: 1;
-  background: var(--bg);
-}
-.chat-aurora-backdrop[data-visible='false'] {
-  visibility: hidden;
-  opacity: 0;
-}
-.chat-aurora-backdrop[data-visible='false'] iframe {
-  display: none;
-}
-
-/* ── Code Grid 数据网格背景 ──────────────────────────────────────────────── */
-.code-grid-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition: opacity 0.5s ease, visibility 0.5s ease;
-}
-.code-grid-backdrop iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  opacity: 1;
-  background: var(--bg);
-}
-.code-grid-backdrop[data-visible='false'] {
-  visibility: hidden;
-  opacity: 0;
-}
-.code-grid-backdrop[data-visible='false'] iframe {
-  display: none;
 }
 
 /* FABLEADV-33: 底部 dock 悬浮叠在消息流上方 → composer 磨砂玻璃后能透出滚动内容。

@@ -1,6 +1,6 @@
 // pipe.go — named-pipe RPC server with strict ACL + caller-token auth.
 //
-// Security model (see docs/dev-log/Metis-Sandbox-Phase7-Privileged-Service.md):
+// Security model:
 //   - Pipe DACL (SDDL) allows only SYSTEM + the interactive user (stricter
 //     than Claude's Everyone-FA, which we can do because we're not MSIX).
 //   - Per-connection: GetNamedPipeClientProcessId -> open token -> TokenUser

@@ -1,7 +1,6 @@
 ## Project Operating Memory
 
 - Default user-facing replies in this project should be Chinese unless the user asks otherwise.
-- Treat `docs/dev-log/` and MVP construction notes as append-only logs. Add new dated sections instead of rewriting earlier construction history.
 - Do not stage or commit local runtime state: `.metis/audit/`, `.metis/cache/`, `.metis/memory.json`, `.metis/project-profile.json`, `.agent_todos.json`, `NEWUPDATE.md`, logs, build output, or release installers unless the user explicitly asks for that artifact.
 - Release handling preference: do not create a new GitHub release announcement unless explicitly requested. When asked to update the previous release, attach the new installer there.
 

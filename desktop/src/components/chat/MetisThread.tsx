@@ -29,8 +29,7 @@ import { AwaySummaryNotice, ContextOrganizingNotice, LearningNotice, RunRecovery
 import { SubagentGroup } from './SubagentGroup';
 
 const coworkBackdropUrl = new URL('../../assets/cowork-dotwave-b.html', import.meta.url).href;
-const chatAuroraUrl     = new URL('../../assets/chat-aurora.html',      import.meta.url).href;
-const codeGridUrl       = new URL('../../assets/code-grid.html',        import.meta.url).href;
+const coworkBackdropWorkerUrl = new URL('../../assets/cowork-dotwave-worker.js', import.meta.url).href;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -135,9 +134,7 @@ export function MetisThread() {
         data-mode={appMode}
         ref={shellRef}
       >
-        <ChatAuroraBackdrop visible={appMode === 'chat' && !settingsOpen} />
-        <CoworkBackdrop visible={appMode === 'cowork' && !settingsOpen} />
-        <CodeGridBackdrop visible={appMode === 'code' && !settingsOpen} />
+        <ModeBackdrop scene={appMode} visible={!settingsOpen} />
         <header className="thread-context-header" aria-label={t('当前会话')}>
           <AnimatePresence initial={false} mode="wait">
             <motion.div
@@ -218,19 +215,11 @@ function runtimeStatusForDock(status: RuntimeStatus | null, appMode: AppMode): R
   return null;
 }
 
-function CoworkBackdrop({ visible }: { visible: boolean }) {
-  return <AnimatedBackdrop className="cowork-backdrop" url={coworkBackdropUrl} visible={visible} />;
+function ModeBackdrop({ scene, visible }: { scene: AppMode; visible: boolean }) {
+  return <AnimatedModeBackdrop scene={scene} visible={visible} />;
 }
 
-function ChatAuroraBackdrop({ visible }: { visible: boolean }) {
-  return <AnimatedBackdrop className="chat-aurora-backdrop" url={chatAuroraUrl} visible={visible} />;
-}
-
-function CodeGridBackdrop({ visible }: { visible: boolean }) {
-  return <AnimatedBackdrop className="code-grid-backdrop" url={codeGridUrl} visible={visible} />;
-}
-
-function AnimatedBackdrop({ className, url, visible }: { className: string; url: string; visible: boolean }) {
+function AnimatedModeBackdrop({ scene, visible }: { scene: AppMode; visible: boolean }) {
   const appearanceMode = useUiStore(state => state.appearanceMode);
   const theme = useUiStore(state => state.theme);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -242,19 +231,24 @@ function AnimatedBackdrop({ className, url, visible }: { className: string; url:
       text: palette['--text'] || '',
       accent: palette['--accent-ink'] || palette['--accent'] || '',
       border: palette['--border'] || '',
+      worker: coworkBackdropWorkerUrl,
     });
-    return `${url}?${params.toString()}`;
-  }, [appearanceMode, theme, url]);
+    return `${coworkBackdropUrl}?${params.toString()}`;
+  }, [appearanceMode, theme]);
 
-  const syncVisibility = useCallback(() => {
-    frameRef.current?.contentWindow?.postMessage({ type: 'metis-backdrop-active', active: visible }, '*');
-  }, [visible]);
+  const syncBackdrop = useCallback(() => {
+    frameRef.current?.contentWindow?.postMessage({
+      type: 'metis-backdrop-state',
+      active: visible,
+      scene,
+    }, '*');
+  }, [scene, visible]);
 
-  useEffect(syncVisibility, [syncVisibility]);
+  useEffect(syncBackdrop, [syncBackdrop]);
 
   return (
-    <div className={className} aria-hidden="true" data-visible={visible}>
-      <iframe ref={frameRef} src={src} tabIndex={-1} title="" onLoad={syncVisibility} />
+    <div className="mode-backdrop" aria-hidden="true" data-scene={scene} data-visible={visible}>
+      <iframe ref={frameRef} src={src} tabIndex={-1} title="" onLoad={syncBackdrop} />
     </div>
   );
 }
