@@ -4,7 +4,6 @@ import {
   Calendar,
   ChevronDown,
   ChevronRight,
-  CheckCircle2,
   Cpu,
   Database,
   ExternalLink,
@@ -1583,7 +1582,7 @@ function InlineError({ message, onRetry }: { message: string; onRetry: () => Pro
 function StatusPill({ ok, text }: { ok: boolean; text: string }) {
   return (
     <span className="zone-pill" data-ok={ok}>
-      {ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+      {!ok && <AlertTriangle size={12} />}
       {text}
     </span>
   );

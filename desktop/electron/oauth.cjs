@@ -197,7 +197,9 @@ async function authorizeGitHubDeviceFlow({ app, safeStorage, shell, options }) {
   if (!device.device_code || !device.verification_uri) {
     return { ok: false, service: 'github', error: 'GitHub did not return a device code.' }
   }
-  await shell.openExternal(device.verification_uri)
+  const verificationUrl = new URL(device.verification_uri)
+  verificationUrl.searchParams.set('user_code', String(device.user_code))
+  await shell.openExternal(device.verification_uri_complete || verificationUrl.toString())
   const token = await pollGitHubDeviceToken(clientId, device)
   await storeSecret(app, safeStorage, 'github', token)
   return {

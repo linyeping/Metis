@@ -260,6 +260,7 @@ test('FABLEADV-47 connector OAuth stores tokens safely', () => {
   assert.match(oauth, /GITHUB_PERSONAL_ACCESS_TOKEN/);
   assert.match(oauth, /GOOGLE_OAUTH_ACCESS_TOKEN/);
   assert.match(oauth, /login\/device\/code/);
+  assert.match(oauth, /searchParams\.set\('user_code'/);
   assert.match(oauth, /code_challenge_method', 'S256'/);
   assert.doesNotMatch(oauth, /console\.log\(.*token/i);
   assert.match(main, /registerConnectorIpc/);
@@ -268,6 +269,7 @@ test('FABLEADV-47 connector OAuth stores tokens safely', () => {
   assert.match(preload, /connectorDisconnect/);
   assert.match(globals, /connectorAuthorize/);
   assert.match(settings, /ConnectorsTab/);
+  assert.match(settings, /在浏览器中授权/);
 });
 
 test('FABLEADV-11 build hygiene keeps Vite and backend packaging scoped', () => {

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useState } from 'react';
-import { KeyRound, Plug, Power, PowerOff, RefreshCw, Unplug, Zap } from 'lucide-react';
+import { ExternalLink, KeyRound, Plug, Power, PowerOff, RefreshCw, Unplug, Zap } from 'lucide-react';
 import type { ConnectorAuthorizeResult, ConnectorServiceStatus, ConnectorStatusPayload } from '../../../lib/types';
 import {
   type BackendConnector,
@@ -48,6 +48,8 @@ export const ConnectorsTab = memo(function ConnectorsTab() {
         setSecretValues(current => ({ ...current, [service]: {} }));
         await refresh();
       }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t('连接器操作失败'));
     } finally {
       setBusyService('');
     }
@@ -116,7 +118,7 @@ export const ConnectorsTab = memo(function ConnectorsTab() {
         </div>
         <div className="connector-overview-body">
           <div>
-            <p className="section-desc">{t('第三方连接器使用标准 OAuth 或本地配置，敏感信息仅在本机加密保存。')}</p>
+            <p className="section-desc">{t('GitHub 和 Gmail 可在系统浏览器中授权；其他连接器按服务能力使用本地凭据。')}</p>
             <p className="section-desc">{t('保存配置后点“激活”启动工具；新保存的敏感信息需重启后端才会注入。')}</p>
           </div>
           <button type="button" className="connector-refresh-button" onClick={() => void refresh()}>
@@ -192,7 +194,19 @@ function ConnectorCard({
   const optionalSecretEnvs = service.optionalSecretEnvs?.length ? service.optionalSecretEnvs : backend?.optionalSecretEnvs || [];
   const envSecretConnector = secretEnvs.length > 0;
   const noTokenConnector = !service.tokenEnv && !envSecretConnector;
+  const browserOAuthConnector = service.service === 'github' || service.service === 'gmail';
+  const manualTokenConnector = !noTokenConnector && !envSecretConnector && service.service !== 'gmail';
   const requiredSecretsReady = secretEnvs.every(envName => (secretValues[envName] || '').trim());
+  const manualCredentialLabel = service.service === 'github'
+    ? t('Personal access token（可选）')
+    : service.service === 'postgres'
+      ? t('数据库连接地址')
+      : t('访问令牌');
+  const manualCredentialPlaceholder = service.service === 'github'
+    ? 'ghp_...'
+    : service.service === 'postgres'
+      ? 'postgresql://user:password@host/database'
+      : t('粘贴服务提供的访问令牌');
   return (
     <section className="settings-section connector-card" data-connected={service.connected} data-active={active}>
       <div className="settings-section-header">
@@ -237,31 +251,40 @@ function ConnectorCard({
           </div>
         </>
       )}
-      {!noTokenConnector && !envSecretConnector && (
+      {browserOAuthConnector && (
+        <p className="connector-auth-note">
+          {t('授权将在系统浏览器中打开，完成账号登录后会自动返回 Metis。')}
+        </p>
+      )}
+      {manualTokenConnector && (
         <label>
-          <span>{service.service === 'github' ? t('Personal access token（可选）') : t('本地测试 token（可选）')}</span>
+          <span>{manualCredentialLabel}</span>
           <input
             type="password"
             value={token}
             autoComplete="off"
-            placeholder={service.service === 'github' ? 'ghp_...' : t('留空则尝试 OAuth')}
+            placeholder={manualCredentialPlaceholder}
             onChange={event => onTokenChange(event.target.value)}
           />
         </label>
       )}
-      {!noTokenConnector && !envSecretConnector && (
+      {(browserOAuthConnector || manualTokenConnector) && (
         <div className="connector-actions">
-          <button type="button" disabled={busy || !service.encryptionAvailable} onClick={() => onAuthorize({})}>
-            <Plug size={14} />
-            {busy ? t('处理中...') : t('OAuth 连接')}
-          </button>
-          <button type="button" disabled={busy || !token.trim() || !service.encryptionAvailable} onClick={() => onAuthorize({ token: token.trim() })}>
-            <KeyRound size={14} />
-            {t('加密保存 token')}
-          </button>
+          {browserOAuthConnector && (
+            <button type="button" disabled={busy || !service.encryptionAvailable} onClick={() => onAuthorize({})}>
+              <ExternalLink size={14} />
+              {busy ? t('处理中...') : t('在浏览器中授权')}
+            </button>
+          )}
+          {manualTokenConnector && (
+            <button type="button" disabled={busy || !token.trim() || !service.encryptionAvailable} onClick={() => onAuthorize({ token: token.trim() })}>
+              <KeyRound size={14} />
+              {service.service === 'postgres' ? t('加密保存连接地址') : t('加密保存 token')}
+            </button>
+          )}
           <button type="button" disabled={busy || !service.connected} onClick={onRemoveToken}>
             <Unplug size={14} />
-            {t('删除 token')}
+            {t('删除配置')}
           </button>
         </div>
       )}

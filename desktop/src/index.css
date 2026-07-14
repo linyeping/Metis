@@ -14573,6 +14573,20 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   background: var(--panel);
 }
 
+.provider-check-summary {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-0-5);
+}
+
+.provider-check-hint,
+.model-discovery-error p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-sm);
+  line-height: 1.5;
+}
+
 .provider-check-panel[data-ok='true'] {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
   background: color-mix(in srgb, var(--panel) 88%, var(--accent-soft));
@@ -14611,6 +14625,39 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 
 .provider-check-panel em {
   color: var(--text-faint);
+}
+
+.provider-technical-details {
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
+.provider-technical-details summary {
+  width: max-content;
+  max-width: 100%;
+  cursor: pointer;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.provider-technical-details > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+  margin-top: var(--space-1-5);
+  padding: 8px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.provider-technical-details code {
+  overflow-wrap: anywhere;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--ui-font-size-xs);
+  line-height: 1.45;
+  white-space: normal;
 }
 
 .provider-preset-strip {
@@ -14895,6 +14942,13 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   gap: var(--space-2);
 }
 
+.model-discovery-error {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+  padding: 8px 9px 3px;
+}
+
 .provider-model-summary {
   display: grid;
   min-width: 0;
@@ -15017,6 +15071,57 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--space-3);
+}
+
+.usage-settings-grid {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.usage-settings-grid .provider-usage-card {
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.usage-error-state {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-2);
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--danger) 8%);
+}
+
+.usage-error-state > svg {
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+.usage-error-state > span {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.usage-error-state strong {
+  color: var(--text);
+  font-size: var(--ui-font-size-md);
+}
+
+.usage-error-state p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.usage-error-state .provider-technical-details {
+  grid-column: 2;
 }
 
 .provider-usage-head div {
@@ -15513,6 +15618,13 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
 
 .connector-card input {
   height: 32px;
+}
+
+.connector-auth-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-xs);
+  line-height: 1.5;
 }
 
 .connector-actions {
@@ -18069,7 +18181,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   background: color-mix(in srgb, var(--danger-soft) 74%, var(--danger) 12%);
 }
 
-.zone-pill {
+.zone-header .zone-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -18085,7 +18197,7 @@ body.resizing-side-chat-history .side-chat-vertical-resizer::after {
   white-space: nowrap;
 }
 
-.zone-pill[data-ok='true'] {
+.zone-header .zone-pill[data-ok='true'] {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
   background: var(--accent-soft);
   color: var(--accent);

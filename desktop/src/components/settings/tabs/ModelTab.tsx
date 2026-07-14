@@ -49,6 +49,13 @@ function isLikelyChatModel(modelId: string): boolean {
   return !/(^gpt-image|image|dall-e|embedding|rerank|moderation|whisper|tts|audio)/.test(value);
 }
 
+function catalogStatusText(status: string | undefined, t: (value: string) => string): string {
+  if (status === 'ok') return t('已读取');
+  if (status === 'error') return t('读取失败');
+  if (status === 'unsupported') return t('不支持');
+  return t('未读取');
+}
+
 export const ModelTab = memo(function ModelTab({
   apiKey,
   capabilities,
@@ -75,6 +82,22 @@ export const ModelTab = memo(function ModelTab({
   const tierVariant = capabilities ? (capabilities.tier <= 1 ? 'success' : capabilities.tier === 2 ? 'warning' : 'danger') : 'neutral';
   const connectionVariant = providerCheck?.ok ? 'success' : providerCheck ? 'warning' : 'neutral';
   const catalogVariant = modelCatalog?.status === 'ok' ? 'success' : modelCatalog?.status === 'error' ? 'danger' : modelCatalog ? 'warning' : 'neutral';
+  const catalogFailed = modelCatalog?.status === 'error';
+  const providerTechnicalDetails = providerCheck
+    ? [
+        providerCheck.chatUrl,
+        ...providerCheck.warnings,
+        providerCheck.conformance
+          ? `Conformance: ${providerCheck.conformance.multiRoundContinuation || 'unknown'} · reasoning ${
+              providerCheck.conformance.requiresReasoningPassback === null
+                ? 'unknown'
+                : providerCheck.conformance.requiresReasoningPassback
+                  ? 'passback'
+                  : 'not required'
+            }`
+          : '',
+      ].filter(Boolean)
+    : [];
   const serviceName = settings.providerId || settings.backend || t('模型服务');
 
   return (
@@ -127,24 +150,18 @@ export const ModelTab = memo(function ModelTab({
         </div>
         {providerCheck && (
           <div className="provider-check-panel" data-ok={providerCheck.ok}>
-            <span>
+            <span className="provider-check-summary">
               <strong>{t(providerCheck.title)}</strong>
               <em>{t(providerCheck.message)}</em>
             </span>
-            {providerCheck.chatUrl && <small>{providerCheck.chatUrl}</small>}
-            {providerCheck.hint && <em>{t(providerCheck.hint)}</em>}
-            {providerCheck.warnings.map(warning => (
-              <em key={warning}>{t(warning)}</em>
-            ))}
-            {providerCheck.conformance && (
-              <small>
-                Conformance: {providerCheck.conformance.multiRoundContinuation || 'unknown'} · reasoning{' '}
-                {providerCheck.conformance.requiresReasoningPassback === null
-                  ? 'unknown'
-                  : providerCheck.conformance.requiresReasoningPassback
-                    ? 'passback'
-                    : 'not required'}
-              </small>
+            {providerCheck.hint && <p className="provider-check-hint">{t(providerCheck.hint)}</p>}
+            {providerTechnicalDetails.length > 0 && (
+              <details className="provider-technical-details">
+                <summary>{t('查看技术详情')}</summary>
+                <div>
+                  {providerTechnicalDetails.map((detail, index) => <code key={`${detail}-${index}`}>{t(detail)}</code>)}
+                </div>
+              </details>
             )}
           </div>
         )}
@@ -165,12 +182,30 @@ export const ModelTab = memo(function ModelTab({
         <div className="provider-catalog-panel model-discovery-panel" data-status={modelCatalog?.status || 'idle'}>
           <div className="model-discovery-summary" data-status={catalogVariant}>
             <span>
-              <strong>{chatModels.length > 0 ? `${chatModels.length} ${t('个聊天模型')}` : t('等待模型发现')}</strong>
+              <strong>
+                {chatModels.length > 0
+                  ? `${chatModels.length} ${t('个聊天模型')}`
+                  : catalogFailed
+                    ? t('模型列表读取失败')
+                    : t('等待模型发现')}
+              </strong>
               <small>{endpointPreview || t('填写 Base URL 后可读取模型列表')}</small>
             </span>
-            <em>{modelCatalog?.status || 'idle'}</em>
+            <em>{catalogStatusText(modelCatalog?.status, t)}</em>
           </div>
-          {modelCatalog && (
+          {modelCatalog && catalogFailed && (
+            <div className="model-discovery-error" role="alert">
+              <p>{modelCatalog.hint ? t(modelCatalog.hint) : t('请检查 Base URL、API Key、代理和模型平台分组。')}</p>
+              <details className="provider-technical-details">
+                <summary>{t('查看技术详情')}</summary>
+                <div>
+                  {modelCatalog.message && <code>{t(modelCatalog.message)}</code>}
+                  {modelCatalog.modelsUrl && <code>{modelCatalog.modelsUrl}</code>}
+                </div>
+              </details>
+            </div>
+          )}
+          {modelCatalog && !catalogFailed && (
             <div className="provider-catalog-result">
               <span className="provider-model-summary">
                 <strong>{t(modelCatalog.message || '模型目录')}</strong>
@@ -227,7 +262,7 @@ export const ModelTab = memo(function ModelTab({
             ))}
             {chatModels.length > 8 && <p className="provider-model-empty">{t('还有 ')}{chatModels.length - 8}{t(' 个模型可在上方下拉选择。')}</p>}
           </div>
-        ) : modelCatalog ? (
+        ) : modelCatalog?.ok ? (
           <p className="provider-model-empty">{t('当前 API 没有返回可切换的聊天模型，仍可手动填写模型名。')}</p>
         ) : null}
       </section>
