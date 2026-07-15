@@ -63,12 +63,12 @@ export function DesignStudio() {
           <div className="design-brand-mark"><Paintbrush size={17} /></div>
           <div>
             <strong>{project?.name || studioTitle || 'Design Studio'}</strong>
-            <span>{project ? (project.kind === 'deck' ? (zh ? '演示文稿' : 'Slide deck') : project.fidelity === 'wireframe' ? (zh ? '线框图' : 'Wireframe') : (zh ? '高保真' : 'High fidelity')) : (zh ? 'Open Design 功能区' : 'Open Design workspace')}</span>
+            <span>{project ? (project.kind === 'deck' ? (zh ? '演示文稿' : 'Slide deck') : project.fidelity === 'wireframe' ? (zh ? '线框图' : 'Wireframe') : (zh ? '高保真' : 'High fidelity')) : (zh ? 'Metis Design 工作台' : 'Metis Design workspace')}</span>
           </div>
         </div>
         <div className="design-studio-status" data-state={view.state === 'error' ? 'error' : runtime.state}>
           {(runtime.state === 'starting' || view.loading) && <LoaderCircle className="spin" size={14} />}
-          <span>{view.state === 'error' ? (zh ? '工作台错误' : 'Studio error') : runtime.state === 'ready' ? 'Open Design 0.15.1' : runtime.state}</span>
+          <span>{view.state === 'error' ? (zh ? '工作台错误' : 'Studio error') : runtime.state === 'ready' ? 'Metis Design' : runtime.state}</span>
         </div>
         <div className="design-studio-actions">
           <button className="design-icon-command" type="button" title={zh ? '重新加载设计工作台' : 'Reload Design Studio'} aria-label={zh ? '重新加载设计工作台' : 'Reload Design Studio'} onClick={() => void window.metis?.designViewReload?.()}>

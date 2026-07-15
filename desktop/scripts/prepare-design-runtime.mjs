@@ -8,11 +8,12 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(desktopRoot, '..');
 const sourceRoot = path.resolve(
-  process.env.METIS_DESIGN_SOURCE_ROOT || path.join(repoRoot, '..', 'open-design-main'),
+  process.env.METIS_DESIGN_SOURCE_ROOT || path.join(repoRoot, 'open-design'),
 );
 const destination = path.join(desktopRoot, 'resources', 'open-design-runtime');
 const namespace = 'metis-embedded';
-const unpackedRoot = path.join(
+const toolsPackRoot = path.join(sourceRoot, '.tmp', 'tools-pack');
+const namespaceRoot = path.join(
   sourceRoot,
   '.tmp',
   'tools-pack',
@@ -20,8 +21,6 @@ const unpackedRoot = path.join(
   'win',
   'namespaces',
   namespace,
-  'builder',
-  'win-unpacked',
 );
 
 async function exists(target) {
@@ -35,10 +34,13 @@ async function exists(target) {
 
 async function run(command, args, cwd, env = {}) {
   await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const windowsPnpm = process.platform === 'win32' && command === 'pnpm';
+    const child = spawn(windowsPnpm ? (process.env.ComSpec || 'cmd.exe') : command, windowsPnpm
+      ? ['/d', '/s', '/c', 'pnpm.cmd', ...args]
+      : args, {
       cwd,
       env: { ...process.env, ...env },
-      shell: process.platform === 'win32',
+      shell: false,
       stdio: 'inherit',
       windowsHide: true,
     });
@@ -59,8 +61,22 @@ await run(
   { OD_WEB_OUTPUT_MODE: 'standalone' },
 );
 
+const builtManifest = JSON.parse(await readFile(path.join(namespaceRoot, 'built-app.json'), 'utf8'));
+if (builtManifest.version !== 1 || typeof builtManifest.unpackedRoot !== 'string') {
+  throw new Error('Open Design tools-pack returned an invalid built-app manifest');
+}
+const unpackedRoot = path.resolve(builtManifest.unpackedRoot);
+const relativeUnpackedRoot = path.relative(toolsPackRoot, unpackedRoot);
+if (
+  !relativeUnpackedRoot
+  || relativeUnpackedRoot.startsWith('..')
+  || path.isAbsolute(relativeUnpackedRoot)
+  || path.basename(unpackedRoot).toLowerCase() !== 'win-unpacked'
+) {
+  throw new Error(`Open Design tools-pack returned an unsafe unpacked root: ${unpackedRoot}`);
+}
+
 const required = [
-  'Open Design.exe',
   path.join('resources', 'app', 'prebundled', 'daemon', 'daemon-sidecar.mjs'),
   path.join('resources', 'app', 'prebundled', 'daemon', 'daemon-cli.mjs'),
   path.join('resources', 'app', 'prebundled', 'web-sidecar.mjs'),
@@ -74,12 +90,26 @@ for (const relative of required) {
 }
 
 await rm(destination, { recursive: true, force: true });
-await mkdir(path.dirname(destination), { recursive: true });
-await cp(unpackedRoot, destination, { recursive: true, dereference: true });
+await mkdir(destination, { recursive: true });
+await cp(
+  path.join(unpackedRoot, 'resources', 'app', 'prebundled'),
+  path.join(destination, 'app', 'prebundled'),
+  { recursive: true, dereference: true },
+);
+await cp(
+  path.join(unpackedRoot, 'resources', 'open-design'),
+  path.join(destination, 'open-design'),
+  { recursive: true, dereference: true },
+);
+await cp(
+  path.join(unpackedRoot, 'resources', 'open-design-web-standalone'),
+  path.join(destination, 'web-standalone'),
+  { recursive: true, dereference: true },
+);
 await cp(path.join(sourceRoot, 'LICENSE'), path.join(destination, 'OPEN-DESIGN-LICENSE.txt'));
 await writeFile(
   path.join(destination, 'metis-runtime.json'),
-  `${JSON.stringify({ provider: 'open-design', version: sourcePackage.version, builtAt: new Date().toISOString() }, null, 2)}\n`,
+  `${JSON.stringify({ provider: 'metis-open-design-source', version: sourcePackage.version, builtAt: new Date().toISOString(), executable: 'Metis' }, null, 2)}\n`,
   'utf8',
 );
 

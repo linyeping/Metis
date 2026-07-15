@@ -19,12 +19,13 @@ const { applyGraphicsMode, createGraphicsFallbackRecord, resolveGraphicsMode } =
 const {
   DESIGN_DAEMON_PORT,
   DESIGN_RUNTIME_REPOSITORY,
+  DESIGN_RUNTIME_NAMESPACE,
   DESIGN_RUNTIME_VERSION,
   DESIGN_WEB_PORT,
   buildDesignPageUrl,
+  buildDesignNamespaceCommand,
   buildDesignProjectUrl,
   buildManagedDesignConfig,
-  buildMetisAgentProfile,
   buildPnpmSpawnCommand,
   isAllowedDesignNavigation,
   normalizeDesignProject,
@@ -245,7 +246,7 @@ try {
 }
 if (!process.env.METIS_HOME) process.env.METIS_HOME = storageInfo.metisHome
 if (!process.env.METIS_DATA_ROOT) process.env.METIS_DATA_ROOT = storageInfo.dataRoot
-if (!process.env.METIS_DESIGN_BRIDGE_TOKEN) process.env.METIS_DESIGN_BRIDGE_TOKEN = randomUUID()
+if (!process.env.METIS_DESIGN_TOKEN) process.env.METIS_DESIGN_TOKEN = randomUUID()
 if (!process.env.METIS_DESIGN_ROOT) process.env.METIS_DESIGN_ROOT = path.join(storageInfo.metisHome, 'design', 'projects')
 
 const isSmokeMode = process.env.METIS_DESKTOP_SMOKE === '1'
@@ -352,19 +353,6 @@ async function waitForDesignRuntime(runtimeUrl, child, timeoutMs = 120000) {
   return false
 }
 
-async function designRuntimeVersionReady(runtimeUrl) {
-  const origin = parseLoopbackOrigin(runtimeUrl)
-  if (!origin) return false
-  try {
-    const response = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(1600) })
-    if (!response.ok) return false
-    const payload = await response.json()
-    return payload?.ok === true && String(payload?.version || '') === DESIGN_RUNTIME_VERSION
-  } catch {
-    return false
-  }
-}
-
 async function configureManagedDesignRuntime(runtimeUrl) {
   try {
     const currentResponse = await fetch(`${runtimeUrl}/api/app-config`, {
@@ -395,6 +383,40 @@ function appendDesignRuntimeLog(source, chunk) {
     .map(line => `[${source}] ${line}`)
   if (!next.length) return
   emitDesignRuntimeState({ logs: [...designRuntimeState.logs, ...next] })
+}
+
+async function cleanupStaleDesignNamespace(sourceRoot, timeoutMs = 15000) {
+  const command = buildDesignNamespaceCommand('stop', DESIGN_RUNTIME_NAMESPACE)
+  return new Promise(resolve => {
+    let settled = false
+    let child
+    const finish = result => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    const timer = setTimeout(() => {
+      try { child?.kill() } catch {}
+      finish({ ok: false, error: '清理旧 Design runtime 超时。' })
+    }, timeoutMs)
+    try {
+      child = spawn(command.executable, command.args, {
+        cwd: sourceRoot,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      child.stdout?.on('data', chunk => appendDesignRuntimeLog('design:cleanup', chunk))
+      child.stderr?.on('data', chunk => appendDesignRuntimeLog('design:cleanup', chunk))
+      child.on('error', error => finish({ ok: false, error: error?.message || String(error) }))
+      child.on('exit', code => finish(code === 0
+        ? { ok: true }
+        : { ok: false, error: `清理旧 Design runtime 失败 (${code ?? 'unknown'})。` }))
+    } catch (error) {
+      finish({ ok: false, error: error?.message || String(error) })
+    }
+  })
 }
 
 async function startDesignRuntime(locale) {
@@ -439,17 +461,7 @@ async function startDesignRuntime(locale) {
         })
       }
       const designDataRoot = path.join(storageInfo.metisHome, 'design')
-      const designAgentProfilePath = path.join(designDataRoot, 'agents.local.json')
-      const designAgentProfile = buildMetisAgentProfile({
-        executable: process.execPath,
-        bridgeScript: path.join(__dirname, 'design-agent-bridge.cjs'),
-        backendUrl: `http://${DEV_SERVER_HOST}:${backendPort}`,
-        designRoot: process.env.METIS_DESIGN_ROOT,
-        stateFile: path.join(designDataRoot, 'bridge-sessions.json'),
-        token: process.env.METIS_DESIGN_BRIDGE_TOKEN
-      })
       fsSync.mkdirSync(designDataRoot, { recursive: true })
-      fsSync.writeFileSync(designAgentProfilePath, `${JSON.stringify(designAgentProfile, null, 2)}\n`, 'utf8')
       designRuntimeStopping = false
       emitDesignRuntimeState({
         state: 'starting',
@@ -459,13 +471,16 @@ async function startDesignRuntime(locale) {
         version: DESIGN_RUNTIME_VERSION,
         logs: []
       })
-      const child = spawn(process.execPath, [path.join(__dirname, 'design-packaged-launcher.cjs')], {
+      const child = spawn(process.execPath, [path.join(__dirname, 'design-runtime-launcher.cjs')], {
         env: {
           ...process.env,
           ELECTRON_RUN_AS_NODE: '1',
           METIS_DESIGN_RUNTIME_ROOT: bundledRuntime.root,
+          METIS_BACKEND_URL: `http://${DEV_SERVER_HOST}:${backendPort}`,
+          METIS_DESIGN_TOKEN: process.env.METIS_DESIGN_TOKEN,
+          METIS_DESIGN_ROOT: process.env.METIS_DESIGN_ROOT,
+          METIS_MANAGED_DESIGN_RUNTIME: '1',
           OD_DATA_DIR: designDataRoot,
-          OD_AGENT_PROFILES_CONFIG: designAgentProfilePath,
           OD_PORT: String(daemonPort),
           OD_WEB_PORT: String(webPort),
           [Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH']: [
@@ -504,7 +519,7 @@ async function startDesignRuntime(locale) {
     if (!sourceRoot) {
       return emitDesignRuntimeState({
         state: 'unavailable',
-        error: '未找到 open-design-main。可通过 METIS_DESIGN_SOURCE_ROOT 指定源码目录。',
+        error: 'Miro/open-design 源码缺失，Design 无法启动。',
         sourceRoot: ''
       })
     }
@@ -526,25 +541,6 @@ async function startDesignRuntime(locale) {
       })
     }
 
-    const existingRuntimeUrl = `http://${DEV_SERVER_HOST}:${DESIGN_WEB_PORT}`
-    if (await designRuntimeVersionReady(existingRuntimeUrl)) {
-      emitDesignRuntimeState({
-        state: 'starting',
-        url: existingRuntimeUrl,
-        error: '',
-        sourceRoot,
-        version,
-        logs: ['[design] reusing healthy Open Design 0.15.1 runtime']
-      })
-      const managed = await configureManagedDesignRuntime(existingRuntimeUrl)
-      return managed.ok
-        ? emitDesignRuntimeState({ state: 'ready', url: existingRuntimeUrl, error: '' })
-        : emitDesignRuntimeState({ state: 'error', error: `Design runtime 受管配置失败：${managed.error}` })
-    }
-
-    const daemonPort = await findAvailableDevPort(DESIGN_DAEMON_PORT, 40)
-    const webPort = await findAvailableDevPort(DESIGN_WEB_PORT, 40)
-    const runtimeUrl = `http://${DEV_SERVER_HOST}:${webPort}`
     if (!backendPort) {
       return emitDesignRuntimeState({
         state: 'error',
@@ -553,21 +549,19 @@ async function startDesignRuntime(locale) {
         version
       })
     }
+    emitDesignRuntimeState({ state: 'starting', url: '', error: '', sourceRoot, version, logs: [] })
+    const cleanup = await cleanupStaleDesignNamespace(sourceRoot)
+    if (!cleanup.ok) {
+      return emitDesignRuntimeState({ state: 'error', error: cleanup.error, sourceRoot, version })
+    }
+    const daemonPort = await findAvailableDevPort(DESIGN_DAEMON_PORT, 40)
+    const webPort = await findAvailableDevPort(DESIGN_WEB_PORT, 40)
+    const runtimeUrl = `http://${DEV_SERVER_HOST}:${webPort}`
     const designDataRoot = path.join(storageInfo.metisHome, 'design')
-    const designAgentProfilePath = path.join(designDataRoot, 'agents.local.json')
-    const designAgentProfile = buildMetisAgentProfile({
-      executable: process.execPath,
-      bridgeScript: path.join(__dirname, 'design-agent-bridge.cjs'),
-      backendUrl: `http://${DEV_SERVER_HOST}:${backendPort}`,
-      designRoot: process.env.METIS_DESIGN_ROOT,
-      stateFile: path.join(designDataRoot, 'bridge-sessions.json'),
-      token: process.env.METIS_DESIGN_BRIDGE_TOKEN
-    })
     fsSync.mkdirSync(designDataRoot, { recursive: true })
-    fsSync.writeFileSync(designAgentProfilePath, `${JSON.stringify(designAgentProfile, null, 2)}\n`, 'utf8')
     const command = buildPnpmSpawnCommand([
       'tools-dev', 'run', 'web',
-      '--namespace', 'metis',
+      '--namespace', DESIGN_RUNTIME_NAMESPACE,
       '--daemon-port', String(daemonPort),
       '--web-port', String(webPort)
     ])
@@ -581,8 +575,11 @@ async function startDesignRuntime(locale) {
           path.dirname(process.execPath),
           process.env[Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH'] || ''
         ].filter(Boolean).join(path.delimiter),
+        METIS_BACKEND_URL: `http://${DEV_SERVER_HOST}:${backendPort}`,
+        METIS_DESIGN_TOKEN: process.env.METIS_DESIGN_TOKEN,
+        METIS_DESIGN_ROOT: process.env.METIS_DESIGN_ROOT,
+        METIS_MANAGED_DESIGN_RUNTIME: '1',
         OD_DATA_DIR: designDataRoot,
-        OD_AGENT_PROFILES_CONFIG: designAgentProfilePath,
         NO_COLOR: '1'
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -633,7 +630,7 @@ function stopDesignRuntime() {
   designRuntimeProcess = null
   try { child?.kill() } catch {}
   if (!app.isPackaged && designRuntimeState.sourceRoot && designRuntimeState.sourceRoot !== 'external') {
-    const command = buildPnpmSpawnCommand(['tools-dev', 'stop', '--namespace', 'metis'])
+    const command = buildDesignNamespaceCommand('stop', DESIGN_RUNTIME_NAMESPACE)
     try {
       const stopper = spawn(command.executable, command.args, {
         cwd: designRuntimeState.sourceRoot,

@@ -212,7 +212,7 @@ def test_create_session_can_preserve_active_context(isolated_flask_app: Any) -> 
     assert web_app._runtime_state.active_workspace_id == active_workspace_id
 
 
-def test_design_bridge_requires_token_and_exact_managed_project(
+def test_metis_design_transport_requires_token_and_exact_managed_project(
     isolated_flask_app: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -231,7 +231,7 @@ def test_design_bridge_requires_token_and_exact_managed_project(
     outside_session = session_manager.create_session(workspace_id=outside_workspace.id, mode="code")
     started_runs: List[Dict[str, Any]] = []
 
-    monkeypatch.setenv("METIS_DESIGN_BRIDGE_TOKEN", "design-secret")
+    monkeypatch.setenv("METIS_DESIGN_TOKEN", "design-secret")
     monkeypatch.setenv("METIS_DESIGN_ROOT", str(design_root))
     monkeypatch.setattr(web_app, "_start_run_thread", lambda run: started_runs.append(dict(run)))
 
@@ -239,32 +239,33 @@ def test_design_bridge_requires_token_and_exact_managed_project(
         return {
             "message": "build the design",
             "session_id": session_id,
-            "surface_mode": "code",
+            "surface_mode": "design",
             "execution_profile": "local_direct",
-            "design_bridge": {"project_id": project_id},
+            "metis_design": {"project_id": project_id, "project_root": str(project_dir)},
         }
 
     with app.test_client() as client:
         invalid_token = client.post(
             "/runs",
             json=payload(managed_session.id),
-            headers={"X-Metis-Design-Bridge-Token": "wrong"},
+            headers={"X-Metis-Design-Token": "wrong"},
         )
         outside = client.post(
             "/runs",
             json=payload(outside_session.id),
-            headers={"X-Metis-Design-Bridge-Token": "design-secret"},
+            headers={"X-Metis-Design-Token": "design-secret"},
         )
         accepted = client.post(
             "/runs",
             json=payload(managed_session.id),
-            headers={"X-Metis-Design-Bridge-Token": "design-secret"},
+            headers={"X-Metis-Design-Token": "design-secret"},
         )
 
     assert invalid_token.status_code == 403
     assert outside.status_code == 403
     assert accepted.status_code == 200
     assert accepted.get_json()["workspace_root"] == str(project_dir)
+    assert accepted.get_json()["surface_mode"] == "design"
     assert len(started_runs) == 1
     assert web_app._runtime_state.active_session_id is None
 

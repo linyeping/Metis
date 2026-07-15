@@ -3,9 +3,11 @@
   "provider": "open-design",
   "version": "0.15.1",
   "repository": "https://github.com/nexu-io/open-design",
-  "developmentSource": "../open-design-main",
+  "developmentSource": "../open-design",
   "resource": "open-design-runtime",
   "buildCommand": "npm run prepare-design-runtime",
-  "transport": "loopback-http",
+  "transport": "metis-native-http",
+  "agentAdapter": "open-design/apps/daemon/src/runtimes/metis-http.ts",
+  "independentExecutable": false,
   "packaged": true
 }

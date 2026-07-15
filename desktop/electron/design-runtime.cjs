@@ -7,6 +7,7 @@ const DESIGN_RUNTIME_REPOSITORY = 'https://github.com/nexu-io/open-design'
 const DESIGN_DAEMON_PORT = 17456
 const DESIGN_WEB_PORT = 17573
 const DESIGN_RUNTIME_RESOURCE_NAME = 'open-design-runtime'
+const DESIGN_RUNTIME_NAMESPACE = 'metis'
 
 function parseLoopbackOrigin(value) {
   try {
@@ -62,6 +63,12 @@ function buildPnpmSpawnCommand(args, platform = process.platform, comspec = proc
   return { executable: 'pnpm', args: pnpmArgs }
 }
 
+function buildDesignNamespaceCommand(action, namespace = DESIGN_RUNTIME_NAMESPACE, platform = process.platform, comspec = process.env.ComSpec) {
+  const verb = action === 'stop' ? 'stop' : 'status'
+  const scopedNamespace = String(namespace || DESIGN_RUNTIME_NAMESPACE).replace(/[^A-Za-z0-9._-]+/g, '-') || DESIGN_RUNTIME_NAMESPACE
+  return buildPnpmSpawnCommand(['tools-dev', verb, '--namespace', scopedNamespace], platform, comspec)
+}
+
 function buildManagedDesignConfig(current = {}, now = Date.now()) {
   const existingDecision = Number(current?.privacyDecisionAt)
   return {
@@ -78,47 +85,12 @@ function buildManagedDesignConfig(current = {}, now = Date.now()) {
   }
 }
 
-function buildMetisAgentProfile(options = {}) {
-  const executable = path.resolve(String(options.executable || process.execPath))
-  const bridgeScript = path.resolve(String(options.bridgeScript || path.join(__dirname, 'design-agent-bridge.cjs')))
-  const backendUrl = parseLoopbackOrigin(options.backendUrl)
-  const designRoot = path.resolve(String(options.designRoot || ''))
-  const stateFile = path.resolve(String(options.stateFile || path.join(designRoot, '..', 'bridge-sessions.json')))
-  const token = String(options.token || '').trim()
-  if (!backendUrl || !designRoot || !token) {
-    throw new Error('Metis Design agent profile requires a loopback backend, design root, and token.')
-  }
-  return {
-    agents: [
-      {
-        id: 'metis',
-        name: 'Metis',
-        baseAgent: 'claude',
-        // Open Design resolves custom agent binaries through PATH even when a
-        // profile supplies an absolute path. The parent runtime prepends this
-        // executable's directory to its private PATH before launching OD.
-        bin: path.basename(executable, path.extname(executable)),
-        args: [bridgeScript],
-        versionArgs: [bridgeScript, '--version'],
-        helpArgs: [bridgeScript, '--help'],
-        env: {
-          ELECTRON_RUN_AS_NODE: '1',
-          METIS_BACKEND_URL: backendUrl,
-          METIS_DESIGN_BRIDGE_TOKEN: token,
-          METIS_DESIGN_ROOT: designRoot,
-          METIS_DESIGN_BRIDGE_STATE_FILE: stateFile
-        }
-      }
-    ]
-  }
-}
-
 function resolveDesignSourceRoot(options = {}) {
   const candidates = [
     options.explicitRoot,
     process.env.METIS_DESIGN_SOURCE_ROOT,
-    options.appPath ? path.resolve(options.appPath, '..', 'open-design-main') : '',
-    options.mainDir ? path.resolve(options.mainDir, '..', '..', '..', 'open-design-main') : ''
+    options.appPath ? path.resolve(options.appPath, '..', 'open-design') : '',
+    options.mainDir ? path.resolve(options.mainDir, '..', '..', 'open-design') : ''
   ]
   for (const candidate of candidates) {
     if (!candidate) continue
@@ -134,12 +106,11 @@ function bundledDesignRuntimeLayout(root) {
   const resolved = path.resolve(String(root || ''))
   return {
     root: resolved,
-    executable: path.join(resolved, 'Open Design.exe'),
-    daemonEntry: path.join(resolved, 'resources', 'app', 'prebundled', 'daemon', 'daemon-sidecar.mjs'),
-    daemonCliEntry: path.join(resolved, 'resources', 'app', 'prebundled', 'daemon', 'daemon-cli.mjs'),
-    webEntry: path.join(resolved, 'resources', 'app', 'prebundled', 'web-sidecar.mjs'),
-    resourceRoot: path.join(resolved, 'resources', 'open-design'),
-    webStandaloneRoot: path.join(resolved, 'resources', 'open-design-web-standalone'),
+    daemonEntry: path.join(resolved, 'app', 'prebundled', 'daemon', 'daemon-sidecar.mjs'),
+    daemonCliEntry: path.join(resolved, 'app', 'prebundled', 'daemon', 'daemon-cli.mjs'),
+    webEntry: path.join(resolved, 'app', 'prebundled', 'web-sidecar.mjs'),
+    resourceRoot: path.join(resolved, 'open-design'),
+    webStandaloneRoot: path.join(resolved, 'web-standalone'),
     licensePath: path.join(resolved, 'OPEN-DESIGN-LICENSE.txt')
   }
 }
@@ -155,7 +126,6 @@ function resolveBundledDesignRuntime(options = {}) {
     if (!candidate) continue
     const layout = bundledDesignRuntimeLayout(candidate)
     const required = [
-      layout.executable,
       layout.daemonEntry,
       layout.daemonCliEntry,
       layout.webEntry,
@@ -217,13 +187,14 @@ module.exports = {
   DESIGN_DAEMON_PORT,
   DESIGN_RUNTIME_RESOURCE_NAME,
   DESIGN_RUNTIME_REPOSITORY,
+  DESIGN_RUNTIME_NAMESPACE,
   DESIGN_RUNTIME_VERSION,
   DESIGN_WEB_PORT,
   buildDesignProjectUrl,
   buildDesignPageUrl,
+  buildDesignNamespaceCommand,
   buildDesignSidecarStampArgs,
   buildManagedDesignConfig,
-  buildMetisAgentProfile,
   buildPnpmSpawnCommand,
   bundledDesignRuntimeLayout,
   isAllowedDesignNavigation,

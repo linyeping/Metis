@@ -57,6 +57,7 @@ desktop/data/
 desktop/.dev-data/
 desktop/resources/backend-build/
 desktop/resources/backend-dist/
+desktop/resources/open-design-runtime/
 backend/var/
 backend/build/
 backend/output/

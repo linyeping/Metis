@@ -313,7 +313,7 @@ def _load_config_for_workspace(workspace_root: str = "") -> AgentConfig:
 
 def _surface_mode_for_session_mode(mode: str) -> str:
     value = str(mode or "").strip().lower()
-    return value if value in {"chat", "cowork", "code"} else ""
+    return value if value in {"chat", "cowork", "code", "design"} else ""
 
 
 def _config_for_session_mode(
@@ -1819,7 +1819,7 @@ def _create_run_state(
     now = time.time()
     run_id = str(run_id or uuid.uuid4().hex)
     normalized_surface = str(surface_mode or "").strip().lower()
-    if normalized_surface not in {"chat", "cowork", "code"}:
+    if normalized_surface not in {"chat", "cowork", "code", "design"}:
         normalized_surface = _surface_mode_for_session_mode(mode) or "chat"
     normalized_profile = normalize_execution_profile(
         execution_profile,
@@ -2954,6 +2954,7 @@ def _run_registry_worker(run_id: str) -> None:
         )
         config = replace(
             config,
+            surface_mode=str(run.get("surface_mode") or config.surface_mode or ""),
             execution_profile=str(run.get("execution_profile") or LOCAL_DIRECT),
             source_workspace_root=str(run.get("source_workspace_root") or run.get("workspace_root") or ""),
             worktree_id=str((run.get("worktree") or {}).get("worktree_id") if isinstance(run.get("worktree"), dict) else ""),
@@ -3274,13 +3275,13 @@ def create_run() -> Any:
     assistant_id = str(data.get("assistant_id") or data.get("assistantId") or "").strip() or f"assistant-run-{uuid.uuid4().hex[:12]}"
     surface_mode = str(data.get("surface_mode") or data.get("surfaceMode") or "").strip().lower()
     session_id, history, compact_state, mode, explicit_session = _prepare_chat_session(user_message)
-    normalized_surface = surface_mode if surface_mode in {"chat", "cowork", "code"} else (_surface_mode_for_session_mode(mode) or "chat")
-    design_bridge = data.get("design_bridge")
-    if isinstance(design_bridge, dict):
-        expected_token = str(os.environ.get("METIS_DESIGN_BRIDGE_TOKEN") or "")
-        provided_token = str(request.headers.get("X-Metis-Design-Bridge-Token") or "")
+    normalized_surface = surface_mode if surface_mode in {"chat", "cowork", "code", "design"} else (_surface_mode_for_session_mode(mode) or "chat")
+    metis_design = data.get("metis_design")
+    if isinstance(metis_design, dict):
+        expected_token = str(os.environ.get("METIS_DESIGN_TOKEN") or "")
+        provided_token = str(request.headers.get("X-Metis-Design-Token") or "")
         if not expected_token or not hmac.compare_digest(expected_token, provided_token):
-            return jsonify({"ok": False, "error": "Design bridge authorization failed"}), 403
+            return jsonify({"ok": False, "error": "Metis Design authorization failed"}), 403
         design_root = os.path.realpath(
             os.environ.get("METIS_DESIGN_ROOT")
             or os.path.join(os.environ.get("METIS_HOME") or "", "design", "projects")
@@ -3290,10 +3291,16 @@ def create_run() -> Any:
             inside_design_root = os.path.normcase(os.path.commonpath([design_root, session_workspace_root])) == os.path.normcase(design_root)
         except ValueError:
             inside_design_root = False
-        project_id = str(design_bridge.get("project_id") or "").strip()
+        project_id = str(metis_design.get("project_id") or "").strip()
         expected_project_root = os.path.realpath(os.path.join(design_root, project_id)) if project_id else ""
-        if not inside_design_root or not project_id or os.path.normcase(session_workspace_root) != os.path.normcase(expected_project_root):
-            return jsonify({"ok": False, "error": "Design bridge workspace is outside the managed project root"}), 403
+        requested_project_root = os.path.realpath(str(metis_design.get("project_root") or ""))
+        if (
+            not inside_design_root
+            or not project_id
+            or os.path.normcase(session_workspace_root) != os.path.normcase(expected_project_root)
+            or os.path.normcase(requested_project_root) != os.path.normcase(expected_project_root)
+        ):
+            return jsonify({"ok": False, "error": "Metis Design workspace is outside the managed project root"}), 403
     execution_profile_result = normalize_execution_profile(
         data.get("execution_profile") or data.get("executionProfile"),
         default=default_execution_profile_for_surface(normalized_surface),

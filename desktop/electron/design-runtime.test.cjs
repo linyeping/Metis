@@ -1,17 +1,22 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 
 const {
   buildDesignProjectUrl,
   buildDesignPageUrl,
+  buildDesignNamespaceCommand,
   buildDesignSidecarStampArgs,
   buildManagedDesignConfig,
-  buildMetisAgentProfile,
   buildPnpmSpawnCommand,
+  bundledDesignRuntimeLayout,
   isAllowedDesignNavigation,
   normalizeDesignProject,
   normalizeDesignSystem,
-  parseLoopbackOrigin
+  parseLoopbackOrigin,
+  resolveDesignSourceRoot
 } = require('./design-runtime.cjs')
 
 test('pnpm commands use cmd.exe on Windows so Electron can launch command shims', () => {
@@ -25,6 +30,13 @@ test('pnpm commands use cmd.exe on Windows so Electron can launch command shims'
   })
 })
 
+test('Design namespace cleanup is scoped to the managed Metis runtime', () => {
+  assert.deepEqual(buildDesignNamespaceCommand('stop', 'metis design', 'linux'), {
+    executable: 'pnpm',
+    args: ['tools-dev', 'stop', '--namespace', 'metis-design']
+  })
+})
+
 test('managed Design runtime skips upstream onboarding and disables upstream telemetry', () => {
   assert.deepEqual(buildManagedDesignConfig({}, 1234), {
     onboardingCompleted: true,
@@ -35,21 +47,15 @@ test('managed Design runtime skips upstream onboarding and disables upstream tel
   assert.equal(buildManagedDesignConfig({ privacyDecisionAt: 99 }, 1234).privacyDecisionAt, 99)
 })
 
-test('Metis Design profile pins the bridge executable and scoped runtime inputs', () => {
-  const profile = buildMetisAgentProfile({
-    executable: 'C:\\Metis\\electron.exe',
-    bridgeScript: 'C:\\Metis\\design-agent-bridge.cjs',
-    backendUrl: 'http://127.0.0.1:12811/path',
-    designRoot: 'C:\\Metis Data\\design\\projects',
-    stateFile: 'C:\\Metis Data\\design\\bridge-sessions.json',
-    token: 'secret-token'
-  })
-  assert.equal(profile.agents[0].id, 'metis')
-  assert.equal(profile.agents[0].baseAgent, 'claude')
-  assert.equal(profile.agents[0].bin, 'electron')
-  assert.equal(profile.agents[0].env.METIS_BACKEND_URL, 'http://127.0.0.1:12811')
-  assert.equal(profile.agents[0].env.METIS_DESIGN_BRIDGE_TOKEN, 'secret-token')
-  assert.deepEqual(profile.agents[0].versionArgs.slice(-1), ['--version'])
+test('Design resolves repository-local source and packaged modules have no second executable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'metis-design-source-'))
+  fs.writeFileSync(path.join(root, 'package.json'), '{"version":"0.15.1"}')
+  fs.writeFileSync(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9')
+  assert.equal(resolveDesignSourceRoot({ explicitRoot: root }), root)
+  const layout = bundledDesignRuntimeLayout('C:\\Metis\\resources\\open-design-runtime')
+  assert.equal(Object.hasOwn(layout, 'executable'), false)
+  assert.match(layout.daemonEntry, /app[\\/]prebundled[\\/]daemon[\\/]daemon-sidecar\.mjs$/)
+  fs.rmSync(root, { recursive: true, force: true })
 })
 
 test('design runtime accepts loopback origins only', () => {

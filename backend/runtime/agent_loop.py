@@ -2538,7 +2538,7 @@ def _surface_mode_for_config(config: AgentConfig) -> str:
     if value:
         return value
     execution_mode = str(config.execution_mode or "").strip().lower()
-    return execution_mode if execution_mode in {"chat", "cowork", "code"} else ""
+    return execution_mode if execution_mode in {"chat", "cowork", "code", "design"} else ""
 
 
 def _filter_tools_for_surface(
