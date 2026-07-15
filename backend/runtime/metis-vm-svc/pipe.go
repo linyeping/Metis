@@ -35,11 +35,11 @@ const (
 )
 
 var (
-	modKernel32                  = windows.NewLazyDLL("kernel32.dll")
-	procCreateNamedPipeW         = modKernel32.NewProc("CreateNamedPipeW")
-	procConnectNamedPipe         = modKernel32.NewProc("ConnectNamedPipe")
-	procDisconnectNamedPipe      = modKernel32.NewProc("DisconnectNamedPipe")
-	procGetNamedPipeClientPID    = modKernel32.NewProc("GetNamedPipeClientProcessId")
+	modKernel32               = windows.NewLazyDLL("kernel32.dll")
+	procCreateNamedPipeW      = modKernel32.NewProc("CreateNamedPipeW")
+	procConnectNamedPipe      = modKernel32.NewProc("ConnectNamedPipe")
+	procDisconnectNamedPipe   = modKernel32.NewProc("DisconnectNamedPipe")
+	procGetNamedPipeClientPID = modKernel32.NewProc("GetNamedPipeClientProcessId")
 )
 
 // ---------------------------------------------------------------------------
@@ -158,6 +158,9 @@ func createPipeInstance(sddl string, first bool) (windows.Handle, error) {
 func ServePipe() error {
 	startReaper() // reclaim idle session-keyed VMs in the background
 	userSID := expectedUserSID()
+	if userSID == "" {
+		return fmt.Errorf("cannot determine the interactive user SID")
+	}
 	sddl := pipeSDDL(userSID)
 	logf("pipe server: %s\n  expected user SID: %s\n  SDDL: %s", pipeName, userSID, sddl)
 
@@ -193,9 +196,14 @@ func handleConn(h windows.Handle, expectSID string) {
 		logf("auth: cannot get client pid: %v", err)
 		return
 	}
-	callerSID := pidUserSID(pid)
-	if expectSID != "" && callerSID != expectSID {
-		logf("auth: REJECTED pid=%d sid=%s (expected %s)", pid, callerSID, expectSID)
+	client, err := clientContextForPID(pid)
+	if err != nil {
+		logf("auth: REJECTED pid=%d (%v)", pid, err)
+		return
+	}
+	defer client.Close()
+	if client.SID != expectSID {
+		logf("auth: REJECTED pid=%d sid=%s (expected %s)", pid, client.SID, expectSID)
 		return
 	}
 
@@ -210,7 +218,7 @@ func handleConn(h windows.Handle, expectSID string) {
 		if len(line) == 0 {
 			continue
 		}
-		resp := dispatchRequest(line)
+		resp := dispatchRequest(line, client)
 		out := append(resp, '\n')
 		writeAll(h, out)
 	}
@@ -266,21 +274,28 @@ func writeAll(h windows.Handle, b []byte) {
 // ---------------------------------------------------------------------------
 
 type rpcRequest struct {
-	Seq    int             `json:"seq"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
+	Seq      int             `json:"seq"`
+	Protocol string          `json:"protocol"`
+	Method   string          `json:"method"`
+	Params   json.RawMessage `json:"params"`
 }
 
-func dispatchRequest(line []byte) []byte {
+func dispatchRequest(line []byte, client *clientContext) []byte {
 	var req rpcRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		return mustJSON(map[string]any{"type": "response", "ok": false, "error": "bad json"})
+	}
+	if req.Protocol != serviceProtocol {
+		return mustJSON(map[string]any{
+			"seq": req.Seq, "type": "response", "ok": false,
+			"error": "unsupported protocol", "protocol": serviceProtocol,
+		})
 	}
 	switch req.Method {
 	case "svc.hello":
 		return mustJSON(map[string]any{
 			"seq": req.Seq, "type": "response", "ok": true,
-			"result": map[string]any{"service": "metis-vm-svc", "version": "0.1.0", "protocol": "metis.vm.svc.v1"},
+			"result": map[string]any{"service": "metis-vm-svc", "version": "0.2.0", "protocol": serviceProtocol},
 		})
 	case "svc.status":
 		ok := true
@@ -296,17 +311,24 @@ func dispatchRequest(line []byte) []byte {
 		})
 	case "vm.run_job":
 		var jr RunJobRequest
-		_ = json.Unmarshal(req.Params, &jr)
+		if err := json.Unmarshal(req.Params, &jr); err != nil {
+			return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": false, "error": "invalid run request"})
+		}
+		if err := validateRunJobRequest(&jr, client); err != nil {
+			logf("rpc: REJECTED method=vm.run_job pid=%d request=%q reason=%v", client.PID, jr.RequestID, err)
+			result := RunJobResult{Backend: "hcs", ExecMode: "rejected", Error: err.Error(), ReturnCode: 126}
+			return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": false, "result": result})
+		}
+		logf("rpc: accepted method=vm.run_job pid=%d request=%q", client.PID, jr.RequestID)
 		res := RunJob(jr)
 		return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": res.OK, "result": res})
-	case "vm.cleanup_orphans":
-		n := cleanupMetisOrphans()
-		return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": true, "result": map[string]any{"reaped": n}})
 	case "session.close":
 		var p struct {
 			SessionID string `json:"session_id"`
 		}
-		_ = json.Unmarshal(req.Params, &p)
+		if err := json.Unmarshal(req.Params, &p); err != nil || !safeIDPattern.MatchString(p.SessionID) {
+			return mustJSON(map[string]any{"seq": req.Seq, "type": "response", "ok": false, "error": "invalid session_id"})
+		}
 		closed := false
 		if p.SessionID != "" {
 			closed = closeSession(p.SessionID)

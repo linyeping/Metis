@@ -19,16 +19,21 @@ import (
 
 	winio "github.com/Microsoft/go-winio"
 	"github.com/google/uuid"
+	"golang.org/x/sys/windows"
 )
 
 const (
-	metisdPort         = 5001
-	guestWorkspace     = "/workspace"
-	guestArtifacts     = "/artifacts"
-	guestDiagnostics   = "/diagnostics"
-	maxPushFileBytes   = 16 * 1024 * 1024
-	bootTimeoutMs      = 60000
-	metisdWaitSeconds  = 25
+	metisdPort        = 5001
+	guestWorkspace    = "/workspace"
+	guestArtifacts    = "/artifacts"
+	guestDiagnostics  = "/diagnostics"
+	maxPushFileBytes  = 16 * 1024 * 1024
+	maxPushTotalBytes = 256 * 1024 * 1024
+	maxPushFiles      = 10000
+	maxPullFileBytes  = 32 * 1024 * 1024
+	maxPullTotalBytes = 512 * 1024 * 1024
+	bootTimeoutMs     = 60000
+	metisdWaitSeconds = 25
 )
 
 var skipDirs = map[string]bool{
@@ -38,8 +43,10 @@ var skipDirs = map[string]bool{
 
 // RunJobRequest mirrors hcs_runtime_run params.
 type RunJobRequest struct {
+	RequestID      string            `json:"request_id"`
 	SessionID      string            `json:"session_id"`
 	Command        string            `json:"command"`
+	SourceRoot     string            `json:"source_root"`
 	WorkspaceDir   string            `json:"workspace_dir"`
 	ArtifactsDir   string            `json:"artifacts_dir"`
 	DiagnosticsDir string            `json:"diagnostics_dir"`
@@ -54,6 +61,8 @@ type RunJobRequest struct {
 	// first use) is attached and mounted to /data in the guest.
 	SessionDataDir      string `json:"session_data_dir"`
 	SessionDataTemplate string `json:"session_data_template"`
+	callerToken         windows.Token
+	callerSID           string
 }
 
 // RunJobResult mirrors the dict hcs_runtime_run returns.
@@ -124,23 +133,39 @@ func sendJSONL(vmID string, msgs []map[string]any, timeout time.Duration) ([]map
 
 // startConsole creates the COM1 named pipe and drains it to a log file so the
 // guest /init never blocks writing to ttyS0.
-func startConsole(diagDir string) (string, func(), error) {
+func startConsole(diagDir string, callerToken windows.Token) (string, func(), error) {
 	name := `\\.\pipe\metis-console-` + uuid.NewString()
 	l, err := winio.ListenPipe(name, &winio.PipeConfig{})
 	if err != nil {
 		return "", nil, err
 	}
+	var logFile *os.File
+	if diagDir != "" {
+		err = withCallerToken(callerToken, func() error {
+			if mkdirErr := os.MkdirAll(diagDir, 0o700); mkdirErr != nil {
+				return mkdirErr
+			}
+			var createErr error
+			logFile, createErr = os.Create(filepath.Join(diagDir, "vm_console.log"))
+			return createErr
+		})
+		if err != nil {
+			_ = l.Close()
+			return "", nil, err
+		}
+	}
 	go func() {
 		conn, err := l.Accept()
 		if err != nil {
+			if logFile != nil {
+				logFile.Close()
+			}
 			return
 		}
 		defer conn.Close()
-		_ = os.MkdirAll(diagDir, 0o755)
-		f, ferr := os.Create(filepath.Join(diagDir, "vm_console.log"))
-		if ferr == nil {
-			defer f.Close()
-			_, _ = io.Copy(f, conn)
+		if logFile != nil {
+			defer logFile.Close()
+			_, _ = io.Copy(logFile, conn)
 		} else {
 			_, _ = io.Copy(io.Discard, conn)
 		}
@@ -153,13 +178,17 @@ func startConsole(diagDir string) (string, func(), error) {
 func resolveBundle(req RunJobRequest) (BundlePaths, bool) {
 	if req.BundleDir != "" {
 		b := BundlePaths{Vmlinuz: filepath.Join(req.BundleDir, "vmlinuz"), Initrd: filepath.Join(req.BundleDir, "initrd")}
-		if fileExists(filepath.Join(req.BundleDir, "rootfs.vhdx")) {
-			b.Rootfs = filepath.Join(req.BundleDir, "rootfs.vhdx")
+		if !callerCanReadFile(req.callerToken, b.Vmlinuz) || !callerCanReadFile(req.callerToken, b.Initrd) {
+			return BundlePaths{}, false
 		}
-		if fileExists(b.Vmlinuz) && fileExists(b.Initrd) {
-			return b, true
+		rootfs := filepath.Join(req.BundleDir, "rootfs.vhdx")
+		if fileExists(rootfs) {
+			if !callerCanReadFile(req.callerToken, rootfs) {
+				return BundlePaths{}, false
+			}
+			b.Rootfs = rootfs
 		}
-		return BundlePaths{}, false
+		return b, true
 	}
 	return findMetisBundle()
 }
@@ -208,43 +237,52 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 
 	// 1) push: hello + mount + fs.put(every workspace file) + run + list
 	pushed := map[string]bool{}
+	pushedBytes := int64(0)
 	msgs := []map[string]any{
 		{"id": "hello", "method": "runtime.hello", "params": map[string]any{"protocol": "metis.vm.guest.v1"}},
 		{"id": "mount", "method": "session.mount", "params": map[string]any{
 			"workspace": guestWorkspace, "artifacts": guestArtifacts, "diagnostics": guestDiagnostics}},
 	}
 	if req.WorkspaceDir != "" {
-		_ = filepath.Walk(req.WorkspaceDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
-				return nil
-			}
-			rel, rerr := filepath.Rel(req.WorkspaceDir, path)
-			if rerr != nil {
-				return nil
-			}
-			for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
-				if skipDirs[part] {
+		walkErr := withCallerToken(req.callerToken, func() error {
+			return filepath.Walk(req.WorkspaceDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() {
 					return nil
 				}
-			}
-			if info.Size() > maxPushFileBytes {
+				rel, rerr := filepath.Rel(req.WorkspaceDir, path)
+				if rerr != nil {
+					return nil
+				}
+				for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+					if skipDirs[part] {
+						return nil
+					}
+				}
+				if info.Size() > maxPushFileBytes || pushedBytes+info.Size() > maxPushTotalBytes || len(pushed) >= maxPushFiles {
+					return nil
+				}
+				data, derr := os.ReadFile(path)
+				if derr != nil {
+					return nil
+				}
+				relSlash := filepath.ToSlash(rel)
+				pushed[relSlash] = true
+				pushedBytes += int64(len(data))
+				msgs = append(msgs, map[string]any{
+					"id": "put:" + relSlash, "method": "fs.put",
+					"params": map[string]any{
+						"path":        guestWorkspace + "/" + relSlash,
+						"content_b64": base64.StdEncoding.EncodeToString(data),
+					},
+				})
 				return nil
-			}
-			data, derr := os.ReadFile(path)
-			if derr != nil {
-				return nil
-			}
-			relSlash := filepath.ToSlash(rel)
-			pushed[relSlash] = true
-			msgs = append(msgs, map[string]any{
-				"id": "put:" + relSlash, "method": "fs.put",
-				"params": map[string]any{
-					"path":        guestWorkspace + "/" + relSlash,
-					"content_b64": base64.StdEncoding.EncodeToString(data),
-				},
 			})
-			return nil
 		})
+		if walkErr != nil {
+			res.Error = "workspace access: " + walkErr.Error()
+			res.ReturnCode = 126
+			return res
+		}
 	}
 	timeoutSec := req.TimeoutSec
 	if timeoutSec <= 0 {
@@ -291,14 +329,19 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 				if !ok {
 					continue
 				}
-				rel, _ := m["path"].(string)
-				if rel == "" || pushed[rel] {
+				relValue, _ := m["path"].(string)
+				rel, safe := safeGuestRelativePath(relValue)
+				if !safe {
 					continue
 				}
-				getRels = append(getRels, rel)
+				relSlash := filepath.ToSlash(rel)
+				if pushed[relSlash] {
+					continue
+				}
+				getRels = append(getRels, relSlash)
 				getMsgs = append(getMsgs, map[string]any{
-					"id": "get:" + rel, "method": "fs.get",
-					"params": map[string]any{"path": guestWorkspace + "/" + rel}})
+					"id": "get:" + relSlash, "method": "fs.get",
+					"params": map[string]any{"path": guestWorkspace + "/" + relSlash}})
 				if len(getMsgs) >= 500 {
 					break
 				}
@@ -312,6 +355,7 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 							gotByID[id] = r
 						}
 					}
+					pulledBytes := 0
 					for _, rel := range getRels {
 						r := gotByID["get:"+rel]
 						if r == nil {
@@ -321,14 +365,16 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 							continue
 						}
 						cb, _ := r["content_b64"].(string)
-						data, derr := base64.StdEncoding.DecodeString(cb)
-						if derr != nil {
+						if len(cb) > base64.StdEncoding.EncodedLen(maxPullFileBytes) {
 							continue
 						}
-						dst := filepath.Join(req.ArtifactsDir, filepath.FromSlash(rel))
-						_ = os.MkdirAll(filepath.Dir(dst), 0o755)
-						if os.WriteFile(dst, data, 0o644) == nil {
+						data, derr := base64.StdEncoding.DecodeString(cb)
+						if derr != nil || len(data) > maxPullFileBytes || pulledBytes+len(data) > maxPullTotalBytes {
+							continue
+						}
+						if writeCallerFile(req.callerToken, req.ArtifactsDir, rel, data) == nil {
 							res.FilesPulled++
+							pulledBytes += len(data)
 						}
 					}
 				}

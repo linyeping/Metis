@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -61,9 +62,27 @@ func installService() error {
 	}
 	defer m.Disconnect()
 
-	if s, err := m.OpenService(serviceName); err == nil {
-		s.Close()
-		return fmt.Errorf("service %s already exists", serviceName)
+	if existing, openErr := m.OpenService(serviceName); openErr == nil {
+		defer existing.Close()
+		if err := stopService(existing, 20*time.Second); err != nil {
+			return fmt.Errorf("stop existing service: %w", err)
+		}
+		config, err := existing.Config()
+		if err != nil {
+			return fmt.Errorf("read existing service config: %w", err)
+		}
+		config.BinaryPathName = exe
+		config.DisplayName = serviceDisplay
+		config.Description = serviceDesc
+		config.StartType = mgr.StartAutomatic
+		if err := existing.UpdateConfig(config); err != nil {
+			return fmt.Errorf("update existing service config: %w", err)
+		}
+		setServiceRecovery(existing)
+		if err := existing.Start(); err != nil {
+			return fmt.Errorf("updated but start failed: %w", err)
+		}
+		return nil
 	}
 	s, err := m.CreateService(serviceName, exe, mgr.Config{
 		DisplayName:      serviceDisplay,
@@ -76,17 +95,46 @@ func installService() error {
 	}
 	defer s.Close()
 
+	setServiceRecovery(s)
+
+	if err := s.Start(); err != nil {
+		return fmt.Errorf("created but start failed: %w", err)
+	}
+	return nil
+}
+
+func setServiceRecovery(s *mgr.Service) {
 	// Restart on failure (resetPeriod 1 day).
 	_ = s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
 	}, 86400)
+}
 
-	if err := s.Start(); err != nil {
-		return fmt.Errorf("created but start failed: %w", err)
+func stopService(s *mgr.Service, timeout time.Duration) error {
+	status, err := s.Query()
+	if err != nil {
+		return err
 	}
-	return nil
+	if status.State == svc.Stopped {
+		return nil
+	}
+	if _, err := s.Control(svc.Stop); err != nil && err != windows.ERROR_SERVICE_NOT_ACTIVE {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		status, err = s.Query()
+		if err != nil {
+			return err
+		}
+		if status.State == svc.Stopped {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("service did not stop within %s", timeout)
 }
 
 func uninstallService() error {

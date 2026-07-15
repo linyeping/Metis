@@ -17,7 +17,7 @@ from ctypes import wintypes
 from typing import Any, Dict, List, Optional
 
 PIPE_NAME = r"\\.\pipe\metis-vm-service"
-PROTOCOL = "metis.vm.svc.v1"
+PROTOCOL = "metis.vm.svc.v2"
 
 _GENERIC_READ = 0x80000000
 _GENERIC_WRITE = 0x40000000
@@ -93,7 +93,8 @@ def _rpc(messages: List[Dict[str, Any]], read_budget: int = 4_000_000) -> List[D
     if conn is None:
         raise OSError("metis-vm-service pipe unavailable")
     try:
-        payload = "".join(json.dumps(m, ensure_ascii=False) + "\n" for m in messages).encode("utf-8")
+        wire_messages = [{**message, "protocol": PROTOCOL} for message in messages]
+        payload = "".join(json.dumps(m, ensure_ascii=False) + "\n" for m in wire_messages).encode("utf-8")
         conn.write(payload)
         resps: List[Dict[str, Any]] = []
         buf = b""
@@ -124,7 +125,13 @@ def service_available() -> bool:
     """True if the service is running and answers the handshake."""
     try:
         resps = _rpc([{"seq": 1, "method": "svc.hello", "params": {"protocol": PROTOCOL}}])
-        return bool(resps and resps[0].get("ok"))
+        result = resps[0].get("result") if resps and isinstance(resps[0], dict) else None
+        return bool(
+            resps
+            and resps[0].get("ok")
+            and isinstance(result, dict)
+            and result.get("protocol") == PROTOCOL
+        )
     except Exception:
         return False
 

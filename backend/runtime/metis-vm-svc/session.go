@@ -13,7 +13,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -45,14 +44,16 @@ type liveVM struct {
 	dataDisk    string // path to the writable vhdx, "" if no persistence
 	dataMounted bool
 	lastUsed    time.Time
+	sourceRoot  string
+	callerSID   string
 }
 
 var (
-	liveMu      sync.Mutex
-	liveVMs     = map[string]*liveVM{}
-	reaperOnce  sync.Once
-	modK32Sess  = windows.NewLazyDLL("kernel32.dll")
-	procCopyW   = modK32Sess.NewProc("CopyFileW")
+	liveMu     sync.Mutex
+	liveVMs    = map[string]*liveVM{}
+	reaperOnce sync.Once
+	modK32Sess = windows.NewLazyDLL("kernel32.dll")
+	procCopyW  = modK32Sess.NewProc("CopyFileW")
 )
 
 // ensureVM returns a running, session-keyed VM for key, booting + registering
@@ -68,12 +69,16 @@ func ensureVM(key string, req RunJobRequest) (*liveVM, error) {
 				return nil, fmt.Errorf("max concurrent sandbox sessions (%d) reached", maxLiveVMs)
 			}
 		}
-		e = &liveVM{key: key}
+		e = &liveVM{key: key, sourceRoot: req.SourceRoot, callerSID: req.callerSID}
 		liveVMs[key] = e
 	}
 	liveMu.Unlock()
 
 	e.mu.Lock()
+	if !samePath(e.sourceRoot, req.SourceRoot) || e.callerSID != req.callerSID {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("session identity does not match the original workspace")
+	}
 	// Fast path: VM already booted and healthy.
 	if e.vm != nil && e.vm.state == "running" {
 		e.lastUsed = time.Now()
@@ -113,7 +118,7 @@ func (e *liveVM) boot(req RunJobRequest) error {
 	e.dataDisk = dataDisk
 
 	id := uuid.NewString()
-	consolePipe, stopConsole, cerr := startConsole(req.DiagnosticsDir)
+	consolePipe, stopConsole, cerr := startConsole(req.DiagnosticsDir, req.callerToken)
 	if cerr != nil {
 		consolePipe = ""
 	}
@@ -186,6 +191,9 @@ func (e *liveVM) resolveDataDisk(req RunJobRequest, b BundlePaths) (string, erro
 		return "", nil // persistence disabled (no dir, or keyless one-shot)
 	}
 	disk := filepath.Join(req.SessionDataDir, e.key+".vhdx")
+	if err := ensureServiceDataDir(req.SessionDataDir); err != nil {
+		return "", err
+	}
 	if !fileExists(disk) {
 		template := req.SessionDataTemplate
 		if template == "" {
@@ -195,11 +203,8 @@ func (e *liveVM) resolveDataDisk(req RunJobRequest, b BundlePaths) (string, erro
 				template = cand
 			}
 		}
-		if template == "" || !fileExists(template) {
+		if template == "" || !fileExists(template) || !callerCanReadFile(req.callerToken, template) {
 			return "", fmt.Errorf("no sessiondata template (looked at %q)", template)
-		}
-		if err := os.MkdirAll(req.SessionDataDir, 0o755); err != nil {
-			return "", err
 		}
 		if err := copyFile(template, disk); err != nil {
 			return "", fmt.Errorf("clone template: %w", err)

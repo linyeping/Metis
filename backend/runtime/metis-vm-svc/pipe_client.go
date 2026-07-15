@@ -29,6 +29,7 @@ func pipeClientCall(reqs []map[string]any) ([]map[string]any, error) {
 	defer windows.CloseHandle(h)
 
 	for _, r := range reqs {
+		r["protocol"] = serviceProtocol
 		b := append(mustJSON(r), '\n')
 		writeAll(h, b)
 	}
@@ -56,24 +57,23 @@ func pipeClientCall(reqs []map[string]any) ([]map[string]any, error) {
 func clientRunJob(bundleDir string) {
 	fmt.Println("=== metis-vm-svc client -> running service (run_job) ===")
 	ws, _ := os.MkdirTemp("", "metis_cli_ws_")
-	art, _ := os.MkdirTemp("", "metis_cli_art_")
-	diag, _ := os.MkdirTemp("", "metis_cli_diag_")
+	art := filepath.Join(ws, ".metis", "artifacts", "client")
+	diag := filepath.Join(ws, ".metis", "diagnostics", "client")
 	defer os.RemoveAll(ws)
-	defer os.RemoveAll(art)
-	defer os.RemoveAll(diag)
 	_ = os.WriteFile(filepath.Join(ws, "in.txt"), []byte("client data 74"), 0o644)
 
 	resps, err := pipeClientCall([]map[string]any{
 		{"seq": 1, "method": "svc.hello", "params": map[string]any{}},
 		{"seq": 2, "method": "vm.run_job", "params": map[string]any{
+			"request_id":      "req_client_runjob",
 			"command":         "echo CLIENT_SVC_OK; cat in.txt; python3 -c \"open('o.txt','w').write('SVC OK: '+open('in.txt').read())\"",
+			"source_root":     ws,
 			"workspace_dir":   ws,
 			"artifacts_dir":   art,
 			"diagnostics_dir": diag,
 			"timeout":         30,
 			"memory_mb":       512,
 			"processors":      1,
-			"bundle_dir":      bundleDir,
 		}},
 	})
 	if err != nil {
@@ -133,24 +133,23 @@ func pipeSelfTest(bundleDir string) {
 
 	// 3) vm.run_job (real sandbox job over the pipe)
 	ws, _ := os.MkdirTemp("", "metis_pipe_ws_")
-	art, _ := os.MkdirTemp("", "metis_pipe_art_")
-	diag, _ := os.MkdirTemp("", "metis_pipe_diag_")
+	art := filepath.Join(ws, ".metis", "artifacts", "selftest")
+	diag := filepath.Join(ws, ".metis", "diagnostics", "selftest")
 	defer os.RemoveAll(ws)
-	defer os.RemoveAll(art)
-	defer os.RemoveAll(diag)
 	_ = os.WriteFile(filepath.Join(ws, "seed.txt"), []byte("pipe-side data 73"), 0o644)
 
 	jobReq := map[string]any{
 		"seq": 3, "method": "vm.run_job",
 		"params": map[string]any{
+			"request_id":      "req_pipe_selftest",
 			"command":         "echo PIPE_RPC_OK; cat seed.txt; python3 -c \"open('done.txt','w').write('PIPE OK: '+open('seed.txt').read())\"",
+			"source_root":     ws,
 			"workspace_dir":   ws,
 			"artifacts_dir":   art,
 			"diagnostics_dir": diag,
 			"timeout":         30,
 			"memory_mb":       512,
 			"processors":      1,
-			"bundle_dir":      bundleDir,
 		},
 	}
 	resps, err = pipeClientCall([]map[string]any{jobReq})
