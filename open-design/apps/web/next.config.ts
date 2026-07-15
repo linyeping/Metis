@@ -158,7 +158,10 @@ function configuredAllowedDevHosts(): string[] {
 const nextConfig: NextConfig = {
   allowedDevOrigins: configuredAllowedDevHosts(),
   outputFileTracingRoot: WORKSPACE_ROOT,
-  reactStrictMode: true,
+  // The Electron host owns this runtime's lifecycle. Strict Mode's development
+  // remount duplicates startup scans and connector requests without adding
+  // value inside the embedded surface; keep it enabled for standalone work.
+  reactStrictMode: process.env.METIS_MANAGED_DESIGN_RUNTIME !== '1',
   // Emit browser sourcemaps so packaged-runtime exceptions can be symbolicated
   // by PostHog. `tools/pack/src/web-sourcemaps.ts` runs after `next build`
   // to inject chunk IDs, upload to PostHog, and ALWAYS delete the .map files
@@ -199,9 +202,7 @@ const nextConfig: NextConfig = {
             { source: '/frames/:path*', destination: `${DAEMON_ORIGIN}/frames/:path*` },
           ];
         },
-        devIndicators: {
-          position: 'bottom-right',
-        },
+        devIndicators: false,
       }
       : {}),
 };

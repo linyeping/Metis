@@ -31,7 +31,7 @@ const emptyRuntime: DesignRuntimeStatus = {
   url: '',
   error: '',
   version: '0.15.1',
-  repository: 'https://github.com/nexu-io/open-design',
+  repository: 'https://github.com/linyeping/Metis',
   sourceRoot: '',
   logs: [],
 };

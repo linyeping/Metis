@@ -23,7 +23,7 @@ import styles from './WhatsNewPopup.module.css';
 // most once per its `id` (see ../lib/whats-new).
 
 // Fallback for the CTA when the highlight document omits an explicit link.
-const RELEASES_INDEX_URL = 'https://github.com/nexu-io/open-design/releases';
+const RELEASES_INDEX_URL = 'https://github.com/linyeping/Metis/releases';
 
 const cardIn: Variants = {
   hidden: { opacity: 0, scale: 0.96, y: 12 },

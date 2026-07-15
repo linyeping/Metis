@@ -26,7 +26,7 @@ describe('social-share contract', () => {
       locale: 'en',
       url: 'https://example.com/open-design-demo',
       title: 'Demo',
-      text: `Built with Open Design. Repo: ${OPEN_DESIGN_GITHUB_REPO_URL}`,
+      text: `Built with Metis Design. Repo: ${OPEN_DESIGN_GITHUB_REPO_URL}`,
       copyText: `Demo\nhttps://example.com/open-design-demo\n${OPEN_DESIGN_GITHUB_REPO_URL}`,
     });
 

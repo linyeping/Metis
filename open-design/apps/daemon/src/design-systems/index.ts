@@ -1711,12 +1711,12 @@ export function buildDesignSystemSkillsMarkdown(input: {
   lines.push('---');
   lines.push('');
   lines.push(
-    'Generated with **Metis Design** — the open-source, local-first Claude Design alternative. ' +
+    'Generated with **Metis Design** — Metis\'s local-first design workspace. ' +
       'Generate decks, landing pages, dashboards, and brand systems with your favourite AI ' +
       'coding agent.',
   );
   lines.push('');
-  lines.push('https://github.com/nexu-io/open-design');
+  lines.push('https://github.com/linyeping/Metis');
   lines.push('');
 
   return lines.join('\n');

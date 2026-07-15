@@ -8,7 +8,7 @@ import { Icon } from './Icon';
  * constant so it can be repointed (e.g. to a hosted page) without touching
  * markup. `PRIVACY.md` documents the same data handling the modal discloses.
  */
-const PRIVACY_POLICY_URL = 'https://github.com/nexu-io/open-design/blob/main/PRIVACY.md';
+const PRIVACY_POLICY_URL = 'https://github.com/linyeping/Metis/blob/main/PRIVACY.md';
 
 interface Props {
   onShare: () => void;

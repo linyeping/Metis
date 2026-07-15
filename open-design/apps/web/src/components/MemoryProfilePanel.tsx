@@ -29,7 +29,6 @@ const PROFILE_FIELDS: ReadonlyArray<{
   { label: 'Role', labelKey: 'settings.memoryProfileRole', placeholderKey: 'settings.memoryProfileRolePlaceholder' },
   { label: 'Organization size', labelKey: 'settings.onboardingOrgSizeLabel', placeholderKey: 'settings.onboardingSelectPlaceholder' },
   { label: 'Use cases', labelKey: 'settings.onboardingUseCaseLabel', placeholderKey: 'settings.onboardingSelectMultiplePlaceholder', multiline: true },
-  { label: 'Discovery source', labelKey: 'settings.onboardingSourceLabel', placeholderKey: 'settings.onboardingSelectPlaceholder' },
   { label: 'Company / Team', labelKey: 'settings.memoryProfileCompany', placeholderKey: 'settings.memoryProfileCompanyPlaceholder' },
   { label: 'Domain', labelKey: 'settings.memoryProfileDomain', placeholderKey: 'settings.memoryProfileDomainPlaceholder' },
   { label: 'Primary audience', labelKey: 'settings.memoryProfileAudience', placeholderKey: 'settings.memoryProfileAudiencePlaceholder' },

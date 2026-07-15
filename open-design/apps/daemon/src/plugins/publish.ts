@@ -11,7 +11,7 @@
 //   - awesome-agent-skills   → VoltAgent/awesome-agent-skills
 //   - clawhub                → openclaw/clawhub
 //   - skills-sh              → skills.sh discovery hint
-//   - open-design            → nexu-io/open-design (plugins/community/<plugin-name>/).
+//   - open-design            → linyeping/Metis (open-design/plugins/community/<plugin-name>/).
 //                              The dedicated `open-design/plugin-registry` repo per
 //                              docs/plans/plugin-registry.md §1.2 stays the long-term
 //                              target, but submissions land in the monorepo until
@@ -148,14 +148,14 @@ export function buildPublishLink(args: {
         '',
         '## Metis Design registry entry',
         '',
-        '- Target path: `plugins/community/<plugin-name>/open-design.json`',
-        '- Generated index: `plugins/registry/community/open-design-marketplace.json`',
+        '- Target path: `open-design/plugins/community/<plugin-name>/open-design.json`',
+        '- Generated index: `open-design/plugins/registry/community/open-design-marketplace.json`',
         '- Required checks: `od plugin validate`, `od plugin pack`, integrity digest, preview smoke.',
       ].join('\n');
-      const url = newIssueUrl('nexu-io/open-design', title, bodyWithRegistry);
+      const url = newIssueUrl('linyeping/Metis', title, bodyWithRegistry);
       return {
         catalog: args.catalog,
-        catalogLabel: 'nexu-io/open-design',
+        catalogLabel: 'linyeping/Metis',
         url,
         prBody: bodyWithRegistry,
       };

@@ -2125,7 +2125,7 @@ describe('MemorySection', () => {
 	  ).toBeNull();
 	  expect(screen.getByText('OpenAI authentication expired')).toBeTruthy();
     expect(
-      screen.getByText('Connected apps were read, but OpenDesign could not turn that context into memory.'),
+      screen.getByText('Connected apps were read, but Metis Design could not turn that context into memory.'),
     ).toBeTruthy();
     expect(
       screen.getByText('Update the Memory extraction model key or sign in again.'),

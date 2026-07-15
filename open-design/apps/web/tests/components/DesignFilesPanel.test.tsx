@@ -19,7 +19,6 @@ import type {
   ProjectFileKind,
   ProjectFolder,
 } from "../../src/types";
-import { VISUAL_STABILITY_STORAGE_KEY } from "../../src/utils/visualStability";
 
 function folder(path: string): ProjectFolder {
   return {
@@ -229,20 +228,11 @@ describe("DesignFilesPanel sections", () => {
     expect(document.querySelector(".df-useful-info")).toBeNull();
   });
 
-  it("types out the first useful-info tip in the footer while the agent runs", async () => {
-    localStorage.setItem(VISUAL_STABILITY_STORAGE_KEY, "1");
+  it("keeps the file action footer stable while the agent runs", () => {
     renderPanel([file({ name: "page.html", kind: "html" })], { running: true });
 
-    expect(document.querySelector(".df-drop-hint")).toBeNull();
-    expect(document.querySelector(".df-useful-info-label")?.textContent).toBe(
-      "Useful info",
-    );
-    // The tip types in character by character, so wait for the first word.
-    await waitFor(() =>
-      expect(
-        document.querySelector(".df-useful-info-tip")?.textContent,
-      ).toContain("Double-click"),
-    );
+    expect(document.querySelector(".df-drop-hint")).toBeTruthy();
+    expect(document.querySelector(".df-useful-info")).toBeNull();
   });
 });
 

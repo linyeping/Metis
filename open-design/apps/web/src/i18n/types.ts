@@ -206,9 +206,6 @@ export interface Dict {
   'settings.onboardingStepConnect': string;
   'settings.onboardingStepDesignSystem': string;
   'settings.onboardingStepProfile': string;
-  'settings.onboardingStepNewsletter': string;
-  'settings.onboardingNewsletterTitle': string;
-  'settings.onboardingNewsletterBody': string;
   'settings.onboardingConnectTitle': string;
   'settings.onboardingConnectBody': string;
   'settings.onboardingCloudTitle': string;
@@ -250,22 +247,6 @@ export interface Dict {
   'settings.onboardingRoleLabel': string;
   'settings.onboardingOrgSizeLabel': string;
   'settings.onboardingUseCaseLabel': string;
-  'settings.onboardingSourceLabel': string;
-  'settings.onboardingSourceX': string;
-  'settings.onboardingSourceGithub': string;
-  'settings.onboardingSourceYoutube': string;
-  'settings.onboardingSourceTiktok': string;
-  'settings.onboardingSourceReddit': string;
-  'settings.onboardingSourceLinkedin': string;
-  'settings.onboardingSourceMetaSocial': string;
-  'settings.onboardingSourceSearch': string;
-  'settings.onboardingSourceAiTool': string;
-  'settings.onboardingSourceFriend': string;
-  'settings.onboardingSourceCommunity': string;
-  'settings.onboardingSourceEmail': string;
-  'settings.onboardingSourceBlog': string;
-  'settings.onboardingSourceOther': string;
-  'settings.onboardingSourceOtherPlaceholder': string;
   'settings.onboardingSelectPlaceholder': string;
   'settings.onboardingSelectMultiplePlaceholder': string;
   'settings.onboardingOrgSolo': string;
@@ -976,10 +957,6 @@ export interface Dict {
   'whatsNew.cta': string;
   'whatsNew.dismissAria': string;
 
-  // Newsletter email field on the onboarding About-you step.
-  'newsletter.label': string;
-  'newsletter.placeholder': string;
-
   // Entry view / tabs
   'entry.tabDesigns': string;
   'entry.tabTemplates': string;
@@ -989,23 +966,10 @@ export interface Dict {
   'entry.tabVideoTemplates': string;
   'entry.openSettingsTitle': string;
   'entry.openSettingsAria': string;
-  'entry.discordLabel': string;
-  'entry.discordAria': string;
-  'entry.discordAriaWithOnline': string;
-  'entry.discordOnlineLabel': string;
-  'entry.followXLabel': string;
-  'entry.followThreadsLabel': string;
-  'entry.youtubeLabel': string;
-  'entry.followInstagramLabel': string;
-  'entry.followLinkedinLabel': string;
-  'entry.followXiaohongshuLabel': string;
   'entry.resizeAria': string;
   'entry.loadingWorkspace': string;
   'entry.useEverywhereTitle': string;
   'entry.useEverywhereAria': string;
-  'entry.workspaceTeamsLabel': string;
-  'entry.workspaceTeamsTitle': string;
-  'entry.workspaceTeamsAria': string;
   // Left nav rail (icon-only) — surface labels also serve as tooltips
   'entry.navExpand': string;
   'entry.navCollapse': string;
@@ -1030,7 +994,6 @@ export interface Dict {
   'homeHero.templatePicker.projectTypes': string;
   'homeHero.templatesScrollHint': string;
   'homeHero.templatesCollapse': string;
-  'homeHero.subtitlePrefix': string;
   'homeHero.placeholder': string;
   'homeHero.placeholderActive': string;
   // Rotating typewriter placeholder scenarios + idle hint (home-hero carousel).
@@ -1837,11 +1800,6 @@ export interface Dict {
   'entry.helpSubmitFeature': string;
   'entry.helpWhatsNew': string;
   'entry.helpDownloadDesktop': string;
-  // GitHub star pill in the top bar
-  'entry.githubStarLabel': string;
-  'entry.githubStarTitle': string;
-  'entry.githubStarAria': string;
-
   // Connectors tab
   'connectors.title': string;
   'connectors.subtitle': string;
@@ -2378,10 +2336,6 @@ export interface Dict {
   'avatar.modelLabel': string;
   'avatar.reasoningLabel': string;
   'avatar.customSuffix': string;
-  'socialShare.openDesignSection': string;
-  'socialShare.openDesignTitle': string;
-  'socialShare.openDesignText': string;
-  'socialShare.openDesignCopyText': string;
   'socialShare.projectSection': string;
   'socialShare.publishPageTitle': string;
   'socialShare.publishPageSubtitle': string;
@@ -3343,26 +3297,6 @@ export interface Dict {
   'designFiles.sectionDocuments': string;
   'designFiles.kindStylesheet': string;
   'designFiles.modifiedExt': string;
-  'designFiles.usefulInfoLabel': string;
-  'designFiles.usefulInfoTip': string;
-  'designFiles.usefulInfoTip2': string;
-  'designFiles.usefulInfoTip4': string;
-  'designFiles.usefulInfoTip5': string;
-  'designFiles.usefulInfoTip6': string;
-  'designFiles.usefulInfoTip7': string;
-  'designFiles.usefulInfoTip8': string;
-  'designFiles.usefulInfoTip9': string;
-  'designFiles.usefulInfoTip10': string;
-  'designFiles.usefulInfoTip11': string;
-  'designFiles.usefulInfoTip12': string;
-  'designFiles.usefulInfoTip13': string;
-  'designFiles.usefulInfoTip14': string;
-  'designFiles.usefulInfoTip15': string;
-  'designFiles.usefulInfoTip16': string;
-  'designFiles.usefulInfoTip17': string;
-  'designFiles.usefulInfoTip18': string;
-  'designFiles.usefulInfoTip19': string;
-  'designFiles.usefulInfoTip20': string;
   'quickSwitcher.placeholder': string;
   'quickSwitcher.empty': string;
   'quickSwitcher.noMatches': string;

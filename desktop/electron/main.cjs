@@ -519,7 +519,7 @@ async function startDesignRuntime(locale) {
     if (!sourceRoot) {
       return emitDesignRuntimeState({
         state: 'unavailable',
-        error: 'Miro/open-design 源码缺失，Design 无法启动。',
+        error: 'Metis Design 运行时源码缺失，Design 无法启动。',
         sourceRoot: ''
       })
     }
@@ -527,7 +527,7 @@ async function startDesignRuntime(locale) {
     if (version !== DESIGN_RUNTIME_VERSION) {
       return emitDesignRuntimeState({
         state: 'error',
-        error: `Open Design 版本不匹配：需要 ${DESIGN_RUNTIME_VERSION}，当前 ${version || 'unknown'}。`,
+        error: `Metis Design 运行时版本不匹配：需要 ${DESIGN_RUNTIME_VERSION}，当前 ${version || 'unknown'}。`,
         sourceRoot,
         version: version || DESIGN_RUNTIME_VERSION
       })
@@ -535,7 +535,7 @@ async function startDesignRuntime(locale) {
     if (!fsSync.existsSync(path.join(sourceRoot, 'node_modules'))) {
       return emitDesignRuntimeState({
         state: 'unavailable',
-        error: 'Open Design 依赖尚未安装，请先在源码目录运行 pnpm install。',
+        error: 'Metis Design 依赖尚未安装，请先在源码目录运行 pnpm install。',
         sourceRoot,
         version
       })

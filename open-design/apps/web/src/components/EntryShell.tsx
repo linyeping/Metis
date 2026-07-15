@@ -69,7 +69,7 @@ import type {
   TrackingCliProviderId,
 } from '@open-design/contracts/analytics';
 import { agentIdToTracking } from '@open-design/contracts/analytics';
-import { useT, useI18n } from '../i18n';
+import { useT } from '../i18n';
 import { navigate, useRoute } from '../router';
 import { setPendingDesignSystemCreateEntry } from '../analytics/ds-create-entry';
 import type {
@@ -101,11 +101,7 @@ import { AmrBalanceDialog } from './AmrBalanceDialog';
 import { AmrLowBalanceDialog, type AmrLowBalanceDecision } from './AmrLowBalanceDialog';
 import { checkAmrBalanceGate } from '../runtime/amr-balance-gate';
 import { isPaidAmrPlan, resolveAmrPlan } from '../runtime/amr-low-balance-plan';
-import { GithubStarBadge } from './GithubStarBadge';
-import {
-  formatDiscordPresenceCount,
-  useDiscordPresence,
-} from './useDiscordPresence';
+import { GithubLink } from './GithubLink';
 import { HomeView } from './HomeView';
 import {
   createPluginAuthoringHandoff,
@@ -133,7 +129,6 @@ import {
 import { LanguageMenu } from './LanguageMenu';
 import { IntegrationsView, type IntegrationTab } from './IntegrationsView';
 import { InlineModelSwitcher } from './InlineModelSwitcher';
-import { enterpriseUrl } from './enterpriseUrl';
 import {
   EntrySettingsMenu,
   type EntrySettingsSection,
@@ -202,8 +197,6 @@ function writeStoredRailOpen(open: boolean): void {
   }
 }
 
-const DISCORD_URL = 'https://discord.gg/mHAjSMV6gz';
-const X_URL = 'https://x.com/OpenDesignHQ';
 const ONBOARDING_DROPDOWN_OPEN_EVENT = 'open-design:onboarding-dropdown-open';
 
 type OnboardingAgentTestState =
@@ -211,25 +204,11 @@ type OnboardingAgentTestState =
   | { status: 'running'; inputKey: string }
   | { status: 'done'; inputKey: string; result: ConnectionTestResponse };
 
-// The topbar chips (GitHub star, model switcher, Use everywhere)
-// collapse into the settings dropdown when the viewport gets
-// narrow. The transition is driven entirely by CSS @media queries
-// in `entry-layout.css` so server and client render identical
-// markup — both surfaces are always present, and CSS toggles
-// `display` based on `--compact-topbar` breakpoint (900px).
-
 // Default scenario plugin for each project kind/intent. The mapping
 // lives in `@open-design/contracts` so the daemon's `/api/projects`
 // and `/api/runs` fallbacks resolve to the same plugin id when no
 // `pluginId` is on the request body — plan §3.3 of
 // `specs/current/plugin-driven-flow-plan.md`.
-// Newsletter signup endpoint. Lives on the marketing site (Cloudflare Pages
-// Function backed by KV), so this is a cross-origin POST from the desktop
-// client. Overridable at build time via NEXT_PUBLIC_NEWSLETTER_URL — e.g. point
-// it at a local `wrangler pages dev` instance during development.
-const NEWSLETTER_SUBSCRIBE_URL =
-  process.env.NEXT_PUBLIC_NEWSLETTER_URL ?? 'https://open-design.ai/subscribe';
-const NEWSLETTER_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ONBOARDING_BYOK_AUTO_FETCH_DELAY_MS = 300;
 const ONBOARDING_BYOK_AUTO_TEST_DELAY_MS = 500;
 
@@ -244,12 +223,6 @@ type OnboardingProfileState = {
   role: string;
   orgSize: string;
   useCase: string[];
-  source: string;
-  // Free-text detail when `source === 'other'`. Kept separate from `source`
-  // so attribution can still aggregate on the 'other' bucket while capturing
-  // the raw self-reported channel.
-  sourceOther: string;
-  email: string;
 };
 
 type EntryCreateProjectInput = Omit<CreateInput, 'metadata'> & {
@@ -420,7 +393,7 @@ interface Props {
   onCreateDesignSystem?: () => void;
   // NOTE: first-run onboarding intentionally no longer hosts guided
   // design-system creation. The previous step-3 design-system surface was
-  // replaced by the newsletter and brand-extraction steps, so EntryShell does
+  // replaced by the profile and brand-extraction steps, so EntryShell does
   // not accept a `renderDesignSystemCreation` renderer. Guided creation stays
   // reachable from the standalone `design-system-create` route and the
   // Design Systems tab; do not re-thread an onboarding renderer here.
@@ -535,8 +508,6 @@ export function EntryShell({
   artifactUpgradeSlot,
 }: Props) {
   const t = useT();
-  const { locale: uiLocale } = useI18n();
-  const discordPresence = useDiscordPresence();
   // Each entry sub-view (home / projects / design-systems) is its own
   // URL now, so the browser back/forward buttons work and a deep link
   // to /design-systems lands on that section. We derive the active
@@ -604,14 +575,6 @@ export function EntryShell({
   const [onboardingRec, setOnboardingRec] = useState<Recommendation | null>(null);
   const entryMainScrollRef = useRef<HTMLElement | null>(null);
   const analytics = useAnalytics();
-  const discordOnlineLabel = discordPresence
-    ? t('entry.discordOnlineLabel', {
-        count: formatDiscordPresenceCount(discordPresence.onlineCount),
-      })
-    : null;
-  const discordAriaLabel = discordOnlineLabel
-    ? t('entry.discordAriaWithOnline', { online: discordOnlineLabel })
-    : t('entry.discordAria');
   function changeView(next: EntryViewKind) {
     const navElement = navElementForView(next);
     if (navElement) {
@@ -995,78 +958,8 @@ export function EntryShell({
               <Icon name="panel-left" size={20} />
             </button>
             <div className="entry-main__topbar-chips entry-main__topbar-chips--icon-only">
-              <GithubStarBadge />
-              <a
-                className="entry-workspace-chip od-tooltip"
-                href={enterpriseUrl(uiLocale)}
-                target="_blank"
-                rel="noreferrer noopener"
-                onClick={() => {
-                  trackHomeToolbarClick(analytics.track, {
-                    page_name: 'home',
-                    area: 'toolbar',
-                    element: 'workspace_teams',
-                  });
-                }}
-                data-tooltip={t('entry.workspaceTeamsTitle')}
-                data-tooltip-placement="bottom"
-                aria-label={t('entry.workspaceTeamsAria')}
-                data-testid="entry-workspace-teams"
-              >
-                <Icon
-                  name="sparkles"
-                  size={14}
-                  className="entry-workspace-chip__icon"
-                />
-                <span className="entry-workspace-chip__label">
-                  {t('entry.workspaceTeamsLabel')}
-                </span>
-              </a>
-              <a
-                className="entry-discord-badge od-tooltip"
-                href={DISCORD_URL}
-                aria-label={discordAriaLabel}
-                data-tooltip={discordAriaLabel}
-                data-tooltip-placement="bottom"
-                data-testid="entry-discord-badge"
-              >
-                <Icon name="discord" size={14} className="entry-discord-badge__icon" />
-                <span className="entry-discord-badge__label">{t('entry.discordLabel')}</span>
-                {discordOnlineLabel ? (
-                  <>
-                    <span className="entry-discord-badge__sep" aria-hidden>
-                      ·
-                    </span>
-                    <span className="entry-discord-badge__online">
-                      {discordOnlineLabel}
-                    </span>
-                  </>
-                ) : null}
-              </a>
+              <GithubLink />
               {view === 'home' ? null : executionSwitcher}
-              <button
-                type="button"
-                className="use-everywhere-chip od-tooltip"
-                onClick={() => {
-                  trackHomeToolbarClick(analytics.track, {
-                    page_name: 'home',
-                    area: 'toolbar',
-                    element: 'use_everywhere',
-                  });
-                  openIntegrationTab('use-everywhere');
-                }}
-                data-tooltip={t('entry.useEverywhereTitle')}
-                data-tooltip-placement="bottom"
-                aria-label={t('entry.useEverywhereAria')}
-                data-testid="entry-use-everywhere-button"
-              >
-                <span className="use-everywhere-chip__icon" aria-hidden>
-                  <Icon name="hammer" size={13} />
-                </span>
-                <span className="use-everywhere-chip__label">
-                  {t('entry.useEverywhereTitle')}
-                </span>
-              </button>
             </div>
             <UpdaterPopup
               allowSilentUpdates={config.allowSilentUpdates}
@@ -1330,7 +1223,6 @@ function OnboardingView({
   const [amrStatusResolved, setAmrStatusResolved] = useState(false);
   const [amrLoginPending, setAmrLoginPending] = useState(false);
   const [amrLoginCancelPending, setAmrLoginCancelPending] = useState(false);
-  const [newsletterSubmitting, setNewsletterSubmitting] = useState(false);
   const [amrLoginError, setAmrLoginError] = useState<string | null>(null);
   const [visibleAgentIds, setVisibleAgentIds] = useState<string[]>([]);
   const [providerTestState, setProviderTestState] = useState<
@@ -1362,9 +1254,6 @@ function OnboardingView({
     role: '',
     orgSize: '',
     useCase: [] as string[],
-    source: '',
-    sourceOther: '',
-    email: '',
   });
   // Live mirror of `profile` so closures that fire faster than React
   // commits (rapid dropdown picks, the Finish-setup click after the
@@ -1382,9 +1271,9 @@ function OnboardingView({
   // Update the About-you profile through this helper (not `setProfile`
   // directly) whenever the value feeds an imperative read. It mirrors the new
   // value into `profileRef.current` synchronously, so paths that read the live
-  // ref before React's state→ref sync effect runs — `emitAboutYouSubmit`, the
-  // Memory note, the newsletter submit — never see a stale field even when the
-  // user changes an answer and immediately continues.
+  // ref before React's state→ref sync effect runs — `emitAboutYouSubmit` and
+  // the Memory note never see a stale field when the user changes an answer
+  // and immediately continues.
   const updateProfile = useCallback(
     (producer: (current: OnboardingProfileState) => OnboardingProfileState) => {
       const next = producer(profileRef.current);
@@ -1647,8 +1536,7 @@ function OnboardingView({
   } {
     if (stepIdx === 0) return { area: 'runtime', stepIndex: '1', stepName: 'connect' };
     if (stepIdx === 1) return { area: 'about_you', stepIndex: '2', stepName: 'about_you' };
-    if (stepIdx === 2) return { area: 'newsletter', stepIndex: '3', stepName: 'newsletter' };
-    return { area: 'design_system', stepIndex: '4', stepName: 'design_system' };
+    return { area: 'design_system', stepIndex: '3', stepName: 'design_system' };
   }
   function emitOnboardingClick(
     element: TrackingOnboardingClickElement,
@@ -1709,8 +1597,7 @@ function OnboardingView({
     const hasAboutYou = Boolean(
       liveProfile.role
         || liveProfile.orgSize
-        || liveProfile.useCase.length > 0
-        || liveProfile.source,
+        || liveProfile.useCase.length > 0,
     );
     trackOnboardingCompleteResult(analytics.track, {
       page_name: 'onboarding',
@@ -1739,12 +1626,11 @@ function OnboardingView({
         // stay free-text/PII-free (see the contract note on OnboardingClickProps),
         // and the scrubber does not sanitize arbitrary event properties. The
         // typed detail lives only in app-owned local storage (Memory note).
-        discovery_source: liveProfile.source || 'unknown',
       } : {}),
     });
   }
 
-  const isLastStep = step === 3;
+  const isLastStep = step === 2;
 
   const roleOptions = [
     { value: 'agency', label: t('settings.onboardingRoleAgency') },
@@ -1777,23 +1663,6 @@ function OnboardingView({
     { value: 'engineering', label: t('settings.onboardingUseEngineering') },
     { value: 'agency', label: t('settings.onboardingUseAgency') },
   ];
-  const sourceOptions = [
-    { value: 'x', label: t('settings.onboardingSourceX') },
-    { value: 'github', label: t('settings.onboardingSourceGithub') },
-    { value: 'youtube', label: t('settings.onboardingSourceYoutube') },
-    { value: 'tiktok', label: t('settings.onboardingSourceTiktok') },
-    { value: 'reddit', label: t('settings.onboardingSourceReddit') },
-    { value: 'linkedin', label: t('settings.onboardingSourceLinkedin') },
-    { value: 'meta_social', label: t('settings.onboardingSourceMetaSocial') },
-    { value: 'search', label: t('settings.onboardingSourceSearch') },
-    { value: 'ai_tool', label: t('settings.onboardingSourceAiTool') },
-    { value: 'friend', label: t('settings.onboardingSourceFriend') },
-    { value: 'community', label: t('settings.onboardingSourceCommunity') },
-    { value: 'email', label: t('settings.onboardingSourceEmail') },
-    { value: 'blog', label: t('settings.onboardingSourceBlog') },
-    { value: 'other', label: t('settings.onboardingSourceOther') },
-  ];
-
   function cleanOnboardingOptionLabel(label: string): string {
     const trimmed = label.trim();
     return trimmed.replace(/^[^\p{L}\p{N}]+/u, '').trim() || trimmed;
@@ -1819,14 +1688,6 @@ function OnboardingView({
       fields.push([
         'Use cases',
         snapshot.useCase.map((value) => optionLabel(useCaseOptions, value)).join(', '),
-      ]);
-    }
-    if (snapshot.source) {
-      const sourceLabel = optionLabel(sourceOptions, snapshot.source);
-      const custom = snapshot.source === 'other' ? snapshot.sourceOther.trim() : '';
-      fields.push([
-        'Discovery source',
-        custom ? `${sourceLabel} (${custom})` : sourceLabel,
       ]);
     }
     return fields.map(([label, value]) => `- ${label}: ${value}`).join('\n');
@@ -2017,7 +1878,6 @@ function OnboardingView({
   }
 
   function handleBackWithTracking(): void {
-    if (newsletterSubmitting) return;
     // The secondary button only renders for step > 0 — the Connect step has no
     // earlier step and no Skip affordance — so this is always a real Back.
     // (The former step-0 "Skip" path, which emitted the onboarding `skip` /
@@ -2027,7 +1887,6 @@ function OnboardingView({
     setStep((current) => current - 1);
   }
   async function handlePrimaryAction() {
-    if (newsletterSubmitting) return;
     // Connect gate: the button is `aria-disabled` (not natively disabled, so it
     // can still surface its tooltip on hover), so guard the click here — a
     // blocked Continue must not advance past the Connect step.
@@ -2089,8 +1948,8 @@ function OnboardingView({
 
   // Shared finish work for the final step, independent of where the user lands
   // next. Emits the About-you snapshot + completion analytics exactly once
-  // (both are idempotent per session), submits the newsletter if an email was
-  // entered, then clears the session. Reading `profileRef` captures the user's
+  // (both are idempotent per session), then clears the session. Reading
+  // `profileRef` captures the user's
   // final picks even on a fast click before React commits the latest state.
   // Callers pick the destination: home (`onFinish`) or the design-system
   // create flow (`onGoBuild`).
@@ -2103,20 +1962,12 @@ function OnboardingView({
   ): Promise<void> {
     emitAboutYouSubmit();
     void persistOnboardingProfileToMemory();
-    const newsletterEmail = profileRef.current.email;
-    const shouldSubmitNewsletter =
-      NEWSLETTER_EMAIL_RE.test(newsletterEmail.trim().toLowerCase());
-    if (shouldSubmitNewsletter) {
-      setNewsletterSubmitting(true);
-      await submitNewsletterEmail(newsletterEmail);
-    }
     emitOnboardingClick('continue', 'continue');
     emitOnboardingComplete('completed', completionType);
     clearOnboardingSessionId();
   }
 
   async function handleFinishToHome(): Promise<void> {
-    if (newsletterSubmitting) return;
     await runOnboardingCompletion('completed_without_design_system');
     onFinish({
       role: profileRef.current.role,
@@ -2125,7 +1976,6 @@ function OnboardingView({
   }
 
   async function handleFinishToBuild(): Promise<void> {
-    if (newsletterSubmitting) return;
     await runOnboardingCompletion('completed_with_design_system');
     onGoBuild();
   }
@@ -2251,15 +2101,11 @@ function OnboardingView({
     aboutYouReportedRef.current = true;
     const snapshot = profileRef.current;
     const submittedAt = new Date();
-    // The raw "Other" free-text is intentionally excluded from the attribution
-    // profile: it flows into analytics (person properties) and AMR, which must
-    // stay free-text/PII-free. Only the enumerated `source` bucket is carried.
-    // The typed detail is preserved solely in the app-owned Memory note below.
     const attributionProfile = {
       role: snapshot.role,
       orgSize: snapshot.orgSize,
       useCase: snapshot.useCase,
-      source: snapshot.source,
+      source: '',
       completedAt: submittedAt.toISOString(),
     };
     // Persist the survey so later AMR entries (outside onboarding) can forward
@@ -2288,33 +2134,7 @@ function OnboardingView({
       role: snapshot.role || 'unknown',
       organization_size: snapshot.orgSize || 'unknown',
       use_cases: snapshot.useCase.length > 0 ? snapshot.useCase : ['unknown'],
-      discovery_source: snapshot.source || 'unknown',
     });
-  }
-
-  // Optional newsletter signup captured on the Newsletter step. The last-step
-  // button shows loading while this settles; failures are swallowed so
-  // onboarding completion never depends on the marketing site. A blank or
-  // malformed email is simply skipped. Only a boolean opt-in is tracked — the
-  // address itself is never sent to analytics.
-  async function submitNewsletterEmail(rawEmail: string): Promise<void> {
-    const email = rawEmail.trim().toLowerCase();
-    if (!email || !NEWSLETTER_EMAIL_RE.test(email)) return;
-    emitOnboardingClick('newsletter_email', 'subscribe', { newsletter_opt_in: true });
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 5000);
-    try {
-      await fetch(NEWSLETTER_SUBSCRIBE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, source: 'client' }),
-        signal: controller.signal,
-      });
-    } catch {
-      // Swallow — onboarding completion must not depend on the marketing site.
-    } finally {
-      window.clearTimeout(timeout);
-    }
   }
 
   async function scanCliAgents(options: { preferExisting?: boolean } = {}) {
@@ -2528,10 +2348,7 @@ function OnboardingView({
     step,
   ]);
 
-  const onboardingNavigationLocked = newsletterSubmitting;
-  const primaryActionLabel = isLastStep && newsletterSubmitting
-    ? t('common.loading')
-    : step === 0 && amrLoginPending
+  const primaryActionLabel = step === 0 && amrLoginPending
     ? t('settings.amrSigningIn')
     : step === 0 && amrSelectedAndSignedOut
       ? t('settings.amrSignInToContinue')
@@ -2782,7 +2599,6 @@ function OnboardingView({
                 type="button"
                 className="onboarding-view__back-to-cloud"
                 onClick={handleBackWithTracking}
-                disabled={onboardingNavigationLocked}
               >
                 <Icon name="chevron-left" size={14} />
                 <span>{t('settings.onboardingBack')}</span>
@@ -2843,89 +2659,11 @@ function OnboardingView({
                     updateProfile((current) => ({ ...current, useCase: value }));
                   }}
                 />
-                <OnboardingChipField
-                  label={t('settings.onboardingSourceLabel')}
-                  value={profile.source}
-                  options={sourceOptions}
-                  onChange={(value) => {
-                    if (typeof value === 'string' && value) {
-                      emitOnboardingClick('hear_about_us', 'select_option', {
-                        discovery_source: value,
-                      });
-                    }
-                    // Clear the free-text detail whenever the chip changes away
-                    // from 'Other' so a stale custom value never leaks into
-                    // attribution for a different bucket. Routed through
-                    // updateProfile so the live ref reflects the cleared value
-                    // immediately, even if the user changes chip then continues.
-                    updateProfile((current) => ({
-                      ...current,
-                      source: typeof value === 'string' ? value : current.source,
-                      sourceOther: value === 'other' ? current.sourceOther : '',
-                    }));
-                  }}
-                  trailing={
-                    profile.source === 'other' ? (
-                      <input
-                        type="text"
-                        className="onboarding-chip-field__other-input"
-                        maxLength={64}
-                        autoComplete="off"
-                        autoFocus
-                        placeholder={t('settings.onboardingSourceOtherPlaceholder')}
-                        aria-label={t('settings.onboardingSourceOtherPlaceholder')}
-                        value={profile.sourceOther}
-                        onChange={(event) => {
-                          const next = event.target.value;
-                          // updateProfile keeps profileRef in sync synchronously
-                          // so the Memory note (written from the live ref) never
-                          // drops the latest keystrokes on a fast type-then-
-                          // Continue.
-                          updateProfile((current) => ({ ...current, sourceOther: next }));
-                        }}
-                      />
-                    ) : null
-                  }
-                />
               </div>
             </div>
           ) : null}
 
           {step === 2 ? (
-            <div className="onboarding-view__panel onboarding-view__panel--newsletter">
-              <button
-                type="button"
-                className="onboarding-view__back-to-cloud"
-                onClick={handleBackWithTracking}
-                disabled={onboardingNavigationLocked}
-              >
-                <Icon name="chevron-left" size={14} />
-                <span>{t('settings.onboardingBack')}</span>
-              </button>
-              <OnboardingPanelHeader
-                title={t('settings.onboardingNewsletterTitle')}
-                body={t('settings.onboardingNewsletterBody')}
-              />
-              <label className="onboarding-view__email-field">
-                <span className="onboarding-view__email-label">
-                  {t('newsletter.label')}
-                </span>
-                <input
-                  className="onboarding-view__email-input"
-                  type="email"
-                  autoComplete="email"
-                  inputMode="email"
-                  placeholder={t('newsletter.placeholder')}
-                  value={profile.email}
-                  onChange={(event) =>
-                    updateProfile((current) => ({ ...current, email: event.target.value }))
-                  }
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {step === 3 ? (
             <div className="onboarding-view__panel onboarding-view__build">
               <span className="onboarding-view__build-badge">
                 <Icon name="sparkles" size={13} aria-hidden />
@@ -2993,7 +2731,6 @@ function OnboardingView({
                   type="button"
                   className="onboarding-view__ghost onboarding-view__build-back"
                   onClick={handleBackWithTracking}
-                  disabled={onboardingNavigationLocked}
                 >
                   {t('settings.onboardingBack')}
                 </button>
@@ -3003,7 +2740,6 @@ function OnboardingView({
                   onClick={() => {
                     void handleFinishToHome();
                   }}
-                  disabled={newsletterSubmitting}
                 >
                   {t('onboarding.buildHome')}
                 </button>
@@ -3013,8 +2749,6 @@ function OnboardingView({
                   onClick={() => {
                     void handleFinishToBuild();
                   }}
-                  disabled={newsletterSubmitting}
-                  aria-busy={newsletterSubmitting ? true : undefined}
                 >
                   <span>{t('onboarding.buildStart')}</span>
                 </button>
@@ -3022,7 +2756,7 @@ function OnboardingView({
             </div>
           ) : null}
 
-          {step === 3 ? null : (
+          {step === 2 ? null : (
             <div className="onboarding-view__actions">
               {step === 0 && amrLoginError ? (
                 <span className="onboarding-view__action-status is-error" role="alert">
@@ -3045,11 +2779,10 @@ function OnboardingView({
                   connectGateTooltip ? ' od-tooltip' : ''
                 }`}
                 onClick={handlePrimaryAction}
-                disabled={amrLoginPending || amrLoginCancelPending || newsletterSubmitting}
+                disabled={amrLoginPending || amrLoginCancelPending}
                 aria-disabled={connectStepBlocked || undefined}
                 data-tooltip={connectGateTooltip ?? undefined}
                 data-tooltip-placement="top"
-                aria-busy={newsletterSubmitting ? true : undefined}
               >
                 <span>{primaryActionLabel}</span>
               </button>

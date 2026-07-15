@@ -14,7 +14,7 @@ vi.mock('../../src/analytics/provider', () => ({
   }),
 }));
 
-const PRIVACY_POLICY_HREF = 'https://github.com/nexu-io/open-design/blob/main/PRIVACY.md';
+const PRIVACY_POLICY_HREF = 'https://github.com/linyeping/Metis/blob/main/PRIVACY.md';
 
 function renderModal(overrides?: { onShare?: () => void; onDecline?: () => void }) {
   const onShare = overrides?.onShare ?? vi.fn();

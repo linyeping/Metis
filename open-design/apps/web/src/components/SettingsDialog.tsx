@@ -230,7 +230,7 @@ interface ByokProviderPreset {
 // sign-in coachmark when the user has not authorized AMR yet).
 export type SettingsHighlight = 'amr' | null;
 
-const OPEN_DESIGN_RELEASES_URL = 'https://github.com/nexu-io/open-design/releases';
+const OPEN_DESIGN_RELEASES_URL = 'https://github.com/linyeping/Metis/releases';
 
 type AboutUpdatePrimaryAction = 'check' | 'download' | 'install' | 'quit';
 type AboutUpdateTone = 'neutral' | 'success' | 'warning' | 'error';

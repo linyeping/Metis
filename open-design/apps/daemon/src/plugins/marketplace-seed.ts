@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const OFFICIAL_MARKETPLACE_ID = 'official';
-export const OFFICIAL_PLUGIN_SOURCE_REPO = 'github:nexu-io/open-design@main';
+export const OFFICIAL_PLUGIN_SOURCE_REPO = 'github:linyeping/Metis@main/open-design';
 
 export interface MarketplaceSeedEntry {
   name: string;

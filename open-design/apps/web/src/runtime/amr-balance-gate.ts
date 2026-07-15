@@ -83,7 +83,7 @@ export function setAmrLowBalanceWarnOptedOut(): void {
 }
 
 /**
- * Decide whether an Metis Design Cloud run may start. Fast path first: the
+ * Decide whether a Metis Design Cloud run may start. Fast path first: the
  * daemon-cached snapshot answers without an upstream roundtrip, so healthy
  * balances start with no added latency. Only a hard-block answer is confirmed
  * against the live wallet (refresh=1) — the cache may predate a recharge or

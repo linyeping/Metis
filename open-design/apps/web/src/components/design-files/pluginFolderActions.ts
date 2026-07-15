@@ -24,7 +24,7 @@ export function buildPluginFolderAgentActionPrompt(
   ].join('\n');
 }
 
-// `contribute` opens a draft PR against the `nexu-io/open-design` community
+// `contribute` opens a draft PR against the Metis community repository
 // catalog. The agent drives the whole git/gh sequence — fork, branch, copy
 // the plugin into `plugins/community/<name>/`, commit, push, then hand the
 // `gh pr create --web` URL back so the author reviews and clicks Create in
@@ -37,7 +37,7 @@ export function buildPluginFolderAgentActionPrompt(
 //     plugin-folder buttons to satisfy.
 function buildContributePrompt(folderPath: string): string {
   return [
-    'Open a draft Pull Request that adds this generated plugin to the Metis Design community catalog at `nexu-io/open-design`.',
+    'Open a draft Pull Request that adds this generated plugin to the Metis Design community catalog at `linyeping/Metis`.',
     'The goal is to end this turn with a single PR URL the user can click in their browser to review the pre-filled form and press Create.',
     '',
     `Plugin folder: \`${folderPath}\``,
@@ -76,7 +76,7 @@ function buildPublishPrompt(folderPath: string): string {
     `Plugin folder: \`${folderPath}\``,
     `Manifest: \`${folderPath}/open-design.json\``,
     '',
-    'This is the **repository publish** action, NOT the registry-submission action — do NOT route through `od plugin publish --to open-design`. That command emits an Metis Design issue URL and belongs to the "Metis Design PR" button.',
+    'This is the **repository publish** action, NOT the registry-submission action — do NOT route through `od plugin publish --to open-design`. That command emits a Metis Design issue URL and belongs to the "Metis Design PR" button.',
     '',
     'Run this deterministic Metis Design CLI workflow from the current project workspace:',
     '',

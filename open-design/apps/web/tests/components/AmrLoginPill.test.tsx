@@ -77,7 +77,7 @@ describe('AmrAccountControl', () => {
     });
 
     expect(
-      screen.getByRole('group', { name: 'Open Design Cloud account status' }),
+      screen.getByRole('group', { name: 'Metis Design Cloud account status' }),
     ).toBeTruthy();
     expect(screen.getByText('Not signed in')).toBeTruthy();
     const signIn = screen.getByRole('button', { name: 'Sign in' });

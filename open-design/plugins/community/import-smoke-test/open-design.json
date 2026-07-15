@@ -8,11 +8,11 @@
   "license": "MIT",
   "author": {
     "name": "Open Design Community",
-    "url": "https://open-design.ai/marketplace/community"
+    "url": "https://github.com/linyeping/Metis"
   },
-  "homepage": "https://github.com/nexu-io/open-design/tree/main/plugins/community/import-smoke-test",
+  "homepage": "https://github.com/linyeping/Metis/tree/main/open-design/plugins/community/import-smoke-test",
   "plugin": {
-    "repo": "https://github.com/nexu-io/open-design/tree/main/plugins/community/import-smoke-test"
+    "repo": "https://github.com/linyeping/Metis/tree/main/open-design/plugins/community/import-smoke-test"
   },
   "tags": [
     "community",

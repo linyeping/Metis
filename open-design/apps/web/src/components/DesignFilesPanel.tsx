@@ -13,7 +13,6 @@ import {
   FILE_SYSTEM_READ_ERROR_MESSAGE,
   isFileSystemReadError,
 } from '../utils/fileSystemErrors';
-import { isVisualStabilityMode } from '../utils/visualStability';
 import { selectInitialDesignPreviewFile } from './design-files/designArtifacts';
 import type { PluginFolderAgentAction } from './design-files/pluginFolderActions';
 import { getPluginFolderCandidates } from './design-files/pluginFolders';
@@ -39,8 +38,7 @@ interface Props {
   // True while the host is reindexing a freshly replaced working dir. Drives
   // a loading overlay so the panel doesn't sit silently on the stale tree.
   reloading?: boolean;
-  // True while the chat agent is generating. The footer swaps its idle
-  // drop/upload hint for the typewriter "tip" line while a run is in flight.
+  // Kept in the public props for compatibility with existing callers.
   running?: boolean;
   files: ProjectFile[];
   // Persisted folders from `/api/projects/:id/folders`, including empty ones
@@ -166,112 +164,18 @@ function ActionNoticeView({ notice }: { notice: ActionNotice | null }) {
   );
 }
 
-// Useful-info tips that rotate one at a time in the panel footer, ordered as
-// a loose journey: file basics → feeding context → generating → iterating →
-// exporting and sharing. Upstream community and social promotions are not
-// part of the embedded Metis product experience.
-const USEFUL_TIPS: ReadonlyArray<keyof Dict> = [
-  'designFiles.usefulInfoTip',
-  'designFiles.usefulInfoTip2',
-  'designFiles.usefulInfoTip9',
-  'designFiles.usefulInfoTip10',
-  'designFiles.usefulInfoTip4',
-  'designFiles.usefulInfoTip11',
-  'designFiles.usefulInfoTip12',
-  'designFiles.usefulInfoTip13',
-  'designFiles.usefulInfoTip14',
-  'designFiles.usefulInfoTip15',
-  'designFiles.usefulInfoTip5',
-];
-const TIP_TYPE_MS = 32; // per-character typing speed
-const TIP_HOLD_MS = 3800; // pause on a fully-typed tip before advancing
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
-
-// Footer "tip" line that types out one tip at a time (typewriter), holds, then
-// advances to the next — mirroring Claude Design's empty-state hint. Under
-// prefers-reduced-motion the full tip is shown immediately and just cycles.
-function RotatingTip() {
-  const t = useT();
-  const [index, setIndex] = useState(0);
-  const [typed, setTyped] = useState('');
-  // Resolve tips each render but read them through a ref so the typing effect
-  // depends only on `index` — depending on the (re-created) array would reset
-  // the typewriter on every render and never advance.
-  const tipsRef = useRef<string[]>([]);
-  tipsRef.current = USEFUL_TIPS.map((key) => t(key));
-
-  useEffect(() => {
-    const tips = tipsRef.current;
-    const full = tips[index] ?? '';
-    if (isVisualStabilityMode()) {
-      setIndex(0);
-      setTyped(tips[0] ?? '');
-      return;
-    }
-    if (prefersReducedMotion()) {
-      setTyped(full);
-      if (tips.length < 2) return;
-      const hold = window.setTimeout(
-        () => setIndex((i) => (i + 1) % tips.length),
-        TIP_HOLD_MS,
-      );
-      return () => window.clearTimeout(hold);
-    }
-    setTyped('');
-    let i = 0;
-    let holdTimer = 0;
-    const typeTimer = window.setInterval(() => {
-      i += 1;
-      setTyped(full.slice(0, i));
-      if (i >= full.length) {
-        window.clearInterval(typeTimer);
-        if (tips.length < 2) return;
-        holdTimer = window.setTimeout(
-          () => setIndex((p) => (p + 1) % tips.length),
-          TIP_HOLD_MS,
-        );
-      }
-    }, TIP_TYPE_MS);
-    return () => {
-      window.clearInterval(typeTimer);
-      window.clearTimeout(holdTimer);
-    };
-  }, [index]);
-
-  return (
-    <div className="df-useful-info">
-      <div className="df-useful-info-head">
-        <Icon name="sparkles" size={12} />
-        <span className="df-useful-info-label">{t('designFiles.usefulInfoLabel')}</span>
-      </div>
-      <span className="df-useful-info-tip">
-        {typed}
-        <span className="df-tip-caret" aria-hidden />
-      </span>
-    </div>
-  );
-}
-
 /**
  * Full-panel browser for a project's `.od/projects/<id>/` folder. Mirrors
  * Claude Design's "Design Files" surface: a single-line toolbar (up / refresh
  * / breadcrumbs + actions), semantic sections (Folders, Stylesheets, Scripts,
  * Documents, Images …), hover-revealed row checkbox + menu, a right-side
- * preview pane, and a static "useful info" footer. Triggered as a sticky
- * first tab in FileWorkspace.
+ * preview pane, and a stable drag-and-drop footer. Triggered as a sticky first
+ * tab in FileWorkspace.
  */
 export function DesignFilesPanel({
   projectId,
   rootDirName,
   reloading,
-  running = false,
   files,
   folders,
   liveArtifacts,
@@ -1264,17 +1168,13 @@ export function DesignFilesPanel({
             </>
           )}
           <div className="df-footer-info">
-            {running ? (
-              <RotatingTip />
-            ) : (
-              <div className="df-drop-hint">
-                <span className="df-drop-hint-label">
-                  <Icon name="upload" size={12} />
-                  {t('designFiles.dropLabel')}
-                </span>
-                <span className="df-drop-hint-desc">{t('designFiles.dropDesc')}</span>
-              </div>
-            )}
+            <div className="df-drop-hint">
+              <span className="df-drop-hint-label">
+                <Icon name="upload" size={12} />
+                {t('designFiles.dropLabel')}
+              </span>
+              <span className="df-drop-hint-desc">{t('designFiles.dropDesc')}</span>
+            </div>
           </div>
         </div>
         {draggingFiles ? (

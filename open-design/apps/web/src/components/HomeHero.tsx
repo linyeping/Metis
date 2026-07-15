@@ -1229,9 +1229,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         <span className="home-hero__brand-name">Metis Design</span>
       </div>
       <h1 className="home-hero__title">{t('homeHero.title')}</h1>
-      <p className="home-hero__subtitle">
-        {t('homeHero.subtitlePrefix')}
-      </p>
 
       <div
         className={`home-hero__input-card${
@@ -2257,7 +2254,7 @@ function PluginPromptPresets({
   );
 }
 
-// A Website-clone text example ("Website URL to clone: https://open-design.ai") —
+// A website-clone text example with a neutral source URL.
 // pull the site out so the card can show the site's own favicon + bare domain
 // instead of the raw prompt line. Returns null for non-URL examples so the
 // generic text card renders unchanged.
@@ -4194,7 +4191,7 @@ function fallbackPluginPresetPrompt(
 const HOME_PROMPT_EXAMPLES: Record<Locale, Record<string, string[]>> = {
   "en": {
     "web-clone": [
-      "Website URL to clone: https://open-design.ai",
+      "Website URL to clone: https://example.com",
     ],
     prototype: [
       "Design a high-converting website for an AI CRM with a clear hero, feature story, proof points, and trial CTA",
@@ -4329,7 +4326,7 @@ const HOME_PROMPT_EXAMPLES: Record<Locale, Record<string, string[]>> = {
   },
   "zh-CN": {
     "web-clone": [
-      "想要复刻的网站链接：https://open-design.ai",
+      "想要复刻的网站链接：https://example.com",
     ],
     prototype: [
       "为 AI CRM 设计一个高转化官网，包含首屏、功能卖点、客户案例和清晰的试用入口",

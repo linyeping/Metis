@@ -3,7 +3,7 @@ const path = require('node:path')
 const { URL } = require('node:url')
 
 const DESIGN_RUNTIME_VERSION = '0.15.1'
-const DESIGN_RUNTIME_REPOSITORY = 'https://github.com/nexu-io/open-design'
+const DESIGN_RUNTIME_REPOSITORY = 'https://github.com/linyeping/Metis'
 const DESIGN_DAEMON_PORT = 17456
 const DESIGN_WEB_PORT = 17573
 const DESIGN_RUNTIME_RESOURCE_NAME = 'open-design-runtime'

@@ -43,7 +43,7 @@ const AUTHORING_PLUGIN = {
     od: {
       kind: 'scenario',
       taskKind: 'new-generation',
-      useCase: { query: 'Create an Open Design plugin for {{pluginGoal}}.' },
+      useCase: { query: 'Create a Metis Design plugin for {{pluginGoal}}.' },
       inputs: [
         {
           name: 'pluginGoal',
@@ -769,9 +769,9 @@ describe('HomeView prompt handoff', () => {
     ));
     expect(JSON.parse(String((applyCall?.[1] as RequestInit).body))).toMatchObject({
       inputs: {
-        artifactKind: 'Open Design plugin',
-        audience: 'Open Design plugin authors',
-        topic: 'packaging a reusable workflow as an Open Design plugin',
+        artifactKind: 'Metis Design plugin',
+        audience: 'Metis Design plugin authors',
+        topic: 'packaging a reusable workflow as a Metis Design plugin',
       },
     });
     await waitFor(() => {
@@ -781,17 +781,19 @@ describe('HomeView prompt handoff', () => {
     fireEvent.click(screen.getByTestId('home-hero-submit'));
 
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: PLUGIN_AUTHORING_PROMPT,
-      pluginId: 'od-new-generation',
-      appliedPluginSnapshotId: 'snap-default',
-      pluginInputs: {
-        artifactKind: 'Open Design plugin',
-        audience: 'Open Design plugin authors',
-        topic: 'packaging a reusable workflow as an Open Design plugin',
-      },
-      projectKind: 'other',
-    }));
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        prompt: PLUGIN_AUTHORING_PROMPT,
+        pluginId: 'od-new-generation',
+        appliedPluginSnapshotId: 'snap-default',
+        pluginInputs: {
+          artifactKind: 'Metis Design plugin',
+          audience: 'Metis Design plugin authors',
+          topic: 'packaging a reusable workflow as a Metis Design plugin',
+        },
+        projectKind: 'other',
+      }));
+    });
   });
 
   it('binds the Home rail Prototype chip locally and applies it on submit', async () => {

@@ -4174,8 +4174,8 @@ async function runPluginOpenDesignPr(rest) {
     console.log(`Usage:
   od plugin open-design-pr <folder> [--host github.com] [--owner github-login-or-fork-owner] [--dry-run] [--json]
 
-Copies a local plugin folder into plugins/community/<name>/ on the author's
-fork of nexu-io/open-design, pushes a branch, and opens the PR form with --web.`);
+Copies a local plugin folder into open-design/plugins/community/<name>/ on the
+author's fork of linyeping/Metis, pushes a branch, and opens the PR form with --web.`);
     process.exit(rest.length === 0 ? 2 : 0);
   }
   const folder = rest.find((a) => !a.startsWith('-') && a !== flags.host && a !== flags.owner);
@@ -4201,7 +4201,7 @@ fork of nexu-io/open-design, pushes a branch, and opens the PR form with --web.`
   const title = String(manifest.title ?? name).trim();
   const branch = `plugin/${name}-${Math.floor(Date.now() / 1000)}`;
   const tmpRoot = await fsp.mkdtemp(join(os.tmpdir(), 'od-open-design-pr-'));
-  const checkout = join(tmpRoot, 'open-design');
+  const checkout = join(tmpRoot, 'Metis');
   const steps = [];
   const run = async (label, command, args, opts = {}) => {
     steps.push({ label, command: [command, ...args].join(' ') });
@@ -4230,7 +4230,7 @@ fork of nexu-io/open-design, pushes a branch, and opens the PR form with --web.`
     return result;
   };
 
-  await run('fork', 'gh', ['repo', 'fork', 'nexu-io/open-design'], {
+  await run('fork', 'gh', ['repo', 'fork', 'linyeping/Metis'], {
     tolerate: (r) => /already exists|existing fork/i.test(`${r.stdout}\n${r.stderr}`),
   });
   await run('clone fork', 'git', [
@@ -4240,18 +4240,18 @@ fork of nexu-io/open-design, pushes a branch, and opens the PR form with --web.`
     '--branch', 'main',
     '--filter=blob:none',
     '--sparse',
-    `https://github.com/${target.owner}/open-design.git`,
+    `https://github.com/${target.owner}/Metis.git`,
     checkout,
   ], { timeout: 240_000 });
-  await run('sparse checkout', 'git', ['sparse-checkout', 'set', 'plugins/community'], { cwd: checkout });
+  await run('sparse checkout', 'git', ['sparse-checkout', 'set', 'open-design/plugins/community'], { cwd: checkout });
   await run('checkout branch', 'git', ['checkout', '-b', branch], { cwd: checkout });
-  const dest = join(checkout, 'plugins', 'community', name);
+  const dest = join(checkout, 'open-design', 'plugins', 'community', name);
   if (!flags['dry-run']) {
     await fsp.rm(dest, { recursive: true, force: true });
     await fsp.mkdir(dest, { recursive: true });
     await fsp.cp(absFolder, dest, { recursive: true, force: true, filter: (src) => !src.includes(`${absFolder}/.git`) });
   }
-  await run('git add', 'git', ['add', `plugins/community/${name}`], { cwd: checkout });
+  await run('git add', 'git', ['add', `open-design/plugins/community/${name}`], { cwd: checkout });
   await run('git commit', 'git', ['commit', '-m', `Add ${title} plugin`], { cwd: checkout });
   await run('git push branch', 'git', ['push', '-u', 'origin', branch], { cwd: checkout });
   const body = [
@@ -4262,14 +4262,14 @@ fork of nexu-io/open-design, pushes a branch, and opens the PR form with --web.`
   ].filter(Boolean).join('\n');
   const pr = await run('open PR form', 'gh', [
     'pr', 'create',
-    '--repo', 'nexu-io/open-design',
+    '--repo', 'linyeping/Metis',
     '--head', `${target.owner}:${branch}`,
     '--base', 'main',
     '--title', `Add ${title} plugin`,
     '--body', body,
     '--web',
   ], { cwd: checkout });
-  const prUrl = extractFirstUrl(pr.stdout || pr.stderr) ?? `https://github.com/${target.owner}/open-design/pull/new/${branch}`;
+  const prUrl = extractFirstUrl(pr.stdout || pr.stderr) ?? `https://github.com/${target.owner}/Metis/pull/new/${branch}`;
   emitPluginWorkflowResult(flags, {
     ok: true,
     action: 'open-design-pr',
@@ -4574,7 +4574,7 @@ marks a version unresolvable for new installs while preserving lockfile replay.`
     name: parsed.name,
     version: parsed.range,
     reason,
-    url: `https://github.com/nexu-io/open-design/issues/new?${params.toString()}`,
+    url: `https://github.com/linyeping/Metis/issues/new?${params.toString()}`,
     body,
   };
   if (flags.json) {
@@ -5020,7 +5020,7 @@ function printPluginHelp() {
   od plugin publish-repo <folder>         Create/update the author's public
                                           GitHub repo for a plugin folder.
   od plugin open-design-pr <folder>       Push a community-catalog branch and
-                                          open the nexu-io/open-design PR form.
+                                          open the linyeping/Metis PR form.
   od plugin publish <folder> --to open-design|anthropics-skills|awesome-agent-skills|clawhub|skills-sh
                                           Prepare a registry submission link.
   od plugin login [--host github.com]      Authenticate registry publishing via gh.
@@ -8059,7 +8059,7 @@ async function runDesignSystemImportShadcn(args) {
     console.log(`Usage:
   od design-systems import-shadcn <reference> [--name <name>] [--import-mode <mode>] [--craft <slugs>] [--json] [--daemon-url <url>]
 
-Imports a shadcn registry item as an Metis Design design system.
+Imports a shadcn registry item as a Metis Design design system.
 
   <reference>            "<owner>/<repo>/<item>" (e.g. shadcn/ui/theme-zinc)
                          or an https URL to a registry-item JSON document.

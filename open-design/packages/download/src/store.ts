@@ -71,7 +71,7 @@ async function ensureStoreDirs(basePath: string): Promise<void> {
 }
 
 /**
- * Ensure `basePath` is an Metis Design-owned managed base: create it if missing,
+ * Ensure `basePath` is a Metis Design-owned managed base: create it if missing,
  * claim an empty unmarked directory, reject foreign/non-empty or invalid-marker
  * directories, and guarantee the scratch layout exists.
  */

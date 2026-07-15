@@ -6883,7 +6883,7 @@ export async function startServer({
           'ROLE_MARKER_HALLUCINATION',
           `Run terminated: model emitted fabricated role marker (\`${marker}\`). ` +
             'No further tokens or tool calls accepted from this turn. ' +
-            'See https://github.com/nexu-io/open-design/issues/3247.',
+            'See https://github.com/linyeping/Metis/issues.',
           { retryable: true },
         ),
       );

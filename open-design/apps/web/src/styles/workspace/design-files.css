@@ -783,55 +783,6 @@
   line-height: 1.5;
   color: var(--text-muted);
 }
-.df-useful-info {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.df-useful-info-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--accent);
-}
-.df-useful-info-head > svg {
-  flex: 0 0 auto;
-  color: var(--accent);
-}
-.df-useful-info-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.df-useful-info-tip {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text);
-  min-height: 1.5em;
-}
-.df-tip-caret {
-  display: inline-block;
-  width: 1px;
-  height: 1em;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  background: var(--accent);
-  animation: df-tip-caret-blink 1s steps(1) infinite;
-}
-@keyframes df-tip-caret-blink {
-  0%, 50% { opacity: 1; }
-  50.01%, 100% { opacity: 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .df-tip-caret {
-    animation: none;
-    opacity: 0;
-  }
-}
-
 /* Drag-to-upload: the whole panel is a drop target. While dragging files
    over the Design Files panel, an accent overlay invites the drop. */
 .df-drop-overlay {

@@ -1,4 +1,4 @@
-// Starts the repository-built Open Design daemon and web modules under the
+// Starts the repository-built Metis Design daemon and web modules under the
 // Metis Electron runtime. No second desktop executable is involved.
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')

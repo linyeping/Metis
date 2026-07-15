@@ -208,7 +208,7 @@ interface PendingPluginUseHandoff {
 const AUTHORING_DEFAULT_SCENARIO_INPUTS = {
   artifactKind: 'Metis Design plugin',
   audience: 'Metis Design plugin authors',
-  topic: 'packaging a reusable workflow as an Metis Design plugin',
+  topic: 'packaging a reusable workflow as a Metis Design plugin',
 };
 
 

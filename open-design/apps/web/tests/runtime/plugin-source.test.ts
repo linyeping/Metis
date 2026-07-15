@@ -129,18 +129,18 @@ describe('derivePluginSourceLinks · url + local + bundled sources', () => {
     expect(out.sourceKindLabel).toBe('Local');
   });
 
-  it('routes bundled official sources to the Open Design repo', () => {
+  it('routes bundled official sources to the Metis repo', () => {
     const out = derivePluginSourceLinks(
       makeRecord({
         sourceKind: 'bundled',
         source:     'plugins/_official/scenarios/od-code-migration',
       }),
     );
-    expect(out.sourceUrl).toBe('https://github.com/nexu-io/open-design');
+    expect(out.sourceUrl).toBe('https://github.com/linyeping/Metis');
     expect(out.sourceKindLabel).toBe('Official');
-    expect(out.sourceLabel).toBe('nexu-io/open-design');
-    expect(out.authorProfileUrl).toBe('https://github.com/nexu-io/open-design');
-    expect(out.homepageUrl).toBe('https://github.com/nexu-io/open-design');
+    expect(out.sourceLabel).toBe('linyeping/Metis');
+    expect(out.authorProfileUrl).toBe('https://github.com/linyeping/Metis');
+    expect(out.homepageUrl).toBe('https://github.com/linyeping/Metis');
   });
 });
 
@@ -195,13 +195,13 @@ describe('derivePluginSourceLinks · author + contribute', () => {
         manifest: {
           name:    'p',
           version: '1.0.0',
-          homepage: 'https://github.com/nexu-io/open-design',
+          homepage: 'https://github.com/linyeping/Metis',
         } as InstalledPluginRecord['manifest'],
       }),
     );
-    expect(out.contributeUrl).toBe('https://github.com/nexu-io/open-design/issues/new');
+    expect(out.contributeUrl).toBe('https://github.com/linyeping/Metis/issues/new');
     expect(out.contributeOnGithub).toBe(true);
-    expect(out.homepageUrl).toBe('https://github.com/nexu-io/open-design');
+    expect(out.homepageUrl).toBe('https://github.com/linyeping/Metis');
   });
 
   it('drops malformed homepage values', () => {

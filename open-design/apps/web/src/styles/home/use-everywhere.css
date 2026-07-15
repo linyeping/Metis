@@ -305,55 +305,7 @@
   border-color: var(--accent-strong, var(--accent));
 }
 
-/* Top-bar entry chip — sibling of the existing settings cog avatar.
-   The chip wraps an icon + label so the affordance reads like an
-   intentional doc/help entry rather than a generic icon button. On
-   tight viewports the label collapses and the chip acts as an icon. */
-.use-everywhere-chip {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: var(--shadow-xs);
-  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out),
-    color 120ms var(--ease-out);
-}
-.use-everywhere-chip:hover {
-  background: var(--bg-subtle);
-  border-color: var(--border-strong);
-}
-.use-everywhere-chip:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.use-everywhere-chip__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-strong);
-  flex: 0 0 auto;
-}
-.use-everywhere-chip__label {
-  white-space: nowrap;
-}
-
 @media (max-width: 700px) {
-  .use-everywhere-chip__label {
-    display: none;
-  }
-  .use-everywhere-chip {
-    padding: 0 8px;
-  }
   .use-everywhere-modal__foot {
     flex-direction: column;
     align-items: stretch;
