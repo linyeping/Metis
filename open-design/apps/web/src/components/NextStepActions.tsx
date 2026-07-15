@@ -894,8 +894,10 @@ export function NextStepActions({
                   onMouseEnter={(e) => openSub('share', e.currentTarget.getBoundingClientRect())}
                   onClick={(e) => openSub('share', e.currentTarget.getBoundingClientRect())}
                 >
-                  <Icon name="share" size={14} className={styles.toolboxRowIcon} />
-                  <span className={styles.toolboxRowTitle}>{t('nextStep.share')}</span>
+                  <Icon name={canShare || canContribute ? 'share' : 'download'} size={14} className={styles.toolboxRowIcon} />
+                  <span className={styles.toolboxRowTitle}>
+                    {canShare || canContribute ? t('nextStep.share') : t('nextStep.download')}
+                  </span>
                   <Icon name="chevron-right" size={13} className={styles.toolboxRowArrow} />
                 </button>
               ) : null}

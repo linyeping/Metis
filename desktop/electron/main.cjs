@@ -85,6 +85,7 @@ let designRuntimeProcess = null
 let designRuntimeStartPromise = null
 let designRuntimeStopping = false
 let designLocale = 'zh-CN'
+let designThemeMode = 'light'
 let designViewOccluded = false
 let lastDesignBounds = null
 let lastDesignBoundsKey = ''
@@ -1324,6 +1325,42 @@ function routeDesignNavigation(url) {
   return false
 }
 
+function syncDesignTheme(webContents = designView?.webContents) {
+  if (!webContents || webContents.isDestroyed()) return Promise.resolve(false)
+  const theme = designThemeMode === 'dark' ? 'dark' : 'light'
+  try { designView?.setBackgroundColor(theme === 'dark' ? '#171717' : '#f7f7f5') } catch {}
+  return webContents.executeJavaScript(`(() => {
+    const theme = ${JSON.stringify(theme)};
+    const key = 'open-design:config';
+    let config = {};
+    try { config = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch {}
+    if (config.theme !== theme) localStorage.setItem(key, JSON.stringify({ ...config, theme }));
+    document.documentElement.dataset.metisEmbedded = 'true';
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.style.colorScheme = theme;
+    window.__metisManagedTheme = theme;
+    if (!window.__metisManagedThemeObserver) {
+      window.__metisManagedThemeObserver = new MutationObserver(() => {
+        const managedTheme = window.__metisManagedTheme;
+        if (document.documentElement.dataset.theme === managedTheme) return;
+        let nextConfig = {};
+        try { nextConfig = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch {}
+        localStorage.setItem(key, JSON.stringify({ ...nextConfig, theme: managedTheme }));
+        document.documentElement.setAttribute('data-theme', managedTheme);
+        document.documentElement.style.colorScheme = managedTheme;
+      });
+      window.__metisManagedThemeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['data-theme']
+      });
+    }
+    return true;
+  })()`, true).catch(error => {
+    log(`[design] unable to sync managed theme: ${error?.message || error}`)
+    return false
+  })
+}
+
 function ensureDesignView() {
   if (!mainWindow || mainWindow.isDestroyed() || !WebContentsView) return null
   if (designView && !designView.webContents.isDestroyed()) return designView
@@ -1368,6 +1405,7 @@ function ensureDesignView() {
   webContents.on('did-navigate-in-page', (_event, url) => emitDesignViewState({ state: 'ready', url, loading: false, error: '' }))
   webContents.on('page-title-updated', (_event, title) => emitDesignViewState({ title }))
   webContents.on('did-finish-load', () => {
+    void syncDesignTheme(webContents)
     const managedLocale = designLocale === 'en' ? 'en' : 'zh-CN'
     void webContents.executeJavaScript(`(() => {
       const locale = ${JSON.stringify(managedLocale)};
@@ -4378,6 +4416,8 @@ ipcMain.handle('metis:diagnostics', () => diagnosticsPayload())
 ipcMain.handle('metis:set-native-theme', (_event, mode) => {
   const next = ['light', 'dark', 'system'].includes(mode) ? mode : 'system'
   nativeTheme.themeSource = next
+  designThemeMode = next === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : next
+  void syncDesignTheme()
   return { ok: true, themeSource: nativeTheme.themeSource, shouldUseDarkColors: nativeTheme.shouldUseDarkColors }
 })
 ipcMain.handle('metis:save-diagnostics-bundle', () => saveDiagnosticsBundle())

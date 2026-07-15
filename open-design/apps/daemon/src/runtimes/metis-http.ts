@@ -156,6 +156,21 @@ function normalizePermission(payload: JsonRecord, status: string): JsonRecord {
   };
 }
 
+function runtimeStatusDetail(payload: JsonRecord): string | undefined {
+  const parts: string[] = [];
+  const message = String(payload.message || '').trim();
+  const model = String(payload.model || payload.model_name || payload.modelName || '').trim();
+  const tool = String(payload.tool || payload.tool_name || payload.toolName || '').trim();
+  const turn = Number(payload.turn || 0);
+  const toolCalls = Number(payload.tool_calls || payload.toolCalls || 0);
+  if (message) parts.push(message);
+  if (model) parts.push(`model: ${model}`);
+  if (tool) parts.push(`tool: ${tool}`);
+  if (turn > 0) parts.push(`turn: ${turn}`);
+  if (toolCalls > 0) parts.push(`tool calls: ${toolCalls}`);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
 export function metisEventToAgentEvent(event: JsonRecord): JsonRecord | null {
   const kind = String(event?.kind || event?.type || '');
   const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {};
@@ -195,7 +210,12 @@ export function metisEventToAgentEvent(event: JsonRecord): JsonRecord | null {
     return { type: 'status', label: 'waiting_permission', permission: normalizePermission(payload, kind.replace('permission_', '')) };
   }
   if (kind === 'runtime_status') {
-    return { type: 'status', label: String(payload.phase || payload.message || 'running') };
+    const detail = runtimeStatusDetail(payload);
+    return {
+      type: 'status',
+      label: String(payload.phase || payload.message || 'running'),
+      ...(detail ? { detail } : {}),
+    };
   }
   if (kind === 'done' || kind === 'run_completed') {
     const usage = payload.usage && typeof payload.usage === 'object' ? payload.usage : {};

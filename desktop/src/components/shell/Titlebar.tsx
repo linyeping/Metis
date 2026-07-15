@@ -46,6 +46,7 @@ export function shortcutLabel(keys: WorkspaceCardShortcut): string {
 
 export function Titlebar() {
   const appMode = useUiStore(state => state.appMode);
+  const productSurface = useUiStore(state => state.productSurface);
   const sidebarOpen = useUiStore(state => state.sidebarOpen);
   const setSidebarOpen = useUiStore(state => state.setSidebarOpen);
   const rightRailOpen = useUiStore(state => state.rightRailOpen);
@@ -59,7 +60,8 @@ export function Titlebar() {
   const { isFullScreen, isMaximized } = useWindowState();
   const [cardMenuOpen, setCardMenuOpen] = useState(false);
   const cardMenuRef = useRef<HTMLDivElement | null>(null);
-  const showWorkspaceCards = appMode !== 'chat';
+  const designActive = productSurface === 'design';
+  const showWorkspaceCards = appMode !== 'chat' && !designActive;
   const researchSourceOpen = appMode === 'chat' && rightRailOpen && workspaceCardVisibility.research;
   const sessionWorkspaceOpen = appMode === 'chat' && rightRailOpen && workspaceCardVisibility.session;
 
@@ -154,7 +156,7 @@ export function Titlebar() {
       <div className="titlebar-brand" aria-hidden="true" />
       <div className="titlebar-center" aria-hidden="true" />
       <div className="titlebar-actions">
-        <button
+        {!designActive && <button
           type="button"
           className="titlebar-layout-button"
           title={t('左栏')}
@@ -162,7 +164,7 @@ export function Titlebar() {
           onClick={() => setSidebarOpen(!sidebarOpen)}
         >
           <PanelLeft size={15} />
-        </button>
+        </button>}
         {showWorkspaceCards && <div className="titlebar-cards-menu-wrap" ref={cardMenuRef}>
           <button
             type="button"

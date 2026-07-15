@@ -60,7 +60,7 @@ import { Icon } from "./Icon";
 import { NextStepActions, type NextStepActionsVariant } from "./NextStepActions";
 import type { DesignToolboxActionId } from "../runtime/design-toolbox";
 import { copyToClipboard } from "../lib/copy-to-clipboard";
-import { useT } from "../i18n";
+import { useI18n, useT } from "../i18n";
 import { deriveFileOps, type FileOpEntry } from "../runtime/file-ops";
 import { dedupeToolUsesById } from "../runtime/tool-events";
 import {
@@ -2727,6 +2727,52 @@ function StatusPill({
   label: string;
   detail?: string | undefined;
 }) {
+  const { locale } = useI18n();
+  const zh = locale === 'zh-CN' || locale === 'zh-TW';
+  const semantic = {
+    model_routing: {
+      icon: 'sparkles' as const,
+      title: zh ? '正在选择合适的模型' : 'Selecting the best model',
+      summary: zh ? '模型路由' : 'Model routing',
+    },
+    llm_request: {
+      icon: 'upload' as const,
+      title: zh ? '已向模型发送请求' : 'Request sent to model',
+      summary: zh ? '模型请求' : 'Model request',
+    },
+    llm_response: {
+      icon: 'check' as const,
+      title: zh ? '模型响应已接收' : 'Model response received',
+      summary: zh ? '模型响应' : 'Model response',
+    },
+    tool_done: {
+      icon: 'hammer' as const,
+      title: zh ? '工具执行完成' : 'Tool completed',
+      summary: zh ? '工具结果' : 'Tool result',
+    },
+  }[label];
+
+  if (semantic) {
+    const content = (
+      <>
+        <span className="semantic-status-icon"><Icon name={semantic.icon} size={14} /></span>
+        <span className="semantic-status-copy">
+          <strong>{semantic.title}</strong>
+          <span>{detail ? semantic.summary : (zh ? '执行过程已记录' : 'Execution recorded')}</span>
+        </span>
+        {detail ? <Icon className="semantic-status-chevron" name="chevron-down" size={12} /> : null}
+      </>
+    );
+    return detail ? (
+      <details className="status-pill is-semantic" data-status={label}>
+        <summary>{content}</summary>
+        <div className="semantic-status-detail">{renderStatusDetail(detail)}</div>
+      </details>
+    ) : (
+      <div className="status-pill is-semantic" data-status={label}>{content}</div>
+    );
+  }
+
   const variant =
     label === "error" ? "error" : label === "warning" ? "warning" : undefined;
   return (

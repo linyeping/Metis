@@ -1,13 +1,11 @@
 import { useEffect } from 'react';
 import { useDesignStore } from '../../store/designStore';
 import { useUiStore } from '../../store/uiStore';
-import { DesignHome } from './DesignHome';
 import { DesignStudio } from './DesignStudio';
 
 export function DesignSurface() {
   const productSurface = useUiStore(state => state.productSurface);
   const language = useUiStore(state => state.language);
-  const page = useDesignStore(state => state.page);
   const initialize = useDesignStore(state => state.initialize);
   const setRuntime = useDesignStore(state => state.setRuntime);
   const setView = useDesignStore(state => state.setView);
@@ -28,9 +26,9 @@ export function DesignSurface() {
   }, [setRuntime, setView]);
 
   useEffect(() => {
-    if (productSurface === 'design' && page === 'studio') return;
+    if (productSurface === 'design') return;
     void window.metis?.designViewSetLayout?.({ visible: false });
-  }, [page, productSurface]);
+  }, [productSurface]);
 
   return (
     <section
@@ -38,7 +36,7 @@ export function DesignSurface() {
       data-active={productSurface === 'design'}
       aria-hidden={productSurface !== 'design'}
     >
-      {page === 'studio' ? <DesignStudio /> : <DesignHome />}
+      <DesignStudio />
     </section>
   );
 }

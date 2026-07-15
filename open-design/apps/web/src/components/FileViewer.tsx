@@ -11619,7 +11619,7 @@ function HtmlViewer({
           {canShare || canDownload ? (
             <div className="chrome-file-action-menus" ref={shareRef}>
               {canShare ? (
-                <div className="share-menu chrome-share-menu">
+                <div className="share-menu chrome-share-menu chrome-publish-menu">
                   <button
                     type="button"
                     className="chrome-action chrome-action-secondary chrome-action-with-label chrome-action-text-only"

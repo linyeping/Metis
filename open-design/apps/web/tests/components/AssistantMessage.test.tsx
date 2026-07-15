@@ -59,6 +59,31 @@ function producedFile(name: string): ProjectFile {
 }
 
 describe('AssistantMessage feedback gate', () => {
+  it('renders Metis runtime phases as semantic, foldable activity messages', () => {
+    render(
+      <AssistantMessage
+        message={baseMessage({
+          content: '',
+          events: [
+            { kind: 'status', label: 'model_routing', detail: 'model: claude' },
+            { kind: 'status', label: 'llm_request', detail: 'turn: 1' },
+            { kind: 'status', label: 'llm_response', detail: 'first token in 0.8s' },
+            { kind: 'status', label: 'tool_done', detail: 'tool: write_file' },
+          ],
+        })}
+        streaming={false}
+        projectId="proj-1"
+      />,
+    );
+
+    expect(screen.getByText('Selecting the best model')).toBeTruthy();
+    expect(screen.getByText('Request sent to model')).toBeTruthy();
+    expect(screen.getByText('Model response received')).toBeTruthy();
+    expect(screen.getByText('Tool completed')).toBeTruthy();
+    expect(screen.queryByText('model_routing')).toBeNull();
+    expect(document.querySelectorAll('details.status-pill.is-semantic')).toHaveLength(4);
+  });
+
   it('copies the raw assistant markdown from the completion footer', async () => {
     const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     const writeText = vi.fn().mockResolvedValue(undefined);

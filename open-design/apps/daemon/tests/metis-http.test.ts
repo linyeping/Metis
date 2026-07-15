@@ -29,6 +29,23 @@ describe('Metis native Design transport', () => {
     });
   });
 
+  it('keeps Metis runtime phases as semantic statuses with foldable detail', () => {
+    expect(metisEventToAgentEvent({
+      kind: 'runtime_status',
+      payload: {
+        phase: 'tool_done',
+        message: 'Tool write_file finished',
+        tool: 'write_file',
+        turn: 2,
+        tool_calls: 3,
+      },
+    })).toEqual({
+      type: 'status',
+      label: 'tool_done',
+      detail: 'Tool write_file finished · tool: write_file · turn: 2 · tool calls: 3',
+    });
+  });
+
   it('preserves actionable Metis permission requests and their resolved state', () => {
     expect(metisEventToAgentEvent({
       kind: 'permission_required',
