@@ -28,6 +28,12 @@ extraResources:
   # small (~50MB instead of ~1GB) and lets us ship pack updates without rebuilding.
   - from: resources/runtime-svc
     to: runtime-svc
+  - from: resources/open-design-runtime
+    to: open-design-runtime
+    filter:
+      - "**/*"
+      - "!**/*.map"
+      - "!**/.next/cache/**"
 # No spaces in the artifact name so the asset name stays stable across uploads
 # (gh CLI rewrites spaces to dots, which then mismatches latest.yml).
 artifactName: ${productName}-Setup-${version}.${ext}

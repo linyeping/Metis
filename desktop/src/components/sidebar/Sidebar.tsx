@@ -1,4 +1,4 @@
-import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Paintbrush, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
 import { createElement, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
 import { listActiveRuns } from '../../lib/api';
 import { navigateToSession } from '../../lib/modeNavigation';
@@ -14,6 +14,7 @@ import { useT } from '../../hooks/useT';
 export function Sidebar() {
   const t = useT();
   const setSettingsOpen = useUiStore(state => state.setSettingsOpen);
+  const setProductSurface = useUiStore(state => state.setProductSurface);
   const appMode = useUiStore(state => state.appMode);
   const setActiveSection = useUiStore(state => state.setActiveSection);
   const sessions = useSessionStore(state => state.sessions);
@@ -178,10 +179,16 @@ export function Sidebar() {
           )}
         </div>
       </div>
-      <button className="sidebar-settings-button" type="button" onClick={() => setSettingsOpen(true)}>
-        <Settings size={15} />
-        <span>{t('设置')}</span>
-      </button>
+      <div className="sidebar-product-actions">
+        <button className="sidebar-design-button" type="button" onClick={() => setProductSurface('design')}>
+          <Paintbrush size={15} />
+          <span>Design</span>
+        </button>
+        <button className="sidebar-settings-button" type="button" onClick={() => setSettingsOpen(true)}>
+          <Settings size={15} />
+          <span>{t('设置')}</span>
+        </button>
+      </div>
     </div>
   );
 }

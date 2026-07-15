@@ -17,6 +17,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, sideChat, rightRail, overlays }: AppShellProps) {
+  const productSurface = useUiStore(state => state.productSurface);
   const appMode = useUiStore(state => state.appMode);
   const rightRailOpen = useUiStore(state => state.rightRailOpen);
   const rightRailWidth = useUiStore(state => state.rightRailWidth);
@@ -136,6 +137,7 @@ export function AppShell({ backendReady, reconnect, pythonPath, sidebar, main, s
   return (
     <div
       className="app-shell"
+      data-product-surface={productSurface}
       data-app-mode={appMode}
       data-right-rail={rightRailEffectiveOpen}
       data-right-rail-layout={rightRailLayoutOpen}

@@ -1,0 +1,11 @@
+{
+  "schema": "metis.design_runtime.v1",
+  "provider": "open-design",
+  "version": "0.15.1",
+  "repository": "https://github.com/nexu-io/open-design",
+  "developmentSource": "../open-design-main",
+  "resource": "open-design-runtime",
+  "buildCommand": "npm run prepare-design-runtime",
+  "transport": "loopback-http",
+  "packaged": true
+}

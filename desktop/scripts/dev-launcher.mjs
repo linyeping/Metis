@@ -17,6 +17,7 @@ let renderer = null;
 let electron = null;
 let shuttingDown = false;
 let resolvedPort = preferredPort;
+let electronGraphicsMode = process.env.METIS_GRAPHICS_MODE || '';
 
 function normalizePort(value, fallback) {
   const port = Number.parseInt(String(value || ''), 10);
@@ -141,6 +142,7 @@ function spawnElectron(port) {
       env: {
         ...process.env,
         METIS_DESKTOP_DEV_SERVER: rendererUrl(port),
+        ...(electronGraphicsMode ? { METIS_GRAPHICS_MODE: electronGraphicsMode } : {}),
       },
       stdio: ['inherit', 'pipe', 'pipe'],
       windowsHide: true,
@@ -150,6 +152,11 @@ function spawnElectron(port) {
   prefixPipe(child.stderr, '[dev:electron]', process.stderr);
   child.once('exit', code => {
     if (shuttingDown) return;
+    if (code === 75 && electronGraphicsMode !== 'software') {
+      electronGraphicsMode = 'software';
+      electron = spawnElectron(port);
+      return;
+    }
     shutdown(code || 0);
   });
   return child;

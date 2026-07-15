@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, screen, shell, Tray, WebContentsView } = require('electron')
 const { spawn } = require('node:child_process')
+const { randomUUID } = require('node:crypto')
 const fsSync = require('node:fs')
 const fs = require('node:fs/promises')
 const net = require('node:net')
@@ -14,7 +15,25 @@ const {
 } = require('./data-root.cjs')
 const { getBackendLogPath, startBackend, stopBackend, tailBackendLog } = require('./backend.cjs')
 const { registerConnectorIpc } = require('./oauth.cjs')
-const { applyGraphicsMode } = require('./graphics-mode.cjs')
+const { applyGraphicsMode, createGraphicsFallbackRecord, resolveGraphicsMode } = require('./graphics-mode.cjs')
+const {
+  DESIGN_DAEMON_PORT,
+  DESIGN_RUNTIME_REPOSITORY,
+  DESIGN_RUNTIME_VERSION,
+  DESIGN_WEB_PORT,
+  buildDesignPageUrl,
+  buildDesignProjectUrl,
+  buildManagedDesignConfig,
+  buildMetisAgentProfile,
+  buildPnpmSpawnCommand,
+  isAllowedDesignNavigation,
+  normalizeDesignProject,
+  normalizeDesignSystem,
+  parseLoopbackOrigin,
+  readDesignSourceVersion,
+  resolveBundledDesignRuntime,
+  resolveDesignSourceRoot
+} = require('./design-runtime.cjs')
 const {
   HARDENED_WEB_PREFERENCES,
   isAllowedAppNavigation,
@@ -60,6 +79,32 @@ function compareVersions(a, b) {
 
 let mainWindow = null
 let previewView = null
+let designView = null
+let designRuntimeProcess = null
+let designRuntimeStartPromise = null
+let designRuntimeStopping = false
+let designLocale = 'zh-CN'
+let designViewOccluded = false
+let lastDesignBounds = null
+let lastDesignBoundsKey = ''
+let designRuntimeState = {
+  state: 'idle',
+  url: '',
+  error: '',
+  version: DESIGN_RUNTIME_VERSION,
+  repository: DESIGN_RUNTIME_REPOSITORY,
+  sourceRoot: '',
+  logs: []
+}
+let designViewState = {
+  state: 'hidden',
+  url: '',
+  title: '',
+  visible: false,
+  loading: false,
+  error: '',
+  bounds: null
+}
 let previewTabId = ''
 let lastPreviewBoundsKey = ''
 let pendingUpdateInfo = null
@@ -118,6 +163,16 @@ const PREVIEW_WEB_PREFERENCES = Object.freeze({
   allowRunningInsecureContent: false
 })
 
+const DESIGN_WEB_PREFERENCES = Object.freeze({
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+  webSecurity: true,
+  allowRunningInsecureContent: false,
+  webviewTag: false,
+  partition: 'persist:metis-design'
+})
+
 const PREVIEW_RISK_PATTERN = /(\blog\s*in\b|\bsign\s*in\b|\bsign\s*up\b|\boauth\b|\bauthori[sz]e\b|\bgrant\b|\ballow\b|\bconsent\b|\bpassword\b|\bpasscode\b|\botp\b|\bsubmit\b|\bsend\b|\bpost\b|\bpublish\b|\bshare\b|\bupload\b|\bdelete\b|\bremove\b|\bpurchase\b|\bbuy\b|\bcheckout\b|\bpay\b|\bpayment\b|\bsubscribe\b|登录|登陆|注册|授权|允许|同意|密码|验证码|提交|发送|发布|分享|上传|删除|移除|购买|支付|付款|结账|订阅|确认)/i
 const PREVIEW_AUTH_URL_PATTERN = /(accounts\.google\.com|github\.com\/login|\/oauth|\/authorize|\/auth\/|login|signin|sign-in|signup|sign-up)/i
 const PREVIEW_SENSITIVE_INPUT_TYPES = new Set(['password', 'file'])
@@ -128,14 +183,60 @@ try {
   nodePty = require('node-pty')
 } catch {}
 
-// Native GPU processes currently crash with 0x80000003 on affected Windows
-// installations. Keep the verified compatibility path there; hardware remains the
-// default elsewhere and can be forced on Windows with METIS_GRAPHICS_MODE=hardware.
-applyGraphicsMode(app, process.env.METIS_GRAPHICS_MODE, message => {
-  process.stdout.write(`${message}\n`)
-})
+// A detached development launcher can close its output pipe while Electron keeps
+// running. Ignore that transport error instead of terminating the main process.
+for (const stream of [process.stdout, process.stderr]) {
+  stream?.on?.('error', error => {
+    if (error?.code !== 'EPIPE') throw error
+  })
+}
 
 const storageInfo = resolveDataRootInfo()
+const graphicsFallbackPath = path.join(storageInfo.electronUserData, 'graphics-fallback.json')
+const graphicsModeArg = process.argv.find(value => String(value).startsWith('--metis-graphics-mode='))
+const configuredGraphicsMode = graphicsModeArg
+  ? String(graphicsModeArg).slice('--metis-graphics-mode='.length)
+  : process.env.METIS_GRAPHICS_MODE
+let graphicsFallbackRecord = null
+try {
+  graphicsFallbackRecord = JSON.parse(fsSync.readFileSync(graphicsFallbackPath, 'utf8'))
+} catch {}
+const graphicsSelection = resolveGraphicsMode(
+  configuredGraphicsMode,
+  graphicsFallbackRecord,
+  process.platform,
+  process.versions.electron
+)
+
+// Hardware composition is the default. If Chromium's GPU process crashes on
+// this runtime, restart once in software mode and cache that device fallback.
+const activeGraphicsMode = applyGraphicsMode(app, graphicsSelection.mode, message => {
+  process.stdout.write(`${message}\n`)
+})
+let graphicsFallbackScheduled = false
+app.on('child-process-gone', (_event, details = {}) => {
+  if (graphicsFallbackScheduled || activeGraphicsMode !== 'hardware' || graphicsSelection.source === 'explicit') return
+  if (String(details.type || '').toLowerCase() !== 'gpu') return
+  graphicsFallbackScheduled = true
+  try {
+    fsSync.mkdirSync(path.dirname(graphicsFallbackPath), { recursive: true })
+    fsSync.writeFileSync(
+      graphicsFallbackPath,
+      `${JSON.stringify(createGraphicsFallbackRecord(process.versions.electron), null, 2)}\n`,
+      'utf8'
+    )
+  } catch {}
+  const relaunchArgs = process.argv.slice(1)
+    .filter(value => !String(value).startsWith('--metis-graphics-mode='))
+    .concat('--metis-graphics-mode=software')
+  if (process.env.METIS_DESKTOP_DEV_SERVER) {
+    app.exit(75)
+    return
+  }
+  app.relaunch({ args: relaunchArgs })
+  app.exit(0)
+})
+
 try {
   fsSync.mkdirSync(storageInfo.electronUserData, { recursive: true })
   app.setPath('userData', storageInfo.electronUserData)
@@ -144,6 +245,8 @@ try {
 }
 if (!process.env.METIS_HOME) process.env.METIS_HOME = storageInfo.metisHome
 if (!process.env.METIS_DATA_ROOT) process.env.METIS_DATA_ROOT = storageInfo.dataRoot
+if (!process.env.METIS_DESIGN_BRIDGE_TOKEN) process.env.METIS_DESIGN_BRIDGE_TOKEN = randomUUID()
+if (!process.env.METIS_DESIGN_ROOT) process.env.METIS_DESIGN_ROOT = path.join(storageInfo.metisHome, 'design', 'projects')
 
 const isSmokeMode = process.env.METIS_DESKTOP_SMOKE === '1'
 const gotSingleInstanceLock = isSmokeMode || app.requestSingleInstanceLock()
@@ -172,6 +275,447 @@ function log(message) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)))
+}
+
+function compactDesignLogs(lines) {
+  return lines.map(line => String(line || '').trim()).filter(Boolean).slice(-80)
+}
+
+function designRuntimePayload(patch = {}) {
+  designRuntimeState = {
+    ...designRuntimeState,
+    ...patch,
+    logs: compactDesignLogs(patch.logs || designRuntimeState.logs),
+    updatedAt: new Date().toISOString()
+  }
+  return { ...designRuntimeState }
+}
+
+function emitDesignRuntimeState(patch = {}) {
+  const payload = designRuntimePayload(patch)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('metis:design-runtime-state', payload)
+  }
+  return payload
+}
+
+function designViewPayload(patch = {}) {
+  designViewState = {
+    ...designViewState,
+    ...patch,
+    bounds: patch.bounds === null
+      ? null
+      : patch.bounds
+        ? {
+            x: Math.max(0, Math.round(Number(patch.bounds.x) || 0)),
+            y: Math.max(0, Math.round(Number(patch.bounds.y) || 0)),
+            width: Math.max(0, Math.round(Number(patch.bounds.width) || 0)),
+            height: Math.max(0, Math.round(Number(patch.bounds.height) || 0))
+          }
+        : designViewState.bounds,
+    updatedAt: new Date().toISOString()
+  }
+  const webContents = designView?.webContents
+  if (webContents && !webContents.isDestroyed()) {
+    designViewState.url = webContents.getURL() || designViewState.url
+    designViewState.title = webContents.getTitle() || designViewState.title
+  }
+  return { ok: Boolean(webContents && !webContents.isDestroyed()), ...designViewState }
+}
+
+function emitDesignViewState(patch = {}) {
+  const payload = designViewPayload(patch)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('metis:design-view-state', payload)
+  }
+  return payload
+}
+
+async function designHealthReady(runtimeUrl) {
+  const origin = parseLoopbackOrigin(runtimeUrl)
+  if (!origin) return false
+  try {
+    const response = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(1600) })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+async function waitForDesignRuntime(runtimeUrl, child, timeoutMs = 120000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (child && child.exitCode !== null) return false
+    if (await designHealthReady(runtimeUrl)) return true
+    await delay(500)
+  }
+  return false
+}
+
+async function designRuntimeVersionReady(runtimeUrl) {
+  const origin = parseLoopbackOrigin(runtimeUrl)
+  if (!origin) return false
+  try {
+    const response = await fetch(`${origin}/api/health`, { signal: AbortSignal.timeout(1600) })
+    if (!response.ok) return false
+    const payload = await response.json()
+    return payload?.ok === true && String(payload?.version || '') === DESIGN_RUNTIME_VERSION
+  } catch {
+    return false
+  }
+}
+
+async function configureManagedDesignRuntime(runtimeUrl) {
+  try {
+    const currentResponse = await fetch(`${runtimeUrl}/api/app-config`, {
+      signal: AbortSignal.timeout(5000)
+    })
+    if (!currentResponse.ok) throw new Error(`GET /api/app-config returned ${currentResponse.status}`)
+    const currentPayload = await currentResponse.json()
+    const next = buildManagedDesignConfig(currentPayload?.config)
+    const response = await fetch(`${runtimeUrl}/api/app-config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+      signal: AbortSignal.timeout(5000)
+    })
+    if (!response.ok) throw new Error(`PUT /api/app-config returned ${response.status}`)
+    appendDesignRuntimeLog('metis', 'Managed mode configured; upstream onboarding and telemetry disabled.')
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+}
+
+function appendDesignRuntimeLog(source, chunk) {
+  const next = String(chunk || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => `[${source}] ${line}`)
+  if (!next.length) return
+  emitDesignRuntimeState({ logs: [...designRuntimeState.logs, ...next] })
+}
+
+async function startDesignRuntime(locale) {
+  if (locale === 'en' || locale === 'en-US') designLocale = 'en'
+  if (locale === 'zh' || locale === 'zh-CN') designLocale = 'zh-CN'
+  if (designRuntimeState.state === 'ready' && await designHealthReady(designRuntimeState.url)) {
+    return designRuntimePayload()
+  }
+  if (designRuntimeStartPromise) return designRuntimeStartPromise
+
+  designRuntimeStartPromise = (async () => {
+    const configuredOrigin = parseLoopbackOrigin(process.env.METIS_DESIGN_DEV_SERVER)
+    if (configuredOrigin) {
+      emitDesignRuntimeState({ state: 'starting', url: configuredOrigin, error: '', sourceRoot: 'external' })
+      const ready = await waitForDesignRuntime(configuredOrigin, null, 15000)
+      return ready
+        ? emitDesignRuntimeState({ state: 'ready', url: configuredOrigin, error: '' })
+        : emitDesignRuntimeState({ state: 'error', error: `无法连接 Design runtime: ${configuredOrigin}` })
+    }
+
+    const bundledRuntime = resolveBundledDesignRuntime({
+      resourcesPath: process.resourcesPath,
+      mainDir: __dirname
+    })
+    if (app.isPackaged && !bundledRuntime) {
+      return emitDesignRuntimeState({
+        state: 'unavailable',
+        error: '当前安装包中的 Design Runtime Pack 不完整，请重新安装 Metis。',
+        sourceRoot: ''
+      })
+    }
+
+    if (bundledRuntime && app.isPackaged) {
+      const daemonPort = await findAvailableDevPort(DESIGN_DAEMON_PORT, 40)
+      const webPort = await findAvailableDevPort(DESIGN_WEB_PORT, 40)
+      const runtimeUrl = `http://${DEV_SERVER_HOST}:${webPort}`
+      if (!backendPort) {
+        return emitDesignRuntimeState({
+          state: 'error',
+          error: 'Metis backend 尚未就绪，无法启动受管 Design Agent。',
+          sourceRoot: bundledRuntime.root
+        })
+      }
+      const designDataRoot = path.join(storageInfo.metisHome, 'design')
+      const designAgentProfilePath = path.join(designDataRoot, 'agents.local.json')
+      const designAgentProfile = buildMetisAgentProfile({
+        executable: process.execPath,
+        bridgeScript: path.join(__dirname, 'design-agent-bridge.cjs'),
+        backendUrl: `http://${DEV_SERVER_HOST}:${backendPort}`,
+        designRoot: process.env.METIS_DESIGN_ROOT,
+        stateFile: path.join(designDataRoot, 'bridge-sessions.json'),
+        token: process.env.METIS_DESIGN_BRIDGE_TOKEN
+      })
+      fsSync.mkdirSync(designDataRoot, { recursive: true })
+      fsSync.writeFileSync(designAgentProfilePath, `${JSON.stringify(designAgentProfile, null, 2)}\n`, 'utf8')
+      designRuntimeStopping = false
+      emitDesignRuntimeState({
+        state: 'starting',
+        url: runtimeUrl,
+        error: '',
+        sourceRoot: bundledRuntime.root,
+        version: DESIGN_RUNTIME_VERSION,
+        logs: []
+      })
+      const child = spawn(process.execPath, [path.join(__dirname, 'design-packaged-launcher.cjs')], {
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          METIS_DESIGN_RUNTIME_ROOT: bundledRuntime.root,
+          OD_DATA_DIR: designDataRoot,
+          OD_AGENT_PROFILES_CONFIG: designAgentProfilePath,
+          OD_PORT: String(daemonPort),
+          OD_WEB_PORT: String(webPort),
+          [Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH']: [
+            path.dirname(process.execPath),
+            process.env[Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH'] || ''
+          ].filter(Boolean).join(path.delimiter),
+          NO_COLOR: '1'
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      designRuntimeProcess = child
+      child.stdout?.on('data', chunk => appendDesignRuntimeLog('design', chunk))
+      child.stderr?.on('data', chunk => appendDesignRuntimeLog('design:err', chunk))
+      child.on('error', error => emitDesignRuntimeState({ state: 'error', error: error?.message || String(error) }))
+      child.on('exit', (code, signal) => {
+        if (designRuntimeProcess === child) designRuntimeProcess = null
+        if (designRuntimeStopping || app.isQuitting) return
+        emitDesignRuntimeState({ state: 'error', error: `Design runtime 已退出 (${code ?? signal ?? 'unknown'})。` })
+        hideDesignView()
+      })
+      const ready = await waitForDesignRuntime(runtimeUrl, child)
+      if (!ready) {
+        try { child.kill() } catch {}
+        return emitDesignRuntimeState({ state: 'error', error: designRuntimeState.error || 'Design runtime 启动超时。' })
+      }
+      const managed = await configureManagedDesignRuntime(runtimeUrl)
+      if (!managed.ok) {
+        try { child.kill() } catch {}
+        return emitDesignRuntimeState({ state: 'error', error: `Design runtime 受管配置失败：${managed.error}` })
+      }
+      return emitDesignRuntimeState({ state: 'ready', url: runtimeUrl, error: '' })
+    }
+
+    const sourceRoot = resolveDesignSourceRoot({ appPath: app.getAppPath(), mainDir: __dirname })
+    if (!sourceRoot) {
+      return emitDesignRuntimeState({
+        state: 'unavailable',
+        error: '未找到 open-design-main。可通过 METIS_DESIGN_SOURCE_ROOT 指定源码目录。',
+        sourceRoot: ''
+      })
+    }
+    const version = readDesignSourceVersion(sourceRoot)
+    if (version !== DESIGN_RUNTIME_VERSION) {
+      return emitDesignRuntimeState({
+        state: 'error',
+        error: `Open Design 版本不匹配：需要 ${DESIGN_RUNTIME_VERSION}，当前 ${version || 'unknown'}。`,
+        sourceRoot,
+        version: version || DESIGN_RUNTIME_VERSION
+      })
+    }
+    if (!fsSync.existsSync(path.join(sourceRoot, 'node_modules'))) {
+      return emitDesignRuntimeState({
+        state: 'unavailable',
+        error: 'Open Design 依赖尚未安装，请先在源码目录运行 pnpm install。',
+        sourceRoot,
+        version
+      })
+    }
+
+    const existingRuntimeUrl = `http://${DEV_SERVER_HOST}:${DESIGN_WEB_PORT}`
+    if (await designRuntimeVersionReady(existingRuntimeUrl)) {
+      emitDesignRuntimeState({
+        state: 'starting',
+        url: existingRuntimeUrl,
+        error: '',
+        sourceRoot,
+        version,
+        logs: ['[design] reusing healthy Open Design 0.15.1 runtime']
+      })
+      const managed = await configureManagedDesignRuntime(existingRuntimeUrl)
+      return managed.ok
+        ? emitDesignRuntimeState({ state: 'ready', url: existingRuntimeUrl, error: '' })
+        : emitDesignRuntimeState({ state: 'error', error: `Design runtime 受管配置失败：${managed.error}` })
+    }
+
+    const daemonPort = await findAvailableDevPort(DESIGN_DAEMON_PORT, 40)
+    const webPort = await findAvailableDevPort(DESIGN_WEB_PORT, 40)
+    const runtimeUrl = `http://${DEV_SERVER_HOST}:${webPort}`
+    if (!backendPort) {
+      return emitDesignRuntimeState({
+        state: 'error',
+        error: 'Metis backend 尚未就绪，无法启动受管 Design Agent。',
+        sourceRoot,
+        version
+      })
+    }
+    const designDataRoot = path.join(storageInfo.metisHome, 'design')
+    const designAgentProfilePath = path.join(designDataRoot, 'agents.local.json')
+    const designAgentProfile = buildMetisAgentProfile({
+      executable: process.execPath,
+      bridgeScript: path.join(__dirname, 'design-agent-bridge.cjs'),
+      backendUrl: `http://${DEV_SERVER_HOST}:${backendPort}`,
+      designRoot: process.env.METIS_DESIGN_ROOT,
+      stateFile: path.join(designDataRoot, 'bridge-sessions.json'),
+      token: process.env.METIS_DESIGN_BRIDGE_TOKEN
+    })
+    fsSync.mkdirSync(designDataRoot, { recursive: true })
+    fsSync.writeFileSync(designAgentProfilePath, `${JSON.stringify(designAgentProfile, null, 2)}\n`, 'utf8')
+    const command = buildPnpmSpawnCommand([
+      'tools-dev', 'run', 'web',
+      '--namespace', 'metis',
+      '--daemon-port', String(daemonPort),
+      '--web-port', String(webPort)
+    ])
+    designRuntimeStopping = false
+    emitDesignRuntimeState({ state: 'starting', url: runtimeUrl, error: '', sourceRoot, version, logs: [] })
+    const child = spawn(command.executable, command.args, {
+      cwd: sourceRoot,
+      env: {
+        ...process.env,
+        [Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH']: [
+          path.dirname(process.execPath),
+          process.env[Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH'] || ''
+        ].filter(Boolean).join(path.delimiter),
+        OD_DATA_DIR: designDataRoot,
+        OD_AGENT_PROFILES_CONFIG: designAgentProfilePath,
+        NO_COLOR: '1'
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
+    })
+    designRuntimeProcess = child
+    child.stdout?.on('data', chunk => appendDesignRuntimeLog('design', chunk))
+    child.stderr?.on('data', chunk => appendDesignRuntimeLog('design:err', chunk))
+    child.on('error', error => {
+      emitDesignRuntimeState({ state: 'error', error: error?.message || String(error) })
+    })
+    child.on('exit', (code, signal) => {
+      if (designRuntimeProcess === child) designRuntimeProcess = null
+      if (designRuntimeStopping || app.isQuitting) return
+      emitDesignRuntimeState({
+        state: 'error',
+        error: `Design runtime 已退出 (${code ?? signal ?? 'unknown'})。`
+      })
+      hideDesignView()
+    })
+
+    const ready = await waitForDesignRuntime(runtimeUrl, child)
+    if (!ready) {
+      try { child.kill() } catch {}
+      return emitDesignRuntimeState({
+        state: 'error',
+        error: designRuntimeState.error || 'Design runtime 启动超时。'
+      })
+    }
+    const managed = await configureManagedDesignRuntime(runtimeUrl)
+    if (!managed.ok) {
+      try { child.kill() } catch {}
+      return emitDesignRuntimeState({
+        state: 'error',
+        error: `Design runtime 受管配置失败：${managed.error}`
+      })
+    }
+    return emitDesignRuntimeState({ state: 'ready', url: runtimeUrl, error: '' })
+  })().finally(() => {
+    designRuntimeStartPromise = null
+  })
+  return designRuntimeStartPromise
+}
+
+function stopDesignRuntime() {
+  designRuntimeStopping = true
+  const child = designRuntimeProcess
+  designRuntimeProcess = null
+  try { child?.kill() } catch {}
+  if (!app.isPackaged && designRuntimeState.sourceRoot && designRuntimeState.sourceRoot !== 'external') {
+    const command = buildPnpmSpawnCommand(['tools-dev', 'stop', '--namespace', 'metis'])
+    try {
+      const stopper = spawn(command.executable, command.args, {
+        cwd: designRuntimeState.sourceRoot,
+        stdio: 'ignore',
+        windowsHide: true,
+        detached: true
+      })
+      stopper.unref()
+    } catch {}
+  }
+  emitDesignRuntimeState({ state: 'idle', url: '', error: '' })
+}
+
+async function designApiRequest(apiPath, options = {}) {
+  const status = await startDesignRuntime()
+  if (status.state !== 'ready' || !status.url) {
+    throw new Error(status.error || 'Design runtime 未就绪。')
+  }
+  const response = await fetch(`${status.url}${apiPath}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    signal: AbortSignal.timeout(15000)
+  })
+  if (!response.ok) {
+    let detail = ''
+    try {
+      const body = await response.json()
+      detail = body?.error?.message || body?.error || body?.message || ''
+    } catch {}
+    throw new Error(detail || `Design runtime 请求失败 (HTTP ${response.status})`)
+  }
+  return response.json()
+}
+
+async function listDesignProjects() {
+  try {
+    const payload = await designApiRequest('/api/projects')
+    return { ok: true, projects: Array.isArray(payload?.projects) ? payload.projects.map(normalizeDesignProject) : [] }
+  } catch (error) {
+    return { ok: false, projects: [], error: error?.message || String(error) }
+  }
+}
+
+async function listDesignSystems() {
+  try {
+    const payload = await designApiRequest('/api/design-systems')
+    const systems = Array.isArray(payload?.designSystems)
+      ? payload.designSystems.map(normalizeDesignSystem).filter(system => system.id)
+      : []
+    return { ok: true, systems }
+  } catch (error) {
+    return { ok: false, systems: [], error: error?.message || String(error) }
+  }
+}
+
+async function createDesignProject(payload = {}) {
+  const name = String(payload.name || '').trim().slice(0, 120)
+  if (!name) return { ok: false, error: '请输入项目名称。' }
+  const kind = ['prototype', 'deck', 'template', 'other'].includes(payload.kind) ? payload.kind : 'prototype'
+  const fidelity = payload.fidelity === 'wireframe' ? 'wireframe' : 'high-fidelity'
+  try {
+    const body = await designApiRequest('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: randomUUID(),
+        name,
+        skillId: null,
+        designSystemId: payload.designSystemId || null,
+        pendingPrompt: String(payload.prompt || '').trim() || undefined,
+        metadata: { kind, fidelity, nameSource: 'user' }
+      })
+    })
+    const project = normalizeDesignProject(body?.project)
+    return {
+      ok: Boolean(project.id),
+      project,
+      conversationId: String(body?.conversationId || ''),
+      url: buildDesignProjectUrl(designRuntimeState.url, project.id)
+    }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
 }
 
 function trimUrlInput(value) {
@@ -756,6 +1300,203 @@ function ensurePreviewView() {
   webContents.on('page-title-updated', (_event, title) => emitPreviewState({ title }))
 
   return previewView
+}
+
+function hideDesignView() {
+  lastDesignBoundsKey = 'hidden'
+  try { designView?.setVisible?.(false) } catch {}
+  try { designView?.setBounds({ x: 0, y: 0, width: 0, height: 0 }) } catch {}
+  emitDesignViewState({ state: designViewOccluded ? 'occluded' : 'hidden', visible: false })
+}
+
+function disposeDesignView() {
+  if (!designView) return
+  try { mainWindow?.contentView?.removeChildView?.(designView) } catch {}
+  try {
+    if (!designView.webContents.isDestroyed()) designView.webContents.close()
+  } catch {}
+  designView = null
+  lastDesignBounds = null
+  lastDesignBoundsKey = ''
+  designViewState = { state: 'hidden', url: '', title: '', visible: false, loading: false, error: '', bounds: null }
+}
+
+function routeDesignNavigation(url) {
+  if (isAllowedDesignNavigation(url, designRuntimeState.url)) return true
+  if (isSafeExternalUrl(url)) openExternalSafe(url)
+  return false
+}
+
+function ensureDesignView() {
+  if (!mainWindow || mainWindow.isDestroyed() || !WebContentsView) return null
+  if (designView && !designView.webContents.isDestroyed()) return designView
+  designView = new WebContentsView({ webPreferences: DESIGN_WEB_PREFERENCES })
+  try { designView.setBackgroundColor('#f7f7f5') } catch {}
+  mainWindow.contentView.addChildView(designView)
+  hideDesignView()
+
+  const webContents = designView.webContents
+  webContents.on('console-message', (_event, levelOrDetails, message, line, sourceId) => {
+    const details = levelOrDetails && typeof levelOrDetails === 'object'
+      ? levelOrDetails
+      : { level: levelOrDetails, message, lineNumber: line, sourceId }
+    const level = String(details.level || 'log')
+    const text = String(details.message || '').trim()
+    if (!text) return
+    if (process.env.METIS_DESKTOP_DEV_SERVER || level === 'error' || level === 'warning') {
+      log(`[design:${level}] ${text}${details.sourceId ? ` (${details.sourceId}:${details.lineNumber || 0})` : ''}`)
+    }
+  })
+  webContents.setWindowOpenHandler(details => {
+    if (isAllowedDesignNavigation(details.url, designRuntimeState.url)) {
+      void webContents.loadURL(details.url)
+    } else if (isSafeExternalUrl(details.url)) {
+      openExternalSafe(details.url)
+    }
+    return { action: 'deny' }
+  })
+  webContents.on('will-navigate', (event, url) => {
+    if (routeDesignNavigation(url)) return
+    event.preventDefault()
+    log(`[security] denied design navigation ${String(url || '').slice(0, 160)}`)
+  })
+  webContents.on('will-redirect', (event, url) => {
+    if (routeDesignNavigation(url)) return
+    event.preventDefault()
+    log(`[security] denied design redirect ${String(url || '').slice(0, 160)}`)
+  })
+  webContents.on('did-start-loading', () => emitDesignViewState({ state: 'loading', loading: true, error: '' }))
+  webContents.on('did-stop-loading', () => emitDesignViewState({ state: 'ready', loading: false }))
+  webContents.on('did-navigate', (_event, url) => emitDesignViewState({ state: 'ready', url, loading: false, error: '' }))
+  webContents.on('did-navigate-in-page', (_event, url) => emitDesignViewState({ state: 'ready', url, loading: false, error: '' }))
+  webContents.on('page-title-updated', (_event, title) => emitDesignViewState({ title }))
+  webContents.on('did-finish-load', () => {
+    const managedLocale = designLocale === 'en' ? 'en' : 'zh-CN'
+    void webContents.executeJavaScript(`(() => {
+      const locale = ${JSON.stringify(managedLocale)};
+      const localeKey = 'open-design:locale';
+      const sourceKey = 'open-design:locale-source';
+      const changed = localStorage.getItem(localeKey) !== locale || localStorage.getItem(sourceKey) !== 'manual';
+      if (changed) {
+        localStorage.setItem(localeKey, locale);
+        localStorage.setItem(sourceKey, 'manual');
+      }
+      return changed;
+    })()`, true).then(changed => {
+      if (changed && !webContents.isDestroyed()) webContents.reload()
+    }).catch(error => {
+      log(`[design] unable to sync managed locale: ${error?.message || error}`)
+    })
+    if (!process.env.METIS_DESKTOP_DEV_SERVER) return
+    void webContents.executeJavaScript(`({
+      title: document.title,
+      bodyText: document.body?.innerText?.slice(0, 500) || '',
+      bodyChildren: document.body?.childElementCount || 0,
+      readyState: document.readyState
+    })`, true).then(snapshot => {
+      log(`[design] loaded url=${webContents.getURL()} snapshot=${JSON.stringify(snapshot)}`)
+    }).catch(error => {
+      log(`[design] unable to inspect loaded page: ${error?.message || error}`)
+    })
+  })
+  webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (errorCode === -3 || isMainFrame === false) return
+    log(`[design] load failed code=${errorCode} error=${errorDescription} url=${validatedURL}`)
+    emitDesignViewState({
+      state: 'error',
+      error: errorDescription || 'Design Studio 加载失败。',
+      loading: false,
+      url: validatedURL || webContents.getURL()
+    })
+  })
+  webContents.on('render-process-gone', (_event, details = {}) => {
+    emitDesignViewState({ state: 'error', error: `Design Studio 渲染进程已退出 (${details.reason || 'unknown'})。`, loading: false })
+  })
+  return designView
+}
+
+function setDesignViewOccluded(value) {
+  designViewOccluded = Boolean(value)
+  if (designViewOccluded) {
+    hideDesignView()
+    return emitDesignViewState({ state: lastDesignBounds ? 'occluded' : 'hidden', visible: false })
+  }
+  if (!lastDesignBounds || !designView || designView.webContents.isDestroyed()) {
+    return emitDesignViewState({ state: 'hidden', visible: false })
+  }
+  try { designView.setBounds(lastDesignBounds) } catch {}
+  try { designView.setVisible?.(true) } catch {}
+  return emitDesignViewState({
+    bounds: lastDesignBounds,
+    state: designViewState.error ? 'error' : (designViewState.loading ? 'loading' : 'ready'),
+    visible: true
+  })
+}
+
+function applyDesignViewLayout(payload = {}) {
+  const visible = Boolean(payload.visible)
+  if (!visible) {
+    lastDesignBounds = null
+    hideDesignView()
+    return { ok: true, hidden: true, view: designViewPayload({ bounds: null, visible: false }) }
+  }
+  const bounds = {
+    x: Math.max(0, Math.round(Number(payload.x ?? payload.bounds?.x) || 0)),
+    y: Math.max(0, Math.round(Number(payload.y ?? payload.bounds?.y) || 0)),
+    width: Math.max(0, Math.round(Number(payload.width ?? payload.bounds?.width) || 0)),
+    height: Math.max(0, Math.round(Number(payload.height ?? payload.bounds?.height) || 0))
+  }
+  if (bounds.width < 1 || bounds.height < 1) {
+    return { ok: false, error: 'invalid design view bounds', view: designViewPayload() }
+  }
+  lastDesignBounds = bounds
+  if (designViewOccluded) {
+    return { ok: true, occluded: true, view: emitDesignViewState({ bounds, state: 'occluded', visible: false }) }
+  }
+  const view = ensureDesignView()
+  if (!view) return { ok: false, error: 'design view unavailable', view: designViewPayload() }
+  const key = `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+  if (key !== lastDesignBoundsKey) {
+    lastDesignBoundsKey = key
+    view.setBounds(bounds)
+  }
+  try { view.setVisible?.(true) } catch {}
+  return { ok: true, bounds, view: emitDesignViewState({ bounds, visible: true, state: designViewState.loading ? 'loading' : 'ready' }) }
+}
+
+async function loadDesignProject(projectId) {
+  const status = await startDesignRuntime()
+  if (status.state !== 'ready') return { ok: false, error: status.error || 'Design runtime 未就绪。' }
+  const url = buildDesignProjectUrl(status.url, projectId)
+  if (!url) return { ok: false, error: '无效的 Design 项目。' }
+  const view = ensureDesignView()
+  if (!view) return { ok: false, error: 'Design Studio 原生视图不可用。' }
+  emitDesignViewState({ state: 'loading', loading: true, error: '', url })
+  try {
+    if (view.webContents.getURL() !== url) await view.webContents.loadURL(url)
+    return { ok: true, url, view: designViewPayload() }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error), view: emitDesignViewState({ state: 'error', error: error?.message || String(error), loading: false }) }
+  }
+}
+
+async function loadDesignPage(pagePath) {
+  const allowedPaths = new Set(['/', '/projects', '/plugins', '/design-systems', '/design-systems/create'])
+  const normalizedPath = String(pagePath || '/').replace(/\/+$/, '') || '/'
+  if (!allowedPaths.has(normalizedPath)) return { ok: false, error: '不支持的 Design 页面。' }
+  const status = await startDesignRuntime()
+  if (status.state !== 'ready') return { ok: false, error: status.error || 'Design runtime 未就绪。' }
+  const url = buildDesignPageUrl(status.url, normalizedPath)
+  if (!url) return { ok: false, error: '无效的 Design 页面。' }
+  const view = ensureDesignView()
+  if (!view) return { ok: false, error: 'Design Studio 原生视图不可用。' }
+  emitDesignViewState({ state: 'loading', loading: true, error: '', url })
+  try {
+    if (view.webContents.getURL() !== url) await view.webContents.loadURL(url)
+    return { ok: true, url, view: designViewPayload() }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error), view: emitDesignViewState({ state: 'error', error: error?.message || String(error), loading: false }) }
+  }
 }
 
 async function loadPreviewUrl(url, tabId = '') {
@@ -2922,6 +3663,7 @@ async function createWindow() {
 
   mainWindow.on('closed', () => {
     disposePreviewView()
+    disposeDesignView()
     mainWindow = null
   })
 
@@ -3620,6 +4362,21 @@ ipcMain.handle('metis:app-info', () => ({
   fakeBackend: process.env.METIS_FAKE_BACKEND === '1',
   storage: resolveDataRootInfo()
 }))
+ipcMain.handle('metis:design-runtime-status', () => designRuntimePayload())
+ipcMain.handle('metis:design-runtime-start', (_event, locale) => startDesignRuntime(locale))
+ipcMain.handle('metis:design-projects-list', () => listDesignProjects())
+ipcMain.handle('metis:design-systems-list', () => listDesignSystems())
+ipcMain.handle('metis:design-project-create', (_event, payload = {}) => createDesignProject(payload))
+ipcMain.handle('metis:design-view-load', (_event, projectId) => loadDesignProject(projectId))
+ipcMain.handle('metis:design-view-load-page', (_event, pagePath) => loadDesignPage(pagePath))
+ipcMain.handle('metis:design-view-set-layout', (_event, payload = {}) => applyDesignViewLayout(payload))
+ipcMain.handle('metis:design-view-set-occluded', (_event, value) => ({ ok: true, view: setDesignViewOccluded(value) }))
+ipcMain.handle('metis:design-view-reload', () => {
+  const webContents = designView?.webContents
+  if (!webContents || webContents.isDestroyed()) return { ok: false, error: 'Design Studio 未加载。' }
+  webContents.reload()
+  return { ok: true }
+})
 ipcMain.handle('metis:diagnostics', () => diagnosticsPayload())
 ipcMain.handle('metis:set-native-theme', (_event, mode) => {
   const next = ['light', 'dark', 'system'].includes(mode) ? mode : 'system'
@@ -4061,6 +4818,7 @@ app.on('before-quit', () => {
   clearInterval(updateCheckTimer)
   stopAllDevServers()
   killAllTerminalSessions()
+  stopDesignRuntime()
   stopBackend()
 })
 app.on('window-all-closed', () => {})

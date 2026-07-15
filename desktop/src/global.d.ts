@@ -20,6 +20,14 @@ import type {
   TerminalSessionPayload,
   WindowCloseBehavior,
 } from './lib/types';
+import type {
+  CreateDesignProjectInput,
+  CreateDesignProjectResult,
+  DesignProjectsResult,
+  DesignRuntimeStatus,
+  DesignSystemsResult,
+  DesignViewStatus,
+} from './lib/design';
 
 export {};
 
@@ -86,6 +94,16 @@ declare global {
       retryBackend: () => Promise<{ ok: boolean }>;
       openLog: () => Promise<{ ok: boolean; path: string; error?: string }>;
       appInfo: () => Promise<{ name: string; version: string; packaged: boolean; updateUrl: string; githubHome?: string; fakeBackend?: boolean; storage?: StoragePayload }>;
+      designRuntimeStatus: () => Promise<DesignRuntimeStatus>;
+      designRuntimeStart: (locale?: 'zh-CN' | 'en') => Promise<DesignRuntimeStatus>;
+      designProjectsList: () => Promise<DesignProjectsResult>;
+      designSystemsList: () => Promise<DesignSystemsResult>;
+      designProjectCreate: (payload: CreateDesignProjectInput) => Promise<CreateDesignProjectResult>;
+      designViewLoad: (projectId: string) => Promise<{ ok: boolean; url?: string; view?: DesignViewStatus; error?: string }>;
+      designViewLoadPage: (pagePath: string) => Promise<{ ok: boolean; url?: string; view?: DesignViewStatus; error?: string }>;
+      designViewSetLayout: (payload: { visible: boolean; x?: number; y?: number; width?: number; height?: number; bounds?: { x: number; y: number; width: number; height: number } }) => Promise<{ ok: boolean; hidden?: boolean; occluded?: boolean; view?: DesignViewStatus; error?: string }>;
+      designViewSetOccluded: (value: boolean) => Promise<{ ok: boolean; view?: DesignViewStatus }>;
+      designViewReload: () => Promise<{ ok: boolean; error?: string }>;
       diagnostics: () => Promise<DiagnosticsPayload>;
       setNativeTheme: (mode: 'light' | 'dark' | 'system') => Promise<{ ok: boolean; themeSource?: string; shouldUseDarkColors?: boolean }>;
       saveDiagnosticsBundle: () => Promise<DiagnosticsBundleResult>;
@@ -162,6 +180,8 @@ declare global {
         percent?: number;
         message?: string;
       }) => void) => () => void;
+      onDesignRuntimeState: (callback: (payload: DesignRuntimeStatus) => void) => () => void;
+      onDesignViewState: (callback: (payload: DesignViewStatus) => void) => () => void;
     };
   }
 }

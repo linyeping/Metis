@@ -18,6 +18,7 @@ import { ModelPickerOverlay } from './components/command/ModelPickerOverlay';
 import { CronPanel } from './components/cron/CronPanel';
 import { AppDialog } from './components/dialog/AppDialog';
 import { ResearchReportViewer } from './components/research/ResearchReportViewer';
+import { DesignSurface } from './components/design/DesignSurface';
 import { useChatStore } from './store/chatStore';
 import { useSessionStore } from './store/sessionStore';
 import { useUiStore } from './store/uiStore';
@@ -99,6 +100,7 @@ function applyBootEvent(state: BootState, event: BootEvent): BootState {
 export function App() {
   useTheme();
   const activeSection = useUiStore(state => state.activeSection);
+  const productSurface = useUiStore(state => state.productSurface);
   const setSideChatOpen = useUiStore(state => state.setSideChatOpen);
   const settingsOpen = useUiStore(state => state.settingsOpen);
   const commandOpen = useUiStore(state => state.commandOpen);
@@ -280,6 +282,7 @@ export function App() {
       workspaceMenuOpen ||
       Boolean(appDialog) ||
       Boolean(activeResearchReportJobId) ||
+      productSurface === 'design' ||
       firstRun ||
       bootState.status !== 'ready' ||
       !backendReady;
@@ -300,11 +303,14 @@ export function App() {
         await window.metis?.previewSetOccluded?.(false);
         if (!cancelled) setFrozen(null);
       }
+      await window.metis?.designViewSetOccluded?.(
+        settingsOpen || commandOpen || modelPickerOpen || workspaceMenuOpen || Boolean(appDialog) || Boolean(activeResearchReportJobId) || firstRun,
+      );
     })();
     return () => {
       cancelled = true;
     };
-  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, activeResearchReportJobId, firstRun, bootState.status, backendReady, webPreviewUrl]);
+  }, [settingsOpen, commandOpen, modelPickerOpen, workspaceMenuOpen, appDialog, activeResearchReportJobId, firstRun, bootState.status, backendReady, webPreviewUrl, productSurface]);
 
   useEffect(() => {
     let lastEscapeAt = 0;
@@ -357,22 +363,27 @@ export function App() {
         ? <CronPanel />
         : <SectionMain section={activeSection} />;
   const main = (
-    <div className="main-panel-transition-shell" data-section={activeSection}>
-      <AnimatePresence initial={false} custom={panelTransitionDirection}>
-        <motion.div
-          key={activeSection}
-          className="main-panel-stage"
-          data-section={activeSection}
-          custom={panelTransitionDirection}
-          variants={mainPanelVariants}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={mainPanelTransition}
-        >
-          {mainContent}
-        </motion.div>
-      </AnimatePresence>
+    <div className="product-surface-stack" data-product-surface={productSurface}>
+      <div className="assistant-product-surface" data-active={productSurface === 'assistant'} aria-hidden={productSurface !== 'assistant'}>
+        <div className="main-panel-transition-shell" data-section={activeSection}>
+          <AnimatePresence initial={false} custom={panelTransitionDirection}>
+            <motion.div
+              key={activeSection}
+              className="main-panel-stage"
+              data-section={activeSection}
+              custom={panelTransitionDirection}
+              variants={mainPanelVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={mainPanelTransition}
+            >
+              {mainContent}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </div>
+      <DesignSurface />
     </div>
   );
   const showBootOverlay = bootState.status !== 'ready' || !backendReady;

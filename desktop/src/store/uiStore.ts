@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { FileChangePreview, FileChangeSummary } from '../lib/diffPreview';
-import type { AppMode, FileChangeRevertItem, FontFamily, Language, RunExecutionProfile, SectionId, SettingsSection, ThemeName } from '../lib/types';
+import type { AppMode, FileChangeRevertItem, FontFamily, Language, ProductSurface, RunExecutionProfile, SectionId, SettingsSection, ThemeName } from '../lib/types';
 import { themeMode } from '../lib/themes';
 
 type AppearanceMode = 'light' | 'dark';
@@ -104,6 +104,7 @@ type AppDialogInput = Omit<AppDialogRequest, 'id' | 'tone' | 'icon'> & {
 };
 
 interface UiState {
+  productSurface: ProductSurface;
   appMode: AppMode;
   activeSection: SectionId;
   codeFontSize: number;
@@ -151,6 +152,7 @@ interface UiState {
   activeResearchReportJobId: string;
   toasts: ToastNotice[];
   appDialog: AppDialogRequest | null;
+  setProductSurface: (surface: ProductSurface) => void;
   setAppMode: (mode: AppMode) => void;
   setActiveSection: (section: SectionId) => void;
   setCodeFontSize: (size: number) => void;
@@ -248,6 +250,10 @@ function storedAppMode(): AppMode {
   if (startupMode === 'chat' || startupMode === 'cowork' || startupMode === 'code') return startupMode;
   const value = localStorage.getItem('metis.appMode') as AppMode | null;
   return value === 'cowork' || value === 'code' ? value : 'chat';
+}
+
+function storedProductSurface(): ProductSurface {
+  return localStorage.getItem('metis.productSurface') === 'design' ? 'design' : 'assistant';
 }
 
 function storedSidebarOpen(): boolean {
@@ -426,6 +432,7 @@ function cardForRightRailMode(mode: RightRailMode): WorkspaceCardId {
 const initialWorkspaceCardVisibility = storedWorkspaceCardVisibility();
 
 export const useUiStore = create<UiState>(set => ({
+  productSurface: storedProductSurface(),
   appMode: storedAppMode(),
   activeSection: 'chat',
   codeFontSize: storedNumber('metis.codeFontSize', 12, 11, 16),
@@ -474,6 +481,10 @@ export const useUiStore = create<UiState>(set => ({
   activeResearchReportJobId: '',
   toasts: [],
   appDialog: null,
+  setProductSurface: productSurface => {
+    localStorage.setItem('metis.productSurface', productSurface);
+    set({ productSurface });
+  },
   setAppMode: appMode => {
     localStorage.setItem('metis.appMode', appMode);
     set({ appMode });

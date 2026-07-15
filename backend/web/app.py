@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import logging
 import os
 import re
@@ -3274,6 +3275,25 @@ def create_run() -> Any:
     surface_mode = str(data.get("surface_mode") or data.get("surfaceMode") or "").strip().lower()
     session_id, history, compact_state, mode, explicit_session = _prepare_chat_session(user_message)
     normalized_surface = surface_mode if surface_mode in {"chat", "cowork", "code"} else (_surface_mode_for_session_mode(mode) or "chat")
+    design_bridge = data.get("design_bridge")
+    if isinstance(design_bridge, dict):
+        expected_token = str(os.environ.get("METIS_DESIGN_BRIDGE_TOKEN") or "")
+        provided_token = str(request.headers.get("X-Metis-Design-Bridge-Token") or "")
+        if not expected_token or not hmac.compare_digest(expected_token, provided_token):
+            return jsonify({"ok": False, "error": "Design bridge authorization failed"}), 403
+        design_root = os.path.realpath(
+            os.environ.get("METIS_DESIGN_ROOT")
+            or os.path.join(os.environ.get("METIS_HOME") or "", "design", "projects")
+        )
+        session_workspace_root = os.path.realpath(_workspace_root_for_session(session_id))
+        try:
+            inside_design_root = os.path.normcase(os.path.commonpath([design_root, session_workspace_root])) == os.path.normcase(design_root)
+        except ValueError:
+            inside_design_root = False
+        project_id = str(design_bridge.get("project_id") or "").strip()
+        expected_project_root = os.path.realpath(os.path.join(design_root, project_id)) if project_id else ""
+        if not inside_design_root or not project_id or os.path.normcase(session_workspace_root) != os.path.normcase(expected_project_root):
+            return jsonify({"ok": False, "error": "Design bridge workspace is outside the managed project root"}), 403
     execution_profile_result = normalize_execution_profile(
         data.get("execution_profile") or data.get("executionProfile"),
         default=default_execution_profile_for_surface(normalized_surface),

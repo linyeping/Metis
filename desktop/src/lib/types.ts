@@ -30,6 +30,10 @@ export type ThemeName =
 
 export type SectionId = 'chat' | 'chat-list' | 'skills' | 'mcp' | 'computer' | 'cron' | 'store';
 
+// Product surfaces live above Assistant modes. Design is intentionally not an
+// AppMode: switching products must not reset the active Chat/Cowork/Code state.
+export type ProductSurface = 'assistant' | 'design';
+
 // Top-level workspace mode, mirroring Claude Desktop's Chat / Cowork / Code split.
 // Each mode reframes the home screen and (Stage 2) the default agent behavior.
 export type AppMode = 'chat' | 'cowork' | 'code';

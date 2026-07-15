@@ -15,6 +15,16 @@ contextBridge.exposeInMainWorld('metis', {
   retryBackend: () => ipcRenderer.invoke('metis:retry-backend'),
   openLog: () => ipcRenderer.invoke('metis:open-log'),
   appInfo: () => ipcRenderer.invoke('metis:app-info'),
+  designRuntimeStatus: () => ipcRenderer.invoke('metis:design-runtime-status'),
+  designRuntimeStart: locale => ipcRenderer.invoke('metis:design-runtime-start', locale),
+  designProjectsList: () => ipcRenderer.invoke('metis:design-projects-list'),
+  designSystemsList: () => ipcRenderer.invoke('metis:design-systems-list'),
+  designProjectCreate: payload => ipcRenderer.invoke('metis:design-project-create', payload),
+  designViewLoad: projectId => ipcRenderer.invoke('metis:design-view-load', projectId),
+  designViewLoadPage: pagePath => ipcRenderer.invoke('metis:design-view-load-page', pagePath),
+  designViewSetLayout: payload => ipcRenderer.invoke('metis:design-view-set-layout', payload),
+  designViewSetOccluded: value => ipcRenderer.invoke('metis:design-view-set-occluded', value),
+  designViewReload: () => ipcRenderer.invoke('metis:design-view-reload'),
   diagnostics: () => ipcRenderer.invoke('metis:diagnostics'),
   setNativeTheme: mode => ipcRenderer.invoke('metis:set-native-theme', mode),
   saveDiagnosticsBundle: () => ipcRenderer.invoke('metis:save-diagnostics-bundle'),
@@ -100,5 +110,15 @@ contextBridge.exposeInMainWorld('metis', {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('metis:update-event', listener)
     return () => ipcRenderer.removeListener('metis:update-event', listener)
+  },
+  onDesignRuntimeState: callback => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('metis:design-runtime-state', listener)
+    return () => ipcRenderer.removeListener('metis:design-runtime-state', listener)
+  },
+  onDesignViewState: callback => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('metis:design-view-state', listener)
+    return () => ipcRenderer.removeListener('metis:design-view-state', listener)
   }
 })

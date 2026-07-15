@@ -207,7 +207,7 @@ def search() -> Any:
 
 @session_bp.route("/sessions", methods=["POST"])
 def create_session() -> Any:
-    """Create a new session and switch to it."""
+    """Create a session, optionally without changing the active UI context."""
     from backend.core.memory.workspace_state import clear_read_tracking
 
     state = get_state()
@@ -217,10 +217,12 @@ def create_session() -> Any:
     workspace_id = state.active_workspace_id or ""
     if "workspace_id" in data:
         workspace_id = str(data.get("workspace_id") or "")
-        state.active_workspace_id = workspace_id
+    activate = data.get("activate", True) is not False
     session = get_session_manager().create_session(workspace_id=workspace_id, mode=mode)
-    state.activate_session(session.id, history=[], compact_state=dict(session.compact_state), mode=session.mode)
-    clear_read_tracking()
+    if activate:
+        state.active_workspace_id = workspace_id
+        state.activate_session(session.id, history=[], compact_state=dict(session.compact_state), mode=session.mode)
+        clear_read_tracking()
     return jsonify(
         {
             "id": session.id,
@@ -228,6 +230,7 @@ def create_session() -> Any:
             "mode": session.mode,
             "workspace_id": session.workspace_id,
             "compact_state": session.compact_state,
+            "active": activate,
         }
     )
 
