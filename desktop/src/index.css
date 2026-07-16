@@ -260,7 +260,31 @@ button {
 }
 
 .titlebar-brand {
+  display: flex;
+  align-items: center;
+  height: 100%;
   min-width: 0;
+  padding-left: 10px;
+}
+
+.titlebar-design-back {
+  display: inline-grid;
+  width: 30px;
+  height: var(--control-h-sm);
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-design-back:hover {
+  border-color: var(--control-hover-border);
+  background: var(--control-hover-bg);
+  color: var(--text);
 }
 
 .titlebar-brand img {

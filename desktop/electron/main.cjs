@@ -35,6 +35,7 @@ const {
   resolveBundledDesignRuntime,
   resolveDesignSourceRoot
 } = require('./design-runtime.cjs')
+const { startDesignRendererService } = require('./design-renderer-service.cjs')
 const {
   HARDENED_WEB_PREFERENCES,
   isAllowedAppNavigation,
@@ -84,6 +85,8 @@ let designView = null
 let designRuntimeProcess = null
 let designRuntimeStartPromise = null
 let designRuntimeStopping = false
+let designRendererService = null
+let designRendererStartPromise = null
 let designLocale = 'zh-CN'
 let designThemeMode = 'light'
 let designViewOccluded = false
@@ -420,6 +423,72 @@ async function cleanupStaleDesignNamespace(sourceRoot, timeoutMs = 15000) {
   })
 }
 
+function sourceDesignRendererRoot(sourceRoot) {
+  return path.join(sourceRoot, 'apps', 'desktop', 'dist', 'main')
+}
+
+function hasDesignRendererModules(moduleRoot) {
+  return ['artifact-export.js', 'deck-capture.js', 'pdf-export.js']
+    .every(fileName => fsSync.existsSync(path.join(moduleRoot, fileName)))
+}
+
+async function prepareSourceDesignRenderer(sourceRoot) {
+  const moduleRoot = sourceDesignRendererRoot(sourceRoot)
+  if (hasDesignRendererModules(moduleRoot)) return moduleRoot
+  const command = buildPnpmSpawnCommand(['--filter', '@open-design/desktop', 'build'])
+  const result = await new Promise(resolve => {
+    let settled = false
+    const finish = payload => {
+      if (settled) return
+      settled = true
+      resolve(payload)
+    }
+    try {
+      const child = spawn(command.executable, command.args, {
+        cwd: sourceRoot,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      child.stdout?.on('data', chunk => appendDesignRuntimeLog('design:renderer-build', chunk))
+      child.stderr?.on('data', chunk => appendDesignRuntimeLog('design:renderer-build', chunk))
+      child.on('error', error => finish({ ok: false, error: error?.message || String(error) }))
+      child.on('exit', code => finish(code === 0
+        ? { ok: true }
+        : { ok: false, error: `Design renderer 构建失败 (${code ?? 'unknown'})。` }))
+    } catch (error) {
+      finish({ ok: false, error: error?.message || String(error) })
+    }
+  })
+  if (!result.ok) throw new Error(result.error)
+  if (!hasDesignRendererModules(moduleRoot)) throw new Error('Design renderer 构建完成但输出文件缺失。')
+  return moduleRoot
+}
+
+async function ensureDesignRendererService(moduleRoot, dataRoot) {
+  if (designRendererService) return designRendererService
+  if (designRendererStartPromise) return designRendererStartPromise
+  designRendererStartPromise = startDesignRendererService({
+    namespace: DESIGN_RUNTIME_NAMESPACE,
+    moduleRoot,
+    dataRoot,
+    log
+  }).then(service => {
+    designRendererService = service
+    return service
+  }).finally(() => {
+    designRendererStartPromise = null
+  })
+  return designRendererStartPromise
+}
+
+function stopDesignRendererService() {
+  const service = designRendererService
+  designRendererService = null
+  if (!service) return
+  void service.close().catch(error => log(`[design-renderer] close failed: ${error?.message || error}`))
+}
+
 async function startDesignRuntime(locale) {
   if (locale === 'en' || locale === 'en-US') designLocale = 'en'
   if (locale === 'zh' || locale === 'zh-CN') designLocale = 'zh-CN'
@@ -463,6 +532,15 @@ async function startDesignRuntime(locale) {
       }
       const designDataRoot = path.join(storageInfo.metisHome, 'design')
       fsSync.mkdirSync(designDataRoot, { recursive: true })
+      try {
+        await ensureDesignRendererService(bundledRuntime.rendererRoot, designDataRoot)
+      } catch (error) {
+        return emitDesignRuntimeState({
+          state: 'error',
+          error: `Metis Design 导出渲染器启动失败：${error?.message || error}`,
+          sourceRoot: bundledRuntime.root
+        })
+      }
       designRuntimeStopping = false
       emitDesignRuntimeState({
         state: 'starting',
@@ -482,6 +560,7 @@ async function startDesignRuntime(locale) {
           METIS_DESIGN_ROOT: process.env.METIS_DESIGN_ROOT,
           METIS_MANAGED_DESIGN_RUNTIME: '1',
           OD_DATA_DIR: designDataRoot,
+          OD_SIDECAR_NAMESPACE: DESIGN_RUNTIME_NAMESPACE,
           OD_PORT: String(daemonPort),
           OD_WEB_PORT: String(webPort),
           [Object.keys(process.env).find(key => key.toLowerCase() === 'path') || 'PATH']: [
@@ -560,6 +639,17 @@ async function startDesignRuntime(locale) {
     const runtimeUrl = `http://${DEV_SERVER_HOST}:${webPort}`
     const designDataRoot = path.join(storageInfo.metisHome, 'design')
     fsSync.mkdirSync(designDataRoot, { recursive: true })
+    try {
+      const rendererRoot = await prepareSourceDesignRenderer(sourceRoot)
+      await ensureDesignRendererService(rendererRoot, designDataRoot)
+    } catch (error) {
+      return emitDesignRuntimeState({
+        state: 'error',
+        error: `Metis Design 导出渲染器启动失败：${error?.message || error}`,
+        sourceRoot,
+        version
+      })
+    }
     const command = buildPnpmSpawnCommand([
       'tools-dev', 'run', 'web',
       '--namespace', DESIGN_RUNTIME_NAMESPACE,
@@ -581,6 +671,7 @@ async function startDesignRuntime(locale) {
         METIS_DESIGN_ROOT: process.env.METIS_DESIGN_ROOT,
         METIS_MANAGED_DESIGN_RUNTIME: '1',
         OD_DATA_DIR: designDataRoot,
+        OD_SIDECAR_NAMESPACE: DESIGN_RUNTIME_NAMESPACE,
         NO_COLOR: '1'
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -630,6 +721,7 @@ function stopDesignRuntime() {
   const child = designRuntimeProcess
   designRuntimeProcess = null
   try { child?.kill() } catch {}
+  stopDesignRendererService()
   if (!app.isPackaged && designRuntimeState.sourceRoot && designRuntimeState.sourceRoot !== 'external') {
     const command = buildDesignNamespaceCommand('stop', DESIGN_RUNTIME_NAMESPACE)
     try {

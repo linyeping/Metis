@@ -55,6 +55,7 @@ test('Design resolves repository-local source and packaged modules have no secon
   const layout = bundledDesignRuntimeLayout('C:\\Metis\\resources\\open-design-runtime')
   assert.equal(Object.hasOwn(layout, 'executable'), false)
   assert.match(layout.daemonEntry, /app[\\/]prebundled[\\/]daemon[\\/]daemon-sidecar\.mjs$/)
+  assert.match(layout.rendererRoot, /app[\\/]prebundled[\\/]desktop-renderer$/)
   fs.rmSync(root, { recursive: true, force: true })
 })
 

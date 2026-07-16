@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Check,
   ChevronRight,
   Columns3,
@@ -47,6 +48,7 @@ export function shortcutLabel(keys: WorkspaceCardShortcut): string {
 export function Titlebar() {
   const appMode = useUiStore(state => state.appMode);
   const productSurface = useUiStore(state => state.productSurface);
+  const setProductSurface = useUiStore(state => state.setProductSurface);
   const sidebarOpen = useUiStore(state => state.sidebarOpen);
   const setSidebarOpen = useUiStore(state => state.setSidebarOpen);
   const rightRailOpen = useUiStore(state => state.rightRailOpen);
@@ -153,7 +155,19 @@ export function Titlebar() {
 
   return (
     <header className="titlebar">
-      <div className="titlebar-brand" aria-hidden="true" />
+      <div className="titlebar-brand">
+        {designActive && (
+          <button
+            type="button"
+            className="titlebar-design-back"
+            title={t('返回 Metis 桌面')}
+            aria-label={t('返回 Metis 桌面')}
+            onClick={() => setProductSurface('assistant')}
+          >
+            <ArrowLeft size={16} />
+          </button>
+        )}
+      </div>
       <div className="titlebar-center" aria-hidden="true" />
       <div className="titlebar-actions">
         {!designActive && <button

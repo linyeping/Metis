@@ -25,8 +25,8 @@ if (!runtimeRoot || !dataRoot || !daemonPort || !webPort || required.some(entry 
 fs.mkdirSync(dataRoot, { recursive: true })
 const runtimeStateRoot = path.join(dataRoot, 'sidecars')
 fs.mkdirSync(runtimeStateRoot, { recursive: true })
-const namespace = `metis-${process.pid}`
-const pipe = app => `\\\\.\\pipe\\metis-design-${namespace}-${app}`
+const namespace = String(process.env.OD_SIDECAR_NAMESPACE || 'metis').replace(/[^A-Za-z0-9._-]+/g, '-') || 'metis'
+const pipe = app => `\\\\.\\pipe\\open-design-${namespace}-${app}`
 const stampArgs = app => [
   '--od-stamp-app', app,
   '--od-stamp-mode', 'runtime',

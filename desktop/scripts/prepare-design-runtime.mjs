@@ -82,6 +82,7 @@ const required = [
   path.join('resources', 'app', 'prebundled', 'web-sidecar.mjs'),
   path.join('resources', 'open-design'),
   path.join('resources', 'open-design-web-standalone'),
+  path.join('resources', 'dom-to-pptx.bundle.js.gz'),
 ];
 for (const relative of required) {
   if (!(await exists(path.join(unpackedRoot, relative)))) {
@@ -105,6 +106,18 @@ await cp(
   path.join(unpackedRoot, 'resources', 'open-design-web-standalone'),
   path.join(destination, 'web-standalone'),
   { recursive: true, dereference: true },
+);
+const desktopRendererRoot = path.join(destination, 'app', 'prebundled', 'desktop-renderer');
+await mkdir(desktopRendererRoot, { recursive: true });
+for (const fileName of ['artifact-export.js', 'deck-capture.js', 'pdf-export.js']) {
+  const sourcePath = path.join(sourceRoot, 'apps', 'desktop', 'dist', 'main', fileName);
+  if (!(await exists(sourcePath))) throw new Error(`Open Design desktop renderer is missing ${sourcePath}`);
+  await cp(sourcePath, path.join(desktopRendererRoot, fileName));
+}
+await writeFile(path.join(desktopRendererRoot, 'package.json'), '{"type":"module"}\n', 'utf8');
+await cp(
+  path.join(unpackedRoot, 'resources', 'dom-to-pptx.bundle.js.gz'),
+  path.join(desktopRendererRoot, 'dom-to-pptx.bundle.js.gz'),
 );
 await cp(path.join(sourceRoot, 'LICENSE'), path.join(destination, 'OPEN-DESIGN-LICENSE.txt'));
 await writeFile(
