@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - supports package imports
 
 
 JSON_MIGRATION_KEY = "json_migrated_v1"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 logger = logging.getLogger(__name__)
 
 
@@ -126,6 +126,8 @@ class MetisSessionDB:
                 "workspace_id TEXT NOT NULL DEFAULT '', "
                 "created_at REAL NOT NULL, "
                 "updated_at REAL NOT NULL, "
+                "archived_at REAL NOT NULL DEFAULT 0, "
+                "unread INTEGER NOT NULL DEFAULT 0, "
                 "deleted_at REAL NOT NULL DEFAULT 0)"
             )
             self._ensure_session_columns(connection)
@@ -156,6 +158,10 @@ class MetisSessionDB:
         }
         if "compact_state_json" not in columns:
             connection.execute("ALTER TABLE sessions ADD COLUMN compact_state_json TEXT NOT NULL DEFAULT '{}'")
+        if "archived_at" not in columns:
+            connection.execute("ALTER TABLE sessions ADD COLUMN archived_at REAL NOT NULL DEFAULT 0")
+        if "unread" not in columns:
+            connection.execute("ALTER TABLE sessions ADD COLUMN unread INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_integrity_or_rebuild(self) -> None:
         if not os.path.exists(self.db_path):
@@ -277,9 +283,9 @@ class MetisSessionDB:
             self.write_workspaces_json_mirror()
         return changed
 
-    def list_sessions(self, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, workspace_id: Optional[str] = None, *, archived: bool = False) -> List[Dict[str, Any]]:
         params: tuple[Any, ...]
-        where = "deleted_at = 0"
+        where = "deleted_at = 0 AND archived_at " + ("> 0" if archived else "= 0")
         if workspace_id is not None:
             where += " AND workspace_id = ?"
             params = (str(workspace_id),)
@@ -287,7 +293,7 @@ class MetisSessionDB:
             params = ()
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT id, title, mode, workspace_id, created_at, updated_at "
+                "SELECT id, title, mode, workspace_id, created_at, updated_at, archived_at, unread "
                 f"FROM sessions WHERE {where} "
                 "ORDER BY updated_at DESC, created_at DESC, id DESC",
                 params,
@@ -305,6 +311,8 @@ class MetisSessionDB:
             "created_at": now,
             "updated_at": now,
             "workspace_id": str(workspace_id or ""),
+            "archived_at": 0.0,
+            "unread": False,
         }
         self.upsert_session(session)
         return session
@@ -312,7 +320,7 @@ class MetisSessionDB:
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at "
+                "SELECT id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at, archived_at, unread "
                 "FROM sessions WHERE id = ? AND deleted_at = 0",
                 (str(session_id),),
             ).fetchone()
@@ -326,8 +334,8 @@ class MetisSessionDB:
         compact_state_json = json.dumps(data["compact_state"], ensure_ascii=False)
         with self.connect() as connection:
             connection.execute(
-                "INSERT INTO sessions(id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at, deleted_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
+                "INSERT INTO sessions(id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at, archived_at, unread, deleted_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
                 "ON CONFLICT(id) DO UPDATE SET "
                 "title = excluded.title, "
                 "history_json = excluded.history_json, "
@@ -336,6 +344,8 @@ class MetisSessionDB:
                 "workspace_id = excluded.workspace_id, "
                 "created_at = excluded.created_at, "
                 "updated_at = excluded.updated_at, "
+                "archived_at = excluded.archived_at, "
+                "unread = excluded.unread, "
                 "deleted_at = 0",
                 (
                     data["id"],
@@ -346,6 +356,8 @@ class MetisSessionDB:
                     data["workspace_id"],
                     data["created_at"],
                     data["updated_at"],
+                    data["archived_at"],
+                    1 if data["unread"] else 0,
                 ),
             )
             connection.commit()
@@ -380,6 +392,26 @@ class MetisSessionDB:
         session["updated_at"] = updated_at if updated_at is not None else self.next_timestamp()
         self.upsert_session(session)
         return session
+
+    def set_session_archived(self, session_id: str, archived: bool) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE sessions SET archived_at = ?, unread = 0 WHERE id = ? AND deleted_at = 0",
+                (self.next_timestamp() if archived else 0.0, str(session_id)),
+            )
+            connection.commit()
+        if cursor.rowcount:
+            self.write_sessions_index_json()
+        return cursor.rowcount > 0
+
+    def set_session_unread(self, session_id: str, unread: bool) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "UPDATE sessions SET unread = ? WHERE id = ? AND deleted_at = 0 AND archived_at = 0",
+                (1 if unread else 0, str(session_id)),
+            )
+            connection.commit()
+        return cursor.rowcount > 0
 
     def assign_unscoped_sessions(self, workspace_id: str) -> None:
         sessions = self.list_sessions(workspace_id="")
@@ -448,7 +480,8 @@ class MetisSessionDB:
         with self.connect() as connection:
             connection.execute("DELETE FROM messages_fts")
             rows = connection.execute(
-                "SELECT id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at "
+                "SELECT id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at, "
+                "archived_at, unread "
                 "FROM sessions WHERE deleted_at = 0"
             ).fetchall()
             connection.commit()
@@ -533,7 +566,8 @@ class MetisSessionDB:
     def iter_full_sessions(self) -> List[Dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at "
+                "SELECT id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at, "
+                "archived_at, unread "
                 "FROM sessions WHERE deleted_at = 0 "
                 "ORDER BY updated_at DESC, created_at DESC, id DESC"
             ).fetchall()
@@ -645,6 +679,8 @@ class MetisSessionDB:
             compact_state = compact_state if isinstance(compact_state, dict) else {}
             mode = str(source.get("mode") or "auto")
             workspace_id = str(source.get("workspace_id") or "")
+            archived_at = _to_float(source.get("archived_at"), 0.0)
+            unread = bool(source.get("unread", False))
             created_at = _to_float(source.get("created_at"), time.time())
             updated_at = _to_float(source.get("updated_at"), created_at)
         else:
@@ -656,6 +692,8 @@ class MetisSessionDB:
             compact_state = raw_compact_state if isinstance(raw_compact_state, dict) else {}
             mode = str(getattr(session, "mode", "") or "auto")
             workspace_id = str(getattr(session, "workspace_id", "") or "")
+            archived_at = _to_float(getattr(session, "archived_at", None), 0.0)
+            unread = bool(getattr(session, "unread", False))
             created_at = _to_float(getattr(session, "created_at", None), time.time())
             updated_at = _to_float(getattr(session, "updated_at", None), created_at)
         if not session_id:
@@ -669,6 +707,8 @@ class MetisSessionDB:
             "workspace_id": workspace_id,
             "created_at": created_at,
             "updated_at": updated_at,
+            "archived_at": archived_at,
+            "unread": unread,
         }
 
     def _session_from_row(self, row: sqlite3.Row) -> Dict[str, Any]:
@@ -693,6 +733,8 @@ class MetisSessionDB:
             "workspace_id": str(row["workspace_id"] or ""),
             "created_at": _to_float(row["created_at"]),
             "updated_at": _to_float(row["updated_at"]),
+            "archived_at": _to_float(row["archived_at"]),
+            "unread": bool(row["unread"]),
         }
 
     def _match_query(self, query: str) -> str:

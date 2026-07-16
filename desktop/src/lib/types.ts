@@ -47,13 +47,30 @@ export type PetId = string;
 export type PetSize = 'small' | 'medium' | 'large';
 export type PetAnimationSpeed = 'slow' | 'normal' | 'fast';
 
+export interface NotificationSettings {
+  soundEnabled: boolean;
+  desktopEnabled: boolean;
+}
+
 export interface CustomPet {
   id: PetId;
   name: string;
   description: Record<Language, string>;
   spriteUrl: string;
   spriteVersionNumber: 1 | 2;
+  sourceCommunityId?: string;
+  sourceCodexId?: string;
   custom: true;
+}
+
+export interface CommunityPet {
+  id: string;
+  slug: string;
+  displayName: string;
+  description: string;
+  tags: string[];
+  spritesheetUrl: string;
+  installed: boolean;
 }
 
 export type PetAnimationState =
@@ -71,6 +88,7 @@ export interface PetConfig {
   enabled: boolean;
   petId: PetId;
   size: PetSize;
+  sizeScale: number;
   animationSpeed: PetAnimationSpeed;
   alwaysOnTop: boolean;
   statusDriven: boolean;
@@ -82,6 +100,8 @@ export type SettingsSection =
   | 'general'
   | 'appearance'
   | 'conversation'
+  | 'notifications'
+  | 'archives'
   | 'model'
   | 'usage'
   | 'network'
@@ -392,6 +412,8 @@ export interface SessionMeta {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  archivedAt?: number;
+  unread?: boolean;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system';

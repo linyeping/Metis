@@ -169,7 +169,8 @@ def list_sessions() -> Any:
     """List all sessions for the sidebar."""
     state = get_state()
     manager = get_session_manager()
-    sessions = manager.list_sessions()
+    archived = str(request.args.get("archived") or "").strip().lower() in {"1", "true", "yes"}
+    sessions = manager.list_sessions(archived=archived)
     payload = []
     for session in sessions:
         full_session = manager.get_session(session.id)
@@ -182,6 +183,8 @@ def list_sessions() -> Any:
                 "workspace_id": session.workspace_id,
                 "mode": getattr(session, "mode", "chat"),
                 "message_count": len(full_session.history) if full_session is not None else 0,
+                "archived_at": session.archived_at,
+                "unread": session.unread,
             }
         )
     return jsonify(
@@ -229,6 +232,8 @@ def create_session() -> Any:
             "title": session.title,
             "mode": session.mode,
             "workspace_id": session.workspace_id,
+            "archived_at": session.archived_at,
+            "unread": session.unread,
             "compact_state": session.compact_state,
             "active": activate,
         }
@@ -334,6 +339,7 @@ def switch_session(session_id: str) -> Any:
         compact_state=dict(session.compact_state),
         mode=session.mode,
     )
+    manager.set_session_unread(session.id, False)
     clear_read_tracking()
     return jsonify(
         {
@@ -344,6 +350,33 @@ def switch_session(session_id: str) -> Any:
             "compact_state": session.compact_state,
         }
     )
+
+
+@session_bp.route("/sessions/<session_id>/archive", methods=["POST"])
+def archive_session(session_id: str) -> Any:
+    """Archive or restore a session without deleting its history."""
+    state = get_state()
+    manager = get_session_manager()
+    data = request.get_json(silent=True) or {}
+    archived = data.get("archived", True) is not False
+    active_was_archived = archived and state.active_session_id == session_id
+    if active_was_archived:
+        save_active_session()
+    if not manager.set_session_archived(session_id, archived):
+        return jsonify({"error": "session not found"}), 404
+    if active_was_archived:
+        load_latest_session_for_workspace(state.active_workspace_id or "")
+    return jsonify({"ok": True, "id": session_id, "archived": archived})
+
+
+@session_bp.route("/sessions/<session_id>/unread", methods=["POST"])
+def set_session_unread(session_id: str) -> Any:
+    """Set the explicit unread marker used by the desktop sidebar."""
+    data = request.get_json(silent=True) or {}
+    unread = data.get("unread", True) is not False
+    if not get_session_manager().set_session_unread(session_id, unread):
+        return jsonify({"error": "session not found"}), 404
+    return jsonify({"ok": True, "id": session_id, "unread": unread})
 
 
 @session_bp.route("/sessions/<session_id>", methods=["DELETE"])

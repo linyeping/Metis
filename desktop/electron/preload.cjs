@@ -19,9 +19,19 @@ contextBridge.exposeInMainWorld('metis', {
   petUpdateConfig: patch => ipcRenderer.invoke('metis:pet-update-config', patch),
   petShow: () => ipcRenderer.invoke('metis:pet-show'),
   petSetState: state => ipcRenderer.invoke('metis:pet-set-state', state),
-  petImport: () => ipcRenderer.invoke('metis:pet-import'),
+  petUpdateShape: rectangles => ipcRenderer.invoke('metis:pet-update-shape', rectangles),
+  petImportFolder: () => ipcRenderer.invoke('metis:pet-import-folder'),
+  petImportZip: () => ipcRenderer.invoke('metis:pet-import-zip'),
+  petImportCodex: () => ipcRenderer.invoke('metis:pet-import-codex'),
+  petCommunityList: () => ipcRenderer.invoke('metis:pet-community-list'),
+  petCommunityInstall: id => ipcRenderer.invoke('metis:pet-community-install', id),
   petDelete: id => ipcRenderer.invoke('metis:pet-delete', id),
   petOpenFolder: () => ipcRenderer.invoke('metis:pet-open-folder'),
+  notificationConfig: () => ipcRenderer.invoke('metis:notification-config'),
+  notificationUpdateConfig: patch => ipcRenderer.invoke('metis:notification-update-config', patch),
+  notificationTest: () => ipcRenderer.invoke('metis:notification-test'),
+  taskNotification: payload => ipcRenderer.invoke('metis:task-notification', payload),
+  notificationClear: () => ipcRenderer.invoke('metis:notification-clear'),
   designRuntimeStatus: () => ipcRenderer.invoke('metis:design-runtime-status'),
   designRuntimeStart: locale => ipcRenderer.invoke('metis:design-runtime-start', locale),
   designProjectsList: () => ipcRenderer.invoke('metis:design-projects-list'),
@@ -137,5 +147,10 @@ contextBridge.exposeInMainWorld('metis', {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('metis:pet-state', listener)
     return () => ipcRenderer.removeListener('metis:pet-state', listener)
+  },
+  onNotificationOpen: callback => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('metis:notification-open', listener)
+    return () => ipcRenderer.removeListener('metis:notification-open', listener)
   }
 })

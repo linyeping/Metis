@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BarChart3, Copy, Cpu, Egg, Globe, HardDrive, Info, MessageSquare, Minus, Monitor, Palette, Plug, Search, Settings2, Square, Terminal, Wrench, X } from 'lucide-react';
+import { Archive, ArrowLeft, BarChart3, Bell, Copy, Cpu, Egg, Globe, HardDrive, Info, MessageSquare, Minus, Monitor, Palette, Plug, Search, Settings2, Square, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionWritableRoot,
   createPermissionRule,
@@ -70,6 +70,8 @@ import { ConnectorsTab } from './tabs/ConnectorsTab';
 import { PetsTab } from './tabs/PetsTab';
 import { DesktopTab } from './tabs/DesktopTab';
 import { AboutTab } from './tabs/AboutTab';
+import { ArchivesTab } from './tabs/ArchivesTab';
+import { NotificationsTab } from './tabs/NotificationsTab';
 
 const SETTINGS_API_CACHE_MS = 30_000;
 
@@ -94,6 +96,8 @@ const sectionIcons: Record<SettingsSection, typeof Palette> = {
   general: Settings2,
   appearance: Palette,
   conversation: MessageSquare,
+  notifications: Bell,
+  archives: Archive,
   model: Cpu,
   usage: BarChart3,
   network: Globe,
@@ -110,6 +114,8 @@ const sectionDescriptions: Record<SettingsSection, string> = {
   general: '窗口关闭和应用级行为。',
   appearance: '主题、语言、字体和界面密度。',
   conversation: '记忆、自动技能和对话行为。',
+  notifications: '完成提示音、Windows 通知和任务栏未读徽标。',
+  archives: '查看、恢复或永久删除已归档会话。',
   model: '供应商、模型、API 地址和推理参数。',
   usage: '模型额度、用量统计和供应商账单状态。',
   network: '代理、网络访问和外部连接配置。',
@@ -633,6 +639,10 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
         ) : (
           renderSettingsLoading(section)
         );
+      case 'notifications':
+        return <NotificationsTab language={language} />;
+      case 'archives':
+        return <ArchivesTab language={language} />;
       case 'model':
         return settings ? (
           <ModelTab

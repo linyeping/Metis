@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getFirstRun, getSettings, pingHealth } from './lib/api';
+import { navigateToSession } from './lib/modeNavigation';
 import type { BootEvent, BootState, RuntimeSettings } from './lib/types';
 import { useTheme } from './hooks/useTheme';
 import { AppShell } from './components/shell/AppShell';
@@ -101,6 +102,7 @@ export function App() {
   useTheme();
   const activeSection = useUiStore(state => state.activeSection);
   const productSurface = useUiStore(state => state.productSurface);
+  const setProductSurface = useUiStore(state => state.setProductSurface);
   const setSideChatOpen = useUiStore(state => state.setSideChatOpen);
   const settingsOpen = useUiStore(state => state.settingsOpen);
   const commandOpen = useUiStore(state => state.commandOpen);
@@ -224,6 +226,18 @@ export function App() {
       });
     });
   }, [pushToast]);
+
+  useEffect(() => window.metis.onNotificationOpen(payload => {
+    if (payload.surface === 'design') {
+      setProductSurface('design');
+      return;
+    }
+    const session = payload.sessionId ? useSessionStore.getState().sessions.find(item => item.id === payload.sessionId) : null;
+    if (!session) return;
+    setProductSurface('assistant');
+    const mode = session.mode === 'cowork' || session.mode === 'code' ? session.mode : 'chat';
+    navigateToSession(session.id, mode);
+  }), [setProductSurface]);
 
   useEffect(() => {
     const appMode = useUiStore.getState().appMode;

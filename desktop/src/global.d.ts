@@ -100,9 +100,19 @@ declare global {
       petUpdateConfig: (patch: Partial<PetConfig>) => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
       petShow: () => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
       petSetState: (state: PetAnimationState) => Promise<{ ok: boolean; state?: PetAnimationState }>;
-      petImport: () => Promise<{ ok: boolean; canceled?: boolean; config?: PetConfig; error?: string }>;
+      petUpdateShape: (rectangles: Array<{ x: number; y: number; width: number; height: number }>) => Promise<{ ok: boolean; applied?: boolean }>;
+      petImportFolder: () => Promise<{ ok: boolean; canceled?: boolean; imported?: number; warnings?: string[]; config?: PetConfig; error?: string }>;
+      petImportZip: () => Promise<{ ok: boolean; canceled?: boolean; config?: PetConfig; error?: string }>;
+      petImportCodex: () => Promise<{ ok: boolean; imported?: number; warnings?: string[]; config?: PetConfig; error?: string }>;
+      petCommunityList: () => Promise<{ ok: boolean; pets: import('./lib/types').CommunityPet[]; error?: string }>;
+      petCommunityInstall: (id: string) => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
       petDelete: (id: PetId) => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
       petOpenFolder: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+      notificationConfig: () => Promise<NotificationSettings & { supported: boolean; unreadCount: number }>;
+      notificationUpdateConfig: (patch: Partial<NotificationSettings>) => Promise<{ ok: boolean; config: NotificationSettings; supported: boolean; unreadCount: number }>;
+      notificationTest: () => Promise<{ ok: boolean; supported: boolean }>;
+      taskNotification: (payload: { status?: 'success' | 'error'; title?: string; body?: string; sessionId?: string; surface?: AppMode | 'design' }) => Promise<{ ok: boolean; shown?: boolean; unreadCount?: number }>;
+      notificationClear: () => Promise<{ ok: boolean; unreadCount: number }>;
       designRuntimeStatus: () => Promise<DesignRuntimeStatus>;
       designRuntimeStart: (locale?: 'zh-CN' | 'en') => Promise<DesignRuntimeStatus>;
       designProjectsList: () => Promise<DesignProjectsResult>;
@@ -193,6 +203,7 @@ declare global {
       onDesignViewState: (callback: (payload: DesignViewStatus) => void) => () => void;
       onPetConfig: (callback: (payload: PetConfig) => void) => () => void;
       onPetState: (callback: (payload: PetAnimationState) => void) => () => void;
+      onNotificationOpen: (callback: (payload: { sessionId?: string; surface?: AppMode | 'design' }) => void) => () => void;
     };
   }
 }

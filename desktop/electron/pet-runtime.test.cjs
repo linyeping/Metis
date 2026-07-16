@@ -20,6 +20,7 @@ test('pet config rejects unknown ids, sizes, and invalid coordinates', () => {
     enabled: true,
     petId: 'tux',
     size: 'medium',
+    sizeScale: 100,
     animationSpeed: 'normal',
     alwaysOnTop: false,
     statusDriven: false,
@@ -37,6 +38,7 @@ test('pet config patches preserve fields not present in the update', () => {
       enabled: true,
       petId: 'dentist',
       size: 'large',
+      sizeScale: 79,
       animationSpeed: 'normal',
       alwaysOnTop: true,
       statusDriven: true,
@@ -57,4 +59,6 @@ test('pet state and window size are normalized', () => {
   assert.equal(normalizePetState('thinking'), 'idle')
   assert.deepEqual(petWindowSize('small'), { width: 150, height: 184 })
   assert.deepEqual(petWindowSize('unknown'), { width: 190, height: 228 })
+  assert.deepEqual(petWindowSize('medium', 125), { width: 238, height: 285 })
+  assert.deepEqual(petWindowSize('medium', 500), { width: 304, height: 365 })
 })

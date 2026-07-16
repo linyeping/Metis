@@ -28,8 +28,7 @@ test('Windows compatibility mode applies the switches required by the affected r
 
   assert.equal(applyGraphicsMode(app, 'software', () => {}, 'win32'), 'software')
   assert.deepEqual(switches, [
-    ['use-angle', 'swiftshader'],
-    ['enable-unsafe-swiftshader', undefined],
+    ['disable-gpu', undefined],
     ['no-sandbox', undefined],
     ['disable-gpu-sandbox', undefined]
   ])

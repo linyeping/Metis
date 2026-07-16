@@ -35,12 +35,11 @@ function createGraphicsFallbackRecord(runtimeVersion, now = Date.now()) {
 function applyGraphicsMode(app, value, log = () => {}, platform = process.platform) {
   const mode = normalizeGraphicsMode(value, platform)
   if (mode === 'software') {
-    app.commandLine.appendSwitch('use-angle', 'swiftshader')
-    app.commandLine.appendSwitch('enable-unsafe-swiftshader')
-    // DirectComposition is required for transparent auxiliary windows. Turning
-    // it off makes the pet window render as an opaque black rectangle.
-    // Required on affected Windows machines where the sandboxed GPU/renderer
-    // process exits with 0x80000003 even when ANGLE is using SwiftShader.
+    // Some Windows drivers crash Chromium's GPU process with 0x80000003. ANGLE
+    // SwiftShader still creates a GPU process and, with DirectComposition on,
+    // can leave an otherwise healthy renderer as a fully white window. Use the
+    // real CPU compositor for the compatibility path instead.
+    app.commandLine.appendSwitch('disable-gpu')
     app.commandLine.appendSwitch('no-sandbox')
     app.commandLine.appendSwitch('disable-gpu-sandbox')
     log('[graphics] Windows compatibility rendering enabled')

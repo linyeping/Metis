@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Eye, FolderOpen, Gauge, Pin, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Check, Download, Eye, FolderInput, FolderOpen, Gauge, PackageOpen, Pin, RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react';
 import type {
+  CommunityPet,
   Language,
   PetAnimationSpeed,
   PetAnimationState,
   PetConfig,
   PetId,
-  PetSize,
 } from '../../../lib/types';
 import { petById, petCatalog } from '../../../pets/catalog';
 import { PetSprite } from '../../../pets/PetSprite';
+import { useUiStore } from '../../../store/uiStore';
 
 type PetsTabProps = {
   language: Language;
@@ -19,6 +20,7 @@ const fallbackConfig: PetConfig = {
   enabled: false,
   petId: 'tux',
   size: 'medium',
+  sizeScale: 100,
   animationSpeed: 'normal',
   alwaysOnTop: true,
   statusDriven: true,
@@ -46,6 +48,11 @@ export function PetsTab({ language }: PetsTabProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [previewState, setPreviewState] = useState<PetAnimationState>('idle');
+  const [communityPets, setCommunityPets] = useState<CommunityPet[]>([]);
+  const [communityLoading, setCommunityLoading] = useState(true);
+  const [communityQuery, setCommunityQuery] = useState('');
+  const [installingId, setInstallingId] = useState('');
+  const requestConfirm = useUiStore(state => state.requestConfirm);
   const selectedPet = useMemo(
     () => petById(config.petId, config.customPets),
     [config.customPets, config.petId],
@@ -66,6 +73,22 @@ export function PetsTab({ language }: PetsTabProps) {
     };
   }, []);
 
+  const loadCommunity = useCallback(async () => {
+    setCommunityLoading(true);
+    setMessage('');
+    try {
+      const result = await window.metis.petCommunityList();
+      if (!result.ok) throw new Error(result.error || text('社区宠物暂时无法加载。', 'Community pets are temporarily unavailable.'));
+      setCommunityPets(result.pets);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCommunityLoading(false);
+    }
+  }, [text]);
+
+  useEffect(() => { void loadCommunity(); }, [loadCommunity]);
+
   const update = useCallback(async (patch: Partial<PetConfig>) => {
     setBusy(true);
     setMessage('');
@@ -85,12 +108,27 @@ export function PetsTab({ language }: PetsTabProps) {
     if (config.enabled) await window.metis.petSetState(state);
   }, [config.enabled]);
 
-  const importPet = useCallback(async () => {
+  const importPetFolder = useCallback(async () => {
     setBusy(true);
     setMessage('');
     try {
-      const result = await window.metis.petImport();
+      const result = await window.metis.petImportFolder();
       if (!result.ok) throw new Error(result.error || text('无法导入宠物。', 'The pet could not be imported.'));
+      if (result.config) setConfig(result.config);
+      if (result.warnings?.length) setMessage(result.warnings.join('\n'));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [text]);
+
+  const importPetZip = useCallback(async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await window.metis.petImportZip();
+      if (!result.ok) throw new Error(result.error || text('无法导入宠物 ZIP。', 'The pet ZIP could not be imported.'));
       if (result.config) setConfig(result.config);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -99,19 +137,77 @@ export function PetsTab({ language }: PetsTabProps) {
     }
   }, [text]);
 
-  const deletePet = useCallback(async (id: PetId) => {
+  const importCodexPets = useCallback(async () => {
     setBusy(true);
     setMessage('');
     try {
-      const result = await window.metis.petDelete(id);
-      if (!result.ok || !result.config) throw new Error(result.error || text('无法删除宠物。', 'The pet could not be deleted.'));
-      setConfig(result.config);
+      const result = await window.metis.petImportCodex();
+      if (!result.ok) throw new Error(result.error || text('没有找到可导入的 Codex 宠物。', 'No Codex pets were found to import.'));
+      if (result.config) setConfig(result.config);
+      setMessage(text(`已同步 ${result.imported || 0} 个 Codex 宠物。`, `Synced ${result.imported || 0} Codex pets.`));
+      if (result.warnings?.length) setMessage(current => `${current}\n${result.warnings!.join('\n')}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
   }, [text]);
+
+  const installCommunityPet = useCallback(async (pet: CommunityPet) => {
+    setInstallingId(pet.id);
+    setMessage('');
+    try {
+      const result = await window.metis.petCommunityInstall(pet.id);
+      if (!result.ok || !result.config) throw new Error(result.error || text('无法安装社区宠物。', 'The community pet could not be installed.'));
+      setConfig(result.config);
+      setCommunityPets(current => current.map(item => item.id === pet.id ? { ...item, installed: true } : item));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInstallingId('');
+    }
+  }, [text]);
+
+  const deletePet = useCallback(async (id: PetId) => {
+    const pet = config.customPets.find(item => item.id === id);
+    const confirmed = await requestConfirm({
+      title: text('删除自定义宠物', 'Delete custom pet'),
+      message: text(`“${pet?.name || id}”将从 Metis 宠物库中删除。`, `“${pet?.name || id}” will be removed from the Metis pet library.`),
+      confirmLabel: text('删除', 'Delete'),
+      tone: 'danger',
+      icon: 'trash',
+    });
+    if (!confirmed) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await window.metis.petDelete(id);
+      if (!result.ok || !result.config) throw new Error(result.error || text('无法删除宠物。', 'The pet could not be deleted.'));
+      setConfig(result.config);
+      if (pet?.sourceCommunityId) {
+        setCommunityPets(current => current.map(item => item.id === pet.sourceCommunityId ? { ...item, installed: false } : item));
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [config.customPets, requestConfirm, text]);
+
+  const filteredCommunityPets = useMemo(() => {
+    const query = communityQuery.trim().toLowerCase();
+    const filtered = query
+      ? communityPets.filter(pet => `${pet.displayName} ${pet.description} ${pet.tags.join(' ')}`.toLowerCase().includes(query))
+      : communityPets;
+    return filtered.slice(0, 40);
+  }, [communityPets, communityQuery]);
+
+  const updateSizeScale = useCallback((sizeScale: number) => {
+    setConfig(current => ({ ...current, sizeScale }));
+    void window.metis.petUpdateConfig({ sizeScale }).then(result => {
+      if (result.ok && result.config) setConfig(result.config);
+    });
+  }, []);
 
   return (
     <div className="settings-card-grid pet-settings-grid">
@@ -219,15 +315,12 @@ export function PetsTab({ language }: PetsTabProps) {
             <span>
               <span>
                 <strong>{text('宠物大小', 'Pet size')}</strong>
-                <small>{text('位置会自动限制在当前显示器工作区内。', 'Position stays inside the current display work area.')}</small>
+                <small>{text('拖动滑杆连续调整，位置会自动限制在当前显示器工作区内。', 'Use the slider for continuous sizing; position stays inside the current display work area.')}</small>
               </span>
             </span>
-            <div className="pet-segmented-control" role="group" aria-label={text('宠物大小', 'Pet size')}>
-              {(['small', 'medium', 'large'] as PetSize[]).map(size => (
-                <button type="button" data-active={config.size === size} disabled={busy} key={size} onClick={() => void update({ size })}>
-                  {size === 'small' ? text('小', 'S') : size === 'medium' ? text('中', 'M') : text('大', 'L')}
-                </button>
-              ))}
+            <div className="pet-size-control">
+              <input type="range" min="65" max="160" step="1" value={config.sizeScale} aria-label={text('宠物大小', 'Pet size')} onChange={event => updateSizeScale(Number(event.target.value))} />
+              <output>{config.sizeScale}%</output>
             </div>
           </div>
           <div className="pet-setting-row pet-setting-row-controls">
@@ -260,9 +353,17 @@ export function PetsTab({ language }: PetsTabProps) {
               <FolderOpen size={15} />
               {text('打开文件夹', 'Open folder')}
             </button>
-            <button type="button" className="primary" disabled={busy} onClick={() => void importPet()}>
-              <Plus size={15} />
-              {text('导入宠物', 'Import pet')}
+            <button type="button" disabled={busy} onClick={() => void importPetZip()}>
+              <PackageOpen size={15} />
+              {text('导入 ZIP', 'Import ZIP')}
+            </button>
+            <button type="button" disabled={busy} onClick={() => void importCodexPets()}>
+              <Sparkles size={15} />
+              {text('导入 Codex', 'Import Codex')}
+            </button>
+            <button type="button" className="primary" disabled={busy} onClick={() => void importPetFolder()}>
+              <FolderInput size={15} />
+              {text('导入文件夹', 'Import folder')}
             </button>
           </div>
         </div>
@@ -288,6 +389,47 @@ export function PetsTab({ language }: PetsTabProps) {
           <div className="pet-custom-empty">{text('尚未导入自定义宠物。', 'No custom pets imported yet.')}</div>
         )}
         {message && <p className="pet-settings-error">{message}</p>}
+      </section>
+
+      <section className="settings-section pet-community-section">
+        <div className="settings-section-header pet-custom-header">
+          <div>
+            <h3>{text('社区宠物', 'Community pets')}</h3>
+            <p className="section-desc">{text('浏览并安装经过社区审核的 Codex 兼容宠物，安装后可继续使用大小、速度和动作预览。', 'Browse approved Codex-compatible pets. Installed pets retain Metis sizing, speed, and animation previews.')}</p>
+          </div>
+          <button type="button" className="pet-community-refresh" disabled={communityLoading} title={text('刷新社区', 'Refresh community')} onClick={() => void loadCommunity()}>
+            <RefreshCw size={15} className={communityLoading ? 'spin' : ''} />
+          </button>
+        </div>
+        <label className="pet-community-search">
+          <Search size={15} />
+          <input value={communityQuery} onChange={event => setCommunityQuery(event.target.value)} placeholder={text('搜索宠物名称或标签', 'Search pets or tags')} />
+        </label>
+        {communityLoading ? (
+          <div className="pet-custom-empty">{text('正在加载社区宠物…', 'Loading community pets…')}</div>
+        ) : filteredCommunityPets.length > 0 ? (
+          <div className="pet-community-list">
+            {filteredCommunityPets.map(pet => (
+              <article key={pet.id} className="pet-community-row">
+                <span className="pet-community-icon"><PackageOpen size={17} /></span>
+                <span>
+                  <strong>{pet.displayName}</strong>
+                  <small>{pet.description || pet.tags.join(' · ') || text('社区宠物', 'Community pet')}</small>
+                </span>
+                <button type="button" disabled={Boolean(installingId)} data-installed={pet.installed} onClick={() => void installCommunityPet(pet)}>
+                  {pet.installed ? <Check size={15} /> : <Download size={15} />}
+                  {installingId === pet.id
+                    ? text('安装中…', 'Installing…')
+                    : pet.installed
+                      ? text('重新安装', 'Reinstall')
+                      : text('安装', 'Install')}
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="pet-custom-empty">{text('没有找到匹配的社区宠物。', 'No matching community pets found.')}</div>
+        )}
       </section>
     </div>
   );

@@ -584,8 +584,8 @@ async function requestJson<T>(path: string, init?: RequestInit, options: Request
   return data as T;
 }
 
-export async function getSessions(): Promise<SessionsPayload> {
-  const data = await requestJson<Record<string, unknown>>('/sessions');
+export async function getSessions(archived = false): Promise<SessionsPayload> {
+  const data = await requestJson<Record<string, unknown>>(archived ? '/sessions?archived=1' : '/sessions');
   const sessions = Array.isArray(data.sessions) ? data.sessions : [];
   return {
     activeSessionId: stringValue(data.active_id) || null,
@@ -600,6 +600,8 @@ export async function getSessions(): Promise<SessionsPayload> {
         messageCount: numberValue(row.message_count),
         createdAt: numberValue(row.created_at),
         updatedAt: numberValue(row.updated_at),
+        archivedAt: numberValue(row.archived_at),
+        unread: Boolean(row.unread),
       };
     }),
   };
@@ -723,6 +725,20 @@ export async function renameSessionTitle(sessionId: string, title: string): Prom
   await requestJson(`/sessions/${encodeURIComponent(sessionId)}/title`, {
     method: 'POST',
     body: JSON.stringify({ title }),
+  });
+}
+
+export async function archiveSession(sessionId: string, archived = true): Promise<void> {
+  await requestJson(`/sessions/${encodeURIComponent(sessionId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ archived }),
+  });
+}
+
+export async function markSessionUnread(sessionId: string, unread: boolean): Promise<void> {
+  await requestJson(`/sessions/${encodeURIComponent(sessionId)}/unread`, {
+    method: 'POST',
+    body: JSON.stringify({ unread }),
   });
 }
 

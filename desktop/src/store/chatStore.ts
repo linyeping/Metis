@@ -576,6 +576,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (isActiveSession(sessionId)) {
         updateAssistant(assistantId, current => ({ ...current, pending: false }));
       }
+      if (completedNormally) void notifyRunCompletion(sessionId);
       if (completedNormally && !get().pausedFollowupSessions[sessionId]) {
         window.setTimeout(() => { void get().runNextFollowup(sessionId); }, 0);
       }
@@ -1015,6 +1016,7 @@ function attachRunStream(run: ChatRunPayload, sessionId: string): void {
       if (isActiveSession(sessionId)) {
         updateAssistant(assistantId, current => ({ ...current, pending: false }));
       }
+      if (completedNormally) void notifyRunCompletion(sessionId);
       if (completedNormally && !useChatStore.getState().pausedFollowupSessions[sessionId]) {
         window.setTimeout(() => { void useChatStore.getState().runNextFollowup(sessionId); }, 0);
       }
@@ -1029,6 +1031,20 @@ function refreshActiveRunUiState(): void {
     streaming: Boolean(activeRun),
     controller: activeRun?.controller || null,
     runSessionId: activeRun ? activeSessionId : null,
+  });
+}
+
+function notifyRunCompletion(sessionId: string): Promise<unknown> | undefined {
+  if (!window.metis?.taskNotification) return undefined;
+  const session = useSessionStore.getState().sessions.find(item => item.id === sessionId);
+  const mode = session?.mode === 'cowork' || session?.mode === 'code' ? session.mode : 'chat';
+  const title = session?.title?.trim() || 'Metis 任务';
+  return window.metis.taskNotification({
+    status: 'success',
+    title: `${title} · 已完成`,
+    body: '任务已经完成，打开 Metis 查看结果。',
+    sessionId,
+    surface: mode,
   });
 }
 

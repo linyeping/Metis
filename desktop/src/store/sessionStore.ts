@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import {
+  archiveSession,
   clearWorkspaceSessions,
   createSession,
   createWorkspace,
   deleteSession,
   getSessions,
   getWorkspaces,
+  markSessionUnread,
   removeWorkspace,
   renameSessionTitle,
   switchSession,
@@ -34,6 +36,8 @@ interface SessionState {
   selectSession: (sessionId: string) => Promise<void>;
   deleteSessionById: (sessionId: string) => Promise<void>;
   renameSessionById: (sessionId: string, title: string) => Promise<void>;
+  archiveSessionById: (sessionId: string) => Promise<void>;
+  markSessionUnreadById: (sessionId: string, unread: boolean) => Promise<void>;
   openWorkspacePath: (path: string) => Promise<void>;
   selectWorkspace: (workspaceId: string) => Promise<void>;
   clearWorkspace: (workspaceId: string) => Promise<void>;
@@ -197,7 +201,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       activeWorkspaceByMode,
       activeSessionId: targetSession.id,
       activeWorkspaceId: workspaceId,
+      sessions: state.sessions.map(item => item.id === targetSession.id ? { ...item, unread: false } : item),
     });
+    if (targetSession.unread) void markSessionUnread(targetSession.id, false).catch(() => undefined);
     return { sessionId: targetSession.id, workspaceId, draft: false };
   },
   activateModeSession: async mode => {
@@ -241,6 +247,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!nextTitle) return;
     await renameSessionTitle(sessionId, nextTitle);
     await get().load();
+  },
+  archiveSessionById: async sessionId => {
+    await archiveSession(sessionId, true);
+    await get().load();
+  },
+  markSessionUnreadById: async (sessionId, unread) => {
+    set(state => ({ sessions: state.sessions.map(item => item.id === sessionId ? { ...item, unread } : item) }));
+    try {
+      await markSessionUnread(sessionId, unread);
+    } catch (error) {
+      await get().load();
+      throw error;
+    }
   },
   openWorkspacePath: async path => {
     const appMode = useUiStore.getState().appMode;

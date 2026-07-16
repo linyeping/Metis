@@ -368,8 +368,8 @@ test('electron window keeps hardened renderer defaults', () => {
   assert.match(security, /webSecurity:\s*true/);
   assert.match(main, /METIS_GRAPHICS_MODE/);
   assert.match(graphics, /mode === 'software'/);
-  assert.match(graphics, /appendSwitch\(['"]use-angle['"], ['"]swiftshader['"]\)/);
-  assert.match(graphics, /appendSwitch\(['"]enable-unsafe-swiftshader['"]\)/);
+  assert.match(graphics, /appendSwitch\(['"]disable-gpu['"]\)/);
+  assert.doesNotMatch(graphics, /appendSwitch\(['"]use-angle['"], ['"]swiftshader['"]\)/);
   assert.doesNotMatch(graphics, /appendSwitch\(['"]disable-direct-composition['"]\)/);
   assert.doesNotMatch(main, /app\.disableHardwareAcceleration\(\)/);
   assert.match(main, /!app\.isPackaged[\s\S]*path\.isAbsolute\(relaunchArgs\[0\]\)[\s\S]*path\.resolve\(relaunchArgs\[0\]\)/);
@@ -949,7 +949,7 @@ test('NEW-93 busy session guard and sidebar status language stays wired', () => 
   assert.match(chatStore, /phase:\s*'session_busy'/);
   assert.match(chatStore, /当前会话正在运行/);
   assert.match(sidebar, /session-state-dot/);
-  assert.match(sidebar, /data-status={runStatus \|\| 'idle'}/);
+  assert.match(sidebar, /data-status={runStatus \|\| \(session\.unread \? 'unread' : 'idle'\)}/);
   assert.match(css, /\.session-state-dot/);
   assert.match(css, /@keyframes session-state-pulse/);
   assert.match(smoke, /new93-busy-send-guard-visible/);
@@ -2598,4 +2598,44 @@ test('FABLEADV-15 provider probe and FABLEADV-17 rewind stay wired', () => {
   assert.match(uiStore, /refreshWorkspaceView/);
   assert.match(css, /\.user-message-shell:hover \.user-message-actions/);
   assert.match(css, /\.user-action-button/);
+});
+
+test('task notifications, unread sessions, and archives stay wired across desktop surfaces', () => {
+  const electronMain = read('electron/main.cjs');
+  const preload = read('electron/preload.cjs');
+  const app = read('src/App.tsx');
+  const chatStore = read('src/store/chatStore.ts');
+  const sidebar = read('src/components/sidebar/Sidebar.tsx');
+  const settings = read('src/components/settings/SettingsDialog.tsx');
+  const notifications = read('src/components/settings/tabs/NotificationsTab.tsx');
+  const archives = read('src/components/settings/tabs/ArchivesTab.tsx');
+  const pets = read('src/components/settings/tabs/PetsTab.tsx');
+  const petPackage = read('electron/pet-package.cjs');
+  const designProject = fs.readFileSync(path.resolve(root, '..', 'open-design', 'apps', 'web', 'src', 'components', 'ProjectView.tsx'), 'utf8');
+
+  assert.match(electronMain, /new Notification\(/);
+  assert.match(electronMain, /setOverlayIcon/);
+  assert.match(electronMain, /metis:task-notification/);
+  assert.match(electronMain, /\[metis:task-complete\]/);
+  assert.match(preload, /taskNotification:/);
+  assert.match(preload, /onNotificationOpen:/);
+  assert.match(app, /onNotificationOpen/);
+  assert.match(chatStore, /notifyRunCompletion/);
+  assert.match(designProject, /\[metis:task-complete\]/);
+  assert.match(designProject, /\[metis:pet-state\]/);
+  assert.match(sidebar, /markSessionUnreadById/);
+  assert.match(sidebar, /archiveSessionById/);
+  assert.match(sidebar, /slice\(0, expandedLists\.chat \? undefined : 4\)/);
+  assert.match(settings, /NotificationsTab/);
+  assert.match(settings, /ArchivesTab/);
+  assert.match(notifications, /notificationTest/);
+  assert.match(archives, /getSessions\(true\)/);
+  assert.match(pets, /petImportCodex/);
+  assert.match(pets, /petImportZip/);
+  assert.match(pets, /petCommunityInstall/);
+  assert.match(pets, /requestConfirm/);
+  assert.match(petPackage, /readWebpDimensions/);
+  assert.match(petPackage, /extractPetZip/);
+  assert.match(electronMain, /setShape\(safeRectangles\)/);
+  assert.match(sidebar, /createPortal/);
 });

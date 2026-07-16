@@ -161,3 +161,52 @@ def test_rebuild_search_index_from_sqlite_sessions(tmp_path: Path) -> None:
 
     db.rebuild_search_index()
     assert db.search_sessions("rebuildable")
+
+
+def test_archive_and_unread_state_round_trip(tmp_path: Path) -> None:
+    db = MetisSessionDB(data_root=str(tmp_path / ".metis"))
+    session = db.create_session("Archive me")
+
+    assert db.set_session_unread(session["id"], True) is True
+    assert db.list_sessions()[0]["unread"] == 1
+
+    assert db.set_session_archived(session["id"], True) is True
+    assert db.list_sessions() == []
+    archived = db.list_sessions(archived=True)
+    assert len(archived) == 1
+    assert archived[0]["id"] == session["id"]
+    assert archived[0]["archived_at"] > 0
+    assert archived[0]["unread"] == 0
+    assert db.set_session_unread(session["id"], True) is False
+
+    assert db.set_session_archived(session["id"], False) is True
+    restored = db.list_sessions()
+    assert len(restored) == 1
+    assert restored[0]["archived_at"] == 0
+
+
+def test_existing_session_schema_adds_archive_and_unread_columns(tmp_path: Path) -> None:
+    root = tmp_path / ".metis"
+    root.mkdir()
+    db_path = root / "session-state.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE sessions ("
+            "id TEXT PRIMARY KEY, title TEXT NOT NULL, history_json TEXT NOT NULL, "
+            "compact_state_json TEXT NOT NULL DEFAULT '{}', mode TEXT NOT NULL, "
+            "workspace_id TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, "
+            "updated_at REAL NOT NULL, deleted_at REAL NOT NULL DEFAULT 0)"
+        )
+        connection.execute(
+            "INSERT INTO sessions(id, title, history_json, compact_state_json, mode, workspace_id, created_at, updated_at, deleted_at) "
+            "VALUES ('legacy', 'Legacy session', '[]', '{}', 'chat', '', 1, 2, 0)"
+        )
+        connection.commit()
+
+    db = MetisSessionDB(data_root=str(root))
+
+    loaded = db.get_session("legacy")
+    assert loaded is not None
+    assert loaded["title"] == "Legacy session"
+    assert loaded["archived_at"] == 0
+    assert loaded["unread"] is False

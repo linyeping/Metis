@@ -27,6 +27,8 @@ class SessionMeta:
     updated_at: float
     workspace_id: str = ""
     mode: str = "chat"
+    archived_at: float = 0.0
+    unread: bool = False
 
 
 @dataclass
@@ -41,6 +43,8 @@ class Session:
     created_at: float = 0.0
     updated_at: float = 0.0
     workspace_id: str = ""
+    archived_at: float = 0.0
+    unread: bool = False
 
 
 class SessionManager:
@@ -49,13 +53,13 @@ class SessionManager:
     def __init__(self, data_root: Optional[str] = None, db: Optional[MetisSessionDB] = None) -> None:
         self._db = db or MetisSessionDB(data_root=data_root)
 
-    def list_sessions(self, workspace_id: Optional[str] = None) -> List[SessionMeta]:
+    def list_sessions(self, workspace_id: Optional[str] = None, *, archived: bool = False) -> List[SessionMeta]:
         """Return sessions with the most recently updated session first.
 
         If workspace_id is given, only sessions belonging to that workspace
         are returned. Pass None to return all sessions.
         """
-        return [self._meta_from_dict(item) for item in self._db.list_sessions(workspace_id=workspace_id)]
+        return [self._meta_from_dict(item) for item in self._db.list_sessions(workspace_id=workspace_id, archived=archived)]
 
     def create_session(self, title: str = "", workspace_id: str = "", mode: str = "chat") -> Session:
         """Create a new empty session."""
@@ -104,6 +108,12 @@ class SessionManager:
         """Delete every session assigned to a workspace."""
         return self._db.delete_sessions_for_workspace(workspace_id)
 
+    def set_session_archived(self, session_id: str, archived: bool) -> bool:
+        return self._db.set_session_archived(session_id, archived)
+
+    def set_session_unread(self, session_id: str, unread: bool) -> bool:
+        return self._db.set_session_unread(session_id, unread)
+
     def _default_title(self) -> str:
         return "新会话"
 
@@ -115,6 +125,8 @@ class SessionManager:
             updated_at=float(item.get("updated_at") or 0.0),
             workspace_id=str(item.get("workspace_id") or ""),
             mode=str(item.get("mode") or "chat"),
+            archived_at=float(item.get("archived_at") or 0.0),
+            unread=bool(item.get("unread", False)),
         )
 
     def _session_from_dict(self, data: Dict[str, Any]) -> Session:
@@ -129,6 +141,8 @@ class SessionManager:
             created_at=float(data.get("created_at") or 0.0),
             updated_at=float(data.get("updated_at") or 0.0),
             workspace_id=str(data.get("workspace_id") or ""),
+            archived_at=float(data.get("archived_at") or 0.0),
+            unread=bool(data.get("unread", False)),
         )
 
 

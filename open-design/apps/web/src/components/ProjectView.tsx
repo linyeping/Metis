@@ -1918,6 +1918,19 @@ export function ProjectView({
   // form as a freshly appeared one.
   const hasQuestions =
     Boolean(questionForm || questionsGenerating) && questionFormSubmittedAnswers === undefined;
+  const metisPetState = error
+    ? 'failed'
+    : hasQuestions
+      ? 'waiting'
+      : Object.keys(liveToolInput).length > 0
+        ? 'review'
+        : currentConversationBusy
+          ? 'running'
+          : 'idle';
+  useEffect(() => {
+    if (typeof document === 'undefined' || document.documentElement.dataset.metisEmbedded !== 'true') return;
+    console.info(`[metis:pet-state]${JSON.stringify({ state: metisPetState })}`);
+  }, [metisPetState]);
   // Stable identity for the current form occurrence, used to remember that its
   // one-by-one reveal already played. Keyed on the conversation + the hosting
   // assistant message id (not the message index, and NOT the parsed form id —
@@ -2269,6 +2282,19 @@ export function ProjectView({
         ? 'failed'
         : last.runStatus;
     if (status !== 'succeeded' && status !== 'failed') return;
+
+    if (typeof document !== 'undefined' && document.documentElement.dataset.metisEmbedded === 'true') {
+      const fallbackBody = status === 'succeeded'
+        ? t('notify.successBody')
+        : t('notify.failureBody');
+      const trimmed = (last.content ?? '').trim();
+      console.info(`[metis:task-complete]${JSON.stringify({
+        status: status === 'failed' ? 'error' : 'success',
+        title: status === 'failed' ? t('notify.failureTitle') : t('notify.successTitle'),
+        body: trimmed ? trimmed.slice(0, 160) : fallbackBody,
+      })}`);
+      return;
+    }
 
     const cfg = config.notifications ?? DEFAULT_NOTIFICATIONS;
     if (cfg.soundEnabled) {

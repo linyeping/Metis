@@ -1,5 +1,6 @@
-import { ChevronRight, Folder, FolderOpen, MoreHorizontal, Paintbrush, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
-import { createElement, useEffect, useMemo, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
+import { Archive, ChevronDown, ChevronRight, Folder, FolderOpen, Mail, MoreHorizontal, Paintbrush, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
+import { createElement, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type KeyboardEvent, type SetStateAction } from 'react';
+import { createPortal } from 'react-dom';
 import { listActiveRuns } from '../../lib/api';
 import { navigateToSession } from '../../lib/modeNavigation';
 import type { ChatRunStatus, SessionMeta, Workspace } from '../../lib/types';
@@ -16,7 +17,6 @@ export function Sidebar() {
   const setSettingsOpen = useUiStore(state => state.setSettingsOpen);
   const setProductSurface = useUiStore(state => state.setProductSurface);
   const appMode = useUiStore(state => state.appMode);
-  const setActiveSection = useUiStore(state => state.setActiveSection);
   const sessions = useSessionStore(state => state.sessions);
   const workspaces = useSessionStore(state => state.workspaces);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
@@ -26,6 +26,8 @@ export function Sidebar() {
   const selectWorkspace = useSessionStore(state => state.selectWorkspace);
   const deleteSessionById = useSessionStore(state => state.deleteSessionById);
   const renameSessionById = useSessionStore(state => state.renameSessionById);
+  const archiveSessionById = useSessionStore(state => state.archiveSessionById);
+  const markSessionUnreadById = useSessionStore(state => state.markSessionUnreadById);
   const openWorkspacePath = useSessionStore(state => state.openWorkspacePath);
   const clearWorkspace = useSessionStore(state => state.clearWorkspace);
   const removeWorkspaceById = useSessionStore(state => state.removeWorkspaceById);
@@ -34,6 +36,8 @@ export function Sidebar() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<string | null>(null);
   const [runStatuses, setRunStatuses] = useState<Record<string, ChatRunStatus>>({});
+  const [expandedLists, setExpandedLists] = useState<Record<string, boolean>>({});
+  const workspacePaths = useMemo(() => new Map(workspaces.map(workspace => [workspace.id, workspace.path])), [workspaces]);
 
   const modeSessions = useMemo(
     () => sessions.filter(session => session.mode === appMode || (appMode === 'chat' && !session.mode)),
@@ -123,19 +127,22 @@ export function Sidebar() {
           {appMode === 'chat' ? (
             <div className="session-list session-list-chat">
               {modeSessions.length === 0 && <p className="empty-line">{t('暂无会话')}</p>}
-              {modeSessions.slice(0, 20).map(session =>
+              {modeSessions.slice(0, expandedLists.chat ? undefined : 4).map(session =>
                 createElement(SessionRow, {
                   key: session.id,
                   active: session.id === activeSessionId,
+                  archiveSessionById,
                   deleteSessionById,
+                  markSessionUnreadById,
                   renameSessionById,
                   runStatus: runStatuses[session.id] || '',
                   session,
+                  workspacePath: workspacePaths.get(session.workspaceId) || '',
                 })
               )}
-              {modeSessions.length > 20 && (
-                <button className="sidebar-view-all" type="button" onClick={() => setActiveSection('chat-list')}>
-                  {t('查看全部')} <ChevronRight size={14} />
+              {modeSessions.length > 4 && (
+                <button className="session-expand-button" type="button" onClick={() => setExpandedLists(value => ({ ...value, chat: !value.chat }))}>
+                  {expandedLists.chat ? t('收起显示') : `${t('展开显示')} (${modeSessions.length - 4})`} <ChevronDown size={14} data-open={Boolean(expandedLists.chat)} />
                 </button>
               )}
             </div>
@@ -143,15 +150,22 @@ export function Sidebar() {
             <>
               {unscopedModeSessions.length > 0 && (
                 <div className="session-list session-list-unscoped">
-                  {unscopedModeSessions.map(session =>
+                  {unscopedModeSessions.slice(0, expandedLists.unscoped ? undefined : 4).map(session =>
                     createElement(SessionRow, {
                       key: session.id,
                       active: session.id === activeSessionId,
+                      archiveSessionById,
                       deleteSessionById,
+                      markSessionUnreadById,
                       renameSessionById,
                       runStatus: runStatuses[session.id] || '',
                       session,
                     }),
+                  )}
+                  {unscopedModeSessions.length > 4 && (
+                    <button className="session-expand-button" type="button" onClick={() => setExpandedLists(value => ({ ...value, unscoped: !value.unscoped }))}>
+                      {expandedLists.unscoped ? t('收起显示') : `${t('展开显示')} (${unscopedModeSessions.length - 4})`} <ChevronDown size={14} data-open={Boolean(expandedLists.unscoped)} />
+                    </button>
                   )}
                 </div>
               )}
@@ -160,12 +174,14 @@ export function Sidebar() {
                   key: group.workspace.id,
                   activeSessionId,
                   activeWorkspaceId,
+                  archiveSessionById,
                   clearWorkspace,
                   createChat,
                   deleteSessionById,
                   group,
                   loadChatSession,
                   menu,
+                  markSessionUnreadById,
                   open,
                   renameSessionById,
                   removeWorkspaceById,
@@ -211,6 +227,8 @@ interface WorkspaceGroupProps {
   selectWorkspace: (workspaceId: string) => Promise<void>;
   deleteSessionById: (sessionId: string) => Promise<void>;
   renameSessionById: (sessionId: string, title: string) => Promise<void>;
+  archiveSessionById: (sessionId: string) => Promise<void>;
+  markSessionUnreadById: (sessionId: string, unread: boolean) => Promise<void>;
   clearWorkspace: (workspaceId: string) => Promise<void>;
   removeWorkspaceById: (workspaceId: string) => Promise<void>;
   loadChatSession: (sessionId: string | null, options?: { force?: boolean }) => Promise<void>;
@@ -220,12 +238,14 @@ interface WorkspaceGroupProps {
 function WorkspaceGroup({
   activeSessionId,
   activeWorkspaceId,
+  archiveSessionById,
   clearWorkspace,
   createChat,
   deleteSessionById,
   group,
   loadChatSession,
   menu,
+  markSessionUnreadById,
   open,
   renameSessionById,
   removeWorkspaceById,
@@ -239,6 +259,8 @@ function WorkspaceGroup({
   const id = workspace.id || 'default';
   const isOpen = open[id] ?? true;
   const isActive = workspace.id === activeWorkspaceId;
+  const [expanded, setExpanded] = useState(false);
+  const visibleSessions = expanded ? group.sessions : group.sessions.slice(0, 4);
 
   return (
     <section className="workspace-group" style={workspaceColor(workspace.name || id)}>
@@ -292,15 +314,23 @@ function WorkspaceGroup({
       <div className="session-list-shell" data-open={isOpen}>
         <div className="session-list">
           {group.sessions.length === 0 && <p className="empty-line">{t('暂无会话')}</p>}
-          {group.sessions.map(session =>
+          {visibleSessions.map(session =>
             createElement(SessionRow, {
               key: session.id,
               active: session.id === activeSessionId,
+              archiveSessionById,
               deleteSessionById,
+              markSessionUnreadById,
               renameSessionById,
               runStatus: runStatuses[session.id] || '',
               session,
+              workspacePath: workspace.path,
             }),
+          )}
+          {group.sessions.length > 4 && (
+            <button className="session-expand-button" type="button" onClick={() => setExpanded(value => !value)}>
+              {expanded ? t('收起显示') : `${t('展开显示')} (${group.sessions.length - 4})`} <ChevronDown size={14} data-open={expanded} />
+            </button>
           )}
         </div>
       </div>
@@ -310,26 +340,53 @@ function WorkspaceGroup({
 
 function SessionRow({
   active,
+  archiveSessionById,
   deleteSessionById,
+  markSessionUnreadById,
   renameSessionById,
   runStatus,
   session,
+  workspacePath = '',
 }: {
   active: boolean;
   session: SessionMeta;
   runStatus: ChatRunStatus;
+  workspacePath?: string;
+  archiveSessionById: (sessionId: string) => Promise<void>;
   deleteSessionById: (sessionId: string) => Promise<void>;
+  markSessionUnreadById: (sessionId: string, unread: boolean) => Promise<void>;
   renameSessionById: (sessionId: string, title: string) => Promise<void>;
 }) {
   const t = useT();
   const appMode = useUiStore(state => state.appMode);
+  const requestConfirm = useUiStore(state => state.requestConfirm);
   const loadChatSession = useChatStore(state => state.loadSession);
   const [renaming, setRenaming] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [renameDraft, setRenameDraft] = useState(session.title || 'Metis Chat');
+  const menuRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!renaming) setRenameDraft(session.title || 'Metis Chat');
   }, [renaming, session.title]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const close = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node) && !contextMenuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    const closeOnViewportChange = () => setMenuOpen(false);
+    window.addEventListener('resize', closeOnViewportChange);
+    window.addEventListener('scroll', closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      window.removeEventListener('resize', closeOnViewportChange);
+      window.removeEventListener('scroll', closeOnViewportChange, true);
+    };
+  }, [menuOpen]);
 
   const commitRename = async () => {
     const nextTitle = renameDraft.trim().slice(0, 80);
@@ -354,12 +411,12 @@ function SessionRow({
   };
 
   return (
-    <div className="session-item" data-active={active} data-running={Boolean(runStatus)}>
+    <div className="session-item" data-active={active} data-running={Boolean(runStatus)} data-unread={Boolean(session.unread)} ref={menuRef}>
       {renaming ? (
         <div className="session-main session-main-edit">
           <span
             className="session-state-dot"
-            data-status={runStatus || 'idle'}
+            data-status={runStatus || (session.unread ? 'unread' : 'idle')}
             role={runStatus ? 'status' : undefined}
             aria-label={runStatus ? `${t('会话')} ${runStatus}` : undefined}
             title={runStatus || 'idle'}
@@ -377,7 +434,7 @@ function SessionRow({
         <button
           className="session-main"
           type="button"
-          title={`${session.messageCount} ${t('条消息')}`}
+          title={`${session.title || 'Metis Chat'} · ${session.messageCount} ${t('条消息')}`}
           onClick={() => {
             const targetMode = (session.mode as import('../../lib/types').AppMode) || appMode;
             navigateToSession(session.id, targetMode);
@@ -385,39 +442,101 @@ function SessionRow({
         >
           <span
             className="session-state-dot"
-            data-status={runStatus || 'idle'}
+            data-status={runStatus || (session.unread ? 'unread' : 'idle')}
             role={runStatus ? 'status' : undefined}
             aria-label={runStatus ? `${t('会话')} ${runStatus}` : undefined}
             title={runStatus || 'idle'}
           />
-          <span className="session-title">{session.title || 'Metis Chat'}</span>
+          <ScrollingSessionTitle title={session.title || 'Metis Chat'} />
         </button>
       )}
       <button
-        className="rename-session"
+        className="session-more-button"
         type="button"
-        title={t('重命名会话')}
-        onClick={() => {
-          setRenameDraft(session.title || 'Metis Chat');
-          setRenaming(true);
+        title={t('会话操作')}
+        aria-label={t('会话操作')}
+        aria-expanded={menuOpen}
+        onClick={event => {
+          const nextOpen = !menuOpen;
+          if (nextOpen) {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            const menuHeight = workspacePath ? 176 : 142;
+            const top = bounds.bottom + menuHeight <= window.innerHeight - 8
+              ? bounds.bottom + 4
+              : Math.max(8, bounds.top - menuHeight - 4);
+            setMenuPosition({ top, left: Math.max(8, Math.min(window.innerWidth - 198, bounds.right - 190)) });
+          }
+          setMenuOpen(nextOpen);
         }}
       >
-        <Pencil size={13} />
+        <MoreHorizontal size={15} />
       </button>
-      <button
-        className="delete-session"
-        type="button"
-        title={t('删除会话')}
-        onClick={async () => {
-          await deleteSessionById(session.id);
-          const nextActive = useSessionStore.getState().activeSessionId;
-          await loadChatSession(nextActive);
-        }}
-      >
-        <Trash2 size={13} />
-      </button>
+      {menuOpen && createPortal(
+        <div ref={contextMenuRef} className="session-context-menu session-context-menu-portal" role="menu" style={menuPosition}>
+          {workspacePath && (
+            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); void window.metis.openPath(workspacePath); }}>
+              <FolderOpen size={14} /> {t('在资源管理器中打开')}
+            </button>
+          )}
+          <button className="rename-session" type="button" role="menuitem" onClick={() => { setMenuOpen(false); setRenameDraft(session.title || 'Metis Chat'); setRenaming(true); }}>
+            <Pencil size={14} /> {t('重命名会话')}
+          </button>
+          <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); void markSessionUnreadById(session.id, !session.unread); }}>
+            <Mail size={14} /> {session.unread ? t('标记为已读') : t('标记为未读')}
+          </button>
+          <button type="button" role="menuitem" onClick={async () => {
+            setMenuOpen(false);
+            await archiveSessionById(session.id);
+            await loadChatSession(useSessionStore.getState().activeSessionId);
+          }}>
+            <Archive size={14} /> {t('归档')}
+          </button>
+          <button className="delete-session" type="button" role="menuitem" onClick={async () => {
+            setMenuOpen(false);
+            const confirmed = await requestConfirm({
+              title: t('删除会话'),
+              message: t('此会话及其历史将被永久删除。'),
+              confirmLabel: t('删除'),
+              tone: 'danger',
+              icon: 'trash',
+            });
+            if (!confirmed) return;
+            await deleteSessionById(session.id);
+            await loadChatSession(useSessionStore.getState().activeSessionId);
+          }}>
+            <Trash2 size={14} /> {t('删除会话')}
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>
   );
+}
+
+function ScrollingSessionTitle({ title }: { title: string }) {
+  const trackRef = useRef<HTMLSpanElement>(null);
+  const animationRef = useRef<Animation | null>(null);
+
+  const start = () => {
+    const track = trackRef.current;
+    const viewport = track?.parentElement;
+    if (!track || !viewport) return;
+    const distance = Math.max(0, track.scrollWidth - viewport.clientWidth);
+    if (distance < 2) return;
+    animationRef.current?.cancel();
+    animationRef.current = track.animate(
+      [{ transform: 'translateX(0)' }, { transform: `translateX(-${distance}px)` }],
+      { duration: Math.max(1800, distance * 36), delay: 450, direction: 'alternate', easing: 'ease-in-out', iterations: Infinity },
+    );
+  };
+
+  const stop = () => {
+    animationRef.current?.cancel();
+    animationRef.current = null;
+  };
+
+  useEffect(() => stop, []);
+  return <span className="session-title" onPointerEnter={start} onPointerLeave={stop}><span ref={trackRef}>{title}</span></span>;
 }
 
 function isActiveRunStatus(status: string): status is ChatRunStatus {

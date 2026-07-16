@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from '../hooks/useTheme';
 import type { PetAnimationState, PetConfig } from '../lib/types';
 import { useUiStore } from '../store/uiStore';
@@ -9,6 +9,7 @@ const defaultConfig: PetConfig = {
   enabled: false,
   petId: 'tux',
   size: 'medium',
+  sizeScale: 100,
   animationSpeed: 'normal',
   alwaysOnTop: true,
   statusDriven: true,
@@ -36,6 +37,9 @@ export function PetWindow() {
   const [config, setConfig] = useState<PetConfig>(defaultConfig);
   const [state, setState] = useState<PetAnimationState>('idle');
   const pet = useMemo(() => petById(config.petId, config.customPets), [config.customPets, config.petId]);
+  const updateWindowShape = useCallback((rectangles: Array<{ x: number; y: number; width: number; height: number }>) => {
+    void window.metis.petUpdateShape(rectangles);
+  }, []);
 
   useEffect(() => {
     document.body.classList.add('metis-pet-shell');
@@ -51,10 +55,10 @@ export function PetWindow() {
   }, []);
 
   return (
-    <main className="metis-pet-window" data-pet-size={config.size} data-state={state}>
+    <main className="metis-pet-window" data-state={state}>
       <div className="metis-pet-status" role="status">{stateLabels[state][language]}</div>
       <div className="metis-pet-drag-surface" title={`${pet.name} · ${stateLabels[state][language]}`}>
-        <PetSprite animate speedMultiplier={speedMultipliers[config.animationSpeed]} spriteUrl={pet.spriteUrl} state={state} />
+        <PetSprite animate onMaskChange={updateWindowShape} speedMultiplier={speedMultipliers[config.animationSpeed]} spriteUrl={pet.spriteUrl} state={state} />
       </div>
     </main>
   );

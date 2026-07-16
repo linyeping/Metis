@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, protocol, safeStorage, screen, shell, Tray, WebContentsView } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, protocol, safeStorage, screen, shell, Tray, WebContentsView } = require('electron')
 const { spawn } = require('node:child_process')
 const { randomUUID } = require('node:crypto')
 const fsSync = require('node:fs')
@@ -8,6 +8,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { TextDecoder } = require('node:util')
 const { pathToFileURL } = require('node:url')
+const extractZip = require('extract-zip')
 const {
   configFilePath,
   legacyMetisHome,
@@ -62,6 +63,7 @@ const {
   normalizePetState,
   petWindowSize
 } = require('./pet-runtime.cjs')
+const { extractPetZip, findPetDirectories, inspectPetDirectory } = require('./pet-package.cjs')
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'metis-pet',
@@ -97,7 +99,10 @@ let petConfig = { ...DEFAULT_PET_CONFIG }
 let petState = 'idle'
 let petMoveTimer = null
 let petPositionSaveTimer = null
+let designPetSettleTimer = null
 let lastPetWindowX = null
+let notificationConfig = { soundEnabled: false, desktopEnabled: true }
+let taskNotificationCount = 0
 let previewView = null
 let designView = null
 let designRuntimeProcess = null
@@ -1493,6 +1498,39 @@ function ensureDesignView() {
     const level = String(details.level || 'log')
     const text = String(details.message || '').trim()
     if (!text) return
+    if (text.startsWith('[metis:task-complete]')) {
+      try {
+        const payload = JSON.parse(text.slice('[metis:task-complete]'.length))
+        clearTimeout(designPetSettleTimer)
+        petState = payload.status === 'error' ? 'failed' : 'jumping'
+        sendPetState(petState)
+        designPetSettleTimer = setTimeout(() => {
+          designPetSettleTimer = null
+          petState = 'idle'
+          sendPetState(petState)
+        }, payload.status === 'error' ? 2200 : 1800)
+        notifyTaskCompletion({ ...payload, surface: 'design' })
+      } catch (error) {
+        log(`[design] invalid task completion event: ${error?.message || error}`)
+      }
+      return
+    }
+    if (text.startsWith('[metis:pet-state]')) {
+      try {
+        const payload = JSON.parse(text.slice('[metis:pet-state]'.length))
+        const nextState = normalizePetState(payload.state)
+        if (designPetSettleTimer && nextState === 'idle') return
+        if (nextState !== 'idle') {
+          clearTimeout(designPetSettleTimer)
+          designPetSettleTimer = null
+        }
+        petState = nextState
+        sendPetState(petState)
+      } catch (error) {
+        log(`[design] invalid pet state event: ${error?.message || error}`)
+      }
+      return
+    }
     if (process.env.METIS_DESKTOP_DEV_SERVER || level === 'error' || level === 'warning') {
       log(`[design:${level}] ${text}${details.sourceId ? ` (${details.sourceId}:${details.lineNumber || 0})` : ''}`)
     }
@@ -3809,6 +3847,7 @@ async function createWindow() {
   mainWindow.on('enter-full-screen', broadcastWindowState)
   mainWindow.on('leave-full-screen', broadcastWindowState)
   mainWindow.on('restore', broadcastWindowState)
+  mainWindow.on('focus', clearTaskNotifications)
 
   mainWindow.on('close', handleMainWindowClose)
 
@@ -3917,6 +3956,101 @@ function showWindow(reason = 'unknown') {
   mainWindow.focus()
 }
 
+function notificationConfigPath() {
+  return path.join(storageInfo.metisHome, 'notification-config.json')
+}
+
+function normalizeNotificationConfig(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    soundEnabled: source.soundEnabled === true,
+    desktopEnabled: source.desktopEnabled !== false
+  }
+}
+
+function loadNotificationConfig() {
+  try {
+    notificationConfig = normalizeNotificationConfig(JSON.parse(fsSync.readFileSync(notificationConfigPath(), 'utf8')))
+  } catch {
+    notificationConfig = normalizeNotificationConfig()
+  }
+  return notificationConfig
+}
+
+function saveNotificationConfig() {
+  fsSync.mkdirSync(path.dirname(notificationConfigPath()), { recursive: true })
+  fsSync.writeFileSync(notificationConfigPath(), `${JSON.stringify(notificationConfig, null, 2)}\n`, 'utf8')
+}
+
+function notificationPayload() {
+  return {
+    ...notificationConfig,
+    supported: Notification.isSupported(),
+    unreadCount: taskNotificationCount
+  }
+}
+
+function taskbarBadgeImage(count) {
+  const label = count > 9 ? '9+' : String(Math.max(1, count))
+  const fontSize = label.length > 1 ? 9 : 11
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="15" fill="#1677ff" stroke="#ffffff" stroke-width="2"/><text x="16" y="20" text-anchor="middle" font-family="Segoe UI,Arial" font-size="${fontSize}" font-weight="700" fill="#ffffff">${label}</text></svg>`
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`).resize({ width: 16, height: 16 })
+}
+
+function updateTaskbarNotificationBadge() {
+  if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return
+  try {
+    mainWindow.setOverlayIcon(
+      taskNotificationCount > 0 ? taskbarBadgeImage(taskNotificationCount) : null,
+      taskNotificationCount > 0 ? `${taskNotificationCount} 条未读任务消息` : ''
+    )
+  } catch (error) {
+    log(`[notifications] unable to update taskbar badge: ${error?.message || error}`)
+  }
+}
+
+function clearTaskNotifications() {
+  if (taskNotificationCount === 0) return 0
+  taskNotificationCount = 0
+  updateTaskbarNotificationBadge()
+  return taskNotificationCount
+}
+
+function notifyTaskCompletion(payload = {}, options = {}) {
+  const status = payload.status === 'error' ? 'error' : 'success'
+  const background = !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized() || !mainWindow.isFocused()
+  if (!background && options.force !== true) return { ok: true, shown: false, unreadCount: taskNotificationCount }
+
+  if (options.force !== true) {
+    taskNotificationCount += 1
+    updateTaskbarNotificationBadge()
+  }
+
+  if (!notificationConfig.desktopEnabled || !Notification.isSupported()) {
+    if (notificationConfig.soundEnabled) shell.beep()
+    return { ok: true, shown: false, unreadCount: taskNotificationCount }
+  }
+
+  const title = String(payload.title || (status === 'error' ? 'Metis 任务失败' : 'Metis 任务已完成')).trim().slice(0, 100)
+  const body = String(payload.body || (status === 'error' ? '任务执行失败，打开 Metis 查看详情。' : '任务已经完成，可以返回 Metis 查看结果。')).trim().slice(0, 240)
+  const notification = new Notification({
+    title,
+    body,
+    icon: iconPath('logo.png'),
+    silent: !notificationConfig.soundEnabled,
+    urgency: status === 'error' ? 'critical' : 'normal'
+  })
+  notification.on('click', () => {
+    showWindow('task-notification')
+    mainWindow?.webContents.send('metis:notification-open', {
+      sessionId: String(payload.sessionId || ''),
+      surface: String(payload.surface || '')
+    })
+  })
+  notification.show()
+  return { ok: true, shown: true, unreadCount: taskNotificationCount }
+}
+
 function petConfigPath() {
   return path.join(storageInfo.metisHome, 'pet-config.json')
 }
@@ -3966,6 +4100,8 @@ function readCustomPet(directory) {
       },
       spriteUrl: `metis-pet://asset/${encodeURIComponent(id)}`,
       spriteVersionNumber: Number(manifest.spriteVersionNumber) === 2 ? 2 : 1,
+      sourceCommunityId: typeof manifest.sourceCommunityId === 'string' ? manifest.sourceCommunityId : undefined,
+      sourceCodexId: typeof manifest.sourceCodexId === 'string' ? manifest.sourceCodexId : undefined,
       custom: true,
       spritePath
     }
@@ -4002,7 +4138,7 @@ function registerCustomPetProtocol() {
       if (!pet) return new Response('Not found', { status: 404 })
       const contentType = pet.spritePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/webp'
       return new Response(fsSync.readFileSync(pet.spritePath), {
-        headers: { 'content-type': contentType, 'cache-control': 'no-store' }
+        headers: { 'content-type': contentType, 'cache-control': 'no-store', 'access-control-allow-origin': '*' }
       })
     } catch {
       return new Response('Not found', { status: 404 })
@@ -4010,47 +4146,197 @@ function registerCustomPetProtocol() {
   })
 }
 
-function importCustomPet(sourceDirectory) {
-  const source = path.resolve(String(sourceDirectory || ''))
-  const manifest = JSON.parse(fsSync.readFileSync(path.join(source, 'pet.json'), 'utf8'))
-  const sourceSprite = path.resolve(source, String(manifest.spritesheetPath || 'spritesheet.webp'))
-  if (!sourceSprite.startsWith(`${source}${path.sep}`)) throw new Error('宠物图集路径无效。')
-  const extension = path.extname(sourceSprite).toLowerCase()
-  if (extension !== '.webp' && extension !== '.png') throw new Error('仅支持 WebP 或 PNG 宠物图集。')
-  const stat = fsSync.statSync(sourceSprite)
-  if (!stat.isFile() || stat.size <= 0 || stat.size > 24 * 1024 * 1024) throw new Error('宠物图集为空或超过 24 MB。')
-  const imageSize = nativeImage.createFromPath(sourceSprite).getSize()
-  const inferredVersion = imageSize.width === 1536 && imageSize.height === 2288
-    ? 2
-    : imageSize.width === 1536 && imageSize.height === 1872
-      ? 1
-      : 0
-  if (!inferredVersion) throw new Error('宠物图集必须是 1536×2288（v2）或 1536×1872（v1）。')
-  if (manifest.spriteVersionNumber && Number(manifest.spriteVersionNumber) !== inferredVersion) {
-    throw new Error('pet.json 的 spriteVersionNumber 与图集尺寸不一致。')
-  }
-
+function importCustomPet(sourceDirectory, options = {}) {
+  const { source, manifest, spritePath: sourceSprite, extension, spriteVersionNumber } = inspectPetDirectory(sourceDirectory)
+  const communityId = typeof options.sourceCommunityId === 'string' ? options.sourceCommunityId : ''
+  const codexId = typeof options.sourceCodexId === 'string' ? options.sourceCodexId : ''
+  const existing = communityId
+    ? listCustomPets().find(pet => pet.sourceCommunityId === communityId)
+    : codexId
+      ? listCustomPets().find(pet => pet.sourceCodexId === codexId)
+      : null
   const baseSlug = customPetSlug(manifest.id || manifest.displayName || path.basename(source))
   let slug = baseSlug
   let index = 2
-  while (fsSync.existsSync(path.join(customPetsRoot(), slug))) slug = `${baseSlug.slice(0, 58)}-${index++}`
+  if (existing) slug = existing.id.slice('custom:'.length)
+  while (!existing && fsSync.existsSync(path.join(customPetsRoot(), slug))) slug = `${baseSlug.slice(0, 58)}-${index++}`
   const target = path.join(customPetsRoot(), slug)
-  fsSync.mkdirSync(target, { recursive: true })
+  const staging = `${target}.import-${randomUUID()}`
+  const backup = `${target}.backup-${randomUUID()}`
+  fsSync.mkdirSync(staging, { recursive: true })
   const spriteFileName = `spritesheet${extension}`
   try {
-    fsSync.copyFileSync(sourceSprite, path.join(target, spriteFileName))
-    fsSync.writeFileSync(path.join(target, 'pet.json'), `${JSON.stringify({
+    fsSync.copyFileSync(sourceSprite, path.join(staging, spriteFileName))
+    fsSync.writeFileSync(path.join(staging, 'pet.json'), `${JSON.stringify({
       id: slug,
       displayName: String(manifest.displayName || manifest.name || slug).trim().slice(0, 80) || slug,
       description: String(manifest.description || '').trim().slice(0, 240),
-      spriteVersionNumber: inferredVersion,
-      spritesheetPath: spriteFileName
+      spriteVersionNumber,
+      spritesheetPath: spriteFileName,
+      ...(communityId ? { sourceCommunityId: communityId } : {}),
+      ...(codexId ? { sourceCodexId: codexId } : {})
     }, null, 2)}\n`, 'utf8')
+    if (existing) fsSync.renameSync(target, backup)
+    fsSync.renameSync(staging, target)
+    if (existing) {
+      try { fsSync.rmSync(backup, { recursive: true, force: true }) } catch {}
+    }
   } catch (error) {
-    fsSync.rmSync(target, { recursive: true, force: true })
+    fsSync.rmSync(staging, { recursive: true, force: true })
+    if (existing && fsSync.existsSync(backup) && !fsSync.existsSync(target)) fsSync.renameSync(backup, target)
     throw error
   }
   return `custom:${slug}`
+}
+
+function importCodexPetLibraries() {
+  const roots = [
+    process.env.CODEX_HOME ? path.join(process.env.CODEX_HOME, 'pets') : '',
+    path.join(os.homedir(), '.codex', 'pets')
+  ].filter(Boolean).map(root => path.resolve(root))
+  const directories = [...new Set(roots.filter(root => fsSync.existsSync(root)).flatMap(root => findPetDirectories(root)))]
+  if (directories.length === 0) throw new Error('没有找到 Codex 宠物库。')
+  const imported = []
+  const errors = []
+  for (const directory of directories.slice(0, 100)) {
+    try {
+      const inspected = inspectPetDirectory(directory)
+      const sourceCodexId = `codex:${customPetSlug(inspected.manifest.id || path.basename(directory))}`
+      imported.push(importCustomPet(directory, { sourceCodexId }))
+    } catch (error) {
+      errors.push(`${path.basename(directory)}: ${error?.message || error}`)
+    }
+  }
+  if (imported.length === 0) throw new Error(errors[0] || 'Codex 宠物库中没有可导入的宠物。')
+  return { imported, errors }
+}
+
+function importPetDirectorySelection(sourceDirectory) {
+  const directories = findPetDirectories(sourceDirectory)
+  if (directories.length === 0) throw new Error('所选文件夹中没有找到 pet.json。')
+  const imported = []
+  const errors = []
+  for (const directory of directories.slice(0, 100)) {
+    try {
+      imported.push(importCustomPet(directory))
+    } catch (error) {
+      errors.push(`${path.basename(directory)}: ${error?.message || error}`)
+    }
+  }
+  if (imported.length === 0) throw new Error(errors[0] || '没有可导入的宠物。')
+  return { imported, errors }
+}
+
+function firestoreValue(value) {
+  if (!value || typeof value !== 'object') return null
+  if ('stringValue' in value) return value.stringValue
+  if ('timestampValue' in value) return value.timestampValue
+  if ('integerValue' in value) return Number(value.integerValue)
+  if ('booleanValue' in value) return Boolean(value.booleanValue)
+  if (value.arrayValue) return (value.arrayValue.values || []).map(firestoreValue)
+  return null
+}
+
+function normalizeCommunityPet(value = {}) {
+  const raw = value.document?.fields
+    ? Object.fromEntries(Object.entries(value.document.fields).map(([key, field]) => [key, firestoreValue(field)]))
+    : value
+  const id = String(raw.id || value.document?.name?.split('/').pop() || '').trim()
+  const packageUrl = String(raw.packageUrl || '').trim()
+  const spritesheetUrl = String(raw.spritesheetUrl || '').trim()
+  if (!/^[a-zA-Z0-9_-]{1,120}$/.test(id)) return null
+  try {
+    const packageHost = new URL(packageUrl)
+    const spriteHost = new URL(spritesheetUrl)
+    if (packageHost.protocol !== 'https:' || packageHost.hostname !== 'firebasestorage.googleapis.com') return null
+    if (spriteHost.protocol !== 'https:' || spriteHost.hostname !== 'firebasestorage.googleapis.com') return null
+  } catch {
+    return null
+  }
+  return {
+    id,
+    slug: String(raw.slug || id).slice(0, 120),
+    displayName: String(raw.displayName || raw.name || raw.slug || id).trim().slice(0, 80),
+    description: String(raw.description || '').trim().slice(0, 240),
+    tags: Array.isArray(raw.tags) ? raw.tags.map(tag => String(tag).slice(0, 30)).slice(0, 8) : [],
+    spritesheetUrl,
+    packageUrl
+  }
+}
+
+async function listCommunityPets() {
+  let values = []
+  try {
+    const response = await fetch('https://www.codexpets.app/api/pets', { signal: AbortSignal.timeout(12000) })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const payload = await response.json()
+    values = Array.isArray(payload) ? payload : Array.isArray(payload?.pets) ? payload.pets : []
+  } catch {
+    const response = await fetch('https://firestore.googleapis.com/v1/projects/codexpets/databases/(default)/documents:runQuery', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: 'pets' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'status' },
+              op: 'EQUAL',
+              value: { stringValue: 'approved' }
+            }
+          },
+          limit: 200
+        }
+      }),
+      signal: AbortSignal.timeout(15000)
+    })
+    if (!response.ok) throw new Error(`社区宠物服务返回 HTTP ${response.status}`)
+    values = await response.json()
+  }
+  const installed = new Set(listCustomPets().map(pet => pet.sourceCommunityId).filter(Boolean))
+  return values.map(normalizeCommunityPet).filter(Boolean).map(pet => ({
+    ...pet,
+    installed: installed.has(pet.id)
+  })).sort((a, b) => a.displayName.localeCompare(b.displayName)).slice(0, 200)
+}
+
+async function installCommunityPet(communityId) {
+  const id = String(communityId || '')
+  if (!/^[a-zA-Z0-9_-]{1,120}$/.test(id)) throw new Error('社区宠物 ID 无效。')
+  const pet = (await listCommunityPets()).find(entry => entry.id === id)
+  if (!pet) throw new Error('社区中找不到这个宠物。')
+  const response = await fetch(pet.packageUrl, { signal: AbortSignal.timeout(30000) })
+  if (!response.ok) throw new Error(`宠物包下载失败（HTTP ${response.status}）。`)
+  const declaredSize = Number(response.headers.get('content-length') || 0)
+  if (declaredSize > 32 * 1024 * 1024) throw new Error('宠物 ZIP 超过 32 MB。')
+  const archive = Buffer.from(await response.arrayBuffer())
+  if (archive.length <= 0 || archive.length > 32 * 1024 * 1024) throw new Error('宠物 ZIP 为空或超过 32 MB。')
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'metis-community-pet-'))
+  try {
+    const zipPath = path.join(tempRoot, 'pet.zip')
+    const extractPath = path.join(tempRoot, 'extracted')
+    await fs.writeFile(zipPath, archive)
+    await extractPetZip(extractZip, zipPath, extractPath)
+    const directories = findPetDirectories(extractPath)
+    if (directories.length !== 1) throw new Error('社区宠物包必须且只能包含一个 pet.json。')
+    return importCustomPet(directories[0], { sourceCommunityId: pet.id })
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true })
+  }
+}
+
+async function importPetZip(sourceZip) {
+  const stat = await fs.stat(sourceZip)
+  if (!stat.isFile() || stat.size <= 0 || stat.size > 32 * 1024 * 1024) throw new Error('宠物 ZIP 为空或超过 32 MB。')
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'metis-pet-zip-'))
+  try {
+    await extractPetZip(extractZip, sourceZip, tempRoot)
+    const directories = findPetDirectories(tempRoot)
+    if (directories.length !== 1) throw new Error('ZIP 必须且只能包含一个 pet.json。')
+    return importCustomPet(directories[0])
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true })
+  }
 }
 
 function loadPetConfig() {
@@ -4145,13 +4431,15 @@ async function createPetWindow() {
     return petWindow
   }
 
-  const size = petWindowSize(petConfig.size)
+  const size = petWindowSize(petConfig.size, petConfig.sizeScale)
   const initialPosition = clampPetPosition(petConfig.position || defaultPetPosition(size), size)
   petWindow = new BrowserWindow({
     ...size,
     x: initialPosition.x,
     y: initialPosition.y,
     title: 'Metis Pet',
+    acceptFirstMouse: true,
+    focusable: false,
     frame: false,
     show: false,
     transparent: true,
@@ -4161,15 +4449,20 @@ async function createPetWindow() {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
+    roundedCorners: false,
+    thickFrame: false,
+    accentColor: false,
     skipTaskbar: true,
     alwaysOnTop: petConfig.alwaysOnTop,
     webPreferences: {
       ...HARDENED_WEB_PREFERENCES,
+      backgroundThrottling: false,
       preload: path.join(__dirname, 'preload.cjs')
     }
   })
 
   try { petWindow.setAlwaysOnTop(petConfig.alwaysOnTop, 'floating') } catch {}
+  try { petWindow.webContents.setBackgroundThrottling(false) } catch {}
   try { petWindow.setVisibleOnAllWorkspaces(petConfig.alwaysOnTop, { visibleOnFullScreen: false }) } catch {}
 
   petWindow.once('ready-to-show', () => {
@@ -4220,7 +4513,7 @@ function applyPetConfig() {
     void createPetWindow().catch(error => log(`[pet] unable to create window: ${error?.message || error}`))
     return
   }
-  const size = petWindowSize(petConfig.size)
+  const size = petWindowSize(petConfig.size, petConfig.sizeScale)
   const position = clampPetPosition(petConfig.position || defaultPetPosition(size), size)
   petWindow.setBounds({ ...position, ...size })
   try { petWindow.setAlwaysOnTop(petConfig.alwaysOnTop, 'floating') } catch {}
@@ -4853,7 +5146,28 @@ ipcMain.handle('metis:pet-set-state', (event, state) => {
   petState = normalizePetState(state)
   return { ok: true, state: sendPetState(petState) }
 })
-ipcMain.handle('metis:pet-import', async event => {
+ipcMain.handle('metis:pet-update-shape', (event, rectangles) => {
+  if (activeGraphicsMode !== 'software' || process.platform !== 'win32') return { ok: true, applied: false }
+  if (!petWindow || petWindow.isDestroyed() || event.sender.id !== petWindow.webContents.id) return { ok: false }
+  const [width, height] = petWindow.getSize()
+  const safeRectangles = Array.isArray(rectangles)
+    ? rectangles.slice(0, 2048).map(rectangle => ({
+        x: Math.max(0, Math.min(width, Math.round(Number(rectangle?.x) || 0))),
+        y: Math.max(0, Math.min(height, Math.round(Number(rectangle?.y) || 0))),
+        width: Math.max(1, Math.min(width, Math.round(Number(rectangle?.width) || 0))),
+        height: Math.max(1, Math.min(height, Math.round(Number(rectangle?.height) || 0)))
+      })).filter(rectangle => rectangle.x + rectangle.width <= width && rectangle.y + rectangle.height <= height)
+    : []
+  if (safeRectangles.length === 0) return { ok: false }
+  try {
+    petWindow.setShape(safeRectangles)
+    return { ok: true, applied: true }
+  } catch (error) {
+    log(`[pet] unable to apply transparent shape: ${error?.message || error}`)
+    return { ok: false }
+  }
+})
+ipcMain.handle('metis:pet-import-folder', async event => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
     return { ok: false, error: 'pet imports are only available to the Metis settings window' }
   }
@@ -4863,8 +5177,57 @@ ipcMain.handle('metis:pet-import', async event => {
   })
   if (result.canceled || !result.filePaths[0]) return { ok: true, canceled: true }
   try {
-    const id = importCustomPet(result.filePaths[0])
+    const { imported, errors } = importPetDirectorySelection(result.filePaths[0])
+    return { ok: true, imported: imported.length, warnings: errors, config: updatePetConfig({ petId: imported[0] }) }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+})
+ipcMain.handle('metis:pet-import-zip', async event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet imports are only available to the Metis settings window' }
+  }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '导入 Codex 兼容宠物 ZIP',
+    properties: ['openFile'],
+    filters: [{ name: 'Pet ZIP', extensions: ['zip'] }]
+  })
+  if (result.canceled || !result.filePaths[0]) return { ok: true, canceled: true }
+  try {
+    const id = await importPetZip(result.filePaths[0])
     return { ok: true, config: updatePetConfig({ petId: id }) }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+})
+ipcMain.handle('metis:pet-import-codex', event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet imports are only available to the Metis settings window' }
+  }
+  try {
+    const { imported, errors } = importCodexPetLibraries()
+    return { ok: true, imported: imported.length, warnings: errors, config: updatePetConfig({ petId: imported[0] }) }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+})
+ipcMain.handle('metis:pet-community-list', async event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, pets: [], error: 'community pets are only available to the Metis settings window' }
+  }
+  try {
+    return { ok: true, pets: await listCommunityPets() }
+  } catch (error) {
+    return { ok: false, pets: [], error: error?.message || String(error) }
+  }
+})
+ipcMain.handle('metis:pet-community-install', async (event, id) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'community pets are only available to the Metis settings window' }
+  }
+  try {
+    const petId = await installCommunityPet(id)
+    return { ok: true, config: updatePetConfig({ petId }) }
   } catch (error) {
     return { ok: false, error: error?.message || String(error) }
   }
@@ -4893,6 +5256,33 @@ ipcMain.handle('metis:pet-open-folder', async event => {
   fsSync.mkdirSync(root, { recursive: true })
   const error = await shell.openPath(root)
   return { ok: !error, path: root, error: error || undefined }
+})
+ipcMain.handle('metis:notification-config', event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ...notificationPayload(), desktopEnabled: false, soundEnabled: false }
+  }
+  return notificationPayload()
+})
+ipcMain.handle('metis:notification-update-config', (event, patch = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, config: notificationConfig, supported: Notification.isSupported(), unreadCount: taskNotificationCount }
+  }
+  notificationConfig = normalizeNotificationConfig({ ...notificationConfig, ...patch })
+  try { saveNotificationConfig() } catch (error) { return { ok: false, error: error?.message || String(error), ...notificationPayload(), config: notificationConfig } }
+  return { ok: true, config: notificationConfig, supported: Notification.isSupported(), unreadCount: taskNotificationCount }
+})
+ipcMain.handle('metis:notification-test', event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return { ok: false, supported: false }
+  const result = notifyTaskCompletion({ title: 'Metis 通知测试', body: '任务完成通知已经可以正常显示。', surface: 'assistant' }, { force: true })
+  return { ok: result.ok, supported: Notification.isSupported() }
+})
+ipcMain.handle('metis:task-notification', (event, payload = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return { ok: false }
+  return notifyTaskCompletion(payload)
+})
+ipcMain.handle('metis:notification-clear', event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return { ok: false, unreadCount: taskNotificationCount }
+  return { ok: true, unreadCount: clearTaskNotifications() }
 })
 ipcMain.handle('metis:design-runtime-status', () => designRuntimePayload())
 ipcMain.handle('metis:design-runtime-start', (_event, locale) => startDesignRuntime(locale))
@@ -5338,8 +5728,10 @@ app.whenReady().then(async () => {
     return
   }
   nativeTheme.themeSource = 'system'
+  if (process.platform === 'win32') app.setAppUserModelId('com.metis.app')
   registerCustomPetProtocol()
   loadCloseBehavior()
+  loadNotificationConfig()
   loadPetConfig()
   migrateApiKeyToSafeStorage()
   await createWindow()
