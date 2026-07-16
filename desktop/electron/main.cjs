@@ -55,6 +55,13 @@ const {
   saveWindowPreferences,
   windowPreferencesPath
 } = require('./window-preferences.cjs')
+const {
+  DEFAULT_PET_CONFIG,
+  mergePetConfig,
+  normalizePetConfig,
+  normalizePetState,
+  petWindowSize
+} = require('./pet-runtime.cjs')
 
 let autoUpdater = null
 try {
@@ -80,6 +87,12 @@ function compareVersions(a, b) {
 }
 
 let mainWindow = null
+let petWindow = null
+let petConfig = { ...DEFAULT_PET_CONFIG }
+let petState = 'idle'
+let petMoveTimer = null
+let petPositionSaveTimer = null
+let lastPetWindowX = null
 let previewView = null
 let designView = null
 let designRuntimeProcess = null
@@ -3893,6 +3906,190 @@ function showWindow(reason = 'unknown') {
   mainWindow.focus()
 }
 
+function petConfigPath() {
+  return path.join(storageInfo.metisHome, 'pet-config.json')
+}
+
+function loadPetConfig() {
+  try {
+    petConfig = normalizePetConfig(JSON.parse(fsSync.readFileSync(petConfigPath(), 'utf8')))
+  } catch {
+    petConfig = { ...DEFAULT_PET_CONFIG }
+  }
+  return { ...petConfig, position: petConfig.position ? { ...petConfig.position } : null }
+}
+
+function savePetConfig() {
+  try {
+    fsSync.mkdirSync(path.dirname(petConfigPath()), { recursive: true })
+    fsSync.writeFileSync(petConfigPath(), `${JSON.stringify(petConfig, null, 2)}\n`, 'utf8')
+  } catch (error) {
+    log(`[pet] unable to save config: ${error?.message || error}`)
+  }
+}
+
+function petConfigPayload() {
+  return { ...petConfig, position: petConfig.position ? { ...petConfig.position } : null }
+}
+
+function emitPetConfig() {
+  const payload = petConfigPayload()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('metis:pet-config', payload)
+  }
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send('metis:pet-config', payload)
+  }
+  return payload
+}
+
+function sendPetState(state = petState) {
+  const next = petConfig.statusDriven ? normalizePetState(state) : 'idle'
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.webContents.send('metis:pet-state', next)
+  }
+  return next
+}
+
+function defaultPetPosition(size) {
+  const display = screen.getPrimaryDisplay()
+  const area = display.workArea
+  return {
+    x: Math.max(area.x, area.x + area.width - size.width - 28),
+    y: Math.max(area.y, area.y + area.height - size.height - 24)
+  }
+}
+
+function clampPetPosition(position, size) {
+  const target = screen.getDisplayNearestPoint(position || { x: 0, y: 0 })
+  const area = target.workArea
+  return {
+    x: Math.min(Math.max(position?.x ?? area.x, area.x), area.x + Math.max(0, area.width - size.width)),
+    y: Math.min(Math.max(position?.y ?? area.y, area.y), area.y + Math.max(0, area.height - size.height))
+  }
+}
+
+function petRendererUrl() {
+  if (process.env.METIS_DESKTOP_DEV_SERVER) {
+    const url = new URL(process.env.METIS_DESKTOP_DEV_SERVER)
+    url.searchParams.set('metisPet', '1')
+    return url.toString()
+  }
+  const url = new URL(pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).toString())
+  url.searchParams.set('metisPet', '1')
+  return url.toString()
+}
+
+function recordPetPosition() {
+  if (!petWindow || petWindow.isDestroyed()) return
+  const [x, y] = petWindow.getPosition()
+  petConfig = mergePetConfig(petConfig, { position: { x, y } })
+  clearTimeout(petPositionSaveTimer)
+  petPositionSaveTimer = setTimeout(() => {
+    savePetConfig()
+    emitPetConfig()
+  }, 250)
+}
+
+async function createPetWindow() {
+  if (!petConfig.enabled) return null
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.showInactive()
+    return petWindow
+  }
+
+  const size = petWindowSize(petConfig.size)
+  const initialPosition = clampPetPosition(petConfig.position || defaultPetPosition(size), size)
+  petWindow = new BrowserWindow({
+    ...size,
+    x: initialPosition.x,
+    y: initialPosition.y,
+    title: 'Metis Pet',
+    frame: false,
+    show: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: petConfig.alwaysOnTop,
+    webPreferences: {
+      ...HARDENED_WEB_PREFERENCES,
+      preload: path.join(__dirname, 'preload.cjs')
+    }
+  })
+
+  try { petWindow.setAlwaysOnTop(petConfig.alwaysOnTop, 'floating') } catch {}
+  try { petWindow.setVisibleOnAllWorkspaces(petConfig.alwaysOnTop, { visibleOnFullScreen: false }) } catch {}
+
+  petWindow.once('ready-to-show', () => {
+    if (!petWindow || petWindow.isDestroyed() || !petConfig.enabled) return
+    petWindow.showInactive()
+    emitPetConfig()
+    sendPetState('waving')
+    setTimeout(() => sendPetState(petState), 1800)
+  })
+  petWindow.on('move', () => {
+    if (!petWindow || petWindow.isDestroyed()) return
+    const [x] = petWindow.getPosition()
+    if (lastPetWindowX !== null && x !== lastPetWindowX) {
+      sendPetState(x > lastPetWindowX ? 'running-right' : 'running-left')
+      clearTimeout(petMoveTimer)
+      petMoveTimer = setTimeout(() => sendPetState(petState), 500)
+    }
+    lastPetWindowX = x
+    recordPetPosition()
+  })
+  petWindow.on('closed', () => {
+    petWindow = null
+    lastPetWindowX = null
+    clearTimeout(petMoveTimer)
+    clearTimeout(petPositionSaveTimer)
+  })
+  petWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  petWindow.webContents.on('context-menu', () => {
+    Menu.buildFromTemplate([
+      { label: '打开 Metis', click: () => showWindow('pet-menu') },
+      { type: 'separator' },
+      {
+        label: '隐藏桌面宠物',
+        click: () => updatePetConfig({ enabled: false })
+      }
+    ]).popup({ window: petWindow || undefined })
+  })
+  await petWindow.loadURL(petRendererUrl())
+  return petWindow
+}
+
+function applyPetConfig() {
+  if (!petConfig.enabled) {
+    if (petWindow && !petWindow.isDestroyed()) petWindow.destroy()
+    return
+  }
+  if (!petWindow || petWindow.isDestroyed()) {
+    void createPetWindow().catch(error => log(`[pet] unable to create window: ${error?.message || error}`))
+    return
+  }
+  const size = petWindowSize(petConfig.size)
+  const position = clampPetPosition(petConfig.position || defaultPetPosition(size), size)
+  petWindow.setBounds({ ...position, ...size })
+  try { petWindow.setAlwaysOnTop(petConfig.alwaysOnTop, 'floating') } catch {}
+  try { petWindow.setVisibleOnAllWorkspaces(petConfig.alwaysOnTop, { visibleOnFullScreen: false }) } catch {}
+  petWindow.showInactive()
+  emitPetConfig()
+  sendPetState(petState)
+}
+
+function updatePetConfig(patch = {}) {
+  petConfig = mergePetConfig(petConfig, patch)
+  savePetConfig()
+  applyPetConfig()
+  return emitPetConfig()
+}
+
 // 重新检查间隔：app 常驻托盘运行数天是常态（closeBehavior=tray），只在启动时查一次
 // 等于几乎永远不会发现新版本——所以这里要周期性重新检查。
 const UPDATE_RECHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
@@ -4489,6 +4686,26 @@ ipcMain.handle('metis:app-info', () => ({
   fakeBackend: process.env.METIS_FAKE_BACKEND === '1',
   storage: resolveDataRootInfo()
 }))
+ipcMain.handle('metis:pet-config', () => petConfigPayload())
+ipcMain.handle('metis:pet-update-config', (event, patch = {}) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet settings are only available to the Metis settings window' }
+  }
+  return { ok: true, config: updatePetConfig(patch) }
+})
+ipcMain.handle('metis:pet-show', event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet controls are only available to the Metis settings window' }
+  }
+  return { ok: true, config: updatePetConfig({ enabled: true }) }
+})
+ipcMain.handle('metis:pet-set-state', (event, state) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false }
+  }
+  petState = normalizePetState(state)
+  return { ok: true, state: sendPetState(petState) }
+})
 ipcMain.handle('metis:design-runtime-status', () => designRuntimePayload())
 ipcMain.handle('metis:design-runtime-start', (_event, locale) => startDesignRuntime(locale))
 ipcMain.handle('metis:design-projects-list', () => listDesignProjects())
@@ -4934,8 +5151,10 @@ app.whenReady().then(async () => {
   }
   nativeTheme.themeSource = 'system'
   loadCloseBehavior()
+  loadPetConfig()
   migrateApiKeyToSafeStorage()
   await createWindow()
+  if (petConfig.enabled) await createPetWindow()
   createTray()
   configureAutoUpdates()
 })
@@ -4947,6 +5166,7 @@ app.on('before-quit', () => {
   clearInterval(updateCheckTimer)
   stopAllDevServers()
   killAllTerminalSessions()
+  if (petWindow && !petWindow.isDestroyed()) petWindow.destroy()
   stopDesignRuntime()
   stopBackend()
 })

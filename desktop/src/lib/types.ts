@@ -42,6 +42,30 @@ export type RunExecutionProfile = 'local_direct' | 'local_worktree' | 'local_vm'
 
 export type WindowCloseBehavior = 'ask' | 'tray' | 'quit';
 
+export type PetId = 'tux' | 'dentist' | 'nyako-shigure' | 'yorha-sit-2b';
+
+export type PetSize = 'small' | 'medium' | 'large';
+
+export type PetAnimationState =
+  | 'idle'
+  | 'running-right'
+  | 'running-left'
+  | 'waving'
+  | 'jumping'
+  | 'failed'
+  | 'waiting'
+  | 'running'
+  | 'review';
+
+export interface PetConfig {
+  enabled: boolean;
+  petId: PetId;
+  size: PetSize;
+  alwaysOnTop: boolean;
+  statusDriven: boolean;
+  position: { x: number; y: number } | null;
+}
+
 export type SettingsSection =
   | 'general'
   | 'appearance'
@@ -53,6 +77,7 @@ export type SettingsSection =
   | 'runtime'
   | 'tools'
   | 'connectors'
+  | 'pets'
   | 'desktop'
   | 'about';
 

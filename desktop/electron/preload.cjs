@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('metis', {
   retryBackend: () => ipcRenderer.invoke('metis:retry-backend'),
   openLog: () => ipcRenderer.invoke('metis:open-log'),
   appInfo: () => ipcRenderer.invoke('metis:app-info'),
+  petGetConfig: () => ipcRenderer.invoke('metis:pet-config'),
+  petUpdateConfig: patch => ipcRenderer.invoke('metis:pet-update-config', patch),
+  petShow: () => ipcRenderer.invoke('metis:pet-show'),
+  petSetState: state => ipcRenderer.invoke('metis:pet-set-state', state),
   designRuntimeStatus: () => ipcRenderer.invoke('metis:design-runtime-status'),
   designRuntimeStart: locale => ipcRenderer.invoke('metis:design-runtime-start', locale),
   designProjectsList: () => ipcRenderer.invoke('metis:design-projects-list'),
@@ -120,5 +124,15 @@ contextBridge.exposeInMainWorld('metis', {
     const listener = (_event, payload) => callback(payload)
     ipcRenderer.on('metis:design-view-state', listener)
     return () => ipcRenderer.removeListener('metis:design-view-state', listener)
+  },
+  onPetConfig: callback => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('metis:pet-config', listener)
+    return () => ipcRenderer.removeListener('metis:pet-config', listener)
+  },
+  onPetState: callback => {
+    const listener = (_event, payload) => callback(payload)
+    ipcRenderer.on('metis:pet-state', listener)
+    return () => ipcRenderer.removeListener('metis:pet-state', listener)
   }
 })

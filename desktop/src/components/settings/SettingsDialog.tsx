@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BarChart3, Copy, Cpu, Globe, HardDrive, Info, MessageSquare, Minus, Monitor, Palette, Plug, Search, Settings2, Square, Terminal, Wrench, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, Copy, Cpu, Egg, Globe, HardDrive, Info, MessageSquare, Minus, Monitor, Palette, Plug, Search, Settings2, Square, Terminal, Wrench, X } from 'lucide-react';
 import {
   createPermissionWritableRoot,
   createPermissionRule,
@@ -67,6 +67,7 @@ import { TerminalTab } from './tabs/TerminalTab';
 import { RuntimeTab } from './tabs/RuntimeTab';
 import { ToolsTab } from './tabs/ToolsTab';
 import { ConnectorsTab } from './tabs/ConnectorsTab';
+import { PetsTab } from './tabs/PetsTab';
 import { DesktopTab } from './tabs/DesktopTab';
 import { AboutTab } from './tabs/AboutTab';
 
@@ -100,6 +101,7 @@ const sectionIcons: Record<SettingsSection, typeof Palette> = {
   runtime: HardDrive,
   tools: Wrench,
   connectors: Plug,
+  pets: Egg,
   desktop: Monitor,
   about: Info,
 };
@@ -115,6 +117,7 @@ const sectionDescriptions: Record<SettingsSection, string> = {
   runtime: 'MetisRuntime、本机隔离执行和诊断修复工具。',
   tools: '工具权限、写入目录和自动审批规则。',
   connectors: '外部服务、MCP 和桌面连接能力。',
+  pets: '桌面宠物、任务状态动画和显示行为。',
   desktop: '桌面接管、视觉能力和本机集成。',
   about: '版本、更新、诊断包和应用状态。',
 };
@@ -736,6 +739,8 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
         );
       case 'connectors':
         return <ConnectorsTab />;
+      case 'pets':
+        return <PetsTab language={language} />;
       case 'desktop':
         return <DesktopTab capabilities={modelCapabilities} capabilitiesError={modelCapabilitiesError} />;
       case 'about':

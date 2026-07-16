@@ -1,6 +1,6 @@
 import type { FontFamily, PermissionRule, SettingsSection, TerminalShell } from '../../lib/types';
 
-export const sections: SettingsSection[] = ['general', 'appearance', 'conversation', 'model', 'usage', 'network', 'terminal', 'runtime', 'tools', 'connectors', 'desktop', 'about'];
+export const sections: SettingsSection[] = ['general', 'appearance', 'conversation', 'model', 'usage', 'network', 'terminal', 'runtime', 'tools', 'connectors', 'pets', 'desktop', 'about'];
 
 export type SettingsNavGroup = {
   id: string;
@@ -20,7 +20,7 @@ export const settingsNavGroups: SettingsNavGroup[] = [
     id: 'integrations',
     labelZh: '集成',
     labelEn: 'Integrations',
-    sections: ['connectors', 'desktop', 'tools'],
+    sections: ['connectors', 'pets', 'desktop', 'tools'],
   },
   {
     id: 'coding',

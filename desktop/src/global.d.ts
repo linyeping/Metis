@@ -10,6 +10,8 @@ import type {
   DevServerStatus,
   DiagnosticsBundleResult,
   DiagnosticsPayload,
+  PetAnimationState,
+  PetConfig,
   PreviewAuditInput,
   StoragePayload,
   PreviewAuditResult,
@@ -94,6 +96,10 @@ declare global {
       retryBackend: () => Promise<{ ok: boolean }>;
       openLog: () => Promise<{ ok: boolean; path: string; error?: string }>;
       appInfo: () => Promise<{ name: string; version: string; packaged: boolean; updateUrl: string; githubHome?: string; fakeBackend?: boolean; storage?: StoragePayload }>;
+      petGetConfig: () => Promise<PetConfig>;
+      petUpdateConfig: (patch: Partial<PetConfig>) => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
+      petShow: () => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
+      petSetState: (state: PetAnimationState) => Promise<{ ok: boolean; state?: PetAnimationState }>;
       designRuntimeStatus: () => Promise<DesignRuntimeStatus>;
       designRuntimeStart: (locale?: 'zh-CN' | 'en') => Promise<DesignRuntimeStatus>;
       designProjectsList: () => Promise<DesignProjectsResult>;
@@ -182,6 +188,8 @@ declare global {
       }) => void) => () => void;
       onDesignRuntimeState: (callback: (payload: DesignRuntimeStatus) => void) => () => void;
       onDesignViewState: (callback: (payload: DesignViewStatus) => void) => () => void;
+      onPetConfig: (callback: (payload: PetConfig) => void) => () => void;
+      onPetState: (callback: (payload: PetAnimationState) => void) => () => void;
     };
   }
 }
