@@ -14441,6 +14441,32 @@ body.metis-pet-shell #root {
   gap: var(--space-3);
 }
 
+.pet-preview-section {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.pet-preview-heading {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.pet-preview-heading strong {
+  color: var(--text);
+  font-size: var(--ui-font-size-md);
+}
+
+.pet-preview-heading span {
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-sm);
+}
+
 .pet-current-preview {
   display: grid;
   width: 74px;
@@ -14669,8 +14695,117 @@ body.metis-pet-shell #root {
 .pet-state-preview {
   width: fit-content;
   max-width: 100%;
-  margin-top: var(--space-3);
+  margin-top: 0;
   overflow-x: auto;
+}
+
+.pet-custom-header {
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pet-custom-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+}
+
+.pet-custom-actions button {
+  display: inline-flex;
+  min-height: var(--control-h-md);
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: 0 11px;
+  white-space: nowrap;
+}
+
+.pet-custom-card {
+  position: relative;
+  min-width: 0;
+  min-height: 82px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-secondary) 76%, transparent);
+}
+
+.pet-custom-card[data-active='true'] {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--bg-secondary));
+}
+
+.pet-custom-select {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 80px;
+  grid-template-columns: 58px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 42px 8px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.pet-custom-select:hover:not(:disabled) {
+  background: var(--control-hover-bg);
+}
+
+.pet-custom-select .pet-sprite {
+  width: 54px;
+}
+
+.pet-custom-select > span {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.pet-custom-select strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--ui-font-size-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-custom-select small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pet-custom-delete {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  color: var(--text-faint);
+  transform: translateY(-50%);
+}
+
+.pet-custom-delete:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.pet-custom-empty {
+  margin-top: var(--space-3);
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-sm);
+  text-align: center;
 }
 
 .pet-state-preview button {
@@ -14695,6 +14830,16 @@ body.metis-pet-shell #root {
 
   .pet-catalog-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pet-preview-section,
+  .pet-custom-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pet-custom-actions {
+    flex-wrap: wrap;
   }
 
   .pet-setting-row {

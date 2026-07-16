@@ -2,13 +2,14 @@ import tuxSprite from '../../../open-design/assets/community-pets/tux/spriteshee
 import dentistSprite from '../../../open-design/assets/community-pets/dentist/spritesheet.webp?url';
 import nyakoSprite from '../../../open-design/assets/community-pets/nyako-shigure/spritesheet.webp?url';
 import yorhaSprite from '../../../open-design/assets/community-pets/yorha-sit-2b/spritesheet.webp?url';
-import type { Language, PetAnimationState, PetId } from '../lib/types';
+import type { CustomPet, Language, PetAnimationState, PetId } from '../lib/types';
 
 export type PetCatalogEntry = {
   id: PetId;
   name: string;
   description: Record<Language, string>;
   spriteUrl: string;
+  custom?: boolean;
 };
 
 export const petCatalog: PetCatalogEntry[] = [
@@ -50,6 +51,6 @@ export const petRows: Record<PetAnimationState, { row: number; frames: number; f
   review: { row: 8, frames: 6, fps: 6 },
 };
 
-export function petById(id: PetId): PetCatalogEntry {
-  return petCatalog.find(pet => pet.id === id) ?? petCatalog[0];
+export function petById(id: PetId, customPets: CustomPet[] = []): PetCatalogEntry {
+  return petCatalog.find(pet => pet.id === id) ?? customPets.find(pet => pet.id === id) ?? petCatalog[0];
 }

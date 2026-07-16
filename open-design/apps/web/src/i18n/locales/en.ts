@@ -994,7 +994,7 @@ export const en: Dict = {
   'pluginCard.contributeAria': 'Contribute {title} to Metis Design',
   'pluginCard.contributeTitle': 'Contribute plugin to Metis Design with a pull request',
   'skillPluginCandidate.createForMe': 'Create plugin/template',
-  'skillPluginCandidate.contributeToMain': 'Contribute to open-design',
+  'skillPluginCandidate.contributeToMain': 'Add to Metis Design',
   'skillPluginCandidate.repoDescription': 'This repo looks like it could work as a plugin.',
   'integrations.kicker': 'Integration',
   'integrations.lede': 'Connect external systems, bring MCP tools into your agent loop, and use Metis Design from other IDEs, scripts, and automations.',

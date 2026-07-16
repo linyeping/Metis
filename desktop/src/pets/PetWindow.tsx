@@ -9,10 +9,14 @@ const defaultConfig: PetConfig = {
   enabled: false,
   petId: 'tux',
   size: 'medium',
+  animationSpeed: 'normal',
   alwaysOnTop: true,
   statusDriven: true,
   position: null,
+  customPets: [],
 };
+
+const speedMultipliers = { slow: 0.5, normal: 0.7, fast: 1 } as const;
 
 const stateLabels: Record<PetAnimationState, { zh: string; en: string }> = {
   idle: { zh: '待命', en: 'Ready' },
@@ -31,7 +35,7 @@ export function PetWindow() {
   const language = useUiStore(value => value.language);
   const [config, setConfig] = useState<PetConfig>(defaultConfig);
   const [state, setState] = useState<PetAnimationState>('idle');
-  const pet = useMemo(() => petById(config.petId), [config.petId]);
+  const pet = useMemo(() => petById(config.petId, config.customPets), [config.customPets, config.petId]);
 
   useEffect(() => {
     document.body.classList.add('metis-pet-shell');
@@ -50,7 +54,7 @@ export function PetWindow() {
     <main className="metis-pet-window" data-pet-size={config.size} data-state={state}>
       <div className="metis-pet-status" role="status">{stateLabels[state][language]}</div>
       <div className="metis-pet-drag-surface" title={`${pet.name} · ${stateLabels[state][language]}`}>
-        <PetSprite animate spriteUrl={pet.spriteUrl} state={state} />
+        <PetSprite animate speedMultiplier={speedMultipliers[config.animationSpeed]} spriteUrl={pet.spriteUrl} state={state} />
       </div>
     </main>
   );

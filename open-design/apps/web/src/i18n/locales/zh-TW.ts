@@ -1032,7 +1032,7 @@ export const zhTW: Dict = {
   "pluginCard.contributeAria": "將 {title} 貢獻至 Metis Design",
   "pluginCard.contributeTitle": "透過 pull request 將外掛貢獻至 Metis Design",
   "skillPluginCandidate.createForMe": "建立外掛/範本",
-  "skillPluginCandidate.contributeToMain": "貢獻到 open-design",
+  "skillPluginCandidate.contributeToMain": "加入 Metis Design",
   "skillPluginCandidate.repoDescription": "這個倉庫看起來可以做成外掛。",
   "integrations.kicker": "整合",
   "integrations.lede":

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, screen, shell, Tray, WebContentsView } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, protocol, safeStorage, screen, shell, Tray, WebContentsView } = require('electron')
 const { spawn } = require('node:child_process')
 const { randomUUID } = require('node:crypto')
 const fsSync = require('node:fs')
@@ -62,6 +62,11 @@ const {
   normalizePetState,
   petWindowSize
 } = require('./pet-runtime.cjs')
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'metis-pet',
+  privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true }
+}])
 
 let autoUpdater = null
 try {
@@ -246,7 +251,13 @@ app.on('child-process-gone', (_event, details = {}) => {
   } catch {}
   const relaunchArgs = process.argv.slice(1)
     .filter(value => !String(value).startsWith('--metis-graphics-mode='))
-    .concat('--metis-graphics-mode=software')
+  // Electron changes cwd to its own dist directory during app.relaunch(). A
+  // relative development app argument such as "." would then boot the Electron
+  // installation as if it were Metis and leave an empty window behind.
+  if (!app.isPackaged && relaunchArgs[0] && !path.isAbsolute(relaunchArgs[0])) {
+    relaunchArgs[0] = path.resolve(relaunchArgs[0])
+  }
+  relaunchArgs.push('--metis-graphics-mode=software')
   if (process.env.METIS_DESKTOP_DEV_SERVER) {
     app.exit(75)
     return
@@ -3910,6 +3921,138 @@ function petConfigPath() {
   return path.join(storageInfo.metisHome, 'pet-config.json')
 }
 
+function customPetsRoot() {
+  return path.join(storageInfo.metisHome, 'pets')
+}
+
+function customPetSlug(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || 'pet'
+}
+
+function customPetDirectory(id) {
+  const raw = String(id || '')
+  if (!/^custom:[a-z0-9][a-z0-9-]{0,63}$/.test(raw)) return null
+  const root = path.resolve(customPetsRoot())
+  const target = path.resolve(root, raw.slice('custom:'.length))
+  return target.startsWith(`${root}${path.sep}`) ? target : null
+}
+
+function readCustomPet(directory) {
+  try {
+    const root = path.resolve(customPetsRoot())
+    const resolvedDirectory = path.resolve(directory)
+    if (!resolvedDirectory.startsWith(`${root}${path.sep}`)) return null
+    const manifest = JSON.parse(fsSync.readFileSync(path.join(resolvedDirectory, 'pet.json'), 'utf8'))
+    const slug = path.basename(resolvedDirectory)
+    if (customPetSlug(slug) !== slug) return null
+    const spriteFileName = path.basename(String(manifest.spritesheetPath || 'spritesheet.webp'))
+    if (!/^spritesheet\.(?:webp|png)$/i.test(spriteFileName)) return null
+    const spritePath = path.join(resolvedDirectory, spriteFileName)
+    const stat = fsSync.statSync(spritePath)
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 24 * 1024 * 1024) return null
+    const description = typeof manifest.description === 'string' ? manifest.description.trim() : ''
+    const id = `custom:${slug}`
+    return {
+      id,
+      name: String(manifest.displayName || manifest.name || slug).trim().slice(0, 80) || slug,
+      description: {
+        zh: description || '用户导入的 Codex 兼容宠物。',
+        en: description || 'A user-imported Codex-compatible pet.'
+      },
+      spriteUrl: `metis-pet://asset/${encodeURIComponent(id)}`,
+      spriteVersionNumber: Number(manifest.spriteVersionNumber) === 2 ? 2 : 1,
+      custom: true,
+      spritePath
+    }
+  } catch {
+    return null
+  }
+}
+
+function listCustomPets() {
+  const root = customPetsRoot()
+  try {
+    fsSync.mkdirSync(root, { recursive: true })
+    return fsSync.readdirSync(root, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => readCustomPet(path.join(root, entry.name)))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  } catch {
+    return []
+  }
+}
+
+function publicCustomPets() {
+  return listCustomPets().map(({ spritePath, ...entry }) => entry)
+}
+
+function registerCustomPetProtocol() {
+  protocol.handle('metis-pet', request => {
+    try {
+      const url = new URL(request.url)
+      if (url.hostname !== 'asset') return new Response('Not found', { status: 404 })
+      const id = decodeURIComponent(url.pathname.replace(/^\//, ''))
+      const pet = listCustomPets().find(entry => entry.id === id)
+      if (!pet) return new Response('Not found', { status: 404 })
+      const contentType = pet.spritePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/webp'
+      return new Response(fsSync.readFileSync(pet.spritePath), {
+        headers: { 'content-type': contentType, 'cache-control': 'no-store' }
+      })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
+function importCustomPet(sourceDirectory) {
+  const source = path.resolve(String(sourceDirectory || ''))
+  const manifest = JSON.parse(fsSync.readFileSync(path.join(source, 'pet.json'), 'utf8'))
+  const sourceSprite = path.resolve(source, String(manifest.spritesheetPath || 'spritesheet.webp'))
+  if (!sourceSprite.startsWith(`${source}${path.sep}`)) throw new Error('宠物图集路径无效。')
+  const extension = path.extname(sourceSprite).toLowerCase()
+  if (extension !== '.webp' && extension !== '.png') throw new Error('仅支持 WebP 或 PNG 宠物图集。')
+  const stat = fsSync.statSync(sourceSprite)
+  if (!stat.isFile() || stat.size <= 0 || stat.size > 24 * 1024 * 1024) throw new Error('宠物图集为空或超过 24 MB。')
+  const imageSize = nativeImage.createFromPath(sourceSprite).getSize()
+  const inferredVersion = imageSize.width === 1536 && imageSize.height === 2288
+    ? 2
+    : imageSize.width === 1536 && imageSize.height === 1872
+      ? 1
+      : 0
+  if (!inferredVersion) throw new Error('宠物图集必须是 1536×2288（v2）或 1536×1872（v1）。')
+  if (manifest.spriteVersionNumber && Number(manifest.spriteVersionNumber) !== inferredVersion) {
+    throw new Error('pet.json 的 spriteVersionNumber 与图集尺寸不一致。')
+  }
+
+  const baseSlug = customPetSlug(manifest.id || manifest.displayName || path.basename(source))
+  let slug = baseSlug
+  let index = 2
+  while (fsSync.existsSync(path.join(customPetsRoot(), slug))) slug = `${baseSlug.slice(0, 58)}-${index++}`
+  const target = path.join(customPetsRoot(), slug)
+  fsSync.mkdirSync(target, { recursive: true })
+  const spriteFileName = `spritesheet${extension}`
+  try {
+    fsSync.copyFileSync(sourceSprite, path.join(target, spriteFileName))
+    fsSync.writeFileSync(path.join(target, 'pet.json'), `${JSON.stringify({
+      id: slug,
+      displayName: String(manifest.displayName || manifest.name || slug).trim().slice(0, 80) || slug,
+      description: String(manifest.description || '').trim().slice(0, 240),
+      spriteVersionNumber: inferredVersion,
+      spritesheetPath: spriteFileName
+    }, null, 2)}\n`, 'utf8')
+  } catch (error) {
+    fsSync.rmSync(target, { recursive: true, force: true })
+    throw error
+  }
+  return `custom:${slug}`
+}
+
 function loadPetConfig() {
   try {
     petConfig = normalizePetConfig(JSON.parse(fsSync.readFileSync(petConfigPath(), 'utf8')))
@@ -3929,7 +4072,11 @@ function savePetConfig() {
 }
 
 function petConfigPayload() {
-  return { ...petConfig, position: petConfig.position ? { ...petConfig.position } : null }
+  return {
+    ...petConfig,
+    position: petConfig.position ? { ...petConfig.position } : null,
+    customPets: publicCustomPets()
+  }
 }
 
 function emitPetConfig() {
@@ -4706,6 +4853,47 @@ ipcMain.handle('metis:pet-set-state', (event, state) => {
   petState = normalizePetState(state)
   return { ok: true, state: sendPetState(petState) }
 })
+ipcMain.handle('metis:pet-import', async event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet imports are only available to the Metis settings window' }
+  }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '导入 Codex 兼容宠物',
+    properties: ['openDirectory']
+  })
+  if (result.canceled || !result.filePaths[0]) return { ok: true, canceled: true }
+  try {
+    const id = importCustomPet(result.filePaths[0])
+    return { ok: true, config: updatePetConfig({ petId: id }) }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+})
+ipcMain.handle('metis:pet-delete', (event, id) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet deletion is only available to the Metis settings window' }
+  }
+  const target = customPetDirectory(id)
+  if (!target || !fsSync.existsSync(target)) return { ok: false, error: '找不到这个自定义宠物。' }
+  try {
+    if (petConfig.petId === id) petConfig = mergePetConfig(petConfig, { petId: 'tux' })
+    fsSync.rmSync(target, { recursive: true, force: true })
+    savePetConfig()
+    applyPetConfig()
+    return { ok: true, config: emitPetConfig() }
+  } catch (error) {
+    return { ok: false, error: error?.message || String(error) }
+  }
+})
+ipcMain.handle('metis:pet-open-folder', async event => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) {
+    return { ok: false, error: 'pet folders are only available to the Metis settings window' }
+  }
+  const root = customPetsRoot()
+  fsSync.mkdirSync(root, { recursive: true })
+  const error = await shell.openPath(root)
+  return { ok: !error, path: root, error: error || undefined }
+})
 ipcMain.handle('metis:design-runtime-status', () => designRuntimePayload())
 ipcMain.handle('metis:design-runtime-start', (_event, locale) => startDesignRuntime(locale))
 ipcMain.handle('metis:design-projects-list', () => listDesignProjects())
@@ -5150,6 +5338,7 @@ app.whenReady().then(async () => {
     return
   }
   nativeTheme.themeSource = 'system'
+  registerCustomPetProtocol()
   loadCloseBehavior()
   loadPetConfig()
   migrateApiKeyToSafeStorage()

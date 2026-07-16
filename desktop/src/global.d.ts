@@ -100,6 +100,9 @@ declare global {
       petUpdateConfig: (patch: Partial<PetConfig>) => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
       petShow: () => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
       petSetState: (state: PetAnimationState) => Promise<{ ok: boolean; state?: PetAnimationState }>;
+      petImport: () => Promise<{ ok: boolean; canceled?: boolean; config?: PetConfig; error?: string }>;
+      petDelete: (id: PetId) => Promise<{ ok: boolean; config?: PetConfig; error?: string }>;
+      petOpenFolder: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       designRuntimeStatus: () => Promise<DesignRuntimeStatus>;
       designRuntimeStart: (locale?: 'zh-CN' | 'en') => Promise<DesignRuntimeStatus>;
       designProjectsList: () => Promise<DesignProjectsResult>;

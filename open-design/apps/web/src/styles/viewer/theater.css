@@ -984,6 +984,14 @@
 .comment-preview-layer-with-deck-rail .comment-preview-canvas {
   background: #050505;
 }
+
+/* Imported slide documents often leave the page canvas transparent. Give the
+   live deck iframe a stable paper surface so dark Metis themes cannot turn a
+   black-on-transparent PPTX slide into an apparently blank main preview. */
+.comment-preview-layer-with-deck-rail .artifact-preview-transport-stack iframe {
+  background: #fff;
+  color-scheme: light;
+}
 .deck-floating-nav {
   position: absolute;
   left: 50%;

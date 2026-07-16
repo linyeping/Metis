@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, Eye, Pin, Sparkles } from 'lucide-react';
-import type { Language, PetAnimationState, PetConfig, PetId, PetSize } from '../../../lib/types';
+import { Check, Eye, FolderOpen, Gauge, Pin, Plus, Sparkles, Trash2 } from 'lucide-react';
+import type {
+  Language,
+  PetAnimationSpeed,
+  PetAnimationState,
+  PetConfig,
+  PetId,
+  PetSize,
+} from '../../../lib/types';
 import { petById, petCatalog } from '../../../pets/catalog';
 import { PetSprite } from '../../../pets/PetSprite';
 
@@ -12,9 +19,11 @@ const fallbackConfig: PetConfig = {
   enabled: false,
   petId: 'tux',
   size: 'medium',
+  animationSpeed: 'normal',
   alwaysOnTop: true,
   statusDriven: true,
   position: null,
+  customPets: [],
 };
 
 const previewStates: Array<{ id: PetAnimationState; zh: string; en: string }> = [
@@ -26,12 +35,21 @@ const previewStates: Array<{ id: PetAnimationState; zh: string; en: string }> = 
   { id: 'failed', zh: '失败', en: 'Failed' },
 ];
 
+const speedMultipliers: Record<PetAnimationSpeed, number> = {
+  slow: 0.5,
+  normal: 0.7,
+  fast: 1,
+};
+
 export function PetsTab({ language }: PetsTabProps) {
   const [config, setConfig] = useState<PetConfig>(fallbackConfig);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [previewState, setPreviewState] = useState<PetAnimationState>('idle');
-  const selectedPet = useMemo(() => petById(config.petId), [config.petId]);
+  const selectedPet = useMemo(
+    () => petById(config.petId, config.customPets),
+    [config.customPets, config.petId],
+  );
   const text = useCallback((zh: string, en: string) => (language === 'zh' ? zh : en), [language]);
 
   useEffect(() => {
@@ -67,11 +85,44 @@ export function PetsTab({ language }: PetsTabProps) {
     if (config.enabled) await window.metis.petSetState(state);
   }, [config.enabled]);
 
+  const importPet = useCallback(async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await window.metis.petImport();
+      if (!result.ok) throw new Error(result.error || text('无法导入宠物。', 'The pet could not be imported.'));
+      if (result.config) setConfig(result.config);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [text]);
+
+  const deletePet = useCallback(async (id: PetId) => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await window.metis.petDelete(id);
+      if (!result.ok || !result.config) throw new Error(result.error || text('无法删除宠物。', 'The pet could not be deleted.'));
+      setConfig(result.config);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [text]);
+
   return (
     <div className="settings-card-grid pet-settings-grid">
       <section className="settings-section pet-current-section">
         <div className="pet-current-preview">
-          <PetSprite animate spriteUrl={selectedPet.spriteUrl} state={previewState} />
+          <PetSprite
+            animate
+            speedMultiplier={speedMultipliers[config.animationSpeed]}
+            spriteUrl={selectedPet.spriteUrl}
+            state={previewState}
+          />
         </div>
         <div className="pet-current-copy">
           <span>{text('当前宠物', 'Current pet')}</span>
@@ -90,11 +141,25 @@ export function PetsTab({ language }: PetsTabProps) {
         </button>
       </section>
 
+      <section className="settings-section pet-preview-section">
+        <div className="pet-preview-heading">
+          <strong>{text('动画预览', 'Animation preview')}</strong>
+          <span>{text('切换状态会同步到已显示的桌面宠物。', 'State changes are mirrored to the visible desktop pet.')}</span>
+        </div>
+        <div className="pet-state-preview" role="group" aria-label={text('动画状态预览', 'Animation state preview')}>
+          {previewStates.map(item => (
+            <button type="button" data-active={previewState === item.id} key={item.id} onClick={() => void preview(item.id)}>
+              {language === 'zh' ? item.zh : item.en}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="settings-section">
         <div className="settings-section-header">
           <div>
             <h3>{text('内置宠物', 'Built-in pets')}</h3>
-            <p className="section-desc">{text('选择一个随 Metis 安装的宠物。切换会立即应用，不需要启动 Design。', 'Choose a companion bundled with Metis. Changes apply immediately and do not require Design.')}</p>
+            <p className="section-desc">{text('选择一个随 Metis 安装的宠物，切换后立即应用。', 'Choose a companion bundled with Metis. Changes apply immediately.')}</p>
           </div>
         </div>
         <div className="pet-catalog-grid">
@@ -105,7 +170,7 @@ export function PetsTab({ language }: PetsTabProps) {
               data-active={config.petId === pet.id}
               disabled={busy}
               key={pet.id}
-              onClick={() => void update({ petId: pet.id as PetId })}
+              onClick={() => void update({ petId: pet.id })}
             >
               <PetSprite animate={false} spriteUrl={pet.spriteUrl} />
               <span>
@@ -122,7 +187,7 @@ export function PetsTab({ language }: PetsTabProps) {
         <div className="settings-section-header">
           <div>
             <h3>{text('状态与行为', 'State and behavior')}</h3>
-            <p className="section-desc">{text('Metis 会把运行、等待确认、检查、完成和失败映射到 Codex 标准动画行。', 'Metis maps work, approvals, review, completion, and failures to the Codex animation rows.')}</p>
+            <p className="section-desc">{text('Metis 会把运行、等待确认、检查、完成和失败映射到标准动画行。', 'Metis maps work, approvals, review, completion, and failures to standard animation rows.')}</p>
           </div>
         </div>
         <div className="pet-setting-rows">
@@ -165,14 +230,63 @@ export function PetsTab({ language }: PetsTabProps) {
               ))}
             </div>
           </div>
+          <div className="pet-setting-row pet-setting-row-controls">
+            <span>
+              <Gauge size={16} />
+              <span>
+                <strong>{text('动画速度', 'Animation speed')}</strong>
+                <small>{text('默认速度已降低，减少桌面干扰。', 'The default is intentionally calmer and less distracting.')}</small>
+              </span>
+            </span>
+            <div className="pet-segmented-control" role="group" aria-label={text('动画速度', 'Animation speed')}>
+              {(['slow', 'normal', 'fast'] as PetAnimationSpeed[]).map(speed => (
+                <button type="button" data-active={config.animationSpeed === speed} disabled={busy} key={speed} onClick={() => void update({ animationSpeed: speed })}>
+                  {speed === 'slow' ? text('慢', 'Slow') : speed === 'normal' ? text('标准', 'Normal') : text('快', 'Fast')}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <div className="pet-state-preview" role="group" aria-label={text('动画状态预览', 'Animation state preview')}>
-          {previewStates.map(item => (
-            <button type="button" data-active={previewState === item.id} key={item.id} onClick={() => void preview(item.id)}>
-              {language === 'zh' ? item.zh : item.en}
+      </section>
+
+      <section className="settings-section pet-custom-section">
+        <div className="settings-section-header pet-custom-header">
+          <div>
+            <h3>{text('自定义宠物', 'Custom pets')}</h3>
+            <p className="section-desc">{text('导入包含 pet.json 和 spritesheet.webp/png 的 Codex 兼容宠物文件夹。', 'Import a Codex-compatible folder containing pet.json and spritesheet.webp/png.')}</p>
+          </div>
+          <div className="pet-custom-actions">
+            <button type="button" disabled={busy} title={text('打开宠物文件夹', 'Open pets folder')} onClick={() => void window.metis.petOpenFolder()}>
+              <FolderOpen size={15} />
+              {text('打开文件夹', 'Open folder')}
             </button>
-          ))}
+            <button type="button" className="primary" disabled={busy} onClick={() => void importPet()}>
+              <Plus size={15} />
+              {text('导入宠物', 'Import pet')}
+            </button>
+          </div>
         </div>
+        {config.customPets.length > 0 ? (
+          <div className="pet-catalog-grid pet-custom-grid">
+            {config.customPets.map(pet => (
+              <div className="pet-custom-card" data-active={config.petId === pet.id} key={pet.id}>
+                <button type="button" className="pet-custom-select" disabled={busy} onClick={() => void update({ petId: pet.id })}>
+                  <PetSprite animate={false} spriteUrl={pet.spriteUrl} />
+                  <span>
+                    <strong>{pet.name}</strong>
+                    <small>{pet.description[language]}</small>
+                  </span>
+                  {config.petId === pet.id && <Check size={15} aria-hidden="true" />}
+                </button>
+                <button type="button" className="pet-custom-delete" disabled={busy} aria-label={text(`删除 ${pet.name}`, `Delete ${pet.name}`)} title={text('删除宠物', 'Delete pet')} onClick={() => void deletePet(pet.id)}>
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="pet-custom-empty">{text('尚未导入自定义宠物。', 'No custom pets imported yet.')}</div>
+        )}
         {message && <p className="pet-settings-error">{message}</p>}
       </section>
     </div>

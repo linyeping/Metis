@@ -370,8 +370,9 @@ test('electron window keeps hardened renderer defaults', () => {
   assert.match(graphics, /mode === 'software'/);
   assert.match(graphics, /appendSwitch\(['"]use-angle['"], ['"]swiftshader['"]\)/);
   assert.match(graphics, /appendSwitch\(['"]enable-unsafe-swiftshader['"]\)/);
-  assert.match(graphics, /appendSwitch\(['"]disable-direct-composition['"]\)/);
+  assert.doesNotMatch(graphics, /appendSwitch\(['"]disable-direct-composition['"]\)/);
   assert.doesNotMatch(main, /app\.disableHardwareAcceleration\(\)/);
+  assert.match(main, /!app\.isPackaged[\s\S]*path\.isAbsolute\(relaunchArgs\[0\]\)[\s\S]*path\.resolve\(relaunchArgs\[0\]\)/);
   assert.match(graphics, /appendSwitch\(['"]no-sandbox['"]\)/);
   assert.match(graphics, /appendSwitch\(['"]disable-gpu-sandbox['"]\)/);
   assert.doesNotMatch(main, /appendSwitch\(['"]disable-gpu-compositing['"]\)/);

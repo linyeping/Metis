@@ -20,6 +20,7 @@ test('pet config rejects unknown ids, sizes, and invalid coordinates', () => {
     enabled: true,
     petId: 'tux',
     size: 'medium',
+    animationSpeed: 'normal',
     alwaysOnTop: false,
     statusDriven: false,
     position: null
@@ -36,11 +37,19 @@ test('pet config patches preserve fields not present in the update', () => {
       enabled: true,
       petId: 'dentist',
       size: 'large',
+      animationSpeed: 'normal',
       alwaysOnTop: true,
       statusDriven: true,
       position: { x: 12, y: 30 }
     }
   )
+})
+
+test('pet config accepts managed custom ids and animation speeds only', () => {
+  assert.equal(normalizePetConfig({ petId: 'custom:studio-pet' }).petId, 'custom:studio-pet')
+  assert.equal(normalizePetConfig({ petId: 'custom:../escape' }).petId, 'tux')
+  assert.equal(normalizePetConfig({ animationSpeed: 'slow' }).animationSpeed, 'slow')
+  assert.equal(normalizePetConfig({ animationSpeed: 99 }).animationSpeed, 'normal')
 })
 
 test('pet state and window size are normalized', () => {

@@ -826,7 +826,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
                               setSettingsSection(section);
                             }}
                           >
-                            <Icon size={16} />
+                            <Icon size={16} fill={section === 'pets' ? 'currentColor' : 'none'} />
                             <span>{tr(language, section)}</span>
                           </button>
                         );

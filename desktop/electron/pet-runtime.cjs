@@ -12,11 +12,14 @@ const PET_STATES = new Set([
 
 const PET_IDS = new Set(['tux', 'dentist', 'nyako-shigure', 'yorha-sit-2b'])
 const PET_SIZES = new Set(['small', 'medium', 'large'])
+const PET_ANIMATION_SPEEDS = new Set(['slow', 'normal', 'fast'])
+const CUSTOM_PET_ID_PATTERN = /^custom:[a-z0-9][a-z0-9-]{0,63}$/
 
 const DEFAULT_PET_CONFIG = Object.freeze({
   enabled: false,
   petId: 'tux',
   size: 'medium',
+  animationSpeed: 'normal',
   alwaysOnTop: true,
   statusDriven: true,
   position: null
@@ -38,8 +41,13 @@ function normalizePetConfig(value = {}) {
   const y = finiteCoordinate(source.position?.y)
   return {
     enabled: source.enabled === true,
-    petId: PET_IDS.has(source.petId) ? source.petId : DEFAULT_PET_CONFIG.petId,
+    petId: PET_IDS.has(source.petId) || CUSTOM_PET_ID_PATTERN.test(String(source.petId || ''))
+      ? source.petId
+      : DEFAULT_PET_CONFIG.petId,
     size: PET_SIZES.has(source.size) ? source.size : DEFAULT_PET_CONFIG.size,
+    animationSpeed: PET_ANIMATION_SPEEDS.has(source.animationSpeed)
+      ? source.animationSpeed
+      : DEFAULT_PET_CONFIG.animationSpeed,
     alwaysOnTop: source.alwaysOnTop !== false,
     statusDriven: source.statusDriven !== false,
     position: x === null || y === null ? null : { x, y }
@@ -66,6 +74,8 @@ function petWindowSize(size) {
 
 module.exports = {
   DEFAULT_PET_CONFIG,
+  CUSTOM_PET_ID_PATTERN,
+  PET_ANIMATION_SPEEDS,
   PET_IDS,
   PET_SIZES,
   PET_STATES,

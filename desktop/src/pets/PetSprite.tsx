@@ -7,9 +7,10 @@ type PetSpriteProps = {
   className?: string;
   spriteUrl: string;
   state?: PetAnimationState;
+  speedMultiplier?: number;
 };
 
-export function PetSprite({ animate = true, className = '', spriteUrl, state = 'idle' }: PetSpriteProps) {
+export function PetSprite({ animate = true, className = '', speedMultiplier = 0.7, spriteUrl, state = 'idle' }: PetSpriteProps) {
   const definition = petRows[state];
   const [frame, setFrame] = useState(0);
   const [atlasRows, setAtlasRows] = useState(9);
@@ -34,9 +35,9 @@ export function PetSprite({ animate = true, className = '', spriteUrl, state = '
     if (!animate || definition.frames <= 1) return undefined;
     const timer = window.setInterval(() => {
       setFrame(current => (current + 1) % definition.frames);
-    }, Math.round(1000 / definition.fps));
+    }, Math.round(1000 / (definition.fps * Math.max(0.25, speedMultiplier))));
     return () => window.clearInterval(timer);
-  }, [animate, definition.fps, definition.frames, state]);
+  }, [animate, definition.fps, definition.frames, speedMultiplier, state]);
 
   const style = {
     '--pet-atlas-image': `url("${spriteUrl}")`,

@@ -37,7 +37,8 @@ function applyGraphicsMode(app, value, log = () => {}, platform = process.platfo
   if (mode === 'software') {
     app.commandLine.appendSwitch('use-angle', 'swiftshader')
     app.commandLine.appendSwitch('enable-unsafe-swiftshader')
-    app.commandLine.appendSwitch('disable-direct-composition')
+    // DirectComposition is required for transparent auxiliary windows. Turning
+    // it off makes the pet window render as an opaque black rectangle.
     // Required on affected Windows machines where the sandboxed GPU/renderer
     // process exits with 0x80000003 even when ANGLE is using SwiftShader.
     app.commandLine.appendSwitch('no-sandbox')
