@@ -176,10 +176,16 @@ def test_metis_runtime_repair_activates_ready_runtime(monkeypatch) -> None:
 
 
 def test_runtime_manager_smoke_requires_artifact(monkeypatch) -> None:
+    create_call = {}
+
+    def fake_create(**kwargs: object) -> str:
+        create_call.update(kwargs)
+        return _json({"ok": True, "session_id": "rt_smoke", "backend": "metis_wsl"})
+
     monkeypatch.setattr(
         runtime_manager,
         "metis_runtime_create",
-        lambda **kwargs: _json({"ok": True, "session_id": "rt_smoke", "backend": "metis_wsl"}),
+        fake_create,
     )
     monkeypatch.setattr(
         runtime_manager,
@@ -198,6 +204,8 @@ def test_runtime_manager_smoke_requires_artifact(monkeypatch) -> None:
 
     assert result["ok"] is True
     assert result["created"]["session_id"] == "rt_smoke"
+    assert create_call["max_files"] == 0
+    assert create_call["max_bytes"] == 0
 
 
 def test_runtime_selftest_debug_classifies_missing_pack() -> None:

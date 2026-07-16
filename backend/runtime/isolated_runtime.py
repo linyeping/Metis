@@ -63,8 +63,10 @@ ROOTFS_BUILD_SCHEMA = "metis.rootfs_builder.build.v1"
 ROOTFS_IMAGE_BUILDER_STATUS_SCHEMA = "metis.rootfs_image_builder.status.v1"
 ROOTFS_IMAGE_BUILD_SCHEMA = "metis.rootfs_image_builder.build.v1"
 
-DEFAULT_MAX_FILES = 2000
-DEFAULT_MAX_BYTES = 80 * 1024 * 1024
+# Snapshot limits are optional guards. A zero value means "copy the complete
+# selected workset"; a positive value must never cause a partial snapshot.
+DEFAULT_MAX_FILES = 0
+DEFAULT_MAX_BYTES = 0
 MAX_TEXT_DIFF_BYTES = 512 * 1024
 MAX_RETURN_CHARS = 6000
 
@@ -137,6 +139,7 @@ ARTIFACT_PATTERNS = {
 
 VM_REQUIRED_FILES = ("rootfs.vhdx", "vmlinuz", "initrd")
 VM_OPTIONAL_FILES = (
+    "sessiondata-template.vhdx",
     "sessiondata.vhdx",
     "smol-bin.vhdx",
     "metis-bin.vhdx",
@@ -751,7 +754,7 @@ def metis_vm_direct_assets_prepare(
             "vmlinuz": kernel_path,
             "initrd": initrd_path,
             "metis-bin.vhdx": metis_bin_path,
-            "sessiondata.vhdx": sessiondata_path,
+            "sessiondata-template.vhdx": sessiondata_path,
         }
         plan = _build_direct_vm_assets_plan(
             source_root=source_root,
@@ -829,8 +832,8 @@ def metis_vm_direct_assets_prepare(
                 "vm_manifest": vm_manifest,
                 "next_steps": [
                     "Supply Metis-owned rootfs.vhdx, vmlinuz, and initrd before HCS direct runner can start.",
-                    "Run create-direct-vm-assets.ps1 on a Hyper-V capable Windows host to create sessiondata.vhdx and metis-bin.vhdx.",
-                    "Use hcs-runner-plan.json and host/hcs-runner.ps1 as the implementation contract for the later direct runner.",
+                    "Run create-direct-vm-assets.ps1 on a Hyper-V capable Windows host to create the formatted sessiondata-template.vhdx.",
+                    "Run the production HCS selftest to record boot, runtime.hello, and persistence evidence for this exact bundle.",
                 ],
             }
         )
@@ -1748,9 +1751,33 @@ def metis_vm_guest_handshake_verify(
                 "HCS guest handshake requires enable_experimental_hcs=true when dry_run=false.",
                 code="METIS_GUEST_HANDSHAKE_EXPERIMENTAL_FLAG_REQUIRED",
             )
-        return _json_error(
-            "HCS/vsock JSONL transport is not implemented yet; cannot receive runtime.hello from a booted guest.",
-            code="METIS_GUEST_HANDSHAKE_TRANSPORT_UNAVAILABLE",
+        from backend.runtime.hcs_client import find_metis_bundle
+
+        runtime_bundle = find_metis_bundle()
+        requested_bundle = os.path.normcase(str(bundle.resolve(strict=False)))
+        selected_bundle = os.path.normcase(str(runtime_bundle.resolve(strict=False))) if runtime_bundle else ""
+        if not runtime_bundle or requested_bundle != selected_bundle:
+            return _json_error(
+                "The requested bundle is not the bundle selected by the production HCS service.",
+                code="METIS_GUEST_HANDSHAKE_BUNDLE_MISMATCH",
+            )
+        from backend.runtime.runtime_manager import runtime_manager_selftest
+
+        verified = runtime_manager_selftest(root=str(source_root))
+        return _json(
+            {
+                "ok": bool(verified.get("ok")),
+                "schema": METIS_VM_GUEST_HANDSHAKE_SCHEMA,
+                "dry_run": False,
+                "root": str(source_root),
+                "bundle_path": str(bundle),
+                "transport": selected_transport,
+                "handshake_verified": bool(verified.get("handshake_ok")),
+                "hcs_handshake_verified": bool(verified.get("handshake_ok")),
+                "runner_ready": bool(verified.get("ok")),
+                "runner_ready_reason": verified.get("message"),
+                "selftest": verified,
+            }
         )
     except Exception as exc:
         return _json_error(f"{type(exc).__name__}: {exc}", code="METIS_VM_GUEST_HANDSHAKE_VERIFY_FAILED")
@@ -2787,6 +2814,7 @@ class BackendRunResult:
     fallback_reason: str = ""
     canceled: bool = False
     cancel_detail: str = ""
+    runtime_evidence: Dict[str, Any] = field(default_factory=dict)
 
 
 def metis_runtime_create(
@@ -2874,7 +2902,7 @@ def metis_runtime_create(
                 manifest_path=paths.manifest_path,
                 runs_path=paths.runs_path,
             )
-            baseline = _scan_baseline(source_root, max_files=max(1, int(max_files or DEFAULT_MAX_FILES)))
+            baseline = _scan_baseline(source_root, max_files=max(0, int(max_files or 0)))
         elif mode_value == "copy":
             paths.workspace_dir.mkdir(parents=True, exist_ok=True)
             copy_stats, baseline = _copy_workspace_snapshot(
@@ -2882,8 +2910,8 @@ def metis_runtime_create(
                 paths.workspace_dir,
                 include_patterns=include_patterns or [],
                 exclude_patterns=exclude_patterns or [],
-                max_files=max(1, int(max_files or DEFAULT_MAX_FILES)),
-                max_bytes=max(1024, int(max_bytes or DEFAULT_MAX_BYTES)),
+                max_files=max(0, int(max_files or 0)),
+                max_bytes=max(0, int(max_bytes or 0)),
             )
         else:
             paths.workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -2903,7 +2931,7 @@ def metis_runtime_create(
                 manifest_path=paths.manifest_path,
                 runs_path=paths.runs_path,
             )
-            baseline = _scan_baseline(source_root, max_files=max(1, int(max_files or DEFAULT_MAX_FILES)))
+            baseline = _scan_baseline(source_root, max_files=max(0, int(max_files or 0)))
 
         manifest = RuntimeManifest(
             session_id=paths.session_root.name,
@@ -2952,6 +2980,27 @@ def metis_runtime_create(
                     "Run scripts with metis_runtime_run.",
                     "Write generated files to METIS_RUNTIME_ARTIFACTS_DIR.",
                     "Export changes with metis_runtime_export_patch before touching the source project.",
+                ],
+            }
+        )
+    except WorkspaceSnapshotError as exc:
+        for path in (
+            getattr(locals().get("paths"), "session_root", None),
+            getattr(locals().get("paths"), "artifacts_dir", None),
+            getattr(locals().get("paths"), "diagnostics_dir", None),
+        ):
+            if isinstance(path, Path) and path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+        return _json(
+            {
+                "ok": False,
+                "schema": SESSION_SCHEMA,
+                "code": exc.code,
+                "error": str(exc),
+                "snapshot": exc.details,
+                "next_steps": [
+                    "Narrow include_patterns/exclude_patterns or raise the explicit snapshot guard.",
+                    "Leave max_files=0 and max_bytes=0 to require a complete selected workset.",
                 ],
             }
         )
@@ -3062,6 +3111,7 @@ def metis_runtime_run(
                 "timed_out": timed_out,
                 "canceled": canceled,
                 "cancel_detail": backend_result.cancel_detail,
+                "runtime_evidence": backend_result.runtime_evidence,
                 "duration_ms": duration_ms,
                 "stdout": _truncate(stdout),
                 "stderr": _truncate(stderr),
@@ -3498,6 +3548,13 @@ def metis_runtime_gc(
         return _json_error(f"{type(exc).__name__}: {exc}", code="RUNTIME_GC_FAILED")
 
 
+class WorkspaceSnapshotError(RuntimeError):
+    def __init__(self, message: str, *, code: str, details: Dict[str, Any]) -> None:
+        super().__init__(message)
+        self.code = code
+        self.details = details
+
+
 def _copy_workspace_snapshot(
     source_root: Path,
     workspace_dir: Path,
@@ -3508,36 +3565,75 @@ def _copy_workspace_snapshot(
     max_bytes: int,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     files = _candidate_source_files(source_root, include_patterns=include_patterns, exclude_patterns=exclude_patterns)
-    copied = 0
-    copied_bytes = 0
-    skipped: List[Dict[str, str]] = []
-    baseline: List[Dict[str, Any]] = []
+    selected: List[Tuple[Path, str, int]] = []
+    selected_bytes = 0
+    errors: List[Dict[str, str]] = []
     for source in files:
-        if copied >= max_files:
-            skipped.append({"path": str(source), "reason": "max_files reached"})
-            break
         rel = _relative_to(source, source_root)
         try:
             size = source.stat().st_size
         except OSError as exc:
-            skipped.append({"path": rel, "reason": str(exc)})
+            errors.append({"path": rel, "reason": str(exc)})
             continue
-        if copied_bytes + size > max_bytes:
-            skipped.append({"path": rel, "reason": "max_bytes reached"})
-            continue
-        target = workspace_dir / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        copied += 1
-        copied_bytes += size
-        baseline.append({"relative_path": rel, "size": size, "sha256": _sha256_file(source)})
+        selected.append((source, rel, size))
+        selected_bytes += size
+
+    preflight = {
+        "policy": "complete-or-fail",
+        "selected_files": len(selected),
+        "selected_bytes": selected_bytes,
+        "max_files": max_files,
+        "max_bytes": max_bytes,
+        "unlimited_files": max_files == 0,
+        "unlimited_bytes": max_bytes == 0,
+    }
+    if errors:
+        raise WorkspaceSnapshotError(
+            "workspace snapshot preflight could not inspect every selected file",
+            code="WORKSPACE_SNAPSHOT_PREFLIGHT_FAILED",
+            details={**preflight, "errors": errors[:80], "truncated_error_count": max(0, len(errors) - 80)},
+        )
+    exceeded = []
+    if max_files > 0 and len(selected) > max_files:
+        exceeded.append("max_files")
+    if max_bytes > 0 and selected_bytes > max_bytes:
+        exceeded.append("max_bytes")
+    if exceeded:
+        raise WorkspaceSnapshotError(
+            "workspace snapshot exceeds the configured guard; no partial snapshot was created",
+            code="WORKSPACE_SNAPSHOT_LIMIT_EXCEEDED",
+            details={**preflight, "exceeded": exceeded},
+        )
+
+    copied = 0
+    copied_bytes = 0
+    baseline: List[Dict[str, Any]] = []
+    try:
+        for source, rel, size in selected:
+            target = workspace_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            copied += 1
+            copied_bytes += size
+            baseline.append({"relative_path": rel, "size": size, "sha256": _sha256_file(target)})
+    except OSError as exc:
+        raise WorkspaceSnapshotError(
+            f"workspace snapshot copy failed at {rel}: {exc}",
+            code="WORKSPACE_SNAPSHOT_COPY_FAILED",
+            details={**preflight, "copied_files": copied, "copied_bytes": copied_bytes, "failed_path": rel},
+        ) from exc
     return (
         {
             "mode": "copy",
+            "snapshot_policy": "complete-or-fail",
             "copied_files": copied,
             "copied_bytes": copied_bytes,
-            "skipped": skipped[:80],
-            "truncated_skipped_count": max(0, len(skipped) - 80),
+            "selected_files": len(selected),
+            "selected_bytes": selected_bytes,
+            "complete": copied == len(selected) and copied_bytes == selected_bytes,
+            "limits": {"max_files": max_files, "max_bytes": max_bytes},
+            "skipped": [],
+            "truncated_skipped_count": 0,
         },
         baseline,
     )
@@ -3584,7 +3680,7 @@ def _git_list_files(source_root: Path) -> List[str]:
 def _scan_baseline(root: Path, *, max_files: int) -> List[Dict[str, Any]]:
     baseline: List[Dict[str, Any]] = []
     for path in _iter_files(root):
-        if len(baseline) >= max_files:
+        if max_files > 0 and len(baseline) >= max_files:
             break
         rel = _relative_to(path, root)
         if _is_excluded(rel, include_patterns=[], exclude_patterns=[]):
@@ -3752,7 +3848,7 @@ def _detect_vm_runtime_pack(source_root: Path, bundle_path: str = "") -> Dict[st
     elif metis_ready and runner_prepared:
         reason = "Metis direct VM protocol/artifact/lifecycle runner is prepared, but guest handshake verifier is not complete"
     elif metis_ready:
-        reason = "Metis VM bundle detected, but HCS direct runner is not implemented"
+        reason = "Metis VM bundle detected; HCS runner is implemented but the current bundle has no valid selftest receipt"
     elif asset_ready:
         reason = "VM boot assets detected, but this is not a Metis-owned runnable bundle"
     elif blueprint:
@@ -4907,7 +5003,7 @@ def _build_runtime_bundle_manifest(
         },
         "notes": [
             "This is a Metis-owned runtime bundle manifest.",
-            "The first runnable backend is WSL import; HCS/Hyper-V direct runner remains a later layer.",
+            "The bundle supports WSL import and the production HCS/Hyper-V direct runner when its readiness receipt is valid.",
             "Do not mix reference-only Claude assets into this bundle unless explicitly marked reference_only.",
         ],
     }
@@ -5124,7 +5220,7 @@ This directory is a Metis-owned runtime bundle.
 
 ## Runtime Boundary
 
-The first runnable backend is WSL import. The HCS/Hyper-V direct runner is a later layer that can reuse this manifest and rootfs provenance.
+The bundle supports WSL import. The HCS/Hyper-V direct runner is enabled only after the production self-test records a valid asset-bound readiness receipt.
 """
 
 
@@ -5296,11 +5392,11 @@ def _runtime_bundle_v2_asset_specs(bundle: Path, *, include_sessiondata: bool) -
         {"name": "vmlinuz", "path": str(bundle / "vmlinuz"), "required": True, "role": "kernel"},
         {"name": "initrd", "path": str(bundle / "initrd"), "required": True, "role": "initrd"},
         {"name": "rootfs.vhdx", "path": str(bundle / "rootfs.vhdx"), "required": True, "role": "rootfs-source"},
-        {"name": "metis-bin.vhdx", "path": str(bundle / "metis-bin.vhdx"), "required": True, "role": "guest-tools"},
+        {"name": "metis-bin.vhdx", "path": str(bundle / "metis-bin.vhdx"), "required": False, "role": "legacy-guest-tools"},
         {"name": VM_MANIFEST_NAME, "path": str(bundle / VM_MANIFEST_NAME), "required": True, "role": "manifest"},
     ]
     if include_sessiondata:
-        specs.append({"name": "sessiondata.vhdx", "path": str(bundle / "sessiondata.vhdx"), "required": False, "role": "session-disk"})
+        specs.append({"name": "sessiondata-template.vhdx", "path": str(bundle / "sessiondata-template.vhdx"), "required": True, "role": "session-disk-template"})
     for name in (
         DIRECT_VM_ASSETS_MANIFEST_NAME,
         DIRECT_VM_RUNNER_MANIFEST_NAME,
@@ -5530,8 +5626,8 @@ def _runtime_bundle_v2_release_asset_files(
     include_sessiondata: bool,
 ) -> List[Dict[str, Any]]:
     names = ["vmlinuz", "initrd", "metis-bin.vhdx", VM_MANIFEST_NAME]
-    if include_sessiondata and (bundle / "sessiondata.vhdx").is_file():
-        names.append("sessiondata.vhdx")
+    if include_sessiondata and (bundle / "sessiondata-template.vhdx").is_file():
+        names.append("sessiondata-template.vhdx")
     for optional in (
         DIRECT_VM_ASSETS_MANIFEST_NAME,
         DIRECT_VM_RUNNER_MANIFEST_NAME,
@@ -5573,8 +5669,8 @@ def _runtime_bundle_v2_role_for_name(name: str) -> str:
         return "initrd"
     if name == "metis-bin.vhdx":
         return "guest-tools"
-    if name == "sessiondata.vhdx":
-        return "session-disk"
+    if name == "sessiondata-template.vhdx":
+        return "session-disk-template"
     if name == VM_MANIFEST_NAME:
         return "vm-pack-manifest"
     if name.endswith(".json"):
@@ -5785,9 +5881,9 @@ def _build_direct_vm_assets_plan(
         "status": status,
         "commands": commands,
         "notes": [
-            "Direct VM mode requires Metis-owned rootfs.vhdx, vmlinuz, initrd, metis-bin.vhdx, and sessiondata.vhdx.",
-            "The v1 scripts create/check VHDX files and produce an HCS runner contract; they do not fake a running VM.",
-            "WSL import remains the runnable fallback until HCS/Hyper-V runner is implemented end to end.",
+            "Direct VM mode uses Metis-owned rootfs.vhdx, vmlinuz, initrd, and a formatted sessiondata-template.vhdx.",
+            "The asset script formats the template as ext4 with label METISDATA; it never emits an unformatted placeholder.",
+            "Each service session clones its own writable disk from the immutable template.",
         ],
     }
 
@@ -5902,32 +5998,44 @@ def _direct_vm_create_assets_script(*, sessiondata_size_gb: int, metis_bin_size_
 
 $ErrorActionPreference = 'Stop'
 $Bundle = Split-Path -Parent $MyInvocation.MyCommand.Path
-$NewVhd = Get-Command New-VHD -ErrorAction SilentlyContinue
-if (-not $NewVhd) {{
-  throw "New-VHD is required. Enable Hyper-V PowerShell module or install Hyper-V management tools."
-}}
 
-function New-MetisVhdx {{
-  param([string]$Name, [UInt64]$SizeBytes)
+function New-MetisSessionDataTemplate {{
+  $Name = 'sessiondata-template.vhdx'
   $Path = Join-Path $Bundle $Name
   if ((Test-Path $Path) -and -not $Force) {{
     Write-Host "$Name already exists: $Path"
     return
   }}
-  if (Test-Path $Path) {{
-    Remove-Item -LiteralPath $Path -Force
+  $Wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+  if (-not $Wsl) {{ throw "wsl.exe is required on the build host to create the ext4 session data template." }}
+  if (Test-Path $Path) {{ Remove-Item -LiteralPath $Path -Force }}
+  $ResolvedPath = [System.IO.Path]::GetFullPath($Path)
+  if ($ResolvedPath.Length -lt 3 -or $ResolvedPath[1] -ne ':') {{ throw "The VHDX target must be on a local Windows drive." }}
+  $Drive = $ResolvedPath.Substring(0, 1).ToLowerInvariant()
+  $Rest = $ResolvedPath.Substring(2).Replace([char]92, [char]47)
+  $WslPath = "/mnt/$Drive$Rest"
+  $SizeBytes = [UInt64]$SessionDataSizeGB * 1GB
+  $BuildScript = 'set -eu; command -v qemu-img >/dev/null || {{ echo "qemu-img missing; install qemu-utils on the build host" >&2; exit 127; }}; target="__TARGET__"; size="__SIZE__"; raw=$(mktemp /tmp/metis-sessiondata.XXXXXX.raw); trap "rm -f $raw" EXIT; truncate -s "$size" "$raw"; mkfs.ext4 -q -F -L METISDATA "$raw"; rm -f "$target"; qemu-img convert -f raw -O vhdx -o subformat=dynamic "$raw" "$target"'
+  $BuildScript = $BuildScript.Replace('__TARGET__', $WslPath).Replace('__SIZE__', [string]$SizeBytes)
+  $EncodedScript = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($BuildScript))
+  & $Wsl.Source -d MetisRuntime -- bash -lc "echo $EncodedScript | base64 -d | bash"
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Path)) {{
+    throw "Failed to create the formatted sessiondata-template.vhdx (exit $LASTEXITCODE)."
   }}
-  New-VHD -Path $Path -SizeBytes $SizeBytes -Dynamic | Out-Null
-  Write-Host "Created $Name at $Path"
+  $Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+  Set-Content -LiteralPath (Join-Path $Bundle '.sessiondata-template.vhdx.origin') -Value $Hash -Encoding ascii
+  Write-Host "Created formatted $Name at $Path (ext4 label METISDATA)"
 }}
 
-New-MetisVhdx -Name 'sessiondata.vhdx' -SizeBytes ([UInt64]$SessionDataSizeGB * 1GB)
-New-MetisVhdx -Name 'metis-bin.vhdx' -SizeBytes ([UInt64]$MetisBinSizeMB * 1MB)
+New-MetisSessionDataTemplate
+if (-not (Test-Path (Join-Path $Bundle 'metis-bin.vhdx'))) {{
+  Write-Host 'metis-bin.vhdx is optional because guest tools are embedded in rootfs.vhdx.'
+}}
 """
 
 
 def _direct_vm_hcs_runner_script() -> str:
-    required = ", ".join(f"'{name}'" for name in ("rootfs.vhdx", "vmlinuz", "initrd", "metis-bin.vhdx", "sessiondata.vhdx"))
+    required = ", ".join(f"'{name}'" for name in ("rootfs.vhdx", "vmlinuz", "initrd", "sessiondata-template.vhdx"))
     return f"""param(
   [switch]$PlanOnly,
   [string]$Command = "",
@@ -5987,7 +6095,7 @@ $Plan = @{{
   StdioSmokeReady = (Test-Path $GuestDaemon)
   HcsReady = $false
   RunnerStatus = if ($Missing.Count -eq 0 -and (Test-Path $RunnerManifest) -and (Test-Path $GuestDaemon)) {{ 'protocol-ready' }} else {{ 'blocked' }}
-  Message = 'Metis direct runner v1 has lifecycle/protocol/artifact contracts. HCS ComputeSystem start remains gated behind the experimental flag and is not production-ready.'
+  Message = 'The production HCS runner is metis-vm-svc; this script remains a diagnostics and manual-start surface.'
 }}
 $Plan | ConvertTo-Json -Depth 6
 if ($PlanOnly) {{ exit 0 }}
@@ -6043,7 +6151,7 @@ def _direct_vm_hcs_runner_plan(bundle: Path) -> Dict[str, Any]:
     return {
         "schema": "metis.vm_direct.hcs_runner_plan.v1",
         "bundle_path": str(bundle),
-        "required_assets": ["rootfs.vhdx", "vmlinuz", "initrd", "metis-bin.vhdx", "sessiondata.vhdx"],
+        "required_assets": ["rootfs.vhdx", "vmlinuz", "initrd", "sessiondata-template.vhdx"],
         "host_requirements": ["Windows", "Hyper-V", "vmcompute service", "hcsdiag.exe"],
         "transport": {
             "preferred": "hcs-vsock-jsonl",
@@ -6081,8 +6189,8 @@ def _run_direct_vm_vhdx_creation(bundle: Path, *, timeout: int) -> List[Dict[str
 
 
 def _inspect_direct_vm_assets(bundle: Path) -> Dict[str, Any]:
-    required = ["rootfs.vhdx", "vmlinuz", "initrd", "metis-bin.vhdx", "sessiondata.vhdx"]
-    optional = ["rootfs.vhdx.zst", "vmlinuz.zst", "initrd.zst", "smol-bin.vhdx"]
+    required = ["rootfs.vhdx", "vmlinuz", "initrd", "sessiondata-template.vhdx"]
+    optional = ["metis-bin.vhdx", "sessiondata.vhdx", "rootfs.vhdx.zst", "vmlinuz.zst", "initrd.zst", "smol-bin.vhdx"]
     rows: List[Dict[str, Any]] = []
     for name in [*required, *optional]:
         path = bundle / name
@@ -6111,10 +6219,10 @@ def _inspect_direct_vm_assets(bundle: Path) -> Dict[str, Any]:
         "assets": rows,
         "host": host,
         "runner": {
-            "status": "contract-only" if not missing else "missing-assets",
-            "implemented": False,
+            "status": "implemented-awaiting-verified-handshake" if not missing else "missing-assets",
+            "implemented": True,
             "host_ready": host_ready,
-            "reason": "HCS direct VM start is contract-only in this pass" if not missing else "required assets are missing",
+            "reason": "production HCS service path requires a valid selftest receipt" if not missing else "required assets are missing",
         },
     }
 
@@ -6144,17 +6252,18 @@ def _build_direct_vm_assets_manifest(
         "host": status.get("host") if isinstance(status.get("host"), dict) else {},
         "runner": {
             "backend": "hcs-hyperv",
-            "implemented": False,
+            "implemented": True,
             "script": "host/hcs-runner.ps1",
             "plan": "host/hcs-runner-plan.json",
-            "status": (status.get("runner") or {}).get("status") if isinstance(status.get("runner"), dict) else "unknown",
+            "service": "metis-vm-svc",
+            "status": "implemented-awaiting-verified-handshake",
         },
         "copied": copied,
         "vhdx_results": vhdx_results,
         "notes": [
             "This manifest records Metis-owned direct VM boot/runtime assets.",
-            "The pass prepares assets and the HCS runner contract; it does not claim full direct-VM execution.",
-            "WSL-import runtime remains the runnable fallback until the HCS runner is completed.",
+            "The privileged metis-vm-svc owns HCS create/start/HvSocket/teardown and per-session disk cloning.",
+            "runner_ready is still promoted only by a bundle-bound production selftest receipt.",
         ],
     }
 
@@ -6266,7 +6375,7 @@ def _build_direct_vm_runner_prepare_plan(
         "notes": [
             "This prepares the direct runner contract, guest daemon, JSONL protocol, artifact sync, and lifecycle files.",
             "The stdio transport can be smoke-tested on the host.",
-            "HCS direct boot remains gated until ComputeSystem start and host/guest transport are implemented.",
+            "Production readiness remains gated by the real HCS selftest receipt.",
         ],
     }
 
@@ -6355,7 +6464,7 @@ def _inspect_direct_vm_runner(bundle: Path) -> Dict[str, Any]:
         "assets": assets,
         "manifest": manifest,
         "hcs": hcs,
-        "reason": "HCS direct start is gated; JSONL guest protocol bridge is available" if guest_protocol_ready and not implemented else "",
+        "reason": "HCS service runner is implemented; a valid bundle-bound selftest receipt is still required" if implemented else "",
     }
 
 
@@ -6380,20 +6489,17 @@ def _build_direct_vm_runner_manifest(
         "prepared": True,
         "runner": {
             "backend": "hcs-hyperv",
-            "implemented": False,
+            "implemented": True,
             "script": "host/hcs-runner.ps1",
             "plan": "host/hcs-runner-plan.json",
-            "status": "protocol-ready-hcs-gated",
+            "service": "metis-vm-svc",
+            "status": "implemented-awaiting-verified-handshake",
         },
         "hcs": {
-            "ready": False,
+            "ready": bool(host.get("vmcompute_available") and assets.get("assets_ready")),
             "host": host,
             "requirements": ["Windows", "vmcompute", "hcsdiag.exe", "Metis-owned direct VM boot assets"],
-            "blocked_by": [
-                "ComputeSystem start is not implemented",
-                "vsock or named-pipe transport is not implemented",
-                "guest daemon has not been embedded into a booted rootfs image",
-            ],
+            "blocked_by": [],
         },
         "transport": {
             "selected": transport,
@@ -6426,7 +6532,7 @@ def _build_direct_vm_runner_manifest(
         "notes": [
             "This manifest upgrades the direct VM pack from asset-only to protocol/lifecycle/artifact contracts.",
             "metis_vm_direct_runner_smoke can validate the guest daemon over stdio without HCS.",
-            "runner_ready remains false until HCS ComputeSystem start and host/guest transport are implemented.",
+            "runner_ready remains false until a real boot/runtime.hello/data persistence selftest succeeds.",
         ],
     }
 
@@ -6651,6 +6757,22 @@ def _hcs_compute_system_document(
     processor_count: int,
     kernel_cmdline: str,
 ) -> Dict[str, Any]:
+    attachments: Dict[str, Any] = {
+        "0": {
+            "Type": "VirtualDisk",
+            "Path": str((bundle / "rootfs.vhdx").resolve(strict=False)),
+            "ReadOnly": True,
+            "CachingMode": "Cached",
+        }
+    }
+    metis_bin = bundle / "metis-bin.vhdx"
+    if metis_bin.is_file():
+        attachments["1"] = {
+            "Type": "VirtualDisk",
+            "Path": str(metis_bin.resolve(strict=False)),
+            "ReadOnly": True,
+            "CachingMode": "Cached",
+        }
     return {
         "Owner": "Metis",
         "SchemaVersion": {"Major": 2, "Minor": 2},
@@ -6677,26 +6799,7 @@ def _hcs_compute_system_document(
             "Devices": {
                 "Scsi": {
                     "0": {
-                        "Attachments": {
-                            "0": {
-                                "Type": "VirtualDisk",
-                                "Path": str((bundle / "rootfs.vhdx").resolve(strict=False)),
-                                "ReadOnly": False,
-                                "CachingMode": "Cached",
-                            },
-                            "1": {
-                                "Type": "VirtualDisk",
-                                "Path": str((bundle / "sessiondata.vhdx").resolve(strict=False)),
-                                "ReadOnly": False,
-                                "CachingMode": "Cached",
-                            },
-                            "2": {
-                                "Type": "VirtualDisk",
-                                "Path": str((bundle / "metis-bin.vhdx").resolve(strict=False)),
-                                "ReadOnly": True,
-                                "CachingMode": "Cached",
-                            },
-                        }
+                        "Attachments": attachments
                     }
                 },
                 "HvSocket": {},
@@ -6716,7 +6819,7 @@ def _hcs_start_plan(bundle: Path, *, version: str, memory_mb: int, processor_cou
         "compute_document": "host/hcs-compute-system.json",
         "starter": "host/hcs-starter.ps1",
         "api_bridge": "host/HcsApiBridge.cs",
-        "required_assets": ["rootfs.vhdx", "vmlinuz", "initrd", "sessiondata.vhdx", "metis-bin.vhdx"],
+        "required_assets": ["rootfs.vhdx", "vmlinuz", "initrd"],
         "memory_mb": memory_mb,
         "processor_count": processor_count,
         "phases": [
@@ -6892,7 +6995,7 @@ Write-MetisLifecycle -State 'validating_assets' -Message 'validating HCS starter
   computeSystemId = $ComputeSystemId
 }
 
-$Required = @('rootfs.vhdx','vmlinuz','initrd','sessiondata.vhdx','metis-bin.vhdx')
+$Required = @('rootfs.vhdx','vmlinuz','initrd','sessiondata-template.vhdx')
 $Missing = @()
 foreach ($Name in $Required) {
   if (-not (Test-Path (Join-Path $Bundle $Name))) { $Missing += $Name }
@@ -7181,6 +7284,13 @@ def _inspect_rootfs_boot_verifier(bundle: Path) -> Dict[str, Any]:
     ]
     missing = [row["relative_path"] for row in rows if not row["exists"] and row["name"] != "manifest"]
     matrix_count = 0
+    manifest: Dict[str, Any] = {}
+    manifest_path = bundle / ROOTFS_BOOT_VERIFIER_MANIFEST_NAME
+    if manifest_path.is_file():
+        try:
+            manifest = _read_json_object(manifest_path)
+        except Exception:
+            manifest = {}
     matrix_path = bundle / "host" / "boot-cmdline-matrix.json"
     if matrix_path.is_file():
         try:
@@ -7189,16 +7299,25 @@ def _inspect_rootfs_boot_verifier(bundle: Path) -> Dict[str, Any]:
             matrix_count = len(matrix)
         except Exception:
             matrix_count = 0
+    fingerprint = _vm_bundle_asset_fingerprint(bundle)
+    boot_verified = bool(
+        manifest.get("boot_verified")
+        and manifest.get("asset_fingerprint")
+        and manifest.get("asset_fingerprint") == fingerprint.get("fingerprint")
+    )
     return {
         "schema": METIS_VM_ROOTFS_BOOT_VERIFIER_SCHEMA,
         "bundle_path": str(bundle),
-        "verifier_ready": not missing,
+        "verifier_ready": bool(not missing or boot_verified),
         "assets_ready": bool(assets.get("assets_ready")),
-        "hcs_starter_ready": bool(hcs.get("starter_ready")),
-        "hcs_ready": bool(hcs.get("hcs_ready")),
+        "hcs_starter_ready": bool(hcs.get("starter_ready") or boot_verified),
+        "hcs_ready": bool(hcs.get("hcs_ready") or boot_verified),
         "missing_assets": assets.get("missing_required") or [],
         "missing_files": missing,
         "candidate_count": matrix_count,
+        "boot_verified": boot_verified,
+        "boot_receipt": str(manifest.get("boot_receipt") or ""),
+        "asset_fingerprint": fingerprint,
         "files": rows,
         "assets": assets,
         "hcs": hcs,
@@ -7237,12 +7356,12 @@ def _build_rootfs_boot_verifier_manifest(
             "HCS create succeeds",
             "HCS start succeeds",
             "VM can be terminated cleanly unless keep_running=true",
-            "future: guest metisd handshake over HCS/vsock succeeds",
+            "guest metisd handshake over HCS/vsock succeeds",
         ],
         "notes": [
             "This verifier creates multiple HCS compute documents with different root= and init= values.",
             "It is designed to reveal whether failures are caused by root device, init path, HCS schema, or missing guest daemon.",
-            "Current pass can verify HCS start evidence; guest handshake promotion remains a later layer.",
+            "Production readiness is promoted only by the full boot, guest handshake, /data mount, and persistence self-test.",
         ],
     }
 
@@ -7430,7 +7549,7 @@ def _build_guest_handshake_plan(
                 "promotes_runner_ready": False,
             },
             "hcs-vsock-jsonl": {
-                "implemented": False,
+                "implemented": True,
                 "scope": "booted HCS guest readiness gate",
                 "promotes_runner_ready": True,
             },
@@ -7504,24 +7623,152 @@ def _inspect_guest_handshake(bundle: Path) -> Dict[str, Any]:
     last_receipt_path = str(manifest.get("last_handshake_receipt") or "")
     receipt_path = bundle / last_receipt_path if last_receipt_path and not Path(last_receipt_path).is_absolute() else Path(last_receipt_path)
     receipt_exists = bool(last_receipt_path and receipt_path.is_file())
-    hcs_verified = bool(manifest.get("hcs_handshake_verified"))
+    receipt: Dict[str, Any] = {}
+    if receipt_exists:
+        try:
+            receipt = _read_json_object(receipt_path)
+        except Exception:
+            receipt = {}
+    fingerprint = _vm_bundle_asset_fingerprint(bundle)
+    receipt_matches = bool(
+        receipt.get("asset_fingerprint")
+        and receipt.get("asset_fingerprint") == fingerprint.get("fingerprint")
+    )
+    hcs_verified = bool(
+        manifest.get("hcs_handshake_verified")
+        and receipt.get("handshake_verified")
+        and receipt.get("boot_verified")
+        and receipt.get("data_mounted")
+        and receipt.get("persistence_verified")
+        and receipt_matches
+    )
     runner_ready = bool(manifest.get("runner_ready") and hcs_verified)
     return {
         "schema": METIS_VM_GUEST_HANDSHAKE_SCHEMA,
         "bundle_path": str(bundle),
         "manifest_path": str(manifest_path),
-        "verifier_ready": not missing,
+        "verifier_ready": bool(not missing or runner_ready),
         "runner_ready": runner_ready,
         "runner_ready_reason": str(manifest.get("runner_ready_reason") or "runtime.hello from a booted HCS guest has not been verified"),
         "stdio_handshake_verified": bool(manifest.get("stdio_handshake_verified")),
         "hcs_handshake_verified": hcs_verified,
         "last_handshake_receipt": last_receipt_path,
         "last_handshake_receipt_exists": receipt_exists,
+        "last_handshake_receipt_valid": receipt_matches,
+        "asset_fingerprint": fingerprint,
         "transport": manifest.get("transport") if isinstance(manifest.get("transport"), dict) else {},
         "missing_files": missing,
         "files": rows,
         "manifest": manifest,
     }
+
+
+def _vm_bundle_asset_fingerprint(bundle: Path) -> Dict[str, Any]:
+    manifest = _load_vm_manifest_data(bundle)
+    declared_assets = manifest.get("assets") if isinstance(manifest.get("assets"), dict) else {}
+    rows: List[Dict[str, Any]] = []
+    for name in ("vmlinuz", "initrd", "rootfs.vhdx", "sessiondata-template.vhdx"):
+        path = bundle / name
+        row: Dict[str, Any] = {"name": name, "exists": path.is_file()}
+        if path.is_file():
+            stat = path.stat()
+            declared = declared_assets.get(name) if isinstance(declared_assets.get(name), dict) else {}
+            row.update(
+                {
+                    "size_bytes": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                    "declared_sha256": str(declared.get("sha256") or ""),
+                }
+            )
+            if stat.st_size <= 128 * 1024 * 1024:
+                row["sha256"] = _sha256_file(path)
+        rows.append(row)
+    encoded = json.dumps(rows, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "schema": "metis.vm_runtime_pack.asset_fingerprint.v1",
+        "fingerprint": hashlib.sha256(encoded).hexdigest(),
+        "assets": rows,
+        "complete": all(row.get("exists") for row in rows),
+    }
+
+
+def record_hcs_runtime_selftest_receipt(bundle_path: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist a bundle-bound receipt after the production HCS service path succeeds."""
+    bundle = Path(str(bundle_path or "")).resolve(strict=False)
+    if not bundle.is_dir():
+        return {"ok": False, "code": "METIS_VM_BUNDLE_MISSING", "error": f"VM bundle not found: {bundle}"}
+    fingerprint = _vm_bundle_asset_fingerprint(bundle)
+    required = {
+        "backend_hcs": str(evidence.get("backend") or "") == "hcs",
+        "returncode_zero": evidence.get("returncode") == 0,
+        "boot_verified": bool(evidence.get("boot_verified")),
+        "handshake_verified": bool(evidence.get("handshake_verified")),
+        "protocol_verified": evidence.get("guest_protocol") == "metis.vm.guest.v1",
+        "data_mounted": bool(evidence.get("data_mounted")),
+        "persistence_verified": bool(evidence.get("persistence_verified")),
+        "assets_complete": bool(fingerprint.get("complete")),
+    }
+    verified = all(required.values())
+    receipt_id = f"hcs_selftest_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    receipt_dir = bundle / "host" / "handshake-receipts"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    receipt_path = receipt_dir / f"{receipt_id}.json"
+    receipt = {
+        "schema": METIS_VM_GUEST_HANDSHAKE_SCHEMA,
+        "created_at": time.time(),
+        "transport": "hcs-vsock-jsonl",
+        "proof_scope": "production privileged service HCS boot/runtime.hello/persistent-disk selftest",
+        "handshake_id": receipt_id,
+        "handshake_verified": verified,
+        "boot_verified": bool(evidence.get("boot_verified")),
+        "data_mounted": bool(evidence.get("data_mounted")),
+        "persistence_verified": bool(evidence.get("persistence_verified")),
+        "guest_protocol": str(evidence.get("guest_protocol") or ""),
+        "backend": str(evidence.get("backend") or ""),
+        "returncode": evidence.get("returncode"),
+        "checks": required,
+        "asset_fingerprint": fingerprint.get("fingerprint"),
+        "asset_report": fingerprint,
+        "receipt_relative_path": _relative_to(receipt_path, bundle),
+    }
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+
+    boot_manifest_path = bundle / ROOTFS_BOOT_VERIFIER_MANIFEST_NAME
+    boot_manifest = _read_json_object(boot_manifest_path) if boot_manifest_path.is_file() else {
+        "schema": METIS_VM_ROOTFS_BOOT_VERIFIER_SCHEMA,
+        "owner": "metis",
+        "created_at": time.time(),
+    }
+    boot_manifest.update(
+        {
+            "boot_verified": bool(verified and evidence.get("boot_verified")),
+            "boot_receipt": receipt["receipt_relative_path"],
+            "asset_fingerprint": fingerprint.get("fingerprint"),
+            "updated_at": time.time(),
+        }
+    )
+    boot_manifest_path.write_text(json.dumps(boot_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+
+    handshake_manifest_path = bundle / GUEST_HANDSHAKE_MANIFEST_NAME
+    handshake_manifest = _read_json_object(handshake_manifest_path) if handshake_manifest_path.is_file() else {
+        "schema": METIS_VM_GUEST_HANDSHAKE_SCHEMA,
+        "owner": "metis",
+        "created_at": time.time(),
+        "prepared": True,
+    }
+    handshake_manifest.update(
+        {
+            "verifier_ready": True,
+            "hcs_handshake_verified": verified,
+            "runner_ready": verified,
+            "runner_ready_reason": "production HCS boot, runtime.hello, data mount, and persistence verified" if verified else "HCS selftest evidence is incomplete",
+            "last_handshake_receipt": receipt["receipt_relative_path"],
+            "updated_at": time.time(),
+        }
+    )
+    handshake_manifest_path.write_text(json.dumps(handshake_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    _upsert_guest_handshake_pack_manifest(bundle, handshake_manifest)
+    return {"ok": verified, "runner_ready": verified, "receipt": receipt, "manifest": handshake_manifest}
 
 
 def _build_guest_handshake_manifest(
@@ -7552,7 +7799,7 @@ def _build_guest_handshake_manifest(
             "preferred": "hcs-vsock-jsonl",
             "smoke": "jsonl-stdio",
             "frame": "utf8-json-lines",
-            "hcs_vsock_implemented": False,
+            "hcs_vsock_implemented": True,
             "stdio_implemented": True,
         },
         "handshake": {
@@ -7660,7 +7907,7 @@ def _guest_handshake_attempt_plan(
         "expected_method": "runtime.hello",
         "expected_protocol": "metis.vm.guest.v1",
         "runner_ready_on_success": transport == "hcs-vsock-jsonl",
-        "transport_implemented": transport == "jsonl-stdio",
+        "transport_implemented": transport in {"jsonl-stdio", "hcs-vsock-jsonl"},
     }
 
 
@@ -7850,8 +8097,8 @@ if (-not $EnableExperimentalHcsHandshake) {
   exit 0
 }
 $Report.ok = $false
-$Report.code = 'METIS_GUEST_HANDSHAKE_TRANSPORT_UNAVAILABLE'
-$Report.reason = 'The HCS/vsock JSONL transport bridge is not implemented yet, so this script cannot receive runtime.hello from metisd.'
+$Report.code = 'USE_PRODUCTION_HCS_VERIFIER'
+$Report.reason = 'Use metis_vm_guest_handshake_verify; the production verifier boots through metis-vm-svc and records a bundle-bound receipt.'
 $Report | ConvertTo-Json -Depth 8
 """
 
@@ -10250,6 +10497,16 @@ def _run_hcs_command(
                     executed_command=command_text,
                     backend="hcs",
                     fallback_reason="via metis-vm-service",
+                    runtime_evidence={
+                        "structured": "handshake_ok" in result,
+                        "exec_mode": result.get("exec_mode"),
+                        "handshake_ok": bool(result.get("handshake_ok")),
+                        "guest_protocol": str(result.get("guest_protocol") or ""),
+                        "data_mounted": bool(result.get("data_mounted")),
+                        "boot_ms": int(result.get("boot_ms") or 0),
+                        "files_pushed": int(result.get("files_pushed") or 0),
+                        "files_pulled": int(result.get("files_pulled") or 0),
+                    },
                 )
     except Exception:
         pass  # fall through to direct / local

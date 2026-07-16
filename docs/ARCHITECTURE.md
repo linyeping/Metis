@@ -35,9 +35,11 @@ Metis separates command execution from UI authority:
 - `local_worktree` runs code sessions in isolated host worktrees and promotes diffs explicitly.
 - `local_vm` runs commands in an isolated local runtime and returns stdout, diffs, and artifacts to the normal registry.
 
-The first usable `local_vm` runner on Windows is `metis_wsl`, a Metis-managed WSL distro. It may show up in `hcsdiag` as a WSL2 utility VM, but it is not the HCS direct runner and Metis does not select `backend=hcs` for that path.
+The stable `local_vm` execution profile on Windows remains `metis_wsl`, a Metis-managed WSL distro. Copy-mode snapshots use a complete-or-fail policy: `max_files=0` and `max_bytes=0` mean the full selected workset, while explicit positive guards reject the session before execution instead of truncating it. Patch and diagnostics therefore never interpret omitted tail files as deletions.
 
-HCS direct remains a separate gated backend. It requires Metis-owned VM assets, a booted guest `metisd`, and a successful `runtime.hello` handshake over the HCS/vsock transport before it can be considered ready.
+HCS direct is a separate backend owned by the LocalSystem `metis-vm-svc`. It creates and starts the compute system, clones an immutable `sessiondata-template.vhdx` into a per-user/per-session writable disk, mounts it at `/data`, and communicates with guest `metisd` over HCS/HvSocket JSONL. The template is an ext4 filesystem labelled `METISDATA`; an unformatted VHDX is not a valid asset.
+
+HCS readiness is evidence-gated. The production selftest must boot the guest, execute `runtime.hello`, run Python and an office-library round trip, mount `/data`, close the VM, and read the same random token from a new VM lifecycle. Its receipt is bound to the current kernel, initrd, rootfs, and session-data template fingerprint. Replacing any asset invalidates `hcs_direct_ready` until the selftest is repeated.
 
 ## Data Boundaries
 

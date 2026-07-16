@@ -159,7 +159,7 @@ def write_bundle_manifest(bundle_dir: Path, kernel_source: str = "") -> Dict[str
         "assets": {},
     }
 
-    for name in ("vmlinuz", "initrd", "rootfs.vhdx", "metis-data.vhdx", "sessiondata.vhdx"):
+    for name in ("vmlinuz", "initrd", "rootfs.vhdx", "metis-data.vhdx", "sessiondata-template.vhdx"):
         path = bundle_dir / name
         if path.is_file():
             manifest["assets"][name] = {

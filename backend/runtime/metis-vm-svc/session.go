@@ -43,6 +43,7 @@ type liveVM struct {
 	endpoint    *hcn.HostComputeEndpoint
 	dataDisk    string // path to the writable vhdx, "" if no persistence
 	dataMounted bool
+	bootMs      int64
 	lastUsed    time.Time
 	sourceRoot  string
 	callerSID   string
@@ -110,10 +111,7 @@ func (e *liveVM) boot(req RunJobRequest) error {
 	// Resolve (and lazily clone) this key's writable data disk.
 	dataDisk, derr := e.resolveDataDisk(req, b)
 	if derr != nil {
-		// Persistence is best-effort: log and continue without /data rather
-		// than failing the whole job.
-		logf("session %s: data disk unavailable (%v); running without /data", e.key, derr)
-		dataDisk = ""
+		return fmt.Errorf("session persistence unavailable: %w", derr)
 	}
 	e.dataDisk = dataDisk
 
@@ -148,9 +146,11 @@ func (e *liveVM) boot(req RunJobRequest) error {
 	if err := vm.Create(); err != nil {
 		return fmt.Errorf("create: %w", err)
 	}
-	if _, err := vm.Start(bootTimeoutMs); err != nil {
+	bootMs, err := vm.Start(bootTimeoutMs)
+	if err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
+	e.bootMs = bootMs
 	if !waitMetisd(id, metisdWaitSeconds*time.Second) {
 		return fmt.Errorf("metisd did not come up on vsock")
 	}
@@ -177,8 +177,26 @@ func (e *liveVM) boot(req RunJobRequest) error {
 				e.dataMounted, _ = r["mounted"].(bool)
 			}
 		}
+		// Compatibility fallback for runtime packs built before data.mount was
+		// added to metisd. The mount still happens through the authenticated
+		// HvSocket channel and must succeed before a keyed session is accepted.
 		if !e.dataMounted {
-			logf("session %s: data.mount did not mount %s (likely minimal pack without mount/blkid)", e.key, guestDataMount)
+			fallback, _ := sendJSONL(id, []map[string]any{
+				{"id": "data-fallback", "method": "process.run", "params": map[string]any{
+					"command": "mkdir -p /data /data/pyuser && (mountpoint -q /data || mount -L METISDATA /data) && echo METIS_DATA_MOUNT_OK",
+					"cwd":     "/", "timeout_ms": 20000, "network_allowed": false}},
+			}, 25*time.Second)
+			for _, r := range fallback {
+				if r["id"] != "data-fallback" {
+					continue
+				}
+				rc, _ := r["returncode"].(float64)
+				stdout, _ := r["stdout"].(string)
+				e.dataMounted = int(rc) == 0 && strings.Contains(stdout, "METIS_DATA_MOUNT_OK")
+			}
+		}
+		if !e.dataMounted {
+			return fmt.Errorf("session persistence disk did not mount at %s", guestDataMount)
 		}
 	}
 	return nil

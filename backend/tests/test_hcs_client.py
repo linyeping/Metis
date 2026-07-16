@@ -67,13 +67,13 @@ class TestBuildVmDocument:
             build_vm_document(tmp_path)
 
     def test_companion_vhds_auto_detected(self, tmp_path):
-        for name in ("vmlinuz", "initrd", "rootfs.vhdx", "sessiondata.vhdx", "smol-bin.vhdx"):
+        for name in ("vmlinuz", "initrd", "rootfs.vhdx", "sessiondata-template.vhdx", "smol-bin.vhdx"):
             (tmp_path / name).write_bytes(b"x")
 
         doc = build_vm_document(tmp_path)
         attachments = doc["VirtualMachine"]["Devices"]["Scsi"]["primary"]["Attachments"]
-        assert "1" in attachments  # sessiondata
-        assert "2" in attachments  # smol-bin
+        assert attachments["1"]["Path"].endswith("smol-bin.vhdx")
+        assert all(not item["Path"].endswith("sessiondata-template.vhdx") for item in attachments.values())
 
     def test_plan9_shares(self, tmp_path):
         for name in ("vmlinuz", "initrd", "rootfs.vhdx"):

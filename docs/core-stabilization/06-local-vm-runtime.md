@@ -12,8 +12,15 @@
 - Code 文件修改仍走 `local_worktree`。
 - 命令执行、测试、构建可以选择 `execution_profile=local_vm`。
 - `local_vm` 后端固定走 `metis_wsl`。
-- `metis_wsl` 会启动 WSL2 utility VM，但它不是 Metis HCS direct runner。
-- HCS direct 仍是单独的实验路径，不参与 Code/Cowork/UI 主路径。
+- `metis_wsl` 会启动 WSL2 utility VM，但它不是 HCS direct runner；`local_vm` 产品入口仍固定使用这条稳定路径。
+- HCS direct 已形成独立可运行后端，通过特权服务、HvSocket 和 bundle 指纹凭据验收，但不替换 `local_vm` 的默认选择。
+
+快照规则：
+
+- 默认 `max_files=0`、`max_bytes=0`，复制完整的 Git tracked + non-ignored 工作集。
+- 正数上限是显式安全阀，不是截断线；预检超限返回 `WORKSPACE_SNAPSHOT_LIMIT_EXCEEDED`，任务不会执行。
+- 文件读取或复制中途失败会删除半成品 session，并返回稳定错误码。
+- 只有完整快照才会建立 Git baseline 和导出 patch，因此未复制文件不会被报告为伪删除。
 
 ---
 
@@ -58,7 +65,7 @@ python -m backend.runtime.vm_toolchain_check --root D:\pycharm\py.project\Miro
 
 - 缺工具时修 rootfs 或 runtime bundle。
 - 不在 host 主路径里做 “缺 VM 工具就用宿主机工具” 的 fallback。
-- 不把 HCS direct 当成 `local_vm` 的默认候选。
+- 不把 HCS direct 当成 `local_vm` 产品入口的默认候选；它由 Runtime Manager 的独立 readiness gate 管理。
 - 验收报告写入 `$METIS_RUNTIME_ARTIFACTS_DIR/metis_vm_toolchain_check.tsv`。
 
 ---
@@ -92,6 +99,8 @@ python -m backend.runtime.vm_toolchain_check --root D:\pycharm\py.project\Miro
 - artifact 能从 `$METIS_RUNTIME_ARTIFACTS_DIR` 回到 registry。
 - 结果中的 runner/backend 是 `local_vm` / `metis_wsl`。
 - 不启动或选择 HCS backend。
+
+大型工作区回归必须额外验证：超过 2000 个文件时尾部文件可读、空任务 patch 为 0 条变更；显式设置较小 guard 时整体失败且不残留半份 workspace。
 
 ---
 

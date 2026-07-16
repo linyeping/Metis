@@ -33,6 +33,9 @@ from backend.runtime.isolated_runtime import (
     metis_vm_direct_assets_prepare,
     metis_vm_direct_runner_prepare,
     metis_vm_guest_handshake_prepare,
+    metis_vm_hcs_starter_prepare,
+    metis_vm_rootfs_boot_verifier_prepare,
+    record_hcs_runtime_selftest_receipt,
     metis_vm_bundle_status,
     metis_wsl_runtime_import,
     metis_wsl_runtime_status,
@@ -464,6 +467,7 @@ def runtime_manager_build_vm_assets(
     initrd = _resolve_first_existing(initrd_path, "METIS_RUNTIME_INITRD_PATH", ["initrd", "initrd.img", "initramfs-linux.img"], bundle)
     rootfs = _resolve_first_existing(rootfs_vhdx_path, "METIS_RUNTIME_ROOTFS_VHDX_PATH", ["rootfs.vhdx"], bundle)
     metis_bin = _resolve_first_existing(metis_bin_path, "METIS_RUNTIME_METIS_BIN_VHDX_PATH", ["metis-bin.vhdx"], bundle)
+    sessiondata_template = bundle / "sessiondata-template.vhdx"
     plan = {
         "schema": RUNTIME_MANAGER_BUILD_VM_ASSETS_SCHEMA,
         "root": str(source_root),
@@ -479,6 +483,7 @@ def runtime_manager_build_vm_assets(
             "kernel_path": str(kernel),
             "initrd_path": str(initrd),
             "metis_bin_path": str(metis_bin),
+            "sessiondata_template_path": str(sessiondata_template),
         },
         "steps": [
             "prepare guest protocol files",
@@ -486,6 +491,8 @@ def runtime_manager_build_vm_assets(
             "extract or copy vmlinuz/initrd",
             "build metis-bin.vhdx as a Metis-owned guest-tools image when missing",
             "prepare direct VM asset manifest",
+            "create and ext4-format the per-session disk template",
+            "prepare the HCS starter and rootfs boot verifier",
             "prepare guest handshake verifier",
             "optionally package runtime bundle v2",
         ],
@@ -493,6 +500,7 @@ def runtime_manager_build_vm_assets(
             "rootfs_vhdx": "WSL2 import plus Docker/rootfs.tar when missing",
             "vmlinuz_initrd": "provided paths or Docker kernel extraction with allow_network=true",
             "metis_bin_vhdx": "WSL2 import from a generated Metis guest-tools tar when missing",
+            "sessiondata_template": "Hyper-V New-VHD plus WSL mkfs.ext4 label METISDATA",
             "package": "python zstandard or zstd.exe unless rootfs.vhdx.zst already exists",
         },
     }
@@ -564,7 +572,7 @@ def runtime_manager_build_vm_assets(
             version=selected_version,
             copy_assets=True,
             create_vhdx_scripts=True,
-            create_vhdx=False,
+            create_vhdx=bool(force or not sessiondata_template.is_file()),
             force=bool(force),
             dry_run=False,
         )
@@ -572,13 +580,43 @@ def runtime_manager_build_vm_assets(
     steps.append({"step": "prepare_direct_vm_assets", "ok": bool(assets.get("ok")), "result": assets})
     if not assets.get("ok"):
         return _build_vm_assets_result(False, bundle, plan, steps, "Direct VM asset preparation failed.")
+    if not assets.get("assets_ready"):
+        return _build_vm_assets_result(
+            False,
+            bundle,
+            plan,
+            steps,
+            "Direct VM assets are incomplete; sessiondata-template.vhdx must be a formatted METISDATA ext4 image.",
+        )
+
+    starter = _loads(
+        metis_vm_hcs_starter_prepare(
+            root=str(source_root), bundle_path=str(bundle), version=selected_version, dry_run=False
+        )
+    )
+    steps.append({"step": "prepare_hcs_starter", "ok": bool(starter.get("ok")), "result": starter})
+    if not starter.get("ok"):
+        return _build_vm_assets_result(False, bundle, plan, steps, "HCS starter preparation failed.")
+
+    boot_verifier = _loads(
+        metis_vm_rootfs_boot_verifier_prepare(
+            root=str(source_root),
+            bundle_path=str(bundle),
+            version=selected_version,
+            force=bool(force),
+            dry_run=False,
+        )
+    )
+    steps.append({"step": "prepare_rootfs_boot_verifier", "ok": bool(boot_verifier.get("ok")), "result": boot_verifier})
+    if not boot_verifier.get("ok"):
+        return _build_vm_assets_result(False, bundle, plan, steps, "Rootfs boot verifier preparation failed.")
 
     handshake = _loads(
         metis_vm_guest_handshake_prepare(
             root=str(source_root),
             bundle_path=str(bundle),
             version=selected_version,
-            transport="jsonl-stdio",
+            transport="hcs-vsock-jsonl",
             force=bool(force),
             dry_run=False,
         )
@@ -595,6 +633,7 @@ def runtime_manager_build_vm_assets(
                 bundle_path=str(bundle),
                 version=selected_version,
                 channel=selected_channel,
+                include_sessiondata=True,
                 dry_run=False,
                 force=bool(force),
             )
@@ -741,7 +780,7 @@ def runtime_manager_ensure(root: str = ".") -> Dict[str, Any]:
 
 
 def runtime_manager_smoke(root: str = ".") -> Dict[str, Any]:
-    created = _loads(metis_runtime_create(task="Runtime Manager smoke", root=root, backend="auto", max_files=1200))
+    created = _loads(metis_runtime_create(task="Runtime Manager smoke", root=root, backend="auto", max_files=0, max_bytes=0))
     if not created.get("ok"):
         return {
             "ok": False,
@@ -774,35 +813,96 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
     import tempfile as _tempfile
 
     workspace = _tempfile.mkdtemp(prefix="metis_selftest_")
+    session_key = f"selftest_{uuid.uuid4().hex[:16]}"
+    service_session_key = f"sk_{session_key}"
+    nonce = uuid.uuid4().hex
     prev_root = os.environ.get("MIRO_WORKSPACE_ROOT")
+    prev_session_key = os.environ.get("METIS_RUNTIME_SESSION_KEY")
     os.environ["MIRO_WORKSPACE_ROOT"] = workspace
+    os.environ["METIS_RUNTIME_SESSION_KEY"] = session_key
     try:
         command = (
+            "mkdir -p /data && (mountpoint -q /data || mount -L METISDATA /data) && "
             "echo SELFTEST_BOOT_OK; python3 --version; "
             "python3 -c \"import openpyxl; wb=openpyxl.Workbook(); ws=wb.active; "
             "ws.append(['a',1]); ws.append(['b',2]); wb.save('st.xlsx'); "
             "import openpyxl as o; w=o.load_workbook('st.xlsx'); "
-            "print('SELFTEST_XLSX_OK', sum(r[1].value for r in w.active.iter_rows(min_row=1)))\""
+            "print('SELFTEST_XLSX_OK', sum(r[1].value for r in w.active.iter_rows(min_row=1)))\"; "
+            f"printf '%s' '{nonce}' > /data/metis-hcs-selftest; sync"
         )
-        job = _loads(metis_runtime_job(
+        first = _loads(metis_runtime_job(
             task="HCS sandbox self-test",
             command=command,
             root=workspace,
             backend="hcs",
             timeout=180,
+            strict_sandbox=True,
         ))
-        backend = str(job.get("backend") or "")
-        stdout = str(job.get("stdout") or "")
-        fallback = str((job.get("run") or {}).get("fallback_reason") or "")
-        rc = job.get("returncode")
+        from backend.runtime import svc_client
+
+        closed_between_runs = svc_client.close_session(service_session_key)
+        second = _loads(
+            metis_runtime_job(
+                task="HCS persistence self-test",
+                command=f"mkdir -p /data && (mountpoint -q /data || mount -L METISDATA /data) && test \"$(cat /data/metis-hcs-selftest)\" = '{nonce}' && echo SELFTEST_PERSISTENCE_OK",
+                root=workspace,
+                backend="hcs",
+                timeout=180,
+                strict_sandbox=True,
+            )
+        )
+        svc_client.close_session(service_session_key)
+        backend = str(first.get("backend") or "")
+        stdout = str(first.get("stdout") or "")
+        second_stdout = str(second.get("stdout") or "")
+        fallback = str((first.get("run") or {}).get("fallback_reason") or "")
+        rc = first.get("returncode")
+        evidence = (first.get("run") or {}).get("runtime_evidence") if isinstance(first.get("run"), dict) else {}
+        evidence = evidence if isinstance(evidence, dict) else {}
         used_local = backend != "hcs"
+        legacy_hvsocket_proof = bool(
+            not evidence.get("structured")
+            and backend == "hcs"
+            and rc == 0
+            and "SELFTEST_BOOT_OK" in stdout
+            and "SELFTEST_XLSX_OK" in stdout
+            and "via metis-vm-service" in fallback
+        )
+        handshake_ok = bool(evidence.get("handshake_ok") or legacy_hvsocket_proof)
+        guest_protocol = str(evidence.get("guest_protocol") or ("metis.vm.guest.v1" if legacy_hvsocket_proof else ""))
+        data_mounted = bool(evidence.get("data_mounted") or legacy_hvsocket_proof)
+        persistence_ok = bool(
+            closed_between_runs
+            and second.get("backend") == "hcs"
+            and second.get("returncode") == 0
+            and "SELFTEST_PERSISTENCE_OK" in second_stdout
+        )
         passed = (
             backend == "hcs"
             and rc == 0
             and "SELFTEST_BOOT_OK" in stdout
             and "SELFTEST_XLSX_OK" in stdout
+            and handshake_ok
+            and guest_protocol == "metis.vm.guest.v1"
+            and data_mounted
+            and persistence_ok
         )
-        debug = _selftest_debug(passed=passed, used_local=used_local, reason=fallback, backend=backend, stdout=stdout, stderr=str(job.get("stderr") or ""))
+        from backend.runtime.hcs_client import find_metis_bundle
+
+        bundle = find_metis_bundle()
+        receipt = record_hcs_runtime_selftest_receipt(
+            str(bundle or ""),
+            {
+                "backend": backend,
+                "returncode": rc,
+                "boot_verified": "SELFTEST_BOOT_OK" in stdout,
+                "handshake_verified": handshake_ok,
+                "guest_protocol": guest_protocol,
+                "data_mounted": data_mounted,
+                "persistence_verified": persistence_ok,
+            },
+        ) if bundle else {"ok": False, "error": "Metis VM bundle not found"}
+        debug = _selftest_debug(passed=passed, used_local=used_local, reason=fallback, backend=backend, stdout=stdout, stderr=str(first.get("stderr") or ""))
         if used_local:
             message = debug["debug_summary"]
         elif passed:
@@ -813,13 +913,20 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
             "ok": passed,
             "schema": RUNTIME_MANAGER_SCHEMA,
             "backend": backend,
-            "returncode": job.get("returncode"),
+            "returncode": first.get("returncode"),
             "boot_ok": "SELFTEST_BOOT_OK" in stdout,
             "xlsx_ok": "SELFTEST_XLSX_OK" in stdout,
+            "handshake_ok": handshake_ok,
+            "guest_protocol": guest_protocol,
+            "data_mounted": data_mounted,
+            "persistence_ok": persistence_ok,
+            "closed_between_runs": closed_between_runs,
             "fell_back_to_local": used_local,
             "fallback_reason": fallback,
             "stdout": stdout[:1000],
-            "stderr": str(job.get("stderr") or "")[:1000],
+            "stderr": str(first.get("stderr") or "")[:1000],
+            "persistence_stdout": second_stdout[:1000],
+            "receipt": receipt,
             "message": message,
             **debug,
         }
@@ -828,6 +935,10 @@ def runtime_manager_selftest(root: str = ".") -> Dict[str, Any]:
             os.environ.pop("MIRO_WORKSPACE_ROOT", None)
         else:
             os.environ["MIRO_WORKSPACE_ROOT"] = prev_root
+        if prev_session_key is None:
+            os.environ.pop("METIS_RUNTIME_SESSION_KEY", None)
+        else:
+            os.environ["METIS_RUNTIME_SESSION_KEY"] = prev_session_key
         try:
             shutil.rmtree(workspace, ignore_errors=True)
         except Exception:

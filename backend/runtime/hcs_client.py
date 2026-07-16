@@ -238,7 +238,9 @@ def build_vm_document(
         attachments["0"] = {"Type": "VirtualDisk", "Path": str(rootfs.resolve()), "ReadOnly": True}
         slot = 1
         # Auto-detect standard companion VHDs
-        for name, read_only in [("sessiondata.vhdx", False), ("metis-data.vhdx", False), ("smol-bin.vhdx", True)]:
+        # Writable session disks must be per-session clones created by the
+        # privileged service. Never attach the immutable template writable.
+        for name, read_only in [("metis-data.vhdx", False), ("smol-bin.vhdx", True)]:
             vhd = bundle / name
             if vhd.is_file():
                 attachments[str(slot)] = {"Type": "VirtualDisk", "Path": str(vhd.resolve()), "ReadOnly": read_only}

@@ -194,6 +194,56 @@ def test_isolated_runtime_blocks_network_commands_by_default(tmp_path: Path, mon
     assert blocked["code"] == "NETWORK_BLOCKED"
 
 
+def test_large_workspace_snapshot_is_complete_and_has_no_false_deletions(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    backend_cwd = tmp_path / "backend"
+    workspace.mkdir()
+    backend_cwd.mkdir()
+    monkeypatch.chdir(backend_cwd)
+    for index in range(2105):
+        (workspace / f"file-{index:04d}.txt").write_text(f"{index}\n", encoding="utf-8")
+
+    with workspace_root_override(str(workspace)):
+        created = _json(metis_runtime_create(task="large complete snapshot", backend="local"))
+        patch = _json(metis_runtime_export_patch(session_id=created["session_id"]))
+
+    runtime_workspace = Path(created["workspace_dir"])
+    assert created["ok"] is True
+    assert created["copy_stats"]["snapshot_policy"] == "complete-or-fail"
+    assert created["copy_stats"]["complete"] is True
+    assert created["copy_stats"]["copied_files"] == 2105
+    assert (runtime_workspace / "file-2104.txt").read_text(encoding="utf-8") == "2104\n"
+    assert patch["ok"] is True
+    assert patch["changed_files"] == []
+
+
+def test_workspace_snapshot_guard_rejects_instead_of_truncating(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    backend_cwd = tmp_path / "backend"
+    workspace.mkdir()
+    backend_cwd.mkdir()
+    monkeypatch.chdir(backend_cwd)
+    for index in range(5):
+        (workspace / f"file-{index}.txt").write_text("data\n", encoding="utf-8")
+
+    with workspace_root_override(str(workspace)):
+        created = _json(
+            metis_runtime_create(
+                task="guarded snapshot",
+                backend="local",
+                max_files=4,
+                max_bytes=20,
+            )
+        )
+
+    assert created["ok"] is False
+    assert created["code"] == "WORKSPACE_SNAPSHOT_LIMIT_EXCEEDED"
+    assert created["snapshot"]["selected_files"] == 5
+    assert created["snapshot"]["exceeded"] == ["max_files", "max_bytes"]
+    sessions = workspace / ".metis" / "runtime"
+    assert not sessions.exists() or not any(sessions.iterdir())
+
+
 def test_isolated_runtime_tools_are_registered_and_in_lean_profile() -> None:
     registry = ToolRegistry()
     register_builtin_tools(registry)
@@ -737,7 +787,7 @@ def test_runtime_bundle_package_v2_dry_run_reports_missing_assets(tmp_path: Path
     assert planned["ok"] is True
     assert planned["dry_run"] is True
     assert planned["schema"] == "metis.runtime_bundle.package.v2"
-    assert set(planned["asset_status"]["missing_required"]) >= {"vmlinuz", "initrd", "rootfs.vhdx", "metis-bin.vhdx"}
+    assert set(planned["asset_status"]["missing_required"]) >= {"vmlinuz", "initrd", "rootfs.vhdx"}
     assert planned["package_path"].endswith("metis-runtime-bundle-v2-26.6.17-stable.zip")
     assert not (workspace / ".metis" / "runtime-pack" / "releases").exists()
 
@@ -777,7 +827,7 @@ def test_runtime_bundle_package_v2_creates_release_assets(tmp_path: Path, monkey
             "initrd": b"initrd",
             "rootfs.vhdx": b"rootfs-vhdx",
             "metis-bin.vhdx": b"metis-bin",
-            "sessiondata.vhdx": b"session",
+            "sessiondata-template.vhdx": b"session",
         }.items():
             (bundle / name).write_bytes(data)
         packaged = _json(
@@ -818,7 +868,7 @@ def test_runtime_bundle_package_v2_creates_release_assets(tmp_path: Path, monkey
     assert "metis-runtime-bundle-v2/vmlinuz" in names
     assert "metis-runtime-bundle-v2/initrd" in names
     assert "metis-runtime-bundle-v2/metis-bin.vhdx" in names
-    assert "metis-runtime-bundle-v2/sessiondata.vhdx" in names
+    assert "metis-runtime-bundle-v2/sessiondata-template.vhdx" in names
     assert "metis-runtime-bundle-v2/metis-vm-pack.json" in names
     assert "metis-runtime-bundle-v2/SHA256SUMS.txt" in names
     assert "metis-runtime-bundle-v2/install-metis-runtime-bundle-v2.ps1" in names
@@ -867,7 +917,7 @@ def test_vm_direct_assets_prepare_writes_manifest_scripts_and_copies_assets(tmp_
     assert (bundle / "vmlinuz").is_file()
     assert (bundle / "initrd").is_file()
     assert (bundle / "metis-bin.vhdx").is_file()
-    assert (bundle / "sessiondata.vhdx").is_file()
+    assert (bundle / "sessiondata-template.vhdx").is_file()
     assert (bundle / ".rootfs.vhdx.origin").read_text(encoding="utf-8").strip()
     assert (bundle / "create-direct-vm-assets.ps1").is_file()
     assert (bundle / "host" / "hcs-runner.ps1").is_file()
@@ -875,10 +925,10 @@ def test_vm_direct_assets_prepare_writes_manifest_scripts_and_copies_assets(tmp_
     assert manifest["schema"] == "metis.vm_direct.assets.v1"
     assert manifest["owner"] == "metis"
     assert manifest["assets_ready"] is True
-    assert manifest["runner"]["implemented"] is False
+    assert manifest["runner"]["implemented"] is True
     assert manifest["missing_required"] == []
     assert vm_manifest["direct_vm"]["assets_ready"] is True
-    assert vm_manifest["direct_vm"]["runner"]["implemented"] is False
+    assert vm_manifest["direct_vm"]["runner"]["implemented"] is True
     assert "metis-bin.vhdx" in vm_manifest["optional_assets"]
     assert status["selected_bundle"]["ready"] is True
 
@@ -926,7 +976,7 @@ def test_vm_direct_runner_prepare_writes_protocol_lifecycle_and_manifest(tmp_pat
     assert (bundle / "host" / "artifact-sync.ps1").is_file()
     assert (bundle / "host" / "lifecycle-schema.json").is_file()
     assert manifest["schema"] == "metis.vm_direct.runner.v1"
-    assert manifest["runner"]["implemented"] is False
+    assert manifest["runner"]["implemented"] is True
     assert manifest["transport"]["stdio_smoke_ready"] is True
     assert "artifact.collect" in manifest["transport"]["methods"]
     assert "completed" in manifest["lifecycle"]["terminal_states"]
@@ -1012,7 +1062,7 @@ def test_vm_hcs_starter_prepare_writes_compute_document_and_bridge(tmp_path: Pat
     assert compute_doc["VirtualMachine"]["Chipset"]["LinuxKernelDirect"]["KernelFilePath"].endswith("vmlinuz")
     assert compute_doc["VirtualMachine"]["Chipset"]["LinuxKernelDirect"]["InitRdPath"].endswith("initrd")
     assert compute_doc["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"]["0"]["Path"].endswith("rootfs.vhdx")
-    assert compute_doc["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"]["2"]["ReadOnly"] is True
+    assert compute_doc["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"]["1"]["ReadOnly"] is True
     assert manifest["schema"] == "metis.vm_direct.hcs_starter.v1"
     assert manifest["starter_ready"] is True
     assert manifest["assets_ready"] is True
@@ -1190,13 +1240,24 @@ def test_vm_guest_handshake_stdio_writes_receipt_without_runner_ready(tmp_path: 
     assert status["selected_bundle"]["runner_ready"] is False
 
 
-def test_vm_guest_handshake_hcs_gate_and_transport_unavailable(tmp_path: Path, monkeypatch) -> None:
+def test_vm_guest_handshake_hcs_gate_and_production_transport(tmp_path: Path, monkeypatch) -> None:
     workspace = tmp_path / "workspace"
     backend_cwd = tmp_path / "backend"
     workspace.mkdir()
     backend_cwd.mkdir()
     monkeypatch.chdir(backend_cwd)
 
+    from backend.runtime import hcs_client, runtime_manager
+
+    monkeypatch.setattr(
+        runtime_manager,
+        "runtime_manager_selftest",
+        lambda **kwargs: {
+            "ok": True,
+            "handshake_ok": True,
+            "message": "verified",
+        },
+    )
     with workspace_root_override(str(workspace)):
         dry = _json(metis_vm_guest_handshake_verify(transport="hcs-vsock-jsonl", dry_run=True))
         blocked = _json(
@@ -1207,7 +1268,17 @@ def test_vm_guest_handshake_hcs_gate_and_transport_unavailable(tmp_path: Path, m
                 enable_experimental_hcs=False,
             )
         )
+        monkeypatch.setattr(hcs_client, "find_metis_bundle", lambda: Path(dry["bundle_path"]))
         unavailable = _json(
+            metis_vm_guest_handshake_verify(
+                bundle_path=dry["bundle_path"],
+                transport="hcs-vsock-jsonl",
+                dry_run=False,
+                enable_experimental_hcs=True,
+            )
+        )
+        monkeypatch.setattr(hcs_client, "find_metis_bundle", lambda: tmp_path / "different.bundle")
+        mismatched = _json(
             metis_vm_guest_handshake_verify(
                 bundle_path=dry["bundle_path"],
                 transport="hcs-vsock-jsonl",
@@ -1218,11 +1289,50 @@ def test_vm_guest_handshake_hcs_gate_and_transport_unavailable(tmp_path: Path, m
 
     assert dry["ok"] is True
     assert dry["plan"]["runner_ready_on_success"] is True
-    assert dry["plan"]["transport_implemented"] is False
+    assert dry["plan"]["transport_implemented"] is True
     assert blocked["ok"] is False
     assert blocked["code"] == "METIS_GUEST_HANDSHAKE_EXPERIMENTAL_FLAG_REQUIRED"
-    assert unavailable["ok"] is False
-    assert unavailable["code"] == "METIS_GUEST_HANDSHAKE_TRANSPORT_UNAVAILABLE"
+    assert unavailable["ok"] is True
+    assert unavailable["hcs_handshake_verified"] is True
+    assert unavailable["runner_ready"] is True
+    assert mismatched["ok"] is False
+    assert mismatched["code"] == "METIS_GUEST_HANDSHAKE_BUNDLE_MISMATCH"
+
+
+def test_hcs_selftest_receipt_is_bound_to_current_bundle_assets(tmp_path: Path, monkeypatch) -> None:
+    workspace = tmp_path / "workspace"
+    backend_cwd = tmp_path / "backend"
+    workspace.mkdir()
+    backend_cwd.mkdir()
+    monkeypatch.chdir(backend_cwd)
+
+    with workspace_root_override(str(workspace)):
+        scaffold = _json(metis_vm_pack_scaffold())
+        bundle = Path(scaffold["bundle_path"])
+        for name in ("vmlinuz", "initrd", "rootfs.vhdx", "sessiondata-template.vhdx"):
+            (bundle / name).write_bytes(f"asset:{name}".encode("utf-8"))
+        receipt = isolated_runtime.record_hcs_runtime_selftest_receipt(
+            str(bundle),
+            {
+                "backend": "hcs",
+                "returncode": 0,
+                "boot_verified": True,
+                "handshake_verified": True,
+                "guest_protocol": "metis.vm.guest.v1",
+                "data_mounted": True,
+                "persistence_verified": True,
+            },
+        )
+        ready = _json(metis_vm_bundle_status(bundle_path=str(bundle)))
+        (bundle / "initrd").write_bytes(b"changed-initrd")
+        invalidated = _json(metis_vm_bundle_status(bundle_path=str(bundle)))
+
+    assert receipt["ok"] is True
+    assert ready["selected_bundle"]["hcs_direct_ready"] is True
+    assert ready["selected_bundle"]["rootfs_boot_verifier"]["boot_verified"] is True
+    assert invalidated["selected_bundle"]["hcs_direct_ready"] is False
+    assert invalidated["selected_bundle"]["guest_handshake"]["last_handshake_receipt_valid"] is False
+    assert invalidated["selected_bundle"]["rootfs_boot_verifier"]["boot_verified"] is False
 
 
 def test_auto_selects_vm_when_guest_protocol_runner_ready(tmp_path: Path, monkeypatch) -> None:

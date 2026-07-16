@@ -67,17 +67,21 @@ type RunJobRequest struct {
 
 // RunJobResult mirrors the dict hcs_runtime_run returns.
 type RunJobResult struct {
-	OK          bool   `json:"ok"`
-	ReturnCode  int    `json:"returncode"`
-	Stdout      string `json:"stdout"`
-	Stderr      string `json:"stderr"`
-	TimedOut    bool   `json:"timed_out"`
-	DurationMs  int64  `json:"duration_ms"`
-	FilesPushed int    `json:"files_pushed"`
-	FilesPulled int    `json:"files_pulled"`
-	Backend     string `json:"backend"`
-	ExecMode    string `json:"exec_mode"`
-	Error       string `json:"error"`
+	OK            bool   `json:"ok"`
+	ReturnCode    int    `json:"returncode"`
+	Stdout        string `json:"stdout"`
+	Stderr        string `json:"stderr"`
+	TimedOut      bool   `json:"timed_out"`
+	DurationMs    int64  `json:"duration_ms"`
+	FilesPushed   int    `json:"files_pushed"`
+	FilesPulled   int    `json:"files_pulled"`
+	Backend       string `json:"backend"`
+	ExecMode      string `json:"exec_mode"`
+	Error         string `json:"error"`
+	HandshakeOK   bool   `json:"handshake_ok"`
+	GuestProtocol string `json:"guest_protocol"`
+	DataMounted   bool   `json:"data_mounted"`
+	BootMs        int64  `json:"boot_ms"`
 }
 
 func waitMetisd(vmID string, wait time.Duration) bool {
@@ -211,7 +215,10 @@ func runJobKeyed(req RunJobRequest) RunJobResult {
 		return RunJobResult{Backend: "hcs", ExecMode: "unsupported", Error: err.Error(), ReturnCode: 126}
 	}
 	defer e.mu.Unlock() // ensureVM returns with e.mu held
-	return e.runOnVM(req)
+	res := e.runOnVM(req)
+	res.DataMounted = e.dataMounted
+	res.BootMs = e.bootMs
+	return res
 }
 
 // runJobOneShot boots a transient VM, runs once, and destroys it. Reuses the
@@ -225,7 +232,9 @@ func runJobOneShot(req RunJobRequest) RunJobResult {
 		return RunJobResult{Backend: "hcs", ExecMode: "unsupported", Error: err.Error(), ReturnCode: 126}
 	}
 	defer e.teardown()
-	return e.runOnVM(req)
+	res := e.runOnVM(req)
+	res.BootMs = e.bootMs
+	return res
 }
 
 // runJobOnVM runs one push/run/pull cycle against an already-booted VM whose
@@ -246,7 +255,10 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 	if req.WorkspaceDir != "" {
 		walkErr := withCallerToken(req.callerToken, func() error {
 			return filepath.Walk(req.WorkspaceDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
 					return nil
 				}
 				rel, rerr := filepath.Rel(req.WorkspaceDir, path)
@@ -258,12 +270,15 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 						return nil
 					}
 				}
-				if info.Size() > maxPushFileBytes || pushedBytes+info.Size() > maxPushTotalBytes || len(pushed) >= maxPushFiles {
-					return nil
+				if info.Size() > maxPushFileBytes {
+					return fmt.Errorf("WORKSPACE_PUSH_LIMIT_EXCEEDED: file %s is %d bytes (per-file limit %d)", rel, info.Size(), maxPushFileBytes)
+				}
+				if pushedBytes+info.Size() > maxPushTotalBytes || len(pushed) >= maxPushFiles {
+					return fmt.Errorf("WORKSPACE_PUSH_LIMIT_EXCEEDED: selected workset exceeds %d files or %d bytes; refusing a partial upload", maxPushFiles, maxPushTotalBytes)
 				}
 				data, derr := os.ReadFile(path)
 				if derr != nil {
-					return nil
+					return fmt.Errorf("workspace read %s: %w", rel, derr)
 				}
 				relSlash := filepath.ToSlash(rel)
 				pushed[relSlash] = true
@@ -307,15 +322,29 @@ func runJobOnVM(vm *HcsVm, req RunJobRequest) RunJobResult {
 			byID[id] = r
 		}
 	}
+	hello := byID["hello"]
+	if hello != nil {
+		res.HandshakeOK, _ = hello["ok"].(bool)
+		res.GuestProtocol, _ = hello["protocol"].(string)
+		if compatible, present := hello["compatible"].(bool); present {
+			res.HandshakeOK = res.HandshakeOK && compatible
+		}
+	}
+	if !res.HandshakeOK || res.GuestProtocol != "metis.vm.guest.v1" {
+		res.Error = "guest runtime.hello handshake failed"
+		res.ReturnCode = 126
+		return res
+	}
 	run := byID["run"]
 	if run != nil {
-		res.OK, _ = run["ok"].(bool)
+		responseOK, _ := run["ok"].(bool)
 		if rc, ok := run["returncode"].(float64); ok {
 			res.ReturnCode = int(rc)
 		}
 		res.Stdout, _ = run["stdout"].(string)
 		res.Stderr, _ = run["stderr"].(string)
 		res.TimedOut, _ = run["timed_out"].(bool)
+		res.OK = responseOK && res.ReturnCode == 0 && !res.TimedOut
 	}
 	res.FilesPushed = len(pushed)
 

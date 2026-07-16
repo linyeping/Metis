@@ -40,8 +40,8 @@ def metis_runtime_job(
     require_artifacts: bool = False,
     expected_stdout_contains: str = "",
     strict_sandbox: bool = False,
-    max_files: int = 2000,
-    max_bytes: int = 80 * 1024 * 1024,
+    max_files: int = 0,
+    max_bytes: int = 0,
     cancel_event: Any = None,
 ) -> str:
     """Run one Claude-style isolated runtime job and return a stable result contract."""
@@ -69,8 +69,8 @@ def metis_runtime_job(
                     root=creation_context_root,
                     mode=mode,
                     backend=backend,
-                    max_files=max(1, int(max_files or 2000)),
-                    max_bytes=max(1024, int(max_bytes or 1)),
+                    max_files=max(0, int(max_files or 0)),
+                    max_bytes=max(0, int(max_bytes or 0)),
                     allow_network=bool(allow_network),
                     allow_cross_drive=get_effective_sub_allow("allow_paths_outside_workspace"),
                     allow_project_write=False,
