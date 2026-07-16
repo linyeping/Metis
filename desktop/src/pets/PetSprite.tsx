@@ -69,33 +69,37 @@ export function PetSprite({ animate = true, className = '', onMaskChange, speedM
       } catch {
         return;
       }
-      const block = 4;
+      const alphaThreshold = 48;
       const rows: Array<{ x: number; y: number; width: number; height: number }> = [];
-      for (let targetY = 0; targetY < bounds.height; targetY += block) {
+      const targetWidth = Math.max(1, Math.round(bounds.width));
+      const targetHeight = Math.max(1, Math.round(bounds.height));
+      const boundsX = Math.round(bounds.x);
+      const boundsY = Math.round(bounds.y);
+      for (let targetY = 0; targetY < targetHeight; targetY += 1) {
         let runStart = -1;
-        for (let targetX = 0; targetX < bounds.width; targetX += block) {
-          const sourceX0 = Math.floor((targetX / bounds.width) * cellWidth);
-          const sourceX1 = Math.min(cellWidth, Math.ceil(((targetX + block) / bounds.width) * cellWidth));
-          const sourceY0 = Math.floor((targetY / bounds.height) * cellHeight);
-          const sourceY1 = Math.min(cellHeight, Math.ceil(((targetY + block) / bounds.height) * cellHeight));
+        for (let targetX = 0; targetX < targetWidth; targetX += 1) {
+          const sourceX0 = Math.floor((targetX / targetWidth) * cellWidth);
+          const sourceX1 = Math.min(cellWidth, Math.max(sourceX0 + 1, Math.ceil(((targetX + 1) / targetWidth) * cellWidth)));
+          const sourceY0 = Math.floor((targetY / targetHeight) * cellHeight);
+          const sourceY1 = Math.min(cellHeight, Math.max(sourceY0 + 1, Math.ceil(((targetY + 1) / targetHeight) * cellHeight)));
           let opaque = false;
           for (let sourceY = sourceY0; sourceY < sourceY1 && !opaque; sourceY += 1) {
             for (let sourceX = sourceX0; sourceX < sourceX1; sourceX += 1) {
-              if (pixels[(sourceY * cellWidth + sourceX) * 4 + 3] > 8) {
+              if (pixels[(sourceY * cellWidth + sourceX) * 4 + 3] >= alphaThreshold) {
                 opaque = true;
                 break;
               }
             }
           }
           if (opaque && runStart < 0) runStart = targetX;
-          const rowEnded = runStart >= 0 && (!opaque || targetX + block >= bounds.width);
+          const rowEnded = runStart >= 0 && (!opaque || targetX === targetWidth - 1);
           if (rowEnded) {
-            const runEnd = opaque ? Math.min(bounds.width, targetX + block) : targetX;
+            const runEnd = opaque ? targetX + 1 : targetX;
             rows.push({
-              x: Math.max(0, Math.floor(bounds.x + runStart - 1)),
-              y: Math.max(0, Math.floor(bounds.y + targetY - 1)),
-              width: Math.ceil(runEnd - runStart + 2),
-              height: Math.ceil(Math.min(block, bounds.height - targetY) + 2),
+              x: Math.max(0, boundsX + runStart),
+              y: Math.max(0, boundsY + targetY),
+              width: runEnd - runStart,
+              height: 1,
             });
             runStart = -1;
           }
@@ -104,7 +108,7 @@ export function PetSprite({ animate = true, className = '', onMaskChange, speedM
       const merged: typeof rows = [];
       for (const rectangle of rows) {
         const previous = merged.at(-1);
-        if (previous && previous.x === rectangle.x && previous.width === rectangle.width && previous.y + previous.height >= rectangle.y) {
+        if (previous && previous.x === rectangle.x && previous.width === rectangle.width && previous.y + previous.height === rectangle.y) {
           previous.height = Math.max(previous.height, rectangle.y + rectangle.height - previous.y);
         } else {
           merged.push(rectangle);

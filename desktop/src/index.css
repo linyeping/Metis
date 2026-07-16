@@ -2075,7 +2075,7 @@ body.resizing-side-chat-width .side-chat-width-resizer::before {
   top: 28px;
   right: 0;
   display: grid;
-  width: 190px;
+  width: 148px;
   gap: 2px;
   padding: 5px;
   border: 1px solid var(--border);
@@ -16345,6 +16345,12 @@ body.metis-pet-shell #root {
   padding-top: var(--space-3);
 }
 
+.terminal-settings-grid {
+  width: min(100%, 820px);
+  gap: 14px;
+  padding-top: 20px;
+}
+
 .tools-settings-grid .permission-panel {
   padding-top: var(--space-1);
 }
@@ -16353,6 +16359,54 @@ body.metis-pet-shell #root {
 .terminal-settings-grid > .settings-card,
 .terminal-settings-grid > .settings-disclosure {
   margin: 0;
+}
+
+.terminal-settings-grid > .terminal-settings-card {
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg-secondary));
+}
+
+.terminal-settings-disclosure summary {
+  min-height: 34px;
+}
+
+.terminal-settings-disclosure[open] summary {
+  padding-bottom: 13px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.terminal-settings-disclosure .settings-disclosure-body {
+  padding-top: 0;
+}
+
+.terminal-settings-grid .settings-section-header {
+  align-items: flex-start;
+}
+
+.terminal-settings-grid .settings-section-header > .section-icon {
+  margin-top: 2px;
+}
+
+.terminal-settings-grid .python-path-field,
+.terminal-settings-grid .python-actions,
+.terminal-settings-grid .python-hints,
+.terminal-settings-grid .document-converter-support,
+.terminal-settings-grid .document-converter-grid,
+.terminal-settings-grid .document-converter-hints,
+.terminal-settings-grid .document-converter-root {
+  margin-left: 24px;
+}
+
+.terminal-settings-note {
+  gap: 6px;
+  padding: 14px 2px 4px 16px;
+}
+
+.terminal-settings-note > .section-desc {
+  margin-left: 24px;
 }
 
 .tool-tier-bar .tier-label {

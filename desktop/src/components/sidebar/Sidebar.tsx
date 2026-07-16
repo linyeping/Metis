@@ -464,7 +464,7 @@ function SessionRow({
             const top = bounds.bottom + menuHeight <= window.innerHeight - 8
               ? bounds.bottom + 4
               : Math.max(8, bounds.top - menuHeight - 4);
-            setMenuPosition({ top, left: Math.max(8, Math.min(window.innerWidth - 198, bounds.right - 190)) });
+            setMenuPosition({ top, left: Math.max(8, Math.min(window.innerWidth - 156, bounds.right - 148)) });
           }
           setMenuOpen(nextOpen);
         }}
@@ -475,11 +475,11 @@ function SessionRow({
         <div ref={contextMenuRef} className="session-context-menu session-context-menu-portal" role="menu" style={menuPosition}>
           {workspacePath && (
             <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); void window.metis.openPath(workspacePath); }}>
-              <FolderOpen size={14} /> {t('在资源管理器中打开')}
+              <FolderOpen size={14} /> {t('打开')}
             </button>
           )}
           <button className="rename-session" type="button" role="menuitem" onClick={() => { setMenuOpen(false); setRenameDraft(session.title || 'Metis Chat'); setRenaming(true); }}>
-            <Pencil size={14} /> {t('重命名会话')}
+            <Pencil size={14} /> {t('重命名')}
           </button>
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); void markSessionUnreadById(session.id, !session.unread); }}>
             <Mail size={14} /> {session.unread ? t('标记为已读') : t('标记为未读')}
@@ -504,7 +504,7 @@ function SessionRow({
             await deleteSessionById(session.id);
             await loadChatSession(useSessionStore.getState().activeSessionId);
           }}>
-            <Trash2 size={14} /> {t('删除会话')}
+            <Trash2 size={14} /> {t('删除')}
           </button>
         </div>,
         document.body,

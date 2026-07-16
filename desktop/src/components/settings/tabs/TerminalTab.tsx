@@ -42,7 +42,7 @@ export const TerminalTab = memo(function TerminalTab({ documentConverters, onRef
   return (
     <div className="settings-card-grid terminal-settings-grid">
       {/* ── Shell ────────────────────────────────────────────────── */}
-      <details className="settings-section settings-disclosure terminal-settings-disclosure" open>
+      <details className="settings-section settings-disclosure terminal-settings-card terminal-settings-disclosure" open>
         <summary>
           <div className="settings-section-header">
             <Terminal size={16} className="section-icon" />
@@ -73,7 +73,7 @@ export const TerminalTab = memo(function TerminalTab({ documentConverters, onRef
       </details>
 
       {/* ── Python interpreter ───────────────────────────────────── */}
-      <section className="settings-section settings-card">
+      <section className="settings-section settings-card terminal-settings-card">
         <div className="settings-section-header">
           <Terminal size={16} className="section-icon" />
           <span>
@@ -138,7 +138,7 @@ export const TerminalTab = memo(function TerminalTab({ documentConverters, onRef
         </div>
       </section>
 
-      <section className="settings-section settings-card document-converter-card">
+      <section className="settings-section settings-card terminal-settings-card document-converter-card">
         <div className="settings-section-header">
           <FileText size={16} className="section-icon" />
           <span>
@@ -178,7 +178,7 @@ export const TerminalTab = memo(function TerminalTab({ documentConverters, onRef
       </section>
 
       {/* ── Tips ──────────────────────────────────────────────────── */}
-      <section className="settings-section">
+      <section className="settings-section terminal-settings-note">
         <div className="settings-section-header">
           <Workflow size={16} className="section-icon" />
           <h3>{t('常用场景')}</h3>
