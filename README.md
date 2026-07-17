@@ -217,22 +217,35 @@ Runtime Manager 提供系统基础能力、运行组件、隔离执行、镜像/
 
 ---
 
-## 安装与运行环境
+<h2 align="center">下载与首次启动</h2>
 
-| 项 | 要求 |
+<p align="center">
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.17/Metis-Setup-26.7.17.exe"><b>下载 Metis 26.7.17 for Windows</b></a><br />
+  <sub>Windows 10 / 11 · x64 · NSIS 安装程序</sub>
+</p>
+
+<table align="center" width="100%">
+  <tr>
+    <td width="25%" valign="top"><b>1 · 下载</b><br /><br />从 <a href="https://github.com/linyeping/Metis/releases/latest">Latest Release</a> 获取 <code>Metis-Setup-26.7.17.exe</code>。</td>
+    <td width="25%" valign="top"><b>2 · 安装</b><br /><br />运行安装程序，选择安装目录并完成桌面快捷方式创建。</td>
+    <td width="25%" valign="top"><b>3 · 配置模型</b><br /><br />在设置中选择提供方，填写 API Key，并测试连接或读取模型目录。</td>
+    <td width="25%" valign="top"><b>4 · 开始任务</b><br /><br />选择 Chat、Cowork、Code 或 Design；需要时再连接 Skills、MCP 与 Connectors。</td>
+  </tr>
+</table>
+
+### 运行要求
+
+| 项目 | 当前支持 |
 |---|---|
-| 操作系统 | Windows 10 / 11 64 位 |
-| 模型服务 | DeepSeek 或任意 OpenAI-compatible endpoint |
-| 网络 | 调用模型 API、OAuth 连接器或下载隔离运行时资产时需要联网 |
-| Node.js / Python | 仅源码开发需要；桌面安装版本自带应用所需运行组件 |
-| 桌面操控 | `/computer` 会控制鼠标键盘，敏感操作执行前需要确认 |
+| **系统** | Windows 10 / 11 64 位，x64 处理器 |
+| **模型提供方** | DeepSeek、OpenAI、Kimi、智谱 GLM、百炼 / Qwen、豆包、Anthropic、Gemini、Ollama，以及自定义 OpenAI-compatible API |
+| **网络** | 模型 API、OAuth / Connectors、外部 MCP、网页访问和按需下载隔离运行时资产时需要联网 |
+| **本机依赖** | 安装版本已经包含 Electron、Python backend、Windows runtime service 与 Metis Design runtime；使用者不需要安装 Node.js 或 Python |
+| **隔离运行时** | Worktree 直接使用当前 Git；WSL / HCS VM 需要系统具备相应能力，较大的运行时资产按需准备 |
+| **自动更新** | 安装版本从 GitHub Releases 检查并下载更新，在应用退出或确认重启后完成安装 |
 
-1. 从 [v26.7.17 Release](https://github.com/linyeping/Metis/releases/tag/v26.7.17) 下载 `Metis-Setup-26.7.17.exe`。
-2. 运行安装程序并选择安装目录。
-3. 首次启动后，在设置中填写模型 Base URL、API Key 和模型名。
-4. 选择 Chat、Cowork、Code 或 Design 开始任务。
-
-当前版本尚未代码签名，Windows SmartScreen 可能显示风险提示。
+> [!IMPORTANT]
+> 当前安装包尚未代码签名，Windows SmartScreen 可能显示风险提示。请确认下载地址属于 `github.com/linyeping/Metis` 后再运行。Computer Use 会控制鼠标和键盘，涉及外部提交、上传、删除或敏感信息时应先检查权限提示。
 
 ---
 
@@ -363,8 +376,10 @@ Metis 不要求平台账号。模型服务、连接器和外部工具由用户�
 
 ---
 
-<div align="center">
+<p align="center">
+  <b>由 <a href="https://github.com/linyeping">linyeping</a> 打造</b> · 产品方向与部分设计思路致谢：<a href="https://github.com/Serein0812">Serein</a>
+</p>
 
-**由 [linyeping](https://github.com/linyeping) 打造** · 产品方向与部分设计思路致谢：[Serein](https://github.com/Serein0812) · 且将新火试新茶，诗酒趁年华。
-
-</div>
+<p align="center">
+  <i>且将新火试新茶，诗酒趁年华。</i>
+</p>
