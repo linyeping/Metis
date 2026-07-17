@@ -132,6 +132,24 @@ describe('InlineModelSwitcher AMR row', () => {
     }
   });
 
+  it('does not expose Open Design runtime or account controls in Metis managed mode', () => {
+    const { container } = renderSwitcher({ agentId: 'metis' }, [
+      {
+        id: 'metis',
+        name: 'Metis',
+        bin: 'metis',
+        available: true,
+        version: 'managed',
+        models: [{ id: 'default', label: 'Metis model settings' }],
+      },
+      amrAgent,
+      codexAgent,
+    ]);
+
+    expect(container.childElementCount).toBe(0);
+    expect(screen.queryByText(/BYOK|Local CLI|balance|upgrade|sign in/i)).toBeNull();
+  });
+
   it('shows the AMR reminder dot once when another CLI is selected', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();

@@ -123,28 +123,34 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     document.querySelector('[data-testid="blank-workspace-area"]')?.remove();
   });
 
-  it('keeps Home tab as a singleton and avoids duplication', async () => {
+  it('creates real, closable Home tabs from New tab while keeping the first Home pinned', async () => {
     const { rerender } = render(
       <WorkspaceTabsBar route={{ kind: 'home', view: 'home' }} projects={[project]} />,
     );
 
     expect(screen.getAllByRole('tab')).toHaveLength(1);
 
-    // Clicking 'New tab' when a Home tab already exists should activate the existing Home tab
+    // New tab must produce visible state instead of silently re-activating the
+    // already active pinned Home tab.
     fireEvent.click(screen.getByRole('button', { name: 'New tab' }));
     fireEvent.click(screen.getByRole('button', { name: 'New tab' }));
 
     await waitFor(() => {
       const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
-      expect(labels.filter((label) => label.includes('Home'))).toHaveLength(1);
+      expect(labels.filter((label) => label.includes('Home'))).toHaveLength(3);
     });
+
+    const closeButtons = screen.getAllByRole('button', { name: 'Close' });
+    expect(closeButtons).toHaveLength(2);
+    fireEvent.click(closeButtons[0]!);
+    await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2));
 
     // Navigate to projectRoute using rerender with a fresh object reference
     rerender(<WorkspaceTabsBar route={{ ...projectRoute }} projects={[project]} />);
 
     await waitFor(() => {
       const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
-      expect(labels).toHaveLength(2);
+      expect(labels).toHaveLength(3);
       expect(labels.some((label) => label.includes('Home'))).toBe(true);
       expect(labels.some((label) => label.includes('Project Alpha'))).toBe(true);
     });
@@ -155,9 +161,8 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     await waitFor(() => {
       const tabs = screen.getAllByRole('tab');
       const labels = tabs.map((tab) => tab.textContent ?? '');
-      // Expect that we still have 2 tabs (Home and Project Alpha)
-      expect(tabs).toHaveLength(2);
-      expect(labels.filter((label) => label.includes('Home'))).toHaveLength(1);
+      expect(tabs).toHaveLength(3);
+      expect(labels.filter((label) => label.includes('Home'))).toHaveLength(2);
       expect(labels.filter((label) => label.includes('Project Alpha'))).toHaveLength(1);
     });
   });
@@ -347,7 +352,7 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     await waitFor(() => {
       const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
       expect(labels).toHaveLength(2);
-      expect(labels.some((label) => label.includes('Home'))).toBe(true);
+      expect(labels.filter((label) => label.includes('Home'))).toHaveLength(1);
       expect(labels.some((label) => label.includes('Project Alpha'))).toBe(true);
     });
   });
@@ -494,8 +499,8 @@ describe('WorkspaceTabsBar navigation semantics', () => {
     expect(allowedDefault).toBe(false);
     await waitFor(() => {
       const labels = screen.getAllByRole('tab').map((tab) => tab.textContent ?? '');
-      expect(labels).toHaveLength(2);
-      expect(labels.some((label) => label.includes('Home'))).toBe(true);
+      expect(labels).toHaveLength(3);
+      expect(labels.filter((label) => label.includes('Home'))).toHaveLength(2);
       expect(labels.some((label) => label.includes('Project Alpha'))).toBe(true);
     });
     expect(navigate).toHaveBeenCalledWith(homeRoute);

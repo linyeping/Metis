@@ -77,7 +77,9 @@ test('desktop graphics and window activation keep the P0 fast path wired', () =>
   assert.match(main, /mainWindow\.moveTop\(\)/);
   assert.match(main, /const APP_USER_MODEL_ID = 'com\.metis\.app'/);
   assert.ok(main.indexOf('app.setAppUserModelId(APP_USER_MODEL_ID)') < main.indexOf('app.whenReady()'));
-  assert.match(main, /icon: nativeImage\.createFromPath\(iconPath\('logo\.png'\)\)/);
+  assert.match(main, /function windowIconPath\(\)/);
+  assert.match(main, /process\.platform === 'win32' \? 'logo\.ico' : 'logo\.png'/);
+  assert.match(main, /icon: windowIconPath\(\)/);
   assert.doesNotMatch(read('scripts/desktop-perf-runner.mjs'), /--disable-gpu|--no-sandbox|swiftshader|VizDisplayCompositor/);
   assert.doesNotMatch(read('scripts/desktop-smoke-runner.mjs'), /--disable-gpu|--no-sandbox|swiftshader|VizDisplayCompositor/);
   assert.equal((thread.match(/<iframe/g) || []).length, 1);
@@ -455,6 +457,15 @@ test('right rail web preview supports multiple closeable tabs', () => {
   assert.match(css, /\.web-tab-strip/);
   assert.match(css, /\.web-preview-tab/);
   assert.match(css, /\.web-tab-close/);
+});
+
+test('Design titlebar keeps only the Metis return action and window controls', () => {
+  const titlebar = read('src/components/shell/Titlebar.tsx');
+
+  assert.match(titlebar, /const designActive = productSurface === 'design'/);
+  assert.match(titlebar, /className="titlebar-design-back"/);
+  assert.match(titlebar, /setProductSurface\('assistant'\)/);
+  assert.match(titlebar, /appMode === 'chat' && !designActive/);
 });
 
 test('right rail browser workbench keeps navigation and zoom wired', () => {

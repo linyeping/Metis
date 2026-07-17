@@ -10,6 +10,7 @@ type WorkspaceChromeTab =
       id: string;
       kind: 'entry';
       view: EntryHomeView;
+      closable?: boolean;
       createdAt: number;
       lastActiveAt: number;
     }
@@ -88,11 +89,16 @@ function nowId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createEntryTab(view: EntryHomeView, timestamp = Date.now()): WorkspaceChromeTab {
+function createEntryTab(
+  view: EntryHomeView,
+  timestamp = Date.now(),
+  closable = false,
+): WorkspaceChromeTab {
   return {
     id: `entry:${view}:${nowId()}`,
     kind: 'entry',
     view,
+    ...(closable ? { closable: true } : {}),
     createdAt: timestamp,
     lastActiveAt: timestamp,
   };
@@ -157,7 +163,14 @@ function reviveTab(value: unknown): WorkspaceChromeTab | null {
       || view === 'design-systems'
       || view === 'integrations'
     ) {
-      return { id, kind: 'entry', view, createdAt, lastActiveAt };
+      return {
+        id,
+        kind: 'entry',
+        view,
+        ...(record.closable === true ? { closable: true } : {}),
+        createdAt,
+        lastActiveAt,
+      };
     }
   }
   if (record.kind === 'project' && typeof record.projectId === 'string') {
@@ -194,35 +207,30 @@ function uniqueIdForTab(tab: WorkspaceChromeTab): string {
 function normalizeTabsState(state: WorkspaceTabsState): WorkspaceTabsState {
   let sourceTabs = state.tabs.length > 0 ? state.tabs : [createEntryTab('home')];
 
-  // Deduplicate entry tabs (singleton constraint): all sidebar sections
-  // (home / projects / tasks / design-systems / plugins / integrations) share
-  // ONE entry tab that switches its view in place. Keep the canonical one:
-  // 1. Is one of them currently active?
-  // 2. Otherwise, pick the one with highest lastActiveAt.
-  // 3. Otherwise, pick the first one.
-  const entryTabs = sourceTabs.filter((tab) => tab.kind === 'entry');
-  if (entryTabs.length > 1) {
-    let canonicalEntry = entryTabs.find((tab) => tab.id === state.activeTabId);
-    if (!canonicalEntry) {
-      canonicalEntry = entryTabs.reduce((newest, currentTab) =>
-        currentTab.lastActiveAt > newest.lastActiveAt ? currentTab : newest,
-        entryTabs[0]!
+  // Older builds could persist duplicate permanent entry tabs. Collapse only
+  // those legacy/pinned entries; explicitly closable entries are real tabs
+  // created by the New tab action and must survive restore.
+  const permanentEntries = sourceTabs.filter(
+    (tab) => tab.kind === 'entry' && tab.closable !== true,
+  );
+  if (permanentEntries.length > 1) {
+    let canonical = permanentEntries.find((tab) => tab.id === state.activeTabId);
+    if (!canonical) {
+      canonical = permanentEntries.reduce((newest, current) =>
+        current.lastActiveAt > newest.lastActiveAt ? current : newest,
+        permanentEntries[0]!,
       );
     }
-    // Drop every other entry tab; the survivor keeps its own view so the
-    // section the user was on is preserved.
     sourceTabs = sourceTabs.filter(
-      (tab) => tab.kind !== 'entry' || tab.id === canonicalEntry!.id,
+      (tab) => tab.kind !== 'entry' || tab.closable === true || tab.id === canonical!.id,
     );
   }
 
-  // Pin the single entry tab to the leftmost position (Figma-style). It is the
-  // one permanent, non-closable tab regardless of which section it currently
-  // shows; project / marketplace tabs always sit to its right in insertion
-  // order. If no entry tab survives normalization — e.g. a user who reopens on
-  // a saved `[project, ...]` workspace — create one so the invariant "an entry
-  // tab always exists and is leftmost" holds for migrated state too.
-  const entryIndex = sourceTabs.findIndex((tab) => tab.kind === 'entry');
+  // Keep one permanent entry tab pinned at the left. Additional entry tabs are
+  // browser-style tabs: they may be activated, moved, restored, and closed.
+  const entryIndex = sourceTabs.findIndex(
+    (tab) => tab.kind === 'entry' && tab.closable !== true,
+  );
   if (entryIndex < 0) {
     sourceTabs = [createEntryTab('home'), ...sourceTabs];
   } else if (entryIndex > 0) {
@@ -314,12 +322,12 @@ function syncStateToRoute(state: WorkspaceTabsState, route: Route): WorkspaceTab
   const current = normalizeTabsState(state);
   const currentActive = current.tabs.find((tab) => tab.id === current.activeTabId) ?? null;
 
-  // 1. If we are navigating to any entry view (home / projects / tasks /
-  // design-systems / plugins / integrations / onboarding), reuse the single
-  // entry tab and switch its view IN PLACE — all sidebar sections collapse
-  // into the one leftmost tab. Only create one if none exists.
+  // Entry navigation updates the active entry tab. If a project is active,
+  // reuse the pinned entry surface instead of replacing the project tab.
   if (route.kind === 'home') {
-    const existingEntryTab = current.tabs.find((tab) => tab.kind === 'entry');
+    const existingEntryTab = currentActive?.kind === 'entry'
+      ? currentActive
+      : current.tabs.find((tab) => tab.kind === 'entry');
     if (existingEntryTab) {
       return normalizeTabsState({
         ...current,
@@ -764,21 +772,12 @@ export function WorkspaceTabsBar({ route, projects, onboardingCompleted = false 
     // Cmd/Ctrl+T keyboard shortcut, since both funnel through here.
     if (onboardingActive) return;
     const normalized = normalizeTabsState(state);
-    const existingEntryTab = normalized.tabs.find((tab) => tab.kind === 'entry');
-    if (existingEntryTab) {
-      setState({
-        ...normalized,
-        activeTabId: existingEntryTab.id,
-      });
-      navigate({ kind: 'home', view: 'home' });
-    } else {
-      const tab = createEntryTab('home');
-      setState({
-        tabs: [...normalized.tabs, tab],
-        activeTabId: tab.id,
-      });
-      navigate({ kind: 'home', view: 'home' });
-    }
+    const tab = createEntryTab('home', Date.now(), true);
+    setState({
+      tabs: [...normalized.tabs, tab],
+      activeTabId: tab.id,
+    });
+    navigate({ kind: 'home', view: 'home' });
     setTabsMenuOpen(false);
   }
 
@@ -787,10 +786,11 @@ export function WorkspaceTabsBar({ route, projects, onboardingCompleted = false 
     const normalized = normalizeTabsState(state);
     const closingIndex = normalized.tabs.findIndex((tab) => tab.id === tabId);
     if (closingIndex < 0) return;
-    // The single entry tab is permanent — never close it, whatever section
-    // (home / projects / design-systems / …) it currently shows.
     const closingTab = normalized.tabs[closingIndex]!;
-    if (closingTab.kind === 'entry') return;
+    const pinnedEntryTab = normalized.tabs.find(
+      (tab) => tab.kind === 'entry' && tab.closable !== true,
+    );
+    if (closingTab.id === pinnedEntryTab?.id) return;
     let nextRoute: Route | null = null;
     const nextTabs = normalized.tabs.filter((tab) => tab.id !== tabId);
     let nextState: WorkspaceTabsState;
@@ -948,12 +948,12 @@ export function WorkspaceTabsBar({ route, projects, onboardingCompleted = false 
             chrome horizontally. The search-tabs popover still acts as
             a keyboard surface for finding a tab that's scrolled out of
             view. */}
-        {state.tabs.map((tab) => {
+        {state.tabs.map((tab, tabIndex) => {
           const display = displayTabById.get(tab.id) ?? displayTabFor(tab, projectById, t);
           const active = tab.id === state.activeTabId;
           // The single entry tab is permanent and pinned leftmost: it cannot be
           // closed or dragged out of the first slot, whatever section it shows.
-          const isPinned = tab.kind === 'entry';
+          const isPinned = tab.kind === 'entry' && tab.closable !== true && tabIndex === 0;
           const dragOverClass =
             dragOverTarget?.tabId === tab.id && draggingTabId !== tab.id
               ? ` is-drag-over-${dragOverTarget.edge}`

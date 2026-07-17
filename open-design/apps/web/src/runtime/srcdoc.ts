@@ -2615,6 +2615,26 @@ function injectDeckBridge(
     add(document.scrollingElement);
     add(document.documentElement);
     add(document.body);
+    // Generated decks commonly keep the page itself fixed and make a nested
+    // .deck / .slides element the horizontal scroller. Looking only at the
+    // root nodes misclassifies that container as a transform track: host
+    // navigation then writes translateX(...) on top of the artifact's own
+    // scroll position and moves the entire deck off-canvas while thumbnails
+    // continue to render normally. Walk slide ancestors and include only real
+    // scroll containers; overflow:hidden transform tracks stay excluded.
+    var list = slides();
+    for (var s=0; s<list.length; s++) {
+      var node = list[s] && list[s].parentElement;
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (
+          scrollOverflow(node) > 1 &&
+          isScrollableOverflowMode(overflowMode(node))
+        ) {
+          add(node);
+        }
+        node = node.parentElement;
+      }
+    }
     return targets;
   }
   function maxScrollLeft(){

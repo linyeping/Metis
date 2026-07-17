@@ -85,6 +85,10 @@ function buildManagedDesignConfig(current = {}, now = Date.now()) {
   }
 }
 
+function shouldSurfaceDesignRuntimeExit(currentProcess, exitedProcess, options = {}) {
+  return currentProcess === exitedProcess && !options.stopping && !options.quitting
+}
+
 function resolveDesignSourceRoot(options = {}) {
   const candidates = [
     options.explicitRoot,
@@ -210,5 +214,6 @@ module.exports = {
   parseLoopbackOrigin,
   readDesignSourceVersion,
   resolveBundledDesignRuntime,
-  resolveDesignSourceRoot
+  resolveDesignSourceRoot,
+  shouldSurfaceDesignRuntimeExit
 }

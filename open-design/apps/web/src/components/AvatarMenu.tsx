@@ -61,7 +61,14 @@ function displayAgentName(agent: Pick<AgentInfo, 'id' | 'name'>): string {
  * Compact runtime control. Click opens a dropdown with current execution mode
  * and the agent picker (when in daemon mode).
  */
-export function AvatarMenu({
+export function AvatarMenu(props: Props) {
+  // The embedded Metis Design runtime has no separate Open Design account,
+  // CLI selector, BYOK key, plan, balance, or upgrade surface.
+  if (props.config.agentId === 'metis') return null;
+  return <UnmanagedAvatarMenu {...props} />;
+}
+
+function UnmanagedAvatarMenu({
   config,
   agents,
   daemonLive,

@@ -958,7 +958,7 @@ export function EntryShell({
               <Icon name="panel-left" size={20} />
             </button>
             <div className="entry-main__topbar-chips entry-main__topbar-chips--icon-only">
-              <GithubLink />
+              {config.agentId === 'metis' ? null : <GithubLink />}
               {view === 'home' ? null : executionSwitcher}
             </div>
             <UpdaterPopup

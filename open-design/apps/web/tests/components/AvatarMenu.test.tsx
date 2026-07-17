@@ -116,6 +116,24 @@ describe('AvatarMenu', () => {
     vi.clearAllMocks();
   });
 
+  it('does not expose Open Design account or runtime controls in Metis managed mode', () => {
+    const { container } = render(
+      <AvatarMenu
+        config={{ ...baseConfig, agentId: 'metis' }}
+        agents={[codexAgent, claudeAgent]}
+        daemonLive={true}
+        onModeChange={vi.fn()}
+        onAgentChange={vi.fn()}
+        onAgentModelChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onRefreshAgents={vi.fn()}
+      />,
+    );
+
+    expect(container.childElementCount).toBe(0);
+    expect(screen.queryByText(/BYOK|Local CLI|balance|upgrade|sign in/i)).toBeNull();
+  });
+
   it('opens execution settings when Local CLI is selected while the daemon is offline', () => {
     const onOpenSettings = vi.fn();
     renderMenu({

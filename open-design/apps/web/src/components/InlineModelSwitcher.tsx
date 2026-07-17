@@ -154,7 +154,15 @@ function displayAgentChipName(agent: Pick<AgentInfo, 'id' | 'name'>): string {
   return agent.id === 'amr' ? 'Metis Design' : displayAgentName(agent);
 }
 
-export function InlineModelSwitcher({
+export function InlineModelSwitcher(props: Props) {
+  // Metis Desktop owns the runtime and model credentials for its embedded
+  // Design surface. Exposing Open Design's CLI/BYOK/account switcher here is
+  // both misleading and unsafe: changing it can bypass the managed runtime.
+  if (props.config.agentId === 'metis') return null;
+  return <UnmanagedInlineModelSwitcher {...props} />;
+}
+
+function UnmanagedInlineModelSwitcher({
   config,
   agents,
   providerModelsCache,

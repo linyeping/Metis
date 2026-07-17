@@ -34,7 +34,8 @@ const {
   parseLoopbackOrigin,
   readDesignSourceVersion,
   resolveBundledDesignRuntime,
-  resolveDesignSourceRoot
+  resolveDesignSourceRoot,
+  shouldSurfaceDesignRuntimeExit
 } = require('./design-runtime.cjs')
 const { startDesignRendererService } = require('./design-renderer-service.cjs')
 const {
@@ -418,7 +419,13 @@ function appendDesignRuntimeLog(source, chunk) {
     .filter(Boolean)
     .map(line => `[${source}] ${line}`)
   if (!next.length) return
+  for (const line of next) log(line)
   emitDesignRuntimeState({ logs: [...designRuntimeState.logs, ...next] })
+}
+
+function terminateDesignRuntimeChild(child) {
+  if (designRuntimeProcess === child) designRuntimeProcess = null
+  try { child?.kill() } catch {}
 }
 
 async function cleanupStaleDesignNamespace(sourceRoot, timeoutMs = 15000) {
@@ -607,21 +614,28 @@ async function startDesignRuntime(locale) {
       designRuntimeProcess = child
       child.stdout?.on('data', chunk => appendDesignRuntimeLog('design', chunk))
       child.stderr?.on('data', chunk => appendDesignRuntimeLog('design:err', chunk))
-      child.on('error', error => emitDesignRuntimeState({ state: 'error', error: error?.message || String(error) }))
+      child.on('error', error => {
+        if (designRuntimeProcess !== child || designRuntimeStopping || app.isQuitting) return
+        emitDesignRuntimeState({ state: 'error', error: error?.message || String(error) })
+      })
       child.on('exit', (code, signal) => {
+        const shouldSurface = shouldSurfaceDesignRuntimeExit(designRuntimeProcess, child, {
+          stopping: designRuntimeStopping,
+          quitting: app.isQuitting
+        })
         if (designRuntimeProcess === child) designRuntimeProcess = null
-        if (designRuntimeStopping || app.isQuitting) return
+        if (!shouldSurface) return
         emitDesignRuntimeState({ state: 'error', error: `Design runtime 已退出 (${code ?? signal ?? 'unknown'})。` })
         hideDesignView()
       })
       const ready = await waitForDesignRuntime(runtimeUrl, child)
       if (!ready) {
-        try { child.kill() } catch {}
+        terminateDesignRuntimeChild(child)
         return emitDesignRuntimeState({ state: 'error', error: designRuntimeState.error || 'Design runtime 启动超时。' })
       }
       const managed = await configureManagedDesignRuntime(runtimeUrl)
       if (!managed.ok) {
-        try { child.kill() } catch {}
+        terminateDesignRuntimeChild(child)
         return emitDesignRuntimeState({ state: 'error', error: `Design runtime 受管配置失败：${managed.error}` })
       }
       return emitDesignRuntimeState({ state: 'ready', url: runtimeUrl, error: '' })
@@ -713,11 +727,16 @@ async function startDesignRuntime(locale) {
     child.stdout?.on('data', chunk => appendDesignRuntimeLog('design', chunk))
     child.stderr?.on('data', chunk => appendDesignRuntimeLog('design:err', chunk))
     child.on('error', error => {
+      if (designRuntimeProcess !== child || designRuntimeStopping || app.isQuitting) return
       emitDesignRuntimeState({ state: 'error', error: error?.message || String(error) })
     })
     child.on('exit', (code, signal) => {
+      const shouldSurface = shouldSurfaceDesignRuntimeExit(designRuntimeProcess, child, {
+        stopping: designRuntimeStopping,
+        quitting: app.isQuitting
+      })
       if (designRuntimeProcess === child) designRuntimeProcess = null
-      if (designRuntimeStopping || app.isQuitting) return
+      if (!shouldSurface) return
       emitDesignRuntimeState({
         state: 'error',
         error: `Design runtime 已退出 (${code ?? signal ?? 'unknown'})。`
@@ -727,7 +746,7 @@ async function startDesignRuntime(locale) {
 
     const ready = await waitForDesignRuntime(runtimeUrl, child)
     if (!ready) {
-      try { child.kill() } catch {}
+      terminateDesignRuntimeChild(child)
       return emitDesignRuntimeState({
         state: 'error',
         error: designRuntimeState.error || 'Design runtime 启动超时。'
@@ -735,7 +754,7 @@ async function startDesignRuntime(locale) {
     }
     const managed = await configureManagedDesignRuntime(runtimeUrl)
     if (!managed.ok) {
-      try { child.kill() } catch {}
+      terminateDesignRuntimeChild(child)
       return emitDesignRuntimeState({
         state: 'error',
         error: `Design runtime 受管配置失败：${managed.error}`
@@ -3726,6 +3745,10 @@ function iconPath(filename = 'logo.png') {
   return path.join(process.resourcesPath, 'icons', filename)
 }
 
+function windowIconPath() {
+  return iconPath(process.platform === 'win32' ? 'logo.ico' : 'logo.png')
+}
+
 function closePreferencesPath() {
   return windowPreferencesPath(app.getPath('userData'))
 }
@@ -3813,7 +3836,11 @@ async function createWindow() {
     title: 'Metis',
     frame: false,
     show: false,
-    icon: nativeImage.createFromPath(iconPath('logo.png')),
+    // Windows taskbar buttons resolve the HWND icon more reliably from a
+    // multi-resolution .ico than from a large PNG-backed NativeImage. The
+    // packaged executable already carries the same icon; setting the window
+    // explicitly keeps the live taskbar button in sync as well.
+    icon: windowIconPath(),
     backgroundColor: '#0A0A0E',
     webPreferences: {
       ...HARDENED_WEB_PREFERENCES,

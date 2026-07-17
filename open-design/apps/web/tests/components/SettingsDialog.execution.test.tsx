@@ -381,6 +381,23 @@ function selectGatewayPreset(label: string) {
   fireEvent.click(within(popover).getByRole('option', { name: label }));
 }
 
+describe('SettingsDialog Metis managed mode', () => {
+  afterEach(() => cleanup());
+
+  it('redirects runtime settings and hides CLI, BYOK, and media key sections', () => {
+    renderSettingsDialog(
+      { agentId: 'metis', mode: 'daemon' },
+      { initialSection: 'execution' },
+    );
+
+    expect(screen.getByRole('heading', { name: 'Instructions / Rules' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Execution mode/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Media providers/i })).toBeNull();
+    expect(screen.queryByRole('tablist', { name: /Execution mode/i })).toBeNull();
+    expect(screen.queryByText(/BYOK|Local CLI|API keys for image/i)).toBeNull();
+  });
+});
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;

@@ -215,7 +215,7 @@ export function Titlebar() {
             })}
           </div>
         </div>}
-        {appMode === 'chat' && (
+        {appMode === 'chat' && !designActive && (
           <>
             <button
               type="button"

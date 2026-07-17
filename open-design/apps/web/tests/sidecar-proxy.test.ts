@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +16,12 @@ import {
   resolveStandaloneServerEntry,
   startWebSidecar,
 } from '../sidecar/server';
+
+function testIpcPath(runtimeRoot: string): string {
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\open-design-web-test-${process.pid}-${randomUUID()}`
+    : join(runtimeRoot, 'web.sock');
+}
 
 describe('resolveDaemonProxyTarget', () => {
   it('proxies allowlisted relative paths to the daemon origin', () => {
@@ -173,7 +180,7 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)));
       const handle = await startWebSidecar({
         app: 'web',
         base: runtimeRoot,
-        ipc: join(runtimeRoot, 'web.sock'),
+        ipc: testIpcPath(runtimeRoot),
         mode: 'runtime',
         namespace: 'slow-http',
         source: 'tools-pack',
@@ -245,7 +252,7 @@ process.on('SIGTERM', () => dummyServer.close(() => process.exit(0)));
         handle = await startWebSidecar({
           app: 'web',
           base: runtimeRoot,
-          ipc: join(runtimeRoot, 'web.sock'),
+          ipc: testIpcPath(runtimeRoot),
           mode: 'runtime',
           namespace: 'hijacked-port',
           source: 'tools-pack',

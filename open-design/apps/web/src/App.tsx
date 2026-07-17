@@ -2227,10 +2227,13 @@ function AppInner() {
       return;
     }
     setSettingsWelcome(false);
-    setSettingsInitialSection(section);
+    const managedSection = config.agentId === 'metis' && (section === 'execution' || section === 'media')
+      ? 'instructions'
+      : section;
+    setSettingsInitialSection(managedSection);
     setSettingsHighlight(opts?.highlight ?? null);
     setSettingsOpen(true);
-  }, []);
+  }, [config.agentId]);
 
   // Entry point from the failed-run AMR nudge: open Settings on the execution
   // section and flag the AMR agent card for a one-shot scroll-into-view +
@@ -2552,7 +2555,7 @@ function AppInner() {
         onOpenSettings={openSettings}
         onCompleteOnboarding={handleCompleteOnboarding}
         artifactUpgradeSlot={
-          amrArtifactUpgradeHomeOffer ? (
+          config.agentId !== 'metis' && amrArtifactUpgradeHomeOffer ? (
             <AmrArtifactUpgradeHomeCard
               key={amrArtifactUpgradeHomeOffer.sessionKey}
               profile={amrLoginStatus?.profile ?? null}
@@ -2610,7 +2613,7 @@ function AppInner() {
         />
       )}
       <TooltipLayer />
-      <AmrArtifactUpgradeGate
+      {config.agentId === 'metis' ? null : <AmrArtifactUpgradeGate
         homeVisible={route.kind === 'home' && route.view === 'home'}
         activeProjectId={route.kind === 'project' ? route.projectId : null}
         activeConversationId={
@@ -2630,7 +2633,7 @@ function AppInner() {
             ? undefined
             : setAmrArtifactUpgradeHomeOffer
         }
-      />
+      />}
       <AnimatePresence>
       {settingsOpen ? (
         <SettingsDialog

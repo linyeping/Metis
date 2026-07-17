@@ -144,6 +144,11 @@ describe("Windows pack artifact boundaries", () => {
     );
   });
 
+  it("packages from the resolved Electron distribution instead of a partial download cache", async () => {
+    const source = await readFile(new URL("../src/win/builder.ts", import.meta.url), "utf8");
+    expect(source).toContain("electronDist: config.electronDistPath");
+  });
+
   it("keeps NSIS payload archives on the fast LZMA2 path", async () => {
     const source = await readFile(new URL("../src/win/custom-installer.ts", import.meta.url), "utf8");
     expect(source).toContain('"nsis:payload-base-7z"');

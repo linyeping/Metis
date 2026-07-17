@@ -16,7 +16,8 @@ const {
   normalizeDesignProject,
   normalizeDesignSystem,
   parseLoopbackOrigin,
-  resolveDesignSourceRoot
+  resolveDesignSourceRoot,
+  shouldSurfaceDesignRuntimeExit
 } = require('./design-runtime.cjs')
 
 test('pnpm commands use cmd.exe on Windows so Electron can launch command shims', () => {
@@ -45,6 +46,15 @@ test('managed Design runtime skips upstream onboarding and disables upstream tel
     privacyDecisionAt: 1234
   })
   assert.equal(buildManagedDesignConfig({ privacyDecisionAt: 99 }, 1234).privacyDecisionAt, 99)
+})
+
+test('a stale Design child cannot replace a healthy retry with an exit error', () => {
+  const previousChild = {}
+  const currentChild = {}
+  assert.equal(shouldSurfaceDesignRuntimeExit(currentChild, previousChild), false)
+  assert.equal(shouldSurfaceDesignRuntimeExit(currentChild, currentChild), true)
+  assert.equal(shouldSurfaceDesignRuntimeExit(currentChild, currentChild, { stopping: true }), false)
+  assert.equal(shouldSurfaceDesignRuntimeExit(currentChild, currentChild, { quitting: true }), false)
 })
 
 test('Design resolves repository-local source and packaged modules have no second executable', () => {

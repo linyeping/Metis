@@ -1355,6 +1355,10 @@ export function SettingsDialog({
 }: Props) {
   const { t, locale, setLocale } = useI18n();
   const analytics = useAnalytics();
+  const managedByMetis = initial.agentId === 'metis';
+  const visibleInitialSection = managedByMetis && (initialSection === 'execution' || initialSection === 'media')
+    ? 'instructions'
+    : initialSection;
   // Backfill the fixed-origin base URL on mount too, so a config persisted with
   // an empty baseUrl (e.g. selected AIHubMix before this resolution existed)
   // isn't stuck blocking the live model fetch until the user re-selects the tab.
@@ -1457,7 +1461,7 @@ export function SettingsDialog({
       ? { [initial.apiProtocol ?? 'anthropic']: byokProviderKeyForConfig(initial) }
       : {},
   );
-  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+  const [activeSection, setActiveSection] = useState<SettingsSection>(visibleInitialSection);
   const [settingsSidebarCollapsed, setSettingsSidebarCollapsed] = useState(false);
   const [settingsFullscreen, setSettingsFullscreen] = useState(false);
   // Scroll the right-hand content pane back to the top whenever the user
@@ -1779,8 +1783,12 @@ export function SettingsDialog({
   // routes through this when the MCP tab is active so the user can press the
   // single Save button at the bottom instead of hunting for the inner one.
   useEffect(() => {
-    setActiveSection(initialSection);
-  }, [initialSection]);
+    setActiveSection(
+      managedByMetis && (initialSection === 'execution' || initialSection === 'media')
+        ? 'instructions'
+        : initialSection,
+    );
+  }, [initialSection, managedByMetis]);
 
   // settings_view — fires whenever the active section changes (and once on
   // mount). Keying the fire on a section+section-string lets us dedupe
@@ -3998,7 +4006,7 @@ export function SettingsDialog({
             aria-label="Settings sections"
             aria-hidden={settingsSidebarCollapsed ? true : undefined}
           >
-            <button
+            {managedByMetis ? null : <button
               type="button"
               className={`settings-nav-item${activeSection === 'execution' ? ' active' : ''}`}
               onClick={() => setActiveSection('execution')}
@@ -4008,7 +4016,7 @@ export function SettingsDialog({
                 <strong>{t('settings.envConfigure')}</strong>
                 <small>{`${t('settings.localCli')} / ${t('settings.modeApiMeta')}`}</small>
               </span>
-            </button>
+            </button>}
             <button
               type="button"
               className={`settings-nav-item${activeSection === 'instructions' ? ' active' : ''}`}
@@ -4031,7 +4039,7 @@ export function SettingsDialog({
                 <small>{t('settings.memoryHint')}</small>
               </span>
             </button>
-            <button
+            {managedByMetis ? null : <button
               type="button"
               className={`settings-nav-item${activeSection === 'media' ? ' active' : ''}`}
               onClick={() => setActiveSection('media')}
@@ -4041,7 +4049,7 @@ export function SettingsDialog({
                 <strong>{t('settings.mediaProviders')}</strong>
                 <small>Image / video / audio</small>
               </span>
-            </button>
+            </button>}
             <button
               type="button"
               className={`settings-nav-item${activeSection === 'mcpClient' ? ' active' : ''}`}
@@ -4176,7 +4184,7 @@ export function SettingsDialog({
             </button>
           </aside>
           <div className="settings-content" ref={settingsContentRef}>
-          {activeSection === 'execution' ? (
+          {!managedByMetis && activeSection === 'execution' ? (
             <>
               <div
                 className="seg-control"
@@ -5432,7 +5440,7 @@ export function SettingsDialog({
             </>
           ) : null}
 
-          {activeSection === 'media' ? (
+          {!managedByMetis && activeSection === 'media' ? (
             <MediaProvidersSection
               cfg={cfg}
               setCfg={setCfg}

@@ -20,6 +20,80 @@ function lastSlideState(parentPostMessage: ReturnType<typeof vi.fn>) {
 }
 
 describe('deck bridge - scroll container fallback', () => {
+  it('navigates a nested horizontal deck without translating the deck off-canvas', async () => {
+    const bodyHtml = `
+      <style>
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        .deck { width: 100%; height: 100%; display: flex; overflow-x: auto; }
+        .slide { flex: 0 0 100%; min-width: 100%; }
+      </style>
+      <main class="deck" id="deck">
+        <section class="slide">One</section>
+        <section class="slide">Two</section>
+        <section class="slide">Three</section>
+      </main>
+    `;
+    const srcdoc = buildSrcdoc(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
+      deck: true,
+    });
+    const script = extractDeckBridgeScript(srcdoc);
+    const dom = new JSDOM(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
+      runScripts: 'outside-only',
+      pretendToBeVisual: true,
+    });
+    const win = dom.window;
+    const parentPostMessage = vi.fn();
+    Object.defineProperty(win, 'parent', {
+      configurable: true,
+      value: { postMessage: parentPostMessage },
+    });
+    Object.defineProperty(win, 'innerWidth', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(win.document, 'scrollingElement', {
+      configurable: true,
+      value: win.document.documentElement,
+    });
+
+    const deck = win.document.getElementById('deck') as HTMLElement;
+    Object.defineProperty(deck, 'scrollWidth', {
+      configurable: true,
+      value: 3000,
+    });
+    Object.defineProperty(deck, 'clientWidth', {
+      configurable: true,
+      value: 1000,
+    });
+    let deckScrollLeft = 0;
+    Object.defineProperty(deck, 'scrollLeft', {
+      configurable: true,
+      get: () => deckScrollLeft,
+      set: (value: number) => {
+        deckScrollLeft = value;
+      },
+    });
+    Object.defineProperty(deck, 'scrollTo', {
+      configurable: true,
+      value: ({ left }: { left?: number }) => {
+        if (typeof left === 'number') deckScrollLeft = left;
+      },
+    });
+
+    const evaluate = new win.Function(script);
+    evaluate.call(win);
+    win.dispatchEvent(new win.Event('load'));
+
+    win.dispatchEvent(new win.MessageEvent('message', {
+      data: { type: 'od:slide', action: 'go', index: 2 },
+    }));
+    await new Promise<void>((resolve) => win.setTimeout(resolve, 420));
+
+    expect(deck.scrollLeft).toBe(2000);
+    expect(deck.style.transform).toBe('');
+    expect(lastSlideState(parentPostMessage)).toMatchObject({ active: 2, count: 3 });
+  });
+
   it('treats a wide default root scroller as a scroll deck even without explicit overflow-x styling', async () => {
     const bodyHtml = `
       <section class="slide">One</section>
