@@ -4,7 +4,7 @@
 
 # Metis
 
-**把模型接入代码、终端、浏览器与 Windows 桌面，让任务从一句话走到可验证的结果。**
+**把模型接入项目、代码、终端、浏览器与 Windows 桌面，让任务从一句话走到可验证的结果。**
 
 <p>
   <img alt="Electron 41" src="https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white" />
@@ -26,129 +26,126 @@
 
 <br />
 
-<h2 align="center">一个工作台，四种工作面</h2>
+## 四种工作面
+
+Chat、Cowork、Code 与 Design 针对不同任务组织界面和工具，同时共享模型配置、项目上下文、权限策略、连接器与任务通知。
 
 <p align="center">
-  不同任务进入各自最合适的工作面，但共享同一套模型、项目、工具、权限和通知体系。
+  <img src="backend/assets/work-surfaces-real-26.7.17.png" alt="Metis Chat、Cowork、Code 与 Design 实机界面" width="100%" />
 </p>
 
-<p align="center">
-  <img src="backend/assets/work-surfaces-real-26.7.17.png" alt="Metis Chat、Cowork、Code 与 Design 四种工作面" width="100%" />
-</p>
+| 工作面 | 适合处理 | 核心体验 |
+|---|---|---|
+| **Chat** | 问答、分析、文件理解、轻量执行 | 快速对话、附件上下文、模型切换、工具调用与独立 Side Chat |
+| **Cowork** | 调研、整理、计划驱动的多步骤任务 | 计划、子任务、后台运行、研究记录、工具活动和结果汇总 |
+| **Code** | 仓库修改、调试、测试、构建与交付 | 项目上下文、Worktree、终端、文件、Diff、网页预览和验证证据 |
+| **Design** | 网页、原型、演示文稿、图片与交互内容 | 项目化 Studio、素材、设计系统、实时预览、评论、版本与导出 |
 
-<p align="center">
-  <b>CHAT</b> 快速理解与轻量执行 &nbsp;·&nbsp;
-  <b>COWORK</b> 计划驱动的多步骤交付 &nbsp;·&nbsp;
-  <b>CODE</b> 围绕仓库的工程闭环 &nbsp;·&nbsp;
-  <b>DESIGN</b> 对话驱动的可交付设计
-</p>
+模式之间的会话和草稿相互隔离。切换工作面不会让其它模式的请求、输入或运行状态覆盖当前任务。
 
-<p align="center"><sub>模式之间的会话、工作区和草稿相互隔离；快速切换不会让旧请求覆盖当前记录。</sub></p>
+---
 
-<br />
+## 一条完整的任务链路
 
-<h2 align="center">Metis Design：从一句想法到可交付作品</h2>
+Metis 不把“模型回复”当作任务终点。一个任务可以在同一窗口内完成：
 
-<p align="center">
-  在同一个工作区完成需求描述、素材整理、设计生成、实时预览、迭代评审与多格式交付。
-</p>
-
-<table align="center" width="100%">
-  <tr>
-    <td width="50%" valign="top">
-      <b>项目入口与双栏 Studio</b><br /><br />
-      创建或打开设计项目，在左侧和 Agent 协作，在右侧即时查看成品；项目、会话、页面、素材与设计系统持续保存在本机。
-    </td>
-    <td width="50%" valign="top">
-      <b>真实渲染，不是静态草图</b><br /><br />
-      生成网页、桌面与移动端原型、演示文稿、图片和交互式内容，并在隔离预览中直接检查最终效果。
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <b>完整导出链路</b><br /><br />
-      支持按作品类型导出 HTML、PDF、PPTX、图片、Markdown 与项目包；预览、版本恢复、分享和导出状态集中管理。
-    </td>
-    <td width="50%" valign="top">
-      <b>统一模型与桌面体验</b><br /><br />
-      直接使用 Metis 当前模型配置与 API 凭据，并共享主题、语言、任务通知和桌面宠物状态；完成后可直接返回 Chat、Cowork 或 Code。
-    </td>
-  </tr>
-</table>
-
-<br />
-
-<h2 align="center">不止回答，而是把工作做完</h2>
-
-<p align="center">
-  Metis 把模型推理、项目上下文、工具调用、权限控制与结果验证放进同一条本机工作流。
-</p>
+1. **建立上下文**：选择目录或仓库，添加文件与图片，恢复历史会话，读取项目状态。
+2. **确定执行方式**：直接执行、先给计划、使用 Worktree，或进入 WSL / HCS 隔离环境。
+3. **持续运行**：调用代码、终端、浏览器、桌面、检索、Skills、Connectors 与 MCP 工具。
+4. **检查改动**：在文件卡和多文件 Diff 中逐项审阅，按文件回退不需要的改动。
+5. **验证结果**：运行测试和构建，打开本地网页，检查 Windows 应用，保存截图、日志与视觉证据。
+6. **交付与恢复**：后台任务、checkpoint、上下文压缩和会话恢复保持长任务连续，最终集中呈现产物与证据。
 
 <div align="center">
   <img src="backend/assets/metis-capabilities-26.7.17.png" alt="Metis Code、Browser、Desktop、Design、Skills 与 Isolated VM 能力" width="100%" />
 </div>
 
-<table align="center" width="100%">
-  <tr>
-    <td width="50%" valign="top">
-      <b>从目标到证据</b><br /><br />
-      理解仓库与上下文 → 拆解计划 → 修改文件与运行命令 → 检查网页或 Windows 应用 → 汇总 diff、测试、截图、日志和产物。
-    </td>
-    <td width="50%" valign="top">
-      <b>长任务不中断</b><br /><br />
-      上下文压缩、checkpoint、后台 run、重连与恢复共同维护任务连续性，过程状态和最终产物都可回看。
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <b>本机优先</b><br /><br />
-      文件系统、终端、浏览器和桌面工具在用户设备上运行；无需平台账号，也没有内置遥测。
-    </td>
-    <td width="50%" valign="top">
-      <b>可验证交付</b><br /><br />
-      工具调用、耗时、摘要和结果保持可见；完成状态由测试、diff、截图或日志证明，而不是只给一句“已完成”。
-    </td>
-  </tr>
-</table>
+---
 
-<br />
+## 工程工作台
 
-<h2 align="center">覆盖完整任务生命周期</h2>
+Code 与 Cowork 不只有聊天区。右侧工作台由可组合的工作卡组成，可按任务显示、关闭、调整尺寸并保留布局。
 
-<table align="center" width="100%">
-  <tr>
-    <td width="33%" valign="top">
-      <b>会话与后台任务</b><br /><br />
-      会话恢复、归档、未读标记、运行队列、后台任务、checkpoint 与完成通知，让长任务离开当前页面后仍可继续。
-    </td>
-    <td width="34%" valign="top">
-      <b>多标签工作区</b><br /><br />
-      在同一任务中并排使用文件、Diff、终端、网页预览、计划和活动记录；标签可搜索、切换、关闭和恢复。
-    </td>
-    <td width="33%" valign="top">
-      <b>项目级上下文</b><br /><br />
-      目录、仓库、分支、会话、附件、设计系统和生成产物共同组成可回看的项目上下文。
-    </td>
-  </tr>
-  <tr>
-    <td width="33%" valign="top">
-      <b>Skills / Connectors / MCP</b><br /><br />
-      复用技能流程，连接 GitHub、Slack、Notion、Google Workspace、数据库与本机文件，并扩展外部 MCP 工具。
-    </td>
-    <td width="34%" valign="top">
-      <b>安全执行环境</b><br /><br />
-      权限门、Worktree、WSL 与 HCS VM 按任务选择执行边界；敏感操作保持可见、可确认、可审计。
-    </td>
-    <td width="33%" valign="top">
-      <b>从检查到交付</b><br /><br />
-      运行测试、构建和诊断，检查浏览器与 Windows 应用，最后汇总改动、日志、截图、链接和可下载产物。
-    </td>
-  </tr>
-</table>
+| 工作卡 | 能力 |
+|---|---|
+| **Files** | 浏览工作区文件，预览文本、图片、PDF 与常见文档 |
+| **Diff** | 汇总多文件改动，逐文件切换，显示增删行并执行单文件回退 |
+| **Terminal** | 交互式 PTY，支持多终端、重命名、重启、清屏、尺寸调整与 shell 配置 |
+| **Web** | 多标签网页预览、前进后退、刷新、缩放、弹窗接管与本地 HTML 预览 |
+| **Activity** | 查看 run、子任务、工具调用、状态、耗时、摘要和错误 |
+| **Plan** | 展示任务步骤、当前进度和阶段性结果 |
+| **Tool** | 检查单次工具调用的输入、输出、错误与产物 |
+| **Research** | 汇总检索来源、研究过程和结论 |
+| **Session** | 查看当前会话、工作区、分支、执行边界和恢复信息 |
 
-<br />
+### 预览与验证
 
-<h2 align="center">连接你已经使用的服务</h2>
+- 写入本地 HTML 或检测到开发服务器后，可自动打开网页预览。
+- Preview Browser 支持观察、点击、输入、滚动和断言，用真实页面结果验证任务。
+- 预览诊断会记录当前 URL、加载状态和近期活动；视觉检查可保存截图证据。
+- 文件改动会自动生成 Diff，并把写入、编辑、删除映射到对应文件。
+
+### 并发任务与会话
+
+- 不同会话可以独立运行，离开当前页面后任务继续在后台执行。
+- 活动中心统一显示运行中、等待、成功、失败和需要关注的任务。
+- 会话支持恢复、重命名、标记未读、归档和删除。
+- 忙碌会话有明确状态保护，避免重复提交覆盖正在执行的 run。
+- 独立 Side Chat 拥有自己的会话、历史和上下文，不干扰主任务。
+- 上下文额度、自动压缩、手动 compact 与 handoff 让长对话保持可继续性。
+
+---
+
+## Metis Design
+
+Metis Design 是面向真实交付的项目工作面。在同一个 Studio 中完成需求描述、素材整理、生成、预览、评论、迭代和导出。
+
+| 能力 | 说明 |
+|---|---|
+| **项目与标签** | 创建、打开和恢复设计项目；使用浏览器式工作区标签并通过 New tab 开启新工作面 |
+| **对话式 Studio** | 左侧与 Agent 协作，右侧查看作品；消息、文件、页面和预览保持在同一项目上下文 |
+| **素材与附件** | 管理项目文件、图片、文本与引用素材，并按可见顺序加入生成上下文 |
+| **设计系统** | 创建和复用颜色、字体、组件与品牌规则，在不同作品中保持一致性 |
+| **真实预览** | 运行网页、桌面/移动端原型、演示文稿、图片和交互内容，而不是只显示静态草图 |
+| **视觉评论** | 针对页面、幻灯片或具体区域添加评论，把标注直接带入下一轮修改 |
+| **版本与恢复** | 保存项目状态、查看迭代结果并恢复到需要的版本 |
+| **导出与交付** | 根据作品类型导出 HTML、PDF、PPTX、图片、Markdown 与项目包，并显示完整进度和结果 |
+
+Design 使用 Metis 当前的模型配置与 API 凭据，并共享主题、语言、任务通知和桌面宠物状态。顶部返回按钮可以随时回到 Metis 主工作台。
+
+---
+
+## 模型、上下文与命令中心
+
+### 模型服务
+
+- 支持 DeepSeek 与 OpenAI-compatible API，可配置自定义 Base URL、API Key 和模型名。
+- 从当前 API 读取可用模型目录，在 Composer 或模型面板快速切换。
+- 展示上下文窗口、模型类型、提供方信息与可用用量数据。
+- API Key 保存在本机配置中，不写入聊天记录、日志或模型上下文。
+- Design 与其它工作面使用同一套模型配置，无需维护第二套账号或凭据。
+
+### 命令中心
+
+命令中心把全局搜索、系统状态、后台 run 和模型服务放在同一入口：
+
+- 搜索会话、项目和命令，并直接跳转到对应工作面。
+- 检查后端、模型、运行时和连接器状态。
+- 查看后台 run，恢复仍在执行或已经完成的任务。
+- 快速进入模型、权限、终端、运行时与其它设置页面。
+
+---
+
+## Skills、Connectors 与 MCP
+
+| 扩展方式 | 用途 |
+|---|---|
+| **Skills** | 把稳定的操作步骤、工具选择、校验方式和领域知识封装成可复用工作流 |
+| **Connectors** | 连接 GitHub、Slack、Notion、Google Calendar、Google Drive、Gmail、PostgreSQL 与本机文件 |
+| **MCP** | 添加外部 MCP Server，把团队或个人工具接入 Agent 工具列表 |
+| **Slash commands** | 在 Composer 中快速选择常用模式、工具和工作流 |
+
+连接器中心展示能力说明、来源、授权方式、可用工具和连接状态。OAuth Token 由桌面主进程管理，不进入模型上下文。
 
 <p align="center">
   <img src="desktop/src/assets/connectors/github.svg" alt="GitHub" width="42" height="42" />&nbsp;&nbsp;&nbsp;
@@ -161,62 +158,85 @@
   <img src="desktop/src/assets/connectors/filesystem.svg" alt="Local Filesystem" width="42" height="42" />
 </p>
 
-<p align="center"><sub>Store 与连接器中心提供具体的能力说明、来源、授权方式、可用工具和连接状态。</sub></p>
+---
 
-<br />
+## 权限与执行环境
 
-<details>
-  <summary><b>26.7.17 版本亮点</b></summary>
-  <br />
-  <ul>
-    <li>新增 Metis Design：项目入口、对话式 Studio、页面与素材管理、实时预览、设计系统、版本恢复和多格式导出。</li>
-    <li>Design 直接使用 Metis 当前模型配置与 API 凭据，统一主题、语言、任务通知和桌面宠物状态。</li>
-    <li>新增任务完成通知、后台运行、会话恢复/未读/归档、自定义宠物库，并改进托盘恢复和模式切换性能。</li>
-    <li>完善多标签文件工作区、终端、网页预览、Diff、计划与活动记录，支持浏览器式快捷键和标签搜索。</li>
-    <li>扩展 Skills、Connectors、外部 MCP、项目级权限、Worktree、WSL 与隔离 VM 工作流。</li>
-    <li>完成 HCS direct runner 的持久化数据盘、guest handshake 和 boot verifier；大型工作区快照改为完整或失败。</li>
-  </ul>
-</details>
+### 权限中心
 
-<br />
+- 按工具、路径和动作设置 `ask`、允许或拒绝规则。
+- 搜索和筛选现有规则，手动添加工具规则与授权目录。
+- 批量选择、删除、导入、导出并清理冲突规则。
+- 工具调用保留状态、摘要和结果，便于审计与问题排查。
+- 涉及删除、上传、授权、外部提交或敏感数据时保持显式确认边界。
+
+### 执行边界
+
+| 环境 | 适用场景 |
+|---|---|
+| **本机工作区** | 需要直接操作当前目录的日常任务 |
+| **Git Worktree** | 希望隔离代码改动、并行处理分支或降低对主工作区的影响 |
+| **WSL** | 依赖 Linux shell、工具链或运行环境的项目 |
+| **HCS VM** | 需要更强隔离、持久会话数据盘和受控 guest 工具链的任务 |
+
+Runtime Manager 提供系统基础能力、运行组件、隔离执行、镜像/资产状态、健康检查、修复命令和诊断包。HCS readiness 会绑定 kernel、initrd、rootfs 与 session-data template 指纹，资产变化后重新验证。
 
 ---
 
-<h2 align="center">本机架构</h2>
+## 26.7.17 版本重点
+
+- 新增完整的 Metis Design 工作面：项目、Studio、素材、设计系统、评论、预览、版本与多格式导出。
+- Chat / Cowork / Code / Design 共享模型配置、主题、语言、通知与桌面宠物状态。
+- 新增后台运行、活动中心、会话恢复、未读/归档和长任务恢复诊断。
+- 新增独立 Side Chat、命令中心、模型目录、用量信息和上下文额度显示。
+- 完善九类工作卡、多标签网页预览、交互式 PTY、多文件 Diff 和逐文件回退。
+- 增加开发服务器自动预览、Preview Browser 自动化、视觉验证和证据保存。
+- 完善 Skills、Connectors、外部 MCP 与权限中心的批量管理、导入导出。
+- 完成 Worktree、WSL 与 HCS VM 执行链路，补齐持久数据盘、guest handshake 与 boot verifier。
+- 大型工作区快照改为完整复制或显式失败，避免静默截断造成文件缺失和伪删除。
+- 新增任务完成通知、会话状态联动和可导入的桌面宠物库。
+
+---
+
+## 本机架构
 
 <div align="center">
   <img src="backend/assets/metis-local-architecture-26.7.17.png" alt="Metis 本机架构：Chat、Cowork、Code、Design、Python Agent、安全执行与模型 API" width="100%" />
 </div>
 
-<table align="center" width="100%">
-  <tr>
-    <td width="33%" valign="top"><b>Electron Desktop</b><br /><sub>窗口、菜单、OAuth、WebContentsView Preview 与打包后的后端生命周期。</sub></td>
-    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code / Design、工具活动、右侧工作台、设置中心与状态管理。</sub></td>
-    <td width="33%" valign="top"><b>Python Agent</b><br /><sub>Flask + SSE、agent loop、工具注册、技能、浏览器与桌面自动化、checkpoint 和连接器。</sub></td>
-  </tr>
-</table>
+| 层 | 职责 |
+|---|---|
+| **Electron Desktop** | 窗口、托盘、系统通知、OAuth、原生预览、PTY、后端与 Design runtime 生命周期 |
+| **React Workbench** | 四种工作面、会话、Composer、命令中心、工作卡、设置与状态管理 |
+| **Python Agent** | Flask + SSE、agent loop、模型路由、工具注册、Skills、checkpoint、连接器和浏览器/桌面自动化 |
+| **Execution Runtime** | 本机、Worktree、WSL、HCS VM、运行时资产、诊断和安全边界 |
+| **Metis Design Runtime** | 项目、会话、素材、设计系统、实时预览、评论、版本与导出渲染 |
 
 > [!NOTE]
 > Renderer 与本机后端通过 HTTP / SSE 通信。API Key 与 OAuth Token 不经过 Metis 中转服务，也不会写入日志或模型上下文。
 
 ---
 
-## 运行环境
+## 安装与运行环境
 
 | 项 | 要求 |
 |---|---|
 | 操作系统 | Windows 10 / 11 64 位 |
-| Node.js | 开发模式需要 Node.js；安装包模式不要求用户手动安装 |
-| Python | 开发模式需要 Python；安装包会内置后端运行时 |
-| 网络 | 需要联网调用模型 API |
-| API key | DeepSeek 或任意 OpenAI-compatible endpoint |
-| 桌面操控 | `/computer` 会控制鼠标键盘，执行敏感动作前应由用户确认 |
+| 模型服务 | DeepSeek 或任意 OpenAI-compatible endpoint |
+| 网络 | 调用模型 API、OAuth 连接器或下载隔离运行时资产时需要联网 |
+| Node.js / Python | 仅源码开发需要；桌面安装版本自带应用所需运行组件 |
+| 桌面操控 | `/computer` 会控制鼠标键盘，敏感操作执行前需要确认 |
 
-当前版本尚未代码签名，Windows SmartScreen 可能提示风险，确认后可继续运行。
+1. 从 [v26.7.17 Release](https://github.com/linyeping/Metis/releases/tag/v26.7.17) 下载 `Metis-Setup-26.7.17.exe`。
+2. 运行安装程序并选择安装目录。
+3. 首次启动后，在设置中填写模型 Base URL、API Key 和模型名。
+4. 选择 Chat、Cowork、Code 或 Design 开始任务。
+
+当前版本尚未代码签名，Windows SmartScreen 可能显示风险提示。
 
 ---
 
-## 开发运行
+## 源码开发
 
 ```powershell
 python -m pip install -e backend/
@@ -226,63 +246,50 @@ npm ci
 npm run dev
 ```
 
-开发模式会启动：
+开发模式会启动 Vite renderer、Electron desktop shell 和由 Electron launcher 管理的本机 Python backend。Metis Design 位于仓库的 `open-design/` 工作区，并使用同一套桌面开发流程。
 
-- Vite renderer：默认 `http://127.0.0.1:5174`
-- Electron desktop shell
-- 本机 Python backend：由 Electron launcher 管理
-
----
-
-## 常用命令
+### 常用验证命令
 
 ```powershell
-# 前端类型检查
 cd desktop
+
+# TypeScript
 npm run typecheck
 
-# 前端单测
+# React / store / runtime 单测
 npm run test
 
-# Electron / 安全 / 契约测试
+# Electron、安全与产品契约测试
 npm run test:contracts
 
-# 后端测试
+# 发布前固定回归
+npm run test:fixed-regression
+
+# Design runtime 生命周期检查
+npm run test:design-runtime-lifecycle
+
+# 后端全量测试
 cd ..
 python -m pytest backend/tests/ -q
-
-# 生产 renderer 构建
-cd desktop
-npm run build
 ```
 
----
-
-## 打包 Windows EXE
+### 构建 Windows 安装包
 
 ```powershell
 cd desktop
 npm run dist:win
 ```
 
-`dist:win` 会执行：
+`dist:win` 会依次执行：
 
-1. `npm run build-backend`：用 PyInstaller 打包 Python 后端。
-2. `npm run build`：构建 React/Vite renderer。
-3. `electron-builder --win nsis`：生成 Windows NSIS 安装包。
+1. 发布前固定回归测试。
+2. 使用 PyInstaller 构建 Python backend。
+3. 构建 Windows runtime service。
+4. 组装 Metis Design runtime 与导出组件。
+5. 构建 React / Vite renderer。
+6. 使用 electron-builder 生成 NSIS 安装包与 blockmap。
 
-产物位置：
-
-```text
-desktop/release/
-```
-
-如果只想验证前端是否能生产构建：
-
-```powershell
-cd desktop
-npm run build
-```
+构建产物位于 `desktop/release/`。
 
 ---
 
@@ -291,16 +298,15 @@ npm run build
 ```text
 Miro/
 ├── backend/
-│   ├── bridges/        # 事件契约、供应商/工具协议桥接
-│   ├── runtime/        # agent loop、工具注册、技能、checkpoint、context budget
-│   ├── tools/          # 代码、浏览器、桌面、检索等工具实现
-│   ├── web/            # Flask API、SSE、Preview Browser bridge
-│   └── assets/         # 封面、架构图、功能展示图
+│   ├── bridges/        # 事件、供应商与工具协议桥接
+│   ├── runtime/        # agent loop、模型路由、Skills、checkpoint、执行环境
+│   ├── tools/          # 代码、浏览器、桌面、检索与文档工具
+│   └── web/            # Flask API、SSE 与 Preview Browser bridge
 ├── desktop/
-│   ├── electron/       # Electron main/preload、OAuth、打包入口
-│   ├── src/            # React UI、stores、runtime、i18n
-│   └── scripts/        # 构建、契约测试、冒烟测试脚本
-├── open-design/         # 内置 Metis Design 编辑器与导出运行时源码
+│   ├── electron/       # Electron main/preload、窗口、PTY、OAuth 与 runtime 生命周期
+│   ├── src/            # React 工作台、stores、设置、i18n 与桌面组件
+│   └── scripts/        # 构建、契约、回归、冒烟与生命周期测试
+├── open-design/         # Metis Design 项目、Studio、预览与导出 runtime
 └── README.md / README.en.md
 ```
 
@@ -309,10 +315,11 @@ Miro/
 ## 隐私与安全
 
 - Metis 不要求平台账号，不内置遥测。
-- API key 和 OAuth token 存在本机配置/加密存储中。
-- 连接器 token 不进入模型上下文。
-- 工具动作有审计记录，便于回看和排查。
-- `/computer` 和 `/browser` 会区分读取信息与发送/提交数据；涉及外部副作用、敏感数据、删除、上传、授权等操作时应先确认。
+- API Key 和 OAuth Token 保存在本机配置或系统安全存储中。
+- 连接器 Token 不进入模型上下文。
+- 工具动作、权限结果、运行状态和诊断信息保持可回看。
+- `/computer` 与 `/browser` 区分读取信息和发送/提交数据；删除、上传、授权、外部提交与敏感数据操作需要明确确认。
+- 可通过 Worktree、WSL 或 HCS VM 为任务选择不同执行边界。
 
 ---
 
@@ -321,7 +328,8 @@ Miro/
 **[PolyForm Noncommercial 1.0.0](LICENSE)** © 2026 linyeping
 
 源码可见，**个人 / 非商用免费**（学习、研究、个人项目、非营利组织）。
-**任何商业用途或商业二次开发，须事先获得作者书面授权（付费）**。
+
+**任何商业用途或商业二次开发，须事先获得作者书面授权（付费）。**
 
 ---
 
