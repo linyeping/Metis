@@ -293,33 +293,63 @@ npm run dist:win
 
 ---
 
-## 项目结构
+## 仓库导航
 
 ```text
 Miro/
+├── .github/workflows/       # CI、运行时构建与发布工作流
 ├── backend/
-│   ├── bridges/        # 事件、供应商与工具协议桥接
-│   ├── runtime/        # agent loop、模型路由、Skills、checkpoint、执行环境
-│   ├── tools/          # 代码、浏览器、桌面、检索与文档工具
-│   └── web/            # Flask API、SSE 与 Preview Browser bridge
+│   ├── core/                # 配置、常量与共享基础能力
+│   ├── bridges/             # 事件、供应商与工具协议桥接
+│   ├── runtime/             # agent loop、模型路由、run、checkpoint 与执行环境
+│   ├── tools/               # 代码、浏览器、桌面、检索与文档工具
+│   ├── web/                 # Flask API、SSE 与 Preview Browser bridge
+│   └── tests/               # 后端单元、集成、安全与运行时测试
 ├── desktop/
-│   ├── electron/       # Electron main/preload、窗口、PTY、OAuth 与 runtime 生命周期
-│   ├── src/            # React 工作台、stores、设置、i18n 与桌面组件
-│   └── scripts/        # 构建、契约、回归、冒烟与生命周期测试
-├── open-design/         # Metis Design 项目、Studio、预览与导出 runtime
+│   ├── electron/            # 窗口、托盘、PTY、OAuth、预览与 runtime 生命周期
+│   ├── src/                 # React 工作台、状态、设置、i18n 与桌面组件
+│   ├── scripts/             # 构建、契约、回归、冒烟与生命周期测试
+│   └── resources/           # 图标、后端、service 与 Design 的打包资源
+├── open-design/
+│   ├── apps/web/            # Metis Design 项目入口与 Studio
+│   ├── apps/daemon/         # 项目、会话、Agent、预览与导出服务
+│   ├── packages/            # Design 共享组件、协议与运行库
+│   ├── skills/              # Design 工作流与创作能力
+│   └── tools/               # 开发、测试和跨平台打包工具
+├── CONTRIBUTING.md          # 贡献与开发约定
 └── README.md / README.en.md
 ```
+
+日常桌面开发主要集中在 `backend/` 与 `desktop/`；Design 相关改动集中在 `open-design/`，最终由 `desktop/scripts/prepare-design-runtime.mjs` 组装进桌面发布产物。
 
 ---
 
 ## 隐私与安全
 
-- Metis 不要求平台账号，不内置遥测。
-- API Key 和 OAuth Token 保存在本机配置或系统安全存储中。
-- 连接器 Token 不进入模型上下文。
-- 工具动作、权限结果、运行状态和诊断信息保持可回看。
-- `/computer` 与 `/browser` 区分读取信息和发送/提交数据；删除、上传、授权、外部提交与敏感数据操作需要明确确认。
-- 可通过 Worktree、WSL 或 HCS VM 为任务选择不同执行边界。
+Metis 不要求平台账号。模型服务、连接器和外部工具由用户自行配置，应用不会把这些请求转发到 Metis 中转服务。
+
+| 数据或动作 | 本机处理方式 |
+|---|---|
+| **项目与会话** | 写入统一数据目录；默认优先使用安装目录下的 `data/`，不可写时回退到 `%LOCALAPPDATA%/Metis/data` |
+| **数据目录** | 可通过安装目录的 `data-root.json` 或 `METIS_DATA_ROOT` 调整；`METIS_HOME` 单独覆盖后端工作目录 |
+| **模型 API Key** | 使用 Electron `safeStorage` 加密后落盘；启动本机后端时在进程内解密注入 |
+| **OAuth 与连接器凭据** | 按服务分别加密保存，只在对应连接器或本机运行时需要时解密使用 |
+| **Design 数据采集** | Metis 受管配置关闭 metrics、content 与 artifact manifest telemetry |
+| **工具动作** | 权限请求、允许/拒绝结果、运行状态和诊断信息保持可回看 |
+
+### 联网边界
+
+- 调用用户配置的模型 API。
+- 连接用户主动启用的 OAuth 服务、Connectors 与外部 MCP Server。
+- 下载用户选择的隔离运行时资产或访问任务要求的网页。
+- API Key、OAuth Token 和连接器 Token 不加入模型上下文；敏感字段不应出现在诊断包和应用日志中。
+
+### 操作与隔离
+
+- Browser 与 Computer Use 区分读取信息和向外部发送、提交或上传数据。
+- 删除、授权、上传、外部提交和敏感数据传输等动作需要经过对应权限边界。
+- 权限中心支持按工具、路径和动作管理规则，并提供搜索、批量处理、导入导出和冲突清理。
+- 任务可选择本机工作区、Git Worktree、WSL 或 HCS VM；隔离越强，准备成本和环境限制也越高。
 
 ---
 
@@ -335,6 +365,6 @@ Miro/
 
 <div align="center">
 
-**由 [linyeping](https://github.com/linyeping) 打造** · 产品方向与部分设计思路致谢：[Serein](https://github.com/Serein0812) · 智者不喧，巧者不竭。
+**由 [linyeping](https://github.com/linyeping) 打造** · 产品方向与部分设计思路致谢：[Serein](https://github.com/Serein0812) · 且将新火试新茶，诗酒趁年华。
 
 </div>
