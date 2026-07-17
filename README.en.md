@@ -266,7 +266,6 @@ Miro/
 │   ├── src/            # React UI, stores, runtime, i18n
 │   └── scripts/        # build, contract, and smoke scripts
 ├── open-design/         # bundled Metis Design editor and export-runtime source
-├── docs/               # development logs and design documents
 └── README.md / README.en.md
 ```
 

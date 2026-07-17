@@ -266,7 +266,6 @@ Miro/
 │   ├── src/            # React UI、stores、runtime、i18n
 │   └── scripts/        # 构建、契约测试、冒烟测试脚本
 ├── open-design/         # 内置 Metis Design 编辑器与导出运行时源码
-├── docs/               # 开发日志和设计文档
 └── README.md / README.en.md
 ```
 
