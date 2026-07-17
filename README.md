@@ -2,12 +2,12 @@
 
 <img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis 26.7.17 · Design" width="100%" />
 
-# Metis · 墨提斯
+# Metis
 
 **把模型接入代码、终端、浏览器与 Windows 桌面，让任务从一句话走到可验证的结果。**
 
 <p>
-  <img alt="Electron 40" src="https://img.shields.io/badge/Electron-40-47848F?style=flat-square&logo=electron&logoColor=white" />
+  <img alt="Electron 41" src="https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white" />
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=111111" />
   <img alt="TypeScript 6" src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white" />
   <img alt="Python 3.11" src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" />
@@ -33,7 +33,7 @@
 </p>
 
 <p align="center">
-  <img src="backend/assets/work-surfaces.png" alt="Metis Chat、Cowork 与 Code 三种工作面" width="100%" />
+  <img src="backend/assets/work-surfaces.png" alt="Metis Chat、Cowork、Code 与 Design 四种工作面" width="100%" />
 </p>
 
 <p align="center">
@@ -87,7 +87,7 @@
 </p>
 
 <div align="center">
-  <img src="backend/assets/Feature%20Showcase.png" alt="Metis 可执行代码、浏览器、桌面与技能任务" width="100%" />
+  <img src="backend/assets/Feature%20Showcase.png" alt="Metis Code、Browser、Desktop、Design、Skills 与 Isolated VM 能力" width="100%" />
 </div>
 
 <table align="center" width="100%">
