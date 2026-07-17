@@ -50,14 +50,14 @@
 <h2 align="center">Metis Design：从一句想法到可交付作品</h2>
 
 <p align="center">
-  Design 不是外部网页或要求用户另装源码的桥接功能。项目管理、Agent 对话、实时预览和导出运行时已经随 Metis 一同分发。
+  在同一个工作区完成需求描述、素材整理、设计生成、实时预览、迭代评审与多格式交付。
 </p>
 
 <table align="center" width="100%">
   <tr>
     <td width="50%" valign="top">
       <b>项目入口与双栏 Studio</b><br /><br />
-      创建或打开设计项目，在左侧和 Agent 对话，在右侧即时查看成品；项目、会话与设计系统持续保存在本机。
+      创建或打开设计项目，在左侧和 Agent 协作，在右侧即时查看成品；项目、会话、页面、素材与设计系统持续保存在本机。
     </td>
     <td width="50%" valign="top">
       <b>真实渲染，不是静态草图</b><br /><br />
@@ -67,16 +67,14 @@
   <tr>
     <td width="50%" valign="top">
       <b>完整导出链路</b><br /><br />
-      支持按作品类型导出 HTML、PDF、PPTX、图片、Markdown 与项目包，导出进度、成功和失败统一通知。
+      支持按作品类型导出 HTML、PDF、PPTX、图片、Markdown 与项目包；预览、版本恢复、分享和导出状态集中管理。
     </td>
     <td width="50%" valign="top">
-      <b>仍然属于 Metis</b><br /><br />
-      跟随 Metis 的深浅色主题、语言、模型配置、任务通知与桌面宠物状态；完成后可直接返回 Chat、Cowork 或 Code。
+      <b>统一模型与桌面体验</b><br /><br />
+      直接使用 Metis 当前模型配置与 API 凭据，并共享主题、语言、任务通知和桌面宠物状态；完成后可直接返回 Chat、Cowork 或 Code。
     </td>
   </tr>
 </table>
-
-<p align="center"><sub>一个安装包即可使用 Chat / Cowork / Code / Design；无需单独下载 Design 源码。</sub></p>
 
 <br />
 
@@ -87,7 +85,7 @@
 </p>
 
 <div align="center">
-  <img src="backend/assets/Feature%20Showcase.png" alt="Metis Code、Browser、Desktop、Design、Skills 与 Isolated VM 能力" width="100%" />
+  <img src="backend/assets/metis-capabilities-26.7.17.png" alt="Metis Code、Browser、Desktop、Design、Skills 与 Isolated VM 能力" width="100%" />
 </div>
 
 <table align="center" width="100%">
@@ -115,6 +113,41 @@
 
 <br />
 
+<h2 align="center">覆盖完整任务生命周期</h2>
+
+<table align="center" width="100%">
+  <tr>
+    <td width="33%" valign="top">
+      <b>会话与后台任务</b><br /><br />
+      会话恢复、归档、未读标记、运行队列、后台任务、checkpoint 与完成通知，让长任务离开当前页面后仍可继续。
+    </td>
+    <td width="34%" valign="top">
+      <b>多标签工作区</b><br /><br />
+      在同一任务中并排使用文件、Diff、终端、网页预览、计划和活动记录；标签可搜索、切换、关闭和恢复。
+    </td>
+    <td width="33%" valign="top">
+      <b>项目级上下文</b><br /><br />
+      目录、仓库、分支、会话、附件、设计系统和生成产物共同组成可回看的项目上下文。
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <b>Skills / Connectors / MCP</b><br /><br />
+      复用技能流程，连接 GitHub、Slack、Notion、Google Workspace、数据库与本机文件，并扩展外部 MCP 工具。
+    </td>
+    <td width="34%" valign="top">
+      <b>安全执行环境</b><br /><br />
+      权限门、Worktree、WSL 与 HCS VM 按任务选择执行边界；敏感操作保持可见、可确认、可审计。
+    </td>
+    <td width="33%" valign="top">
+      <b>从检查到交付</b><br /><br />
+      运行测试、构建和诊断，检查浏览器与 Windows 应用，最后汇总改动、日志、截图、链接和可下载产物。
+    </td>
+  </tr>
+</table>
+
+<br />
+
 <h2 align="center">连接你已经使用的服务</h2>
 
 <p align="center">
@@ -136,9 +169,11 @@
   <summary><b>26.7.17 版本亮点</b></summary>
   <br />
   <ul>
-    <li>新增原生 Metis Design：项目入口、对话式 Studio、实时预览、设计系统和多格式导出随桌面端一同分发。</li>
-    <li>统一 Design 与 Metis 的主题、语言、模型配置、任务通知和桌面宠物状态。</li>
-    <li>新增任务完成通知、会话未读/归档、自定义宠物库，并改进托盘恢复和模式切换性能。</li>
+    <li>新增 Metis Design：项目入口、对话式 Studio、页面与素材管理、实时预览、设计系统、版本恢复和多格式导出。</li>
+    <li>Design 直接使用 Metis 当前模型配置与 API 凭据，统一主题、语言、任务通知和桌面宠物状态。</li>
+    <li>新增任务完成通知、后台运行、会话恢复/未读/归档、自定义宠物库，并改进托盘恢复和模式切换性能。</li>
+    <li>完善多标签文件工作区、终端、网页预览、Diff、计划与活动记录，支持浏览器式快捷键和标签搜索。</li>
+    <li>扩展 Skills、Connectors、外部 MCP、项目级权限、Worktree、WSL 与隔离 VM 工作流。</li>
     <li>完成 HCS direct runner 的持久化数据盘、guest handshake 和 boot verifier；大型工作区快照改为完整或失败。</li>
   </ul>
 </details>
@@ -150,7 +185,7 @@
 <h2 align="center">本机架构</h2>
 
 <div align="center">
-  <img src="backend/assets/Architecture.png" alt="Metis 本机架构" width="100%" />
+  <img src="backend/assets/metis-local-architecture-26.7.17.png" alt="Metis 本机架构：Chat、Cowork、Code、Design、Python Agent、安全执行与模型 API" width="100%" />
 </div>
 
 <table align="center" width="100%">
