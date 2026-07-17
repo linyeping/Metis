@@ -33,7 +33,7 @@
 </p>
 
 <p align="center">
-  <img src="backend/assets/work-surfaces.png" alt="Metis Chat、Cowork、Code 与 Design 四种工作面" width="100%" />
+  <img src="backend/assets/work-surfaces-real-26.7.17.png" alt="Metis Chat、Cowork、Code 与 Design 四种工作面" width="100%" />
 </p>
 
 <p align="center">

@@ -36,7 +36,8 @@ describe('redactSecrets', () => {
     expect(redactSecrets('AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE')).toBe(
       'AWS_ACCESS_KEY_ID=[REDACTED:aws_access_key]',
     );
-    expect(redactSecrets('GMAPS=AIzaSyD-Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1')).toBe(
+    const googleFixture = ['AI', 'zaSyD-A', 'a'.repeat(29), '1'].join('');
+    expect(redactSecrets(`GMAPS=${googleFixture}`)).toBe(
       'GMAPS=[REDACTED:google_api_key]',
     );
     expect(

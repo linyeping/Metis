@@ -108,6 +108,7 @@ function bundledDesignRuntimeLayout(root) {
     root: resolved,
     daemonEntry: path.join(resolved, 'app', 'prebundled', 'daemon', 'daemon-sidecar.mjs'),
     daemonCliEntry: path.join(resolved, 'app', 'prebundled', 'daemon', 'daemon-cli.mjs'),
+    nodeModulesRoot: path.join(resolved, 'app', 'node_modules'),
     rendererRoot: path.join(resolved, 'app', 'prebundled', 'desktop-renderer'),
     webEntry: path.join(resolved, 'app', 'prebundled', 'web-sidecar.mjs'),
     resourceRoot: path.join(resolved, 'open-design'),
@@ -129,6 +130,8 @@ function resolveBundledDesignRuntime(options = {}) {
     const required = [
       layout.daemonEntry,
       layout.daemonCliEntry,
+      path.join(layout.nodeModulesRoot, 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+      path.join(layout.nodeModulesRoot, 'blake3-wasm', 'package.json'),
       path.join(layout.rendererRoot, 'artifact-export.js'),
       path.join(layout.rendererRoot, 'deck-capture.js'),
       path.join(layout.rendererRoot, 'pdf-export.js'),

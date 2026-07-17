@@ -11,12 +11,21 @@ const webPort = String(process.env.OD_WEB_PORT || '')
 const layout = {
   daemonEntry: path.join(runtimeRoot, 'app', 'prebundled', 'daemon', 'daemon-sidecar.mjs'),
   daemonCliEntry: path.join(runtimeRoot, 'app', 'prebundled', 'daemon', 'daemon-cli.mjs'),
+  nodeModulesRoot: path.join(runtimeRoot, 'app', 'node_modules'),
   webEntry: path.join(runtimeRoot, 'app', 'prebundled', 'web-sidecar.mjs'),
   resourceRoot: path.join(runtimeRoot, 'open-design'),
   webStandaloneRoot: path.join(runtimeRoot, 'web-standalone')
 }
 
-const required = Object.values(layout)
+const required = [
+  layout.daemonEntry,
+  layout.daemonCliEntry,
+  path.join(layout.nodeModulesRoot, 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+  path.join(layout.nodeModulesRoot, 'blake3-wasm', 'package.json'),
+  layout.webEntry,
+  layout.resourceRoot,
+  layout.webStandaloneRoot
+]
 if (!runtimeRoot || !dataRoot || !daemonPort || !webPort || required.some(entry => !fs.existsSync(entry))) {
   process.stderr.write('[metis-design] repository-built Design runtime is incomplete\n')
   process.exit(2)
@@ -81,7 +90,9 @@ function stop(exitCode = 0) {
   for (const child of children) {
     try { child.kill() } catch {}
   }
-  setTimeout(() => process.exit(exitCode), 250).unref()
+  // Keep the timer referenced so a failing child cannot make the launcher
+  // fall off the event loop and accidentally report exit code 0.
+  setTimeout(() => process.exit(exitCode), 250)
 }
 
 start('daemon', layout.daemonEntry)
@@ -91,6 +102,30 @@ start('web', layout.webEntry, {
   PORT: webPort
 })
 
+if (process.env.METIS_DESIGN_RUNTIME_SMOKE_TEST === '1') {
+  const deadline = Date.now() + 30_000
+  void (async () => {
+    while (!stopping && Date.now() < deadline) {
+      try {
+        const [daemonResponse, webResponse] = await Promise.all([
+          fetch(`http://127.0.0.1:${daemonPort}/api/health`),
+          fetch(`http://127.0.0.1:${webPort}/`)
+        ])
+        if (daemonResponse.ok && webResponse.ok) {
+          process.stdout.write('[smoke] embedded Design daemon and web are ready\n')
+          stop(0)
+          return
+        }
+      } catch {}
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    if (!stopping) {
+      process.stderr.write('[smoke] embedded Design runtime did not become ready\n')
+      stop(1)
+    }
+  })()
+}
+
 process.on('SIGINT', () => stop(0))
 process.on('SIGTERM', () => stop(0))
-process.on('disconnect', () => stop(0))
+if (process.connected) process.on('disconnect', () => stop(0))

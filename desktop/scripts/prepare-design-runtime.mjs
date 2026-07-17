@@ -13,6 +13,7 @@ const sourceRoot = path.resolve(
 const destination = path.join(desktopRoot, 'resources', 'open-design-runtime');
 const namespace = 'metis-embedded';
 const toolsPackRoot = path.join(sourceRoot, '.tmp', 'tools-pack');
+const explicitPackedRoot = String(process.env.METIS_DESIGN_PACKED_ROOT || '').trim();
 const namespaceRoot = path.join(
   sourceRoot,
   '.tmp',
@@ -53,15 +54,29 @@ const sourcePackage = JSON.parse(await readFile(path.join(sourceRoot, 'package.j
 if (sourcePackage.version !== '0.15.1') {
   throw new Error(`Open Design 0.15.1 is required; found ${sourcePackage.version || 'unknown'}`);
 }
-
-await run(
-  'pnpm',
-  ['tools-pack', 'win', 'build', '--to', 'dir', '--portable', '--namespace', namespace],
-  sourceRoot,
-  { OD_WEB_OUTPUT_MODE: 'standalone' },
+const desktopPackage = JSON.parse(await readFile(path.join(desktopRoot, 'package.json'), 'utf8'));
+const designDesktopPackage = JSON.parse(
+  await readFile(path.join(sourceRoot, 'apps', 'desktop', 'package.json'), 'utf8'),
 );
+if (desktopPackage.devDependencies?.electron !== designDesktopPackage.devDependencies?.electron) {
+  throw new Error(
+    `Metis Electron ${desktopPackage.devDependencies?.electron || 'unknown'} must match `
+    + `Open Design Electron ${designDesktopPackage.devDependencies?.electron || 'unknown'} for native module ABI compatibility`,
+  );
+}
 
-const builtManifest = JSON.parse(await readFile(path.join(namespaceRoot, 'built-app.json'), 'utf8'));
+if (!explicitPackedRoot) {
+  await run(
+    'pnpm',
+    ['tools-pack', 'win', 'build', '--to', 'dir', '--portable', '--namespace', namespace],
+    sourceRoot,
+    { OD_WEB_OUTPUT_MODE: 'standalone' },
+  );
+}
+
+const builtManifest = explicitPackedRoot
+  ? { version: 1, unpackedRoot: explicitPackedRoot }
+  : JSON.parse(await readFile(path.join(namespaceRoot, 'built-app.json'), 'utf8'));
 if (builtManifest.version !== 1 || typeof builtManifest.unpackedRoot !== 'string') {
   throw new Error('Open Design tools-pack returned an invalid built-app manifest');
 }
@@ -80,6 +95,8 @@ const required = [
   path.join('resources', 'app', 'prebundled', 'daemon', 'daemon-sidecar.mjs'),
   path.join('resources', 'app', 'prebundled', 'daemon', 'daemon-cli.mjs'),
   path.join('resources', 'app', 'prebundled', 'web-sidecar.mjs'),
+  path.join('resources', 'app', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+  path.join('resources', 'app', 'node_modules', 'blake3-wasm', 'package.json'),
   path.join('resources', 'open-design'),
   path.join('resources', 'open-design-web-standalone'),
   path.join('resources', 'dom-to-pptx.bundle.js.gz'),
@@ -95,6 +112,15 @@ await mkdir(destination, { recursive: true });
 await cp(
   path.join(unpackedRoot, 'resources', 'app', 'prebundled'),
   path.join(destination, 'app', 'prebundled'),
+  { recursive: true, dereference: true },
+);
+// The daemon bundle deliberately externalizes native modules. Keep the exact
+// electron-builder-produced dependency tree beside prebundled/ so Node's
+// normal package resolution can load the native bindings in the embedded
+// runtime without pnpm, source checkout, or a separate installation.
+await cp(
+  path.join(unpackedRoot, 'resources', 'app', 'node_modules'),
+  path.join(destination, 'app', 'node_modules'),
   { recursive: true, dereference: true },
 );
 await cp(

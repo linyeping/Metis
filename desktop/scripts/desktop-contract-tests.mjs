@@ -75,6 +75,9 @@ test('desktop graphics and window activation keep the P0 fast path wired', () =>
   assert.match(main, /showWindow\('second-instance'\)/);
   assert.match(main, /showWindow\('main-frame-loaded'\)/);
   assert.match(main, /mainWindow\.moveTop\(\)/);
+  assert.match(main, /const APP_USER_MODEL_ID = 'com\.metis\.app'/);
+  assert.ok(main.indexOf('app.setAppUserModelId(APP_USER_MODEL_ID)') < main.indexOf('app.whenReady()'));
+  assert.match(main, /icon: nativeImage\.createFromPath\(iconPath\('logo\.png'\)\)/);
   assert.doesNotMatch(read('scripts/desktop-perf-runner.mjs'), /--disable-gpu|--no-sandbox|swiftshader|VizDisplayCompositor/);
   assert.doesNotMatch(read('scripts/desktop-smoke-runner.mjs'), /--disable-gpu|--no-sandbox|swiftshader|VizDisplayCompositor/);
   assert.equal((thread.match(/<iframe/g) || []).length, 1);

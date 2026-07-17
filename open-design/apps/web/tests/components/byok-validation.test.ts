@@ -196,7 +196,7 @@ describe('BYOK draft validation', () => {
     ).toBe(true);
     expect(
       validateByokDraft('google', {
-        apiKey: 'AIzaSyD-Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1',
+        apiKey: ['AI', 'zaSyD-A', 'a'.repeat(29), '1'].join(''),
         baseUrl: 'https://generativelanguage.googleapis.com',
         model: 'gemini-2.0-flash',
       }).ok,

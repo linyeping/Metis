@@ -320,7 +320,8 @@ def switch_session(session_id: str) -> Any:
     from backend.core.memory.workspace_state import clear_read_tracking
 
     state = get_state()
-    session = get_session_manager().get_session(session_id)
+    manager = get_session_manager()
+    session = manager.get_session(session_id)
     if session is None:
         return jsonify({"error": "session not found"}), 404
     save_active_session()

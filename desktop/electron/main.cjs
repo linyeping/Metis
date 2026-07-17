@@ -65,6 +65,9 @@ const {
 } = require('./pet-runtime.cjs')
 const { extractPetZip, findPetDirectories, inspectPetDirectory } = require('./pet-package.cjs')
 
+const APP_USER_MODEL_ID = 'com.metis.app'
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
+
 protocol.registerSchemesAsPrivileged([{
   scheme: 'metis-pet',
   privileges: { standard: true, secure: true, corsEnabled: true, supportFetchAPI: true }
@@ -3810,7 +3813,7 @@ async function createWindow() {
     title: 'Metis',
     frame: false,
     show: false,
-    icon: iconPath('logo.ico'),
+    icon: nativeImage.createFromPath(iconPath('logo.png')),
     backgroundColor: '#0A0A0E',
     webPreferences: {
       ...HARDENED_WEB_PREFERENCES,
@@ -5728,7 +5731,6 @@ app.whenReady().then(async () => {
     return
   }
   nativeTheme.themeSource = 'system'
-  if (process.platform === 'win32') app.setAppUserModelId('com.metis.app')
   registerCustomPetProtocol()
   loadCloseBehavior()
   loadNotificationConfig()
