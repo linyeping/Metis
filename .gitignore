@@ -55,6 +55,7 @@ desktop/release/
 desktop/release-new*/
 desktop/data/
 desktop/.dev-data/
+desktop/.electron-cache/
 desktop/resources/backend-build/
 desktop/resources/backend-dist/
 desktop/resources/open-design-runtime/
@@ -62,6 +63,7 @@ backend/var/
 backend/build/
 backend/output/
 backend/others/
+.dev-data/
 .codex-acceptance/
 .agent_todos.json
 NEWUPDATE.md

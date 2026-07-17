@@ -1,7 +1,7 @@
 {
   "name": "metis-desktop",
   "productName": "Metis",
-  "version": "26.7.11",
+  "version": "26.7.17",
   "description": "Metis desktop shell.",
   "author": "Metis",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "build": "tsc -b && vite build",
     "prepare-design-runtime": "node scripts/prepare-design-runtime.mjs",
     "dist": "npm run test:fixed-regression && npm run prepare-design-runtime && npm run build && electron-builder",
-    "dist:win": "npm run test:fixed-regression && npm run build-backend && npm run prepare-design-runtime && npm run build && electron-builder --win nsis",
+    "dist:win": "npm run test:fixed-regression && npm run build-backend && npm run build-svc && npm run prepare-design-runtime && npm run build && electron-builder --win nsis",
     "perf:desktop": "node scripts/desktop-perf-runner.mjs",
     "smoke:desktop": "node scripts/desktop-smoke-runner.mjs",
     "smoke:design-renderer": "electron --no-sandbox scripts/design-renderer-smoke.cjs",

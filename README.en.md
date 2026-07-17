@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="backend/assets/cover.png" alt="Metis" width="100%" />
+<img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis 26.7.17 · Design" width="100%" />
 
 # Metis · 墨提斯
 
@@ -15,8 +15,8 @@
 </p>
 
 <p>
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="Download Metis 26.7.11" src="https://img.shields.io/badge/Download_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
-  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="View Release Notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.17/Metis-Setup-26.7.17.exe"><img alt="Download Metis 26.7.17" src="https://img.shields.io/badge/Download_Metis-26.7.17-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.17"><img alt="View Release Notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
 </p>
 
 <sub>Windows 10 / 11 · 64-bit · DeepSeek / OpenAI-compatible API</sub><br />
@@ -26,10 +26,10 @@
 
 <br />
 
-<h2 align="center">One Workbench, Three Levels of Execution</h2>
+<h2 align="center">One Workbench, Four Work Surfaces</h2>
 
 <p align="center">
-  Each task enters the surface that fits it best while sharing the same sessions, tools, permissions, and evidence chain.
+  Each task enters the surface that fits it best while sharing the same models, projects, tools, permissions, and notifications.
 </p>
 
 <p align="center">
@@ -39,10 +39,44 @@
 <p align="center">
   <b>CHAT</b> fast understanding and light execution &nbsp;·&nbsp;
   <b>COWORK</b> plan-driven multi-step delivery &nbsp;·&nbsp;
-  <b>CODE</b> repository-centered engineering loop
+  <b>CODE</b> repository-centered engineering loop &nbsp;·&nbsp;
+  <b>DESIGN</b> conversational, deliverable design
 </p>
 
 <p align="center"><sub>Sessions, workspaces, and drafts stay isolated by mode, so rapid navigation cannot let stale requests overwrite the active record.</sub></p>
+
+<br />
+
+<h2 align="center">Metis Design: From One Prompt to a Deliverable</h2>
+
+<p align="center">
+  Design is not an external website or a bridge that asks users to install another source tree. Project management, agent chat, live preview, and the export runtime ship inside Metis.
+</p>
+
+<table align="center" width="100%">
+  <tr>
+    <td width="50%" valign="top">
+      <b>Project home and split Studio</b><br /><br />
+      Create or open a design project, direct the agent on the left, and inspect the result on the right. Projects, sessions, and design systems remain local.
+    </td>
+    <td width="50%" valign="top">
+      <b>Rendered work, not static mockups</b><br /><br />
+      Generate web, desktop, and mobile prototypes, decks, images, and interactive artifacts, then inspect them in a sandboxed live preview.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>Complete export pipeline</b><br /><br />
+      Export HTML, PDF, PPTX, images, Markdown, and project bundles with consistent progress, completion, and failure notifications.
+    </td>
+    <td width="50%" valign="top">
+      <b>Part of the Metis system</b><br /><br />
+      Design follows Metis theme, locale, model configuration, task notifications, and desktop-pet state, with direct navigation back to Chat, Cowork, or Code.
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>One installer provides Chat / Cowork / Code / Design. No separate Design source download is required.</sub></p>
 
 <br />
 
@@ -99,13 +133,13 @@
 <br />
 
 <details>
-  <summary><b>What's new in 26.7.11</b></summary>
+  <summary><b>What's new in 26.7.17</b></summary>
   <br />
   <ul>
-    <li>Rolled out the rounded flower identity across the app, tray, Store, and installer.</li>
-    <li>Added colored connector branding and searchable capability descriptions.</li>
-    <li>Added ask, minimize-to-tray, and quit behaviors for closing the window.</li>
-    <li>Reworked Chat / Cowork / Code navigation to prevent duplicate loads and stale-session races.</li>
+    <li>Introduced native Metis Design with a project home, conversational Studio, live preview, design systems, and multi-format export bundled with the desktop app.</li>
+    <li>Unified Design with Metis theme, locale, model configuration, task notifications, and desktop-pet state.</li>
+    <li>Added completion notifications, unread/archive session controls, a custom pet library, and faster tray recovery and surface switching.</li>
+    <li>Completed HCS direct-runner persistence, guest handshake, and boot verification; large workspace snapshots are now complete-or-fail.</li>
   </ul>
 </details>
 
@@ -122,7 +156,7 @@
 <table align="center" width="100%">
   <tr>
     <td width="33%" valign="top"><b>Electron Desktop</b><br /><sub>Windowing, menus, OAuth, WebContentsView Preview, and packaged backend lifecycle.</sub></td>
-    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code, tool activity, right workbench, settings, and state management.</sub></td>
+    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code / Design, tool activity, right workbench, settings, and state management.</sub></td>
     <td width="33%" valign="top"><b>Python Agent</b><br /><sub>Flask + SSE, agent loop, tool registry, skills, browser and desktop automation, checkpoints, and connectors.</sub></td>
   </tr>
 </table>
@@ -231,6 +265,7 @@ Miro/
 │   ├── electron/       # Electron main/preload, OAuth, packaging entry
 │   ├── src/            # React UI, stores, runtime, i18n
 │   └── scripts/        # build, contract, and smoke scripts
+├── open-design/         # bundled Metis Design editor and export-runtime source
 ├── docs/               # development logs and design documents
 └── README.md / README.en.md
 ```

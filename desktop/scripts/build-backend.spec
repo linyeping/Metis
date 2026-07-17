@@ -23,7 +23,7 @@ EXCLUDED_DATA_PARTS = {
     "packaging_blueprint",
     "tests",
     "var",
-    "metis-vm-svc",   # Go service — packaged separately in resources/runtime-svc, not in the Python bundle
+    "metis-vm-svc",   # Go service — packaged separately from resources/runtime-svc-build
     "vmpack_build",   # dev VM pack build output
 }
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".exe", ".go", ".vhdx"}

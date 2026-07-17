@@ -1,17 +1,17 @@
-# Build the Metis privileged VM service (Go) into desktop/resources/runtime-svc.
+# Build the Metis privileged VM service into an unlocked packaging staging dir.
 # Phase 7.7 — runs as part of the desktop packaging pipeline.
 param([string]$Go = "")
 
 $ErrorActionPreference = "Stop"
 
 $svcDir = Resolve-Path (Join-Path $PSScriptRoot "..\..\backend\runtime\metis-vm-svc")
-$outDir = Join-Path $PSScriptRoot "..\resources\runtime-svc"
+$outDir = Join-Path $PSScriptRoot "..\resources\runtime-svc-build"
 $outExe = Join-Path $outDir "metis-vm-svc.exe"
 
 # Resolve the Go toolchain: explicit param -> PATH -> known portable SDK.
 if (-not $Go) { $Go = (Get-Command go -ErrorAction SilentlyContinue).Source }
 if (-not $Go) {
-  foreach ($c in @("$env:LOCALAPPDATA\..\go-sdk\go\bin\go.exe", "C:\Users\$env:USERNAME\go-sdk\go\bin\go.exe", "C:\Go\bin\go.exe")) {
+  foreach ($c in @("$env:LOCALAPPDATA\Metis\toolchains\go1.26.0\go\bin\go.exe", "$env:LOCALAPPDATA\..\go-sdk\go\bin\go.exe", "C:\Users\$env:USERNAME\go-sdk\go\bin\go.exe", "C:\Go\bin\go.exe")) {
     if (Test-Path $c) { $Go = $c; break }
   }
 }

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="backend/assets/cover.png" alt="Metis · 墨提斯" width="100%" />
+<img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis 26.7.17 · Design" width="100%" />
 
 # Metis · 墨提斯
 
@@ -15,8 +15,8 @@
 </p>
 
 <p>
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.11/Metis-Setup-26.7.11.exe"><img alt="下载 Metis 26.7.11" src="https://img.shields.io/badge/下载_Metis-26.7.11-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
-  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.11"><img alt="查看 Release Notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.17/Metis-Setup-26.7.17.exe"><img alt="下载 Metis 26.7.17" src="https://img.shields.io/badge/下载_Metis-26.7.17-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.17"><img alt="查看 Release Notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
 </p>
 
 <sub>Windows 10 / 11 · 64 位 · DeepSeek / OpenAI-compatible API</sub><br />
@@ -26,10 +26,10 @@
 
 <br />
 
-<h2 align="center">一个工作台，三种执行强度</h2>
+<h2 align="center">一个工作台，四种工作面</h2>
 
 <p align="center">
-  不同任务进入各自最合适的工作面，但共享同一套会话、工具、权限和证据链。
+  不同任务进入各自最合适的工作面，但共享同一套模型、项目、工具、权限和通知体系。
 </p>
 
 <p align="center">
@@ -39,10 +39,44 @@
 <p align="center">
   <b>CHAT</b> 快速理解与轻量执行 &nbsp;·&nbsp;
   <b>COWORK</b> 计划驱动的多步骤交付 &nbsp;·&nbsp;
-  <b>CODE</b> 围绕仓库的工程闭环
+  <b>CODE</b> 围绕仓库的工程闭环 &nbsp;·&nbsp;
+  <b>DESIGN</b> 对话驱动的可交付设计
 </p>
 
 <p align="center"><sub>模式之间的会话、工作区和草稿相互隔离；快速切换不会让旧请求覆盖当前记录。</sub></p>
+
+<br />
+
+<h2 align="center">Metis Design：从一句想法到可交付作品</h2>
+
+<p align="center">
+  Design 不是外部网页或要求用户另装源码的桥接功能。项目管理、Agent 对话、实时预览和导出运行时已经随 Metis 一同分发。
+</p>
+
+<table align="center" width="100%">
+  <tr>
+    <td width="50%" valign="top">
+      <b>项目入口与双栏 Studio</b><br /><br />
+      创建或打开设计项目，在左侧和 Agent 对话，在右侧即时查看成品；项目、会话与设计系统持续保存在本机。
+    </td>
+    <td width="50%" valign="top">
+      <b>真实渲染，不是静态草图</b><br /><br />
+      生成网页、桌面与移动端原型、演示文稿、图片和交互式内容，并在隔离预览中直接检查最终效果。
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <b>完整导出链路</b><br /><br />
+      支持按作品类型导出 HTML、PDF、PPTX、图片、Markdown 与项目包，导出进度、成功和失败统一通知。
+    </td>
+    <td width="50%" valign="top">
+      <b>仍然属于 Metis</b><br /><br />
+      跟随 Metis 的深浅色主题、语言、模型配置、任务通知与桌面宠物状态；完成后可直接返回 Chat、Cowork 或 Code。
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>一个安装包即可使用 Chat / Cowork / Code / Design；无需单独下载 Design 源码。</sub></p>
 
 <br />
 
@@ -99,13 +133,13 @@
 <br />
 
 <details>
-  <summary><b>26.7.11 版本亮点</b></summary>
+  <summary><b>26.7.17 版本亮点</b></summary>
   <br />
   <ul>
-    <li>全面启用新的圆角花朵品牌标识，覆盖桌面端、托盘、Store 与 Windows 安装包。</li>
-    <li>Store 使用彩色连接器 Logo，并提供具体、可搜索的中英文能力说明。</li>
-    <li>新增关闭窗口行为：询问、最小化到托盘或直接退出。</li>
-    <li>重构 Chat / Cowork / Code 导航链路，减少重复加载与快速切换竞态。</li>
+    <li>新增原生 Metis Design：项目入口、对话式 Studio、实时预览、设计系统和多格式导出随桌面端一同分发。</li>
+    <li>统一 Design 与 Metis 的主题、语言、模型配置、任务通知和桌面宠物状态。</li>
+    <li>新增任务完成通知、会话未读/归档、自定义宠物库，并改进托盘恢复和模式切换性能。</li>
+    <li>完成 HCS direct runner 的持久化数据盘、guest handshake 和 boot verifier；大型工作区快照改为完整或失败。</li>
   </ul>
 </details>
 
@@ -122,7 +156,7 @@
 <table align="center" width="100%">
   <tr>
     <td width="33%" valign="top"><b>Electron Desktop</b><br /><sub>窗口、菜单、OAuth、WebContentsView Preview 与打包后的后端生命周期。</sub></td>
-    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code、工具活动、右侧工作台、设置中心与状态管理。</sub></td>
+    <td width="34%" valign="top"><b>React Workbench</b><br /><sub>Chat / Cowork / Code / Design、工具活动、右侧工作台、设置中心与状态管理。</sub></td>
     <td width="33%" valign="top"><b>Python Agent</b><br /><sub>Flask + SSE、agent loop、工具注册、技能、浏览器与桌面自动化、checkpoint 和连接器。</sub></td>
   </tr>
 </table>
@@ -231,6 +265,7 @@ Miro/
 │   ├── electron/       # Electron main/preload、OAuth、打包入口
 │   ├── src/            # React UI、stores、runtime、i18n
 │   └── scripts/        # 构建、契约测试、冒烟测试脚本
+├── open-design/         # 内置 Metis Design 编辑器与导出运行时源码
 ├── docs/               # 开发日志和设计文档
 └── README.md / README.en.md
 ```

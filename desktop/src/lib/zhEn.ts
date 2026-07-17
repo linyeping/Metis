@@ -45,7 +45,7 @@ export const zhEn: Record<string, string> = {
   '启动时展开侧栏': 'Open the sidebar on startup',
   '关闭后以更专注的主工作区启动。': 'Turn this off to start with a more focused workspace.',
   '桌面智能工作区': 'Desktop AI workspace',
-  '对话、协作和编码集中在一个安静可靠的桌面环境中。': 'Chat, collaboration, and coding in one calm, reliable desktop workspace.',
+  '对话、协作、编码和设计集中在一个安静可靠的桌面环境中。': 'Chat, collaboration, coding, and design in one calm, reliable desktop workspace.',
   '本地优先': 'Local-first',
   '密钥和工作数据保存在本机': 'Keys and workspace data stay on this device',
   '正式版本': 'Production build',

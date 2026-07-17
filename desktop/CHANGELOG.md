@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning after the first public release.
 
+## [26.7.17] - 2026-07-17
+
+### Added
+
+- Added native Metis Design with project management, conversational Studio, live preview, design systems, and bundled HTML/PDF/PPTX/image export.
+- Added task-completion notifications, unread and archived sessions, custom desktop pets, and Design task-state integration.
+- Added HCS direct-runner session persistence, production guest handshake verification, and bundle-bound boot readiness receipts.
+
+### Changed
+
+- Unified Design with Metis theme, locale, model configuration, notifications, navigation, and desktop-pet state.
+- Improved Chat, Cowork, Code, and Design switching, tray restoration, transparent pet rendering, and long-session menus.
+- Changed isolated workspace snapshots to complete-or-fail semantics with unlimited defaults instead of silent 2,000-file / 80 MB truncation.
+
+### Security
+
+- Tightened the privileged VM service boundary and require persistent-disk mount and guest-protocol evidence before HCS readiness is promoted.
+
 ## [26.7.11] - 2026-07-11
 
 ### Added

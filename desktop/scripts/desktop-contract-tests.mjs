@@ -217,9 +217,11 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(css, /\.runtime-manager-panel/);
   assert.match(css, /\.runtime-vm-summary/);
   assert.match(css, /\.runtime-result-path-row/);
-  assert.match(architecture, /The first usable `local_vm` runner on Windows is `metis_wsl`/);
-  assert.match(architecture, /it is not the HCS direct runner/);
-  assert.match(architecture, /HCS direct remains a separate gated backend/);
+  assert.match(architecture, /The stable `local_vm` execution profile on Windows remains `metis_wsl`/);
+  assert.match(architecture, /complete-or-fail policy/);
+  assert.match(architecture, /HCS direct is a separate backend/);
+  assert.match(architecture, /sessiondata-template\.vhdx/);
+  assert.match(architecture, /HCS readiness is evidence-gated/);
   assert.match(routes, /\/settings\/runtime-manager\/smoke/);
   assert.match(routes, /\/settings\/runtime-manager\/diagnostics/);
   assert.match(routes, /\/settings\/runtime-manager\/repair/);

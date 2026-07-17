@@ -3,6 +3,8 @@ productName: Metis
 directories:
   output: release
   buildResources: resources
+# Reuse the Electron binary installed by npm so release builds do not redownload it.
+electronDist: node_modules/electron/dist
 files:
   - dist/**
   - electron/**
@@ -26,7 +28,7 @@ extraResources:
   # The app downloads it on first run from METIS_RUNTIME_PACK_URL (a GitHub
   # release manifest pointing at the rich-rootfs zip). This keeps the installer
   # small (~50MB instead of ~1GB) and lets us ship pack updates without rebuilding.
-  - from: resources/runtime-svc
+  - from: resources/runtime-svc-build
     to: runtime-svc
   - from: resources/open-design-runtime
     to: open-design-runtime
