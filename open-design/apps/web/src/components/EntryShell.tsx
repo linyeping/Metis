@@ -969,7 +969,7 @@ export function EntryShell({
                   ?? ((allowSilentUpdates) => onConfigPersist({ ...config, allowSilentUpdates }))
               }
             />
-            <WhatsNewPopup active={view === 'home'} />
+            <WhatsNewPopup active={view === 'home' && config.agentId !== 'metis'} />
             {avatarMenu}
             {amrBalanceGateBlock ? (
               <AmrBalanceDialog

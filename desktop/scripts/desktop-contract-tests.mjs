@@ -468,6 +468,22 @@ test('Design titlebar keeps only the Metis return action and window controls', (
   assert.match(titlebar, /appMode === 'chat' && !designActive/);
 });
 
+test('managed Metis Design never exposes the upstream Open Design release card', () => {
+  const main = read('electron/main.cjs');
+  const entryShell = fs.readFileSync(
+    path.resolve(root, '..', 'open-design', 'apps', 'web', 'src', 'components', 'EntryShell.tsx'),
+    'utf8',
+  );
+  const whatsNewService = fs.readFileSync(
+    path.resolve(root, '..', 'open-design', 'apps', 'daemon', 'src', 'services', 'whats-new.ts'),
+    'utf8',
+  );
+
+  assert.match(entryShell, /<WhatsNewPopup active=\{view === 'home' && config\.agentId !== 'metis'\} \/>/);
+  assert.equal((main.match(/OD_DISABLE_WHATS_NEW: '1'/g) || []).length, 2);
+  assert.match(whatsNewService, /OD_DISABLE_WHATS_NEW\?\.trim\(\) === '1'/);
+});
+
 test('right rail browser workbench keeps navigation and zoom wired', () => {
   const uiStore = read('src/store/uiStore.ts');
   const main = read('electron/main.cjs');

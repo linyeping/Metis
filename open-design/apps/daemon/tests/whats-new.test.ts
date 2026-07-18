@@ -24,6 +24,14 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 describe('whatsNewSourceUrl', () => {
+  it('disables the upstream release feed for a managed host', () => {
+    expect(whatsNewSourceUrl({ OD_DISABLE_WHATS_NEW: '1' }, 'stable')).toBeNull();
+    expect(whatsNewSourceUrl({
+      OD_DISABLE_WHATS_NEW: '1',
+      OD_WHATS_NEW_URL: 'https://fixture.local/whats-new.json',
+    }, 'stable')).toBeNull();
+  });
+
   it('uses the dedicated hosted document on release channels', () => {
     expect(whatsNewSourceUrl({}, 'stable')).toBe(DEFAULT_WHATS_NEW_URL);
     expect(whatsNewSourceUrl({}, 'beta')).toBe(DEFAULT_WHATS_NEW_URL);

@@ -598,6 +598,7 @@ async function startDesignRuntime(locale) {
           METIS_DESIGN_TOKEN: process.env.METIS_DESIGN_TOKEN,
           METIS_DESIGN_ROOT: process.env.METIS_DESIGN_ROOT,
           METIS_MANAGED_DESIGN_RUNTIME: '1',
+          OD_DISABLE_WHATS_NEW: '1',
           OD_DATA_DIR: designDataRoot,
           OD_SIDECAR_NAMESPACE: DESIGN_RUNTIME_NAMESPACE,
           OD_PORT: String(daemonPort),
@@ -716,6 +717,7 @@ async function startDesignRuntime(locale) {
         METIS_DESIGN_TOKEN: process.env.METIS_DESIGN_TOKEN,
         METIS_DESIGN_ROOT: process.env.METIS_DESIGN_ROOT,
         METIS_MANAGED_DESIGN_RUNTIME: '1',
+        OD_DISABLE_WHATS_NEW: '1',
         OD_DATA_DIR: designDataRoot,
         OD_SIDECAR_NAMESPACE: DESIGN_RUNTIME_NAMESPACE,
         NO_COLOR: '1'

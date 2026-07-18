@@ -50,6 +50,7 @@ const WHATS_NEW_TIMEOUT_MS = 4_000;
  * object is used only on release channels.
  */
 export function whatsNewSourceUrl(env: NodeJS.ProcessEnv, channel: string): string | null {
+  if (env.OD_DISABLE_WHATS_NEW?.trim() === '1') return null;
   const override = env.OD_WHATS_NEW_URL?.trim();
   if (override) return override;
   return WHATS_NEW_RELEASE_CHANNELS.has(channel) ? DEFAULT_WHATS_NEW_URL : null;
