@@ -56,9 +56,15 @@ test('package exposes core verification scripts', () => {
   assert.ok(pkg.scripts['test:contracts']);
   assert.equal(pkg.scripts['test:fixed-regression'], 'node scripts/fixed-regression-runner.mjs');
   assert.equal(pkg.scripts['test:fixed-regression:list'], 'node scripts/fixed-regression-runner.mjs --list');
+  assert.equal(pkg.scripts['verify:packaged-runtime'], 'node scripts/verify-packaged-runtime.mjs');
   assert.match(pkg.scripts.dist, /^npm run test:fixed-regression && /);
   assert.match(pkg.scripts['dist:win'], /^npm run test:fixed-regression && /);
   assert.ok(pkg.scripts['dist:win'].indexOf('test:fixed-regression') < pkg.scripts['dist:win'].indexOf('electron-builder'));
+  assert.ok(pkg.scripts['dist:win'].indexOf('electron-builder') < pkg.scripts['dist:win'].indexOf('verify:packaged-runtime'));
+  const packagedRuntimeVerifier = read('scripts/verify-packaged-runtime.mjs');
+  assert.match(packagedRuntimeVerifier, /listPackage/);
+  assert.match(packagedRuntimeVerifier, /extract-zip/);
+  assert.match(packagedRuntimeVerifier, /debug/);
 });
 
 test('desktop graphics and window activation keep the P0 fast path wired', () => {
