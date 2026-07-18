@@ -824,6 +824,33 @@ test('NEW-83 appearance font size controls stay wired', () => {
   assert.match(smoke, /new83-code-font-size-applies/);
 });
 
+test('bundled Anthropic typography and compact settings navigation stay wired', () => {
+  const css = read('src/index.css');
+  const theme = read('src/hooks/useTheme.ts');
+  const terminal = read('src/components/terminal/TerminalPanel.tsx');
+  const smoke = read('src/runtime/rendererSmoke.ts');
+  const fontRoot = path.resolve(root, 'src', 'assets', 'fonts');
+
+  for (const file of [
+    'anthropic-sans-web-text.ttf',
+    'anthropic-serif-web-text.ttf',
+    'anthropic-mono-variable.ttf',
+    'noto-serif-sc-variable.ttf',
+  ]) {
+    assert.equal(fs.existsSync(path.join(fontRoot, file)), true, `${file} must be bundled`);
+  }
+  assert.match(css, /@font-face\s*\{[\s\S]*Anthropic Sans Web Text/);
+  assert.match(css, /--font-sans:[^;]*Anthropic Sans Web Text[^;]*Metis Noto Serif SC/);
+  assert.match(css, /--font-prose:[^;]*Anthropic Serif Web Text[^;]*Metis Noto Serif SC/);
+  assert.match(css, /\.welcome-heading\s*\{[\s\S]*font-family:\s*var\(--font-serif\)/);
+  assert.match(css, /\.welcome-subtitle\s*\{[\s\S]*font-family:\s*var\(--font-prose\)/);
+  assert.match(css, /\.settings-nav\s*\{[\s\S]*gap:\s*10px/);
+  assert.match(css, /\.settings-nav button\s*\{[\s\S]*min-height:\s*30px/);
+  assert.match(theme, /official-sans[^\n]*Anthropic Sans Web Text/);
+  assert.match(terminal, /fontFamily:[^\n]*Anthropic Mono Variable/);
+  assert.match(smoke, /bundled-anthropic-fonts-load/);
+});
+
 test('NEW-84 session isolation and shell profiles stay wired', () => {
   const chatStore = read('src/store/chatStore.ts');
   const sseParser = read('src/store/sseParser.ts');

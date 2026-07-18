@@ -237,7 +237,7 @@ export function TerminalPanel({ embedded = false, onRequestClose }: TerminalPane
       cursorBlink: false,
       cursorStyle: 'block',
       disableStdin: true,
-      fontFamily: 'Cascadia Code, Consolas, Microsoft YaHei UI, ui-monospace, monospace',
+      fontFamily: "'Anthropic Mono Variable', 'Metis Noto Serif SC', 'Noto Serif SC', 'Cascadia Code', Consolas, ui-monospace, monospace",
       fontSize: 12,
       lineHeight: 1.5,
       scrollback: 6000,

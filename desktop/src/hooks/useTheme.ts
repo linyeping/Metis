@@ -4,7 +4,7 @@ import type { FontFamily } from '../lib/types';
 import { useUiStore } from '../store/uiStore';
 
 const fontStacks: Record<FontFamily, string> = {
-  'official-sans': "'Anthropic Sans Web Text', 'Inter', 'Segoe UI', 'Microsoft YaHei UI', system-ui, sans-serif",
+  'official-sans': "'Anthropic Sans Web Text', 'Metis Noto Serif SC', 'Noto Serif SC', 'Microsoft YaHei UI', system-ui, sans-serif",
   system: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   'microsoft-yahei': "'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif",
   inter: "'Inter', 'Segoe UI', system-ui, sans-serif",

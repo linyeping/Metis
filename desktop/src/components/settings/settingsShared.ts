@@ -37,7 +37,7 @@ export const settingsNavGroups: SettingsNavGroup[] = [
 ];
 
 export const fontOptions: Array<{ value: FontFamily; label: string; hint: string }> = [
-  { value: 'official-sans', label: '官方 Sans', hint: 'Metis 默认字体栈，英文和中文都优先保证清晰。' },
+  { value: 'official-sans', label: 'Claude 字体', hint: '英文使用 Anthropic 字体，中文使用内置 Noto Serif SC。' },
   { value: 'system', label: '系统默认', hint: '跟随 Windows / 系统 UI 字体。' },
   { value: 'microsoft-yahei', label: '微软雅黑', hint: '中文界面更熟悉，适合长时间阅读。' },
   { value: 'inter', label: 'Inter', hint: '更接近现代开发工具的英文显示。' },

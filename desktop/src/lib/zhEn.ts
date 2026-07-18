@@ -820,8 +820,8 @@ export const zhEn: Record<string, string> = {
   '发送': 'Send',
 
   // —— 设置共享数据/函数 settingsShared (字体/Shell/权限) ——
-  '官方 Sans': 'Official Sans',
-  'Metis 默认字体栈，英文和中文都优先保证清晰。': 'Metis default font stack — clear for both English and Chinese.',
+  'Claude 字体': 'Claude typography',
+  '英文使用 Anthropic 字体，中文使用内置 Noto Serif SC。': 'Anthropic for English and bundled Noto Serif SC for Chinese.',
   '系统默认': 'System default',
   '跟随 Windows / 系统 UI 字体。': 'Follows the Windows / system UI font.',
   '微软雅黑': 'Microsoft YaHei',

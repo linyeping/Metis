@@ -1631,6 +1631,29 @@ async function verifyDeveloperWorkflowPolish(checks: SmokeCheck[]): Promise<void
   ui.setCodeFontSize(14);
   await delay(20);
   const rootStyle = getComputedStyle(document.documentElement);
+  let bundledFontsReady = false;
+  let bundledFontsDetail = '';
+  try {
+    await Promise.all([
+      document.fonts.load('16px "Anthropic Sans Web Text"', 'Metis'),
+      document.fonts.load('16px "Anthropic Serif Web Text"', 'Metis'),
+      document.fonts.load('16px "Anthropic Mono Variable"', 'Metis'),
+      document.fonts.load('16px "Metis Noto Serif SC"', '字体'),
+    ]);
+    bundledFontsReady =
+      document.fonts.check('16px "Anthropic Sans Web Text"', 'Metis') &&
+      document.fonts.check('16px "Anthropic Serif Web Text"', 'Metis') &&
+      document.fonts.check('16px "Anthropic Mono Variable"', 'Metis') &&
+      document.fonts.check('16px "Metis Noto Serif SC"', '字体');
+  } catch (error) {
+    bundledFontsDetail = error instanceof Error ? error.message : String(error);
+  }
+  record(
+    checks,
+    'bundled-anthropic-fonts-load',
+    bundledFontsReady,
+    bundledFontsDetail || document.fonts.status,
+  );
   record(
     checks,
     'new83-ui-font-size-applies',
