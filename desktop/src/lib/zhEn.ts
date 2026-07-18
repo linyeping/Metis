@@ -609,6 +609,8 @@ export const zhEn: Record<string, string> = {
   '切换为引导': 'Switch to steer',
   '切换为排队': 'Switch to queue',
   '删除待处理消息': 'Delete follow-up message',
+  '更多操作': 'More actions',
+  '编辑消息': 'Edit message',
   '已暂停': 'Paused',
   '等待当前步骤': 'Waiting for current step',
   '本轮完成后': 'After this turn',

@@ -1246,12 +1246,16 @@ def test_agent_stream_applies_steering_at_next_safe_model_boundary() -> None:
 def test_agent_stream_processes_queued_followup_in_the_same_run() -> None:
     backend = SteeringBackend()
     queue_calls = 0
+    rich_content = [
+        {"type": "text", "text": "next queued task"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,dGVzdA=="}},
+    ]
 
     def queue_provider() -> List[Dict[str, Any]]:
         nonlocal queue_calls
         queue_calls += 1
         if queue_calls == 1:
-            return [{"id": "followup-queue", "message": "next queued task"}]
+            return [{"id": "followup-queue", "message": "next queued task", "content": rich_content}]
         return []
 
     events = list(
@@ -1270,7 +1274,7 @@ def test_agent_stream_processes_queued_followup_in_the_same_run() -> None:
     assert len(queued) == 1
     assert queued[0].details["followup_ids"] == ["followup-queue"]
     assert backend.calls == 2
-    assert any(message.get("role") == "user" and message.get("content") == "next queued task" for message in backend.requests[1])
+    assert any(message.get("role") == "user" and message.get("content") == rich_content for message in backend.requests[1])
 
 
 def test_run_followup_api_limits_updates_and_consumes_steering(
@@ -1285,18 +1289,44 @@ def test_run_followup_api_limits_updates_and_consumes_steering(
         assert created.status_code == 200
         run_id = created.get_json()["run_id"]
 
-        for index in range(5):
+        for index in range(10):
+            payload = {
+                "id": f"followup-{index}",
+                "message": f"message {index}",
+                "behavior": "queue",
+            }
+            if index == 0:
+                payload.update({
+                    "draft_text": "message 0",
+                    "content": [
+                        {"type": "text", "text": "message 0"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,dGVzdA=="}},
+                    ],
+                    "attachments": [{
+                        "path": "memory://queued.png",
+                        "name": "queued.png",
+                        "kind": "image",
+                        "mime": "image/png",
+                        "dataUrl": "data:image/png;base64,dGVzdA==",
+                    }],
+                })
             added = client.post(
                 f"/runs/{run_id}/followups",
-                json={"id": f"followup-{index}", "message": f"message {index}", "behavior": "queue"},
+                json=payload,
             )
             assert added.status_code == 200
+            if index == 0:
+                followup = added.get_json()["followup"]
+                assert followup["draft_text"] == "message 0"
+                assert followup["content"][1]["type"] == "image_url"
+                assert followup["attachments"][0]["name"] == "queued.png"
 
         full = client.post(
             f"/runs/{run_id}/followups",
             json={"id": "followup-overflow", "message": "overflow", "behavior": "queue"},
         )
         assert full.status_code == 409
+        assert full.get_json()["max_followups"] == 10
 
         changed = client.patch(
             f"/runs/{run_id}/followups/followup-0",
@@ -1312,6 +1342,8 @@ def test_run_followup_api_limits_updates_and_consumes_steering(
     assert run is not None
     consumed = web_app._consume_run_steering(run)
     assert [item["id"] for item in consumed] == ["followup-0"]
+    assert consumed[0]["content"][1]["type"] == "image_url"
+    assert consumed[0]["attachments"][0]["name"] == "queued.png"
     assert next(item for item in run["followups"] if item["id"] == "followup-0")["status"] == "applied"
     queued = web_app._consume_run_queue(run)
     assert [item["id"] for item in queued] == ["followup-2"]

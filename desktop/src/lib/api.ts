@@ -3109,7 +3109,14 @@ export async function cancelChatRun(runId: string): Promise<ChatRunPayload> {
 
 export async function createRunFollowup(
   runId: string,
-  body: { id: string; message: string; behavior: 'queue' | 'steer' },
+  body: {
+    id: string;
+    message: string;
+    draftText?: string;
+    content?: unknown;
+    attachments?: ParsedFile[];
+    behavior: 'queue' | 'steer';
+  },
 ): Promise<ChatRunFollowup> {
   const data = await requestJson<Record<string, unknown>>(`/runs/${encodeURIComponent(runId)}/followups`, {
     method: 'POST',
@@ -3321,13 +3328,41 @@ function chatRunFromRecord(data: Record<string, unknown>): ChatRunPayload {
 
 function chatRunFollowupFromRecord(data: Record<string, unknown>): ChatRunFollowup {
   const behavior = stringValue(data.behavior) === 'steer' ? 'steer' : 'queue';
+  const draftTextValue = data.draft_text ?? data.draftText;
   return {
     id: stringValue(data.id),
     message: stringValue(data.message),
+    draftText: draftTextValue === undefined || draftTextValue === null ? undefined : stringValue(draftTextValue),
+    content: data.content,
+    attachments: Array.isArray(data.attachments)
+      ? data.attachments.map(item => parsedFollowupAttachment(recordValue(item))).filter((item): item is ParsedFile => Boolean(item))
+      : [],
     behavior,
     status: stringValue(data.status) || 'pending',
     createdAt: numberValue(data.created_at ?? data.createdAt),
     updatedAt: numberValue(data.updated_at ?? data.updatedAt),
+  };
+}
+
+function parsedFollowupAttachment(data: Record<string, unknown>): ParsedFile | null {
+  const path = stringValue(data.path);
+  const name = stringValue(data.name);
+  if (!path || !name) return null;
+  const kind = stringValue(data.kind) === 'image' ? 'image' : 'document';
+  const statusValue = stringValue(data.status);
+  const status = statusValue === 'parsing' || statusValue === 'error' ? statusValue : 'ready';
+  return {
+    path,
+    name,
+    extension: stringValue(data.extension),
+    size: numberValue(data.size),
+    kind,
+    mime: stringValue(data.mime),
+    text: stringValue(data.text),
+    dataUrl: stringValue(data.data_url ?? data.dataUrl) || undefined,
+    status,
+    error: stringValue(data.error) || undefined,
+    truncated: Boolean(data.truncated),
   };
 }
 

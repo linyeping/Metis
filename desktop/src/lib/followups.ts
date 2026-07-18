@@ -1,0 +1,2 @@
+export const MAX_PENDING_FOLLOWUPS = 10;
+export const VISIBLE_PENDING_FOLLOWUPS = 5;

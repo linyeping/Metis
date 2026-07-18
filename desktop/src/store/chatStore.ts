@@ -27,6 +27,7 @@ import {
   updateRunFollowup,
 } from '../lib/api';
 import { buildUserContent } from '../lib/chatUtils';
+import { MAX_PENDING_FOLLOWUPS } from '../lib/followups';
 import type {
   ChatMemoryNotice,
   ChatMessage,
@@ -153,10 +154,11 @@ interface ChatState {
   rewindLatest: () => Promise<void>;
   rewindToMessage: (messageId: string) => Promise<void>;
   undoLastTurn: () => Promise<void>;
-  send: (overrideText?: string) => Promise<void>;
+  send: (overrideText?: string, overrideAttachments?: ParsedFile[]) => Promise<void>;
   submitFollowup: (behaviorOverride?: ChatFollowupBehavior) => Promise<void>;
   setFollowupBehavior: (behavior: ChatFollowupBehavior) => void;
   updateFollowupBehavior: (followupId: string, behavior: ChatFollowupBehavior) => Promise<void>;
+  editFollowup: (followupId: string) => Promise<void>;
   removeFollowup: (followupId: string) => Promise<void>;
   runNextFollowup: (sessionId?: string) => Promise<void>;
   stop: () => void;
@@ -432,9 +434,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       void refreshSessionHints(sessionId, { includeAway: true });
     }
   },
-  send: async overrideText => {
+  send: async (overrideText, overrideAttachments) => {
     const text = (overrideText ?? get().composerText).trim();
-    const allAttachments = get().attachments;
+    const allAttachments = overrideAttachments ?? get().attachments;
     const attachments = allAttachments.filter(attachment => attachmentReady(attachment));
     if (allAttachments.some(attachment => attachment.status === 'parsing')) return;
     let sessionId = useSessionStore.getState().activeSessionId;
@@ -586,21 +588,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const sessionId = useSessionStore.getState().activeSessionId;
     const state = get();
     const text = state.composerText.trim();
-    if (!sessionId || !state.streaming || !text) return;
-    if (state.attachments.length > 0) {
-      useUiStore.getState().pushToast({
-        title: '运行中消息暂不支持附件',
-        description: '请等待当前任务结束后再发送附件。',
-        type: 'warning',
-        sessionId,
-      });
-      return;
-    }
+    const attachments = state.attachments.filter(attachment => attachmentReady(attachment));
+    if (!sessionId || !state.streaming || (!text && attachments.length === 0)) return;
+    if (state.attachments.some(attachment => attachment.status === 'parsing')) return;
     const existing = state.followupsBySession[sessionId] || [];
-    if (existing.filter(item => item.status === 'pending' || item.status === 'paused').length >= 5) {
+    if (existing.filter(item => item.status === 'pending' || item.status === 'paused').length >= MAX_PENDING_FOLLOWUPS) {
       useUiStore.getState().pushToast({
         title: '待处理消息已满',
-        description: '最多保留 5 条，请先删除或等待一条消息被处理。',
+        description: `最多保留 ${MAX_PENDING_FOLLOWUPS} 条，请先删除或等待一条消息被处理。`,
         type: 'warning',
         sessionId,
       });
@@ -617,9 +612,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
     const behavior = behaviorOverride || state.followupBehavior;
+    const displayMessage = buildUserDisplayContent(text, attachments);
     const optimistic: PendingChatFollowup = {
       id: `followup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      message: text,
+      message: displayMessage,
+      draftText: text,
+      content: buildUserContent(text, attachments),
+      attachments,
       behavior,
       status: 'pending',
       createdAt: Date.now() / 1000,
@@ -628,6 +627,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     set(current => ({
       composerText: '',
+      attachments: [],
       followupsBySession: {
         ...current.followupsBySession,
         [sessionId]: [...(current.followupsBySession[sessionId] || []), optimistic],
@@ -637,12 +637,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const saved = await createRunFollowup(activeRun.runId, {
         id: optimistic.id,
         message: optimistic.message,
+        draftText: optimistic.draftText,
+        content: optimistic.content,
+        attachments: optimistic.attachments,
         behavior: optimistic.behavior,
       });
       replaceFollowup(sessionId, optimistic.id, { ...saved, runId: activeRun.runId });
     } catch (error) {
       removeFollowupLocal(sessionId, optimistic.id);
-      set(current => ({ composerText: current.composerText.trim() ? current.composerText : text }));
+      set(current => ({
+        composerText: current.composerText.trim() ? current.composerText : text,
+        attachments: current.attachments.length > 0 ? current.attachments : attachments,
+      }));
       useUiStore.getState().pushToast({
         title: '消息未加入待处理区',
         description: formatError(error),
@@ -663,6 +669,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (error) {
       replaceFollowup(sessionId, followupId, item);
       useUiStore.getState().pushToast({ title: '无法切换处理方式', description: formatError(error), type: 'error', sessionId });
+    }
+  },
+  editFollowup: async followupId => {
+    const sessionId = useSessionStore.getState().activeSessionId;
+    if (!sessionId) return;
+    const item = (get().followupsBySession[sessionId] || []).find(candidate => candidate.id === followupId);
+    if (!item || (item.status !== 'pending' && item.status !== 'paused')) return;
+    try {
+      if (item.runId) await deleteRunFollowup(item.runId, item.id);
+      removeFollowupLocal(sessionId, followupId);
+      set({
+        composerText: item.draftText ?? item.message,
+        attachments: item.attachments || [],
+        followupBehavior: item.behavior,
+      });
+    } catch (error) {
+      useUiStore.getState().pushToast({
+        title: '无法编辑待处理消息',
+        description: formatError(error),
+        type: 'error',
+        sessionId,
+      });
     }
   },
   removeFollowup: async followupId => {
@@ -697,7 +725,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     removeFollowupLocal(sessionId, next.id);
     if (next.runId) void deleteRunFollowup(next.runId, next.id).catch(() => null);
     set(state => ({ pausedFollowupSessions: { ...state.pausedFollowupSessions, [sessionId]: false } }));
-    await get().send(next.message);
+    await get().send(next.draftText ?? next.message, next.attachments || []);
   },
   stop: () => {
     const sessionId = get().runSessionId || useSessionStore.getState().activeSessionId;
@@ -810,6 +838,9 @@ async function syncFollowupsToRun(sessionId: string, runId: string): Promise<voi
       const saved = await createRunFollowup(runId, {
         id: item.id,
         message: item.message,
+        draftText: item.draftText,
+        content: item.content,
+        attachments: item.attachments,
         behavior: item.behavior,
       });
       replaceFollowup(sessionId, item.id, { ...saved, runId });

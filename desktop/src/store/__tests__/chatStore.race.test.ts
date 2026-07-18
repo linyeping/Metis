@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, ChatRunPayload, Session } from '../../lib/types';
+import type { ChatMessage, ChatRunPayload, ParsedFile, Session } from '../../lib/types';
 
 vi.mock('../../lib/api', () => ({
   cancelChatRun: vi.fn(async () => runPayload({ status: 'canceled' })),
   chatStream: vi.fn(async () => undefined),
   compactConversation: vi.fn(async () => ({})),
   createRun: vi.fn(async () => runPayload()),
-  createRunFollowup: vi.fn(async (_runId: string, body: { id: string; message: string; behavior: 'queue' | 'steer' }) => ({ ...body, status: 'pending', createdAt: 1, updatedAt: 1 })),
+  createRunFollowup: vi.fn(async (_runId: string, body: { id: string; message: string; draftText?: string; content?: unknown; attachments?: ParsedFile[]; behavior: 'queue' | 'steer' }) => ({ ...body, status: 'pending', createdAt: 1, updatedAt: 1 })),
   createSession: vi.fn(async () => sessionMeta('session-new')),
   deleteRunFollowup: vi.fn(async () => undefined),
   deleteSession: vi.fn(async () => undefined),
@@ -136,6 +136,61 @@ describe('chatStore loadSession runtime correctness', () => {
     expect(useChatStore.getState().composerText).toBe('');
     expect(useChatStore.getState().followupsBySession['session-1']).toHaveLength(1);
     expect(useChatStore.getState().followupsBySession['session-1'][0].behavior).toBe('queue');
+  });
+
+  it('queues rich follow-up content and restores attachments when editing', async () => {
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    const controller = new AbortController();
+    const attachment = parsedImage('queued-image.png');
+    setActiveRunController('session-1', { assistantId: 'assistant-1', controller, runId: 'run-1' });
+    useChatStore.setState({
+      composerText: 'check this image',
+      attachments: [attachment],
+      streaming: true,
+      runSessionId: 'session-1',
+      controller,
+    });
+
+    await useChatStore.getState().submitFollowup('steer');
+
+    expect(api.createRunFollowup).toHaveBeenCalledWith('run-1', expect.objectContaining({
+      message: 'check this image',
+      draftText: 'check this image',
+      attachments: [attachment],
+      content: expect.arrayContaining([
+        expect.objectContaining({ type: 'text', text: 'check this image' }),
+        expect.objectContaining({ type: 'image_url' }),
+      ]),
+      behavior: 'steer',
+    }));
+    const queued = useChatStore.getState().followupsBySession['session-1'][0];
+    expect(useChatStore.getState().attachments).toEqual([]);
+
+    await useChatStore.getState().editFollowup(queued.id);
+
+    expect(api.deleteRunFollowup).toHaveBeenCalledWith('run-1', queued.id);
+    expect(useChatStore.getState().followupsBySession['session-1']).toEqual([]);
+    expect(useChatStore.getState().composerText).toBe('check this image');
+    expect(useChatStore.getState().attachments).toEqual([attachment]);
+    expect(useChatStore.getState().followupBehavior).toBe('steer');
+  });
+
+  it('accepts ten pending follow-ups and rejects the eleventh', async () => {
+    useSessionStore.setState({ activeSessionId: 'session-1' });
+    const controller = new AbortController();
+    setActiveRunController('session-1', { assistantId: 'assistant-1', controller, runId: 'run-1' });
+    useChatStore.setState({ streaming: true, runSessionId: 'session-1', controller });
+
+    for (let index = 0; index < 10; index += 1) {
+      useChatStore.setState({ composerText: `queued ${index}` });
+      await useChatStore.getState().submitFollowup('queue');
+    }
+    useChatStore.setState({ composerText: 'overflow' });
+    await useChatStore.getState().submitFollowup('queue');
+
+    expect(useChatStore.getState().followupsBySession['session-1']).toHaveLength(10);
+    expect(api.createRunFollowup).toHaveBeenCalledTimes(10);
+    expect(useChatStore.getState().composerText).toBe('overflow');
   });
 
   it('stopping pauses queued work and converts unapplied steering to queue', async () => {
@@ -356,6 +411,20 @@ function runPayload(overrides: Partial<ChatRunPayload> = {}): ChatRunPayload {
     lastSeq: 0,
     error: '',
     ...overrides,
+  };
+}
+
+function parsedImage(name: string): ParsedFile {
+  return {
+    path: `memory://${name}`,
+    name,
+    extension: '.png',
+    size: 4,
+    kind: 'image',
+    mime: 'image/png',
+    text: '',
+    dataUrl: 'data:image/png;base64,dGVzdA==',
+    status: 'ready',
   };
 }
 

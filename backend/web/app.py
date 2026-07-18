@@ -1950,6 +1950,13 @@ def _run_followup_public_payload(item: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": str(item.get("id") or ""),
         "message": str(item.get("message") or ""),
+        "draft_text": str(item.get("draft_text") or ""),
+        "content": item.get("content", item.get("message") or ""),
+        "attachments": [
+            dict(attachment)
+            for attachment in list(item.get("attachments") or [])[:5]
+            if isinstance(attachment, dict)
+        ],
         "behavior": str(item.get("behavior") or "queue"),
         "status": str(item.get("status") or "pending"),
         "created_at": float(item.get("created_at") or 0),
@@ -3403,6 +3410,16 @@ def create_run_followup(run_id: str) -> Any:
         return jsonify({"ok": False, "error": "run not found"}), 404
     data = request.get_json(silent=True) or {}
     message = str(data.get("message") or "").strip()
+    raw_draft_text = data.get("draft_text", data.get("draftText"))
+    draft_text = str(message if raw_draft_text is None else raw_draft_text)
+    content = data.get("content")
+    if content is None:
+        content = message
+    attachments = [
+        dict(attachment)
+        for attachment in list(data.get("attachments") or [])[:5]
+        if isinstance(attachment, dict)
+    ]
     behavior = str(data.get("behavior") or "queue").strip().lower()
     if not message:
         return jsonify({"ok": False, "error": "follow-up message is required"}), 400
@@ -3416,12 +3433,15 @@ def create_run_followup(run_id: str) -> Any:
             for item in list(run.get("followups") or [])
             if isinstance(item, dict) and str(item.get("status") or "pending") == "pending"
         )
-        if pending_count >= 5:
-            return jsonify({"ok": False, "error": "follow-up queue is full", "max_followups": 5}), 409
+        if pending_count >= 10:
+            return jsonify({"ok": False, "error": "follow-up queue is full", "max_followups": 10}), 409
         now = time.time()
         item = {
             "id": str(data.get("id") or data.get("followup_id") or uuid.uuid4().hex),
             "message": message,
+            "draft_text": draft_text,
+            "content": content,
+            "attachments": attachments,
             "behavior": behavior,
             "status": "pending",
             "created_at": now,

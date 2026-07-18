@@ -757,6 +757,9 @@ export type ChatFollowupStatus = 'pending' | 'applied' | 'sending' | 'paused' | 
 export interface ChatRunFollowup {
   id: string;
   message: string;
+  draftText?: string;
+  content?: unknown;
+  attachments?: ParsedFile[];
   behavior: ChatFollowupBehavior;
   status: ChatFollowupStatus;
   createdAt: number;

@@ -189,7 +189,7 @@ export function Composer() {
   const pendingAttachment = attachments.some(file => file.status === 'parsing');
   const readyAttachmentCount = attachments.filter(file => !file.status || file.status === 'ready').length;
   const sendDisabled = pendingAttachment
-    || (streaming ? !text.trim() || attachments.length > 0 : !text.trim() && readyAttachmentCount === 0);
+    || (!text.trim() && readyAttachmentCount === 0);
   const sendReady = !sendDisabled;
   const showPromptSuggestions = promptSuggestions.length > 0 && !text.trim() && !streaming;
   const isCodeMode = appMode === 'code';

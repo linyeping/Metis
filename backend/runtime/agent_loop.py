@@ -2310,7 +2310,10 @@ def _append_steering_messages(
     items: List[Dict[str, Any]],
 ) -> None:
     for item in items:
-        working_messages.append({"role": "user", "content": str(item.get("message") or "").strip()})
+        content = item.get("content")
+        if content is None:
+            content = str(item.get("message") or "").strip()
+        working_messages.append({"role": "user", "content": content})
 
 
 def _steering_applied_event(
