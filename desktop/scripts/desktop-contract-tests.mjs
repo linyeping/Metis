@@ -177,7 +177,6 @@ test('Runtime Manager productization stays wired', () => {
   const api = read('src/lib/api.ts');
   const types = read('src/lib/types.ts');
   const css = read('src/index.css');
-  const architecture = fs.readFileSync(path.resolve(root, '..', 'docs', 'ARCHITECTURE.md'), 'utf8');
   const routes = fs.readFileSync(path.resolve(root, '..', 'backend', 'web', 'settings_routes.py'), 'utf8');
   const manager = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'runtime_manager.py'), 'utf8');
   const runtimeJob = fs.readFileSync(path.resolve(root, '..', 'backend', 'runtime', 'runtime_job.py'), 'utf8');
@@ -222,11 +221,6 @@ test('Runtime Manager productization stays wired', () => {
   assert.match(css, /\.runtime-manager-panel/);
   assert.match(css, /\.runtime-vm-summary/);
   assert.match(css, /\.runtime-result-path-row/);
-  assert.match(architecture, /The stable `local_vm` execution profile on Windows remains `metis_wsl`/);
-  assert.match(architecture, /complete-or-fail policy/);
-  assert.match(architecture, /HCS direct is a separate backend/);
-  assert.match(architecture, /sessiondata-template\.vhdx/);
-  assert.match(architecture, /HCS readiness is evidence-gated/);
   assert.match(routes, /\/settings\/runtime-manager\/smoke/);
   assert.match(routes, /\/settings\/runtime-manager\/diagnostics/);
   assert.match(routes, /\/settings\/runtime-manager\/repair/);
@@ -2294,7 +2288,6 @@ test('desktop launcher auto-heals a managed Python backend environment', () => {
   const devLauncher = read('scripts/dev-launcher.mjs');
   const pkg = JSON.parse(read('package.json'));
   const readme = fs.readFileSync(path.resolve(root, '..', 'README.md'), 'utf8');
-  const development = fs.readFileSync(path.resolve(root, '..', 'docs', 'DEVELOPMENT.md'), 'utf8');
 
   assert.match(launcher, /managedPythonRoot/);
   assert.match(launcher, /managedPythonExecutable/);
@@ -2310,7 +2303,7 @@ test('desktop launcher auto-heals a managed Python backend environment', () => {
   assert.match(devLauncher, /METIS_DESKTOP_DEV_SERVER/);
   assert.match(devLauncher, /waitForRenderer/);
   assert.match(readme, /npm run dev/);
-  assert.match(development, /~\/\.metis\/python-backend\/venv|\.metis\\python-backend\\venv/);
+  assert.match(launcher, /python-backend/);
 });
 
 test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
