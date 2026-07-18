@@ -65,8 +65,13 @@ const {
   petWindowSize
 } = require('./pet-runtime.cjs')
 const { extractPetZip, findPetDirectories, inspectPetDirectory } = require('./pet-package.cjs')
+const {
+  appUserModelId,
+  cleanupConflictingElectronShortcut
+} = require('./windows-app-identity.cjs')
 
-const APP_USER_MODEL_ID = 'com.metis.app'
+const APP_USER_MODEL_ID = appUserModelId(app.isPackaged)
+const WINDOWS_IDENTITY_VERIFY = process.argv.includes('--metis-windows-identity-verify')
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
 
 protocol.registerSchemesAsPrivileged([{
@@ -3929,7 +3934,7 @@ async function createWindow() {
     for (const event of bootEvents) {
       mainWindow?.webContents.send('metis:boot-event', event)
     }
-    if (bootStatus === 'idle') {
+    if (bootStatus === 'idle' && !WINDOWS_IDENTITY_VERIFY) {
       void startBackendWithEvents()
     }
   })
@@ -5759,6 +5764,17 @@ app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) {
     return
   }
+  const shortcutCleanup = cleanupConflictingElectronShortcut({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    appDataPath: app.getPath('appData'),
+    electronShell: shell
+  })
+  if (shortcutCleanup.removed) {
+    log(`[identity] removed conflicting development shortcut ${shortcutCleanup.shortcutPath}`)
+  } else if (shortcutCleanup.error) {
+    log(`[identity] shortcut cleanup failed: ${shortcutCleanup.error}`)
+  }
   nativeTheme.themeSource = 'system'
   registerCustomPetProtocol()
   loadCloseBehavior()
@@ -5766,6 +5782,10 @@ app.whenReady().then(async () => {
   loadPetConfig()
   migrateApiKeyToSafeStorage()
   await createWindow()
+  if (WINDOWS_IDENTITY_VERIFY) {
+    setTimeout(() => app.quit(), 45000).unref()
+    return
+  }
   if (petConfig.enabled) await createPetWindow()
   createTray()
   configureAutoUpdates()

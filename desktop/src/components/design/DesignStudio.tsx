@@ -43,7 +43,7 @@ export function DesignStudio() {
     };
   }, [activePagePath, productSurface]);
 
-  const retry = () => openPage(activePagePath || '/projects', studioTitle || (zh ? '项目' : 'Projects'));
+  const retry = () => openPage(activePagePath || '/', studioTitle || (zh ? '主页' : 'Home'));
 
   return (
     <div className="design-studio">

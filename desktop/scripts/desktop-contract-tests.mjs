@@ -57,10 +57,12 @@ test('package exposes core verification scripts', () => {
   assert.equal(pkg.scripts['test:fixed-regression'], 'node scripts/fixed-regression-runner.mjs');
   assert.equal(pkg.scripts['test:fixed-regression:list'], 'node scripts/fixed-regression-runner.mjs --list');
   assert.equal(pkg.scripts['verify:packaged-runtime'], 'node scripts/verify-packaged-runtime.mjs');
+  assert.equal(pkg.scripts['verify:windows-identity'], 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-identity.ps1');
   assert.match(pkg.scripts.dist, /^npm run test:fixed-regression && /);
   assert.match(pkg.scripts['dist:win'], /^npm run test:fixed-regression && /);
   assert.ok(pkg.scripts['dist:win'].indexOf('test:fixed-regression') < pkg.scripts['dist:win'].indexOf('electron-builder'));
   assert.ok(pkg.scripts['dist:win'].indexOf('electron-builder') < pkg.scripts['dist:win'].indexOf('verify:packaged-runtime'));
+  assert.ok(pkg.scripts['dist:win'].indexOf('verify:packaged-runtime') < pkg.scripts['dist:win'].indexOf('verify:windows-identity'));
   const packagedRuntimeVerifier = read('scripts/verify-packaged-runtime.mjs');
   assert.match(packagedRuntimeVerifier, /listPackage/);
   assert.match(packagedRuntimeVerifier, /extract-zip/);
@@ -69,6 +71,7 @@ test('package exposes core verification scripts', () => {
 
 test('desktop graphics and window activation keep the P0 fast path wired', () => {
   const main = read('electron/main.cjs');
+  const identity = read('electron/windows-app-identity.cjs');
   const graphics = read('electron/graphics-mode.cjs');
   const thread = read('src/components/chat/MetisThread.tsx');
   const backdrop = read('src/assets/cowork-dotwave-b.html');
@@ -81,8 +84,13 @@ test('desktop graphics and window activation keep the P0 fast path wired', () =>
   assert.match(main, /showWindow\('second-instance'\)/);
   assert.match(main, /showWindow\('main-frame-loaded'\)/);
   assert.match(main, /mainWindow\.moveTop\(\)/);
-  assert.match(main, /const APP_USER_MODEL_ID = 'com\.metis\.app'/);
+  assert.match(identity, /const PROD_APP_USER_MODEL_ID = 'com\.metis\.app'/);
+  assert.match(identity, /const DEV_APP_USER_MODEL_ID = 'com\.metis\.app\.dev'/);
+  assert.match(main, /const APP_USER_MODEL_ID = appUserModelId\(app\.isPackaged\)/);
   assert.ok(main.indexOf('app.setAppUserModelId(APP_USER_MODEL_ID)') < main.indexOf('app.whenReady()'));
+  assert.match(main, /cleanupConflictingElectronShortcut\(/);
+  assert.match(identity, /details\.appUserModelId !== PROD_APP_USER_MODEL_ID/);
+  assert.match(identity, /node_modules\\\\electron\\\\dist\\\\electron\.exe/);
   assert.match(main, /function windowIconPath\(\)/);
   assert.match(main, /process\.platform === 'win32' \? 'logo\.ico' : 'logo\.png'/);
   assert.match(main, /icon: windowIconPath\(\)/);
@@ -466,6 +474,15 @@ test('Design titlebar keeps only the Metis return action and window controls', (
   assert.match(titlebar, /className="titlebar-design-back"/);
   assert.match(titlebar, /setProductSurface\('assistant'\)/);
   assert.match(titlebar, /appMode === 'chat' && !designActive/);
+});
+
+test('Metis Design opens its creation home instead of the project list', () => {
+  const store = read('src/store/designStore.ts');
+  const studio = read('src/components/design/DesignStudio.tsx');
+
+  assert.match(store, /state\.openPage\('\/', language === 'en' \? 'Home' : '主页'\)/);
+  assert.doesNotMatch(store, /state\.openPage\('\/projects'/);
+  assert.match(studio, /activePagePath \|\| '\/'/);
 });
 
 test('managed Metis Design never exposes the upstream Open Design release card', () => {

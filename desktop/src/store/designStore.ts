@@ -48,7 +48,7 @@ export const useDesignStore = create<DesignState>((set, get) => ({
       if (runtime.state === 'ready') {
         const state = get();
         if (!state.activePagePath) {
-          await state.openPage('/projects', language === 'en' ? 'Projects' : '项目');
+          await state.openPage('/', language === 'en' ? 'Home' : '主页');
         }
       }
     } catch (error) {
