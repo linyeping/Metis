@@ -143,10 +143,12 @@ New-Item -ItemType Directory -Path $probeUserData, $probeHome -Force | Out-Null
 
 $previousMetisHome = $env:METIS_HOME
 $previousMetisDataRoot = $env:METIS_DATA_ROOT
+$previousIdentityVerify = $env:METIS_WINDOWS_IDENTITY_VERIFY
 $process = $null
 try {
   $env:METIS_HOME = $probeHome
   $env:METIS_DATA_ROOT = $probeRoot
+  $env:METIS_WINDOWS_IDENTITY_VERIFY = "1"
   $process = Start-Process -FilePath $exePath -ArgumentList @(
     "--metis-windows-identity-verify",
     "--user-data-dir=$probeUserData"
@@ -220,6 +222,7 @@ try {
   }
   $env:METIS_HOME = $previousMetisHome
   $env:METIS_DATA_ROOT = $previousMetisDataRoot
+  $env:METIS_WINDOWS_IDENTITY_VERIFY = $previousIdentityVerify
   Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 

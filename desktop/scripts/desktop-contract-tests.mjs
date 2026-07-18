@@ -90,6 +90,7 @@ test('desktop graphics and window activation keep the P0 fast path wired', () =>
   assert.ok(main.indexOf('app.setAppUserModelId(APP_USER_MODEL_ID)') < main.indexOf('app.whenReady()'));
   assert.match(main, /cleanupConflictingElectronShortcut\(/);
   assert.match(main, /isSmokeMode \|\| WINDOWS_IDENTITY_VERIFY \|\| app\.requestSingleInstanceLock\(\)/);
+  assert.match(main, /process\.env\.METIS_WINDOWS_IDENTITY_VERIFY === '1'/);
   assert.match(identity, /details\.appUserModelId !== PROD_APP_USER_MODEL_ID/);
   assert.match(identity, /node_modules\\\\electron\\\\dist\\\\electron\.exe/);
   assert.match(main, /function windowIconPath\(\)/);

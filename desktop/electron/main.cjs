@@ -71,7 +71,8 @@ const {
 } = require('./windows-app-identity.cjs')
 
 const APP_USER_MODEL_ID = appUserModelId(app.isPackaged)
-const WINDOWS_IDENTITY_VERIFY = process.argv.includes('--metis-windows-identity-verify')
+const WINDOWS_IDENTITY_VERIFY = process.env.METIS_WINDOWS_IDENTITY_VERIFY === '1'
+  || process.argv.includes('--metis-windows-identity-verify')
 if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID)
 
 protocol.registerSchemesAsPrivileged([{
