@@ -1294,6 +1294,9 @@ test('NEW-53 permission center productization stays wired', () => {
   assert.match(css, /\.permission-filter/);
   assert.match(css, /\.permission-summary-grid/);
   assert.match(css, /\.composer-access-menu/);
+  assert.match(css, /\.composer-access-menu\[data-cowork='true'\][\s\S]*background:\s*color-mix\(in srgb, var\(--bg-elevated\)/);
+  assert.match(css, /\.composer-access-option\[data-cowork='true'\][\s\S]*color:\s*var\(--text\)/);
+  assert.doesNotMatch(css, /\.composer-access-menu\[data-cowork='true'\][\s\S]{0,420}background:\s*#3a3934/);
   assert.match(smoke, /new53-permission-center-visible/);
   assert.match(smoke, /composer-access-bypass-persists-rule/);
   assert.match(smoke, /composer-access-auto-removes-owned-rule/);

@@ -7426,9 +7426,9 @@ button.message-attachment-card:focus-visible {
   gap: 0;
   padding: 6px;
   border-radius: var(--radius-xl);
-  border-color: color-mix(in srgb, #5d5341 68%, var(--border));
-  background: #3a3934;
-  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.34);
+  border-color: color-mix(in srgb, var(--border) 82%, var(--accent));
+  background: color-mix(in srgb, var(--bg-elevated) 96%, var(--bg));
+  box-shadow: var(--shadow-lg), var(--edge-highlight);
 }
 
 .composer-access-option:hover,
@@ -7441,16 +7441,16 @@ button.message-attachment-card:focus-visible {
   gap: var(--space-2);
   min-height: 0;
   padding: 8px 8px 8px 8px;
-  color: #f5f2eb;
+  color: var(--text);
 }
 
 .composer-access-option[data-cowork='true'] + .composer-access-option[data-cowork='true'] {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
 }
 
 .composer-access-option[data-cowork='true']:hover,
 .composer-access-option[data-cowork='true'][data-active='true'] {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--accent-soft) 74%, var(--bg-elevated));
 }
 
 .composer-access-check {
@@ -7464,7 +7464,7 @@ button.message-attachment-card:focus-visible {
 .composer-access-option[data-cowork='true'] .composer-access-check {
   justify-self: center;
   grid-column: 1;
-  color: #7fb0ff;
+  color: var(--accent-strong);
 }
 
 .composer-access-option-icon {
@@ -7476,7 +7476,7 @@ button.message-attachment-card:focus-visible {
 }
 
 .composer-access-option[data-cowork='true'] .composer-access-option-icon {
-  color: #f0eee8;
+  color: var(--text-muted);
   grid-column: 2;
   align-self: center;
 }
@@ -7486,7 +7486,7 @@ button.message-attachment-card:focus-visible {
 }
 
 .composer-access-option[data-cowork='true'][data-active='true'] .composer-access-option-icon {
-  color: #ffffff;
+  color: var(--text);
 }
 
 .composer-access-option-copy {
@@ -7511,7 +7511,7 @@ button.message-attachment-card:focus-visible {
 }
 
 .composer-access-option[data-cowork='true'] .composer-access-option-copy small {
-  color: rgba(240, 237, 230, 0.64);
+  color: var(--text-muted);
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
