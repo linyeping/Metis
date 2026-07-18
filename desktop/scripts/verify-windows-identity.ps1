@@ -142,9 +142,11 @@ $shortcutResultPath = Join-Path $probeRoot "shortcut-result.json"
 New-Item -ItemType Directory -Path $probeUserData, $probeHome -Force | Out-Null
 
 $previousMetisHome = $env:METIS_HOME
+$previousMetisDataRoot = $env:METIS_DATA_ROOT
 $process = $null
 try {
   $env:METIS_HOME = $probeHome
+  $env:METIS_DATA_ROOT = $probeRoot
   $process = Start-Process -FilePath $exePath -ArgumentList @(
     "--metis-windows-identity-verify",
     "--user-data-dir=$probeUserData"
@@ -217,6 +219,7 @@ try {
     $process.WaitForExit(5000) | Out-Null
   }
   $env:METIS_HOME = $previousMetisHome
+  $env:METIS_DATA_ROOT = $previousMetisDataRoot
   Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 

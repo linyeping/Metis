@@ -292,11 +292,11 @@ if (!process.env.METIS_DESIGN_TOKEN) process.env.METIS_DESIGN_TOKEN = randomUUID
 if (!process.env.METIS_DESIGN_ROOT) process.env.METIS_DESIGN_ROOT = path.join(storageInfo.metisHome, 'design', 'projects')
 
 const isSmokeMode = process.env.METIS_DESKTOP_SMOKE === '1'
-const gotSingleInstanceLock = isSmokeMode || app.requestSingleInstanceLock()
+const gotSingleInstanceLock = isSmokeMode || WINDOWS_IDENTITY_VERIFY || app.requestSingleInstanceLock()
 
 if (!gotSingleInstanceLock) {
   app.quit()
-} else if (!isSmokeMode) {
+} else if (!isSmokeMode && !WINDOWS_IDENTITY_VERIFY) {
   app.on('second-instance', () => {
     showWindow('second-instance')
   })
