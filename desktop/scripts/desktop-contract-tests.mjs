@@ -64,9 +64,12 @@ test('package exposes core verification scripts', () => {
   assert.ok(pkg.scripts['dist:win'].indexOf('electron-builder') < pkg.scripts['dist:win'].indexOf('verify:packaged-runtime'));
   assert.ok(pkg.scripts['dist:win'].indexOf('verify:packaged-runtime') < pkg.scripts['dist:win'].indexOf('verify:windows-identity'));
   const packagedRuntimeVerifier = read('scripts/verify-packaged-runtime.mjs');
+  const windowsIdentityVerifier = read('scripts/verify-windows-identity.ps1');
   assert.match(packagedRuntimeVerifier, /listPackage/);
   assert.match(packagedRuntimeVerifier, /extract-zip/);
   assert.match(packagedRuntimeVerifier, /debug/);
+  assert.match(windowsIdentityVerifier, /--metis-graphics-mode=software/);
+  assert.match(windowsIdentityVerifier, /\.ExecutablePath -eq \$exePath/);
 });
 
 test('desktop graphics and window activation keep the P0 fast path wired', () => {

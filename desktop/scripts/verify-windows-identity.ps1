@@ -151,7 +151,8 @@ try {
   $env:METIS_WINDOWS_IDENTITY_VERIFY = "1"
   $process = Start-Process -FilePath $exePath -ArgumentList @(
     "--metis-windows-identity-verify",
-    "--user-data-dir=$probeUserData"
+    "--user-data-dir=$probeUserData",
+    "--metis-graphics-mode=software"
   ) -PassThru
 
   $deadline = [DateTime]::UtcNow.AddSeconds(35)
@@ -220,6 +221,12 @@ try {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     $process.WaitForExit(5000) | Out-Null
   }
+  Get-CimInstance Win32_Process -Filter "Name='Metis.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.ExecutablePath -eq $exePath -and
+      $_.CommandLine -like "*$probeRoot*"
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $env:METIS_HOME = $previousMetisHome
   $env:METIS_DATA_ROOT = $previousMetisDataRoot
   $env:METIS_WINDOWS_IDENTITY_VERIFY = $previousIdentityVerify
