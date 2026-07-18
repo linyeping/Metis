@@ -65,3 +65,11 @@ def test_check_metis_wsl_toolchain_uses_local_vm_runner(tmp_path: Path, monkeypa
     assert captured["request"].collect_artifacts is False
     assert captured["request"].export_patch is False
     assert captured["request"].export_diagnostics == "never"
+
+
+def test_console_json_is_safe_for_gbk_replacement_characters() -> None:
+    rendered = vm_toolchain_check._console_json({"message": "bad \ufffd output"}, "gbk")
+
+    rendered.encode("gbk")
+    assert "bad" in rendered
+    assert "\\ufffd" in rendered

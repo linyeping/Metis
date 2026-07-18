@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 import sys
-import pytest
 
+import pytest
 from backend.runtime import runtime_provision
 from backend.runtime.runtime_provision import (
+    HYPERV_ADMINS_SID,
     PROVISION_SCHEMA,
+    _classify_hcs,
     build_provision_script,
     provision_status,
-    _classify_hcs,
-    HYPERV_ADMINS_SID,
 )
 
 
@@ -60,8 +60,18 @@ class TestScript:
         # command regardless of whether the host running the test has it built.
         monkeypatch.setattr(runtime_provision, "_svc_exe_path", lambda: r"C:\fake\metis-vm-svc.exe")
         s = build_provision_script(["install_service"])
-        assert "metis-vm-svc.exe' install" in s
+        assert "ProgramData" in s
+        assert "icacls.exe" in s
+        assert "& $svcTarget install" in s
         assert "service" in s.lower()
+
+    def test_upgrade_service_uses_versioned_admin_owned_binary(self, monkeypatch):
+        monkeypatch.setattr(runtime_provision, "_svc_exe_path", lambda: r"C:\fake\metis-vm-svc.exe")
+        s = build_provision_script(["upgrade_service"])
+        assert runtime_provision.EXPECTED_SERVICE_VERSION in s
+        assert "RuntimeService" in s
+        assert "*S-1-5-18" in s
+        assert "*S-1-5-32-544" in s
 
     def test_install_service_script_handles_missing_exe(self, monkeypatch):
         monkeypatch.setattr(runtime_provision, "_svc_exe_path", lambda: "")
@@ -102,3 +112,24 @@ class TestStatus:
 
         assert s["ready"] is False
         assert "enable_vm_platform" in s["needs"]
+
+    def test_service_version_drift_requires_upgrade(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(runtime_provision, "is_hcs_available", lambda: (True, "ok"))
+        monkeypatch.setattr(runtime_provision, "find_metis_bundle", lambda: object())
+        monkeypatch.setattr(runtime_provision, "_is_admin", lambda: False)
+        monkeypatch.setattr(runtime_provision, "_service_state", lambda: {
+            "installed": True,
+            "running": True,
+            "responding": True,
+            "pipe_responding": True,
+            "version": "0.2.0",
+            "protocol": "metis.vm.svc.v2",
+            "upgrade_required": True,
+        })
+
+        s = provision_status()
+
+        assert s["ready"] is False
+        assert s["service_upgrade_required"] is True
+        assert "upgrade_service" in s["needs"]

@@ -1404,7 +1404,7 @@ export async function runtimeManagerDiagnostics(sessionId = ''): Promise<Runtime
   );
 }
 
-// Phase 5: HCS sandbox first-run provisioning (VM Platform + Hyper-V group).
+// HCS sandbox first-run provisioning and privileged service lifecycle.
 export interface RuntimeProvisionAction {
   id: string;
   title: string;
@@ -1427,6 +1427,11 @@ export interface RuntimeProvisionStatus {
   serviceInstalled: boolean;
   serviceRunning: boolean;
   serviceResponding: boolean;
+  servicePipeResponding: boolean;
+  serviceVersion: string;
+  serviceExpectedVersion: string;
+  serviceProtocol: string;
+  serviceUpgradeRequired: boolean;
   rebootRequired: boolean;
   needs: string[];
   actions: RuntimeProvisionAction[];
@@ -1452,6 +1457,11 @@ function runtimeProvisionStatusFromRecord(row: Record<string, unknown>): Runtime
     serviceInstalled: Boolean(row.service_installed),
     serviceRunning: Boolean(row.service_running),
     serviceResponding: Boolean(row.service_responding),
+    servicePipeResponding: Boolean(row.service_pipe_responding),
+    serviceVersion: stringValue(row.service_version),
+    serviceExpectedVersion: stringValue(row.service_expected_version),
+    serviceProtocol: stringValue(row.service_protocol),
+    serviceUpgradeRequired: Boolean(row.service_upgrade_required),
     rebootRequired: Boolean(row.reboot_required),
     needs: Array.isArray(row.needs) ? row.needs.map(item => String(item)) : [],
     actions: actions.map(item => ({

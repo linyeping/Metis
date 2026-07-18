@@ -152,13 +152,15 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
     try {
       await runtimeManagerProvision(elevatedNeeds);
       await refresh(true);
-      setNote(t('开通已执行。若提示需要重启或重新登录，请完成后再回到此处。'));
+      setNote(status?.serviceUpgradeRequired
+        ? t('后台服务升级完成。')
+        : t('开通已执行。若提示需要重启或重新登录，请完成后再回到此处。'));
     } catch (err) {
       setNote(String((err as Error)?.message || err));
     } finally {
       setBusy(false);
     }
-  }, [elevatedNeeds, refresh, t]);
+  }, [elevatedNeeds, refresh, status?.serviceUpgradeRequired, t]);
 
   if (!status || !status.supported) return null;
 
@@ -182,7 +184,10 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
           <ProvisionCheck ok={status.virtualizationOk} label={t('CPU 虚拟化')} />
         )}
         <ProvisionCheck ok={status.vmPlatformEnabled} label={t('隔离平台')} />
-        <ProvisionCheck ok={status.serviceResponding} label={t('后台服务')} />
+        <ProvisionCheck
+          ok={status.serviceResponding && !status.serviceUpgradeRequired}
+          label={`${t('后台服务')}${status.serviceVersion ? ` v${status.serviceVersion}` : ''}`}
+        />
         <ProvisionCheck ok={status.bundleInstalled} label={t('运行组件')} />
       </div>
 
@@ -200,6 +205,8 @@ const SandboxProvisionPanel = memo(function SandboxProvisionPanel() {
               <span>
                 {busy
                   ? t('处理中…')
+                  : elevatedNeeds.length === 1 && elevatedNeeds[0] === 'upgrade_service'
+                    ? t('升级后台服务（需一次 UAC）')
                   : elevatedNeeds.length === 1 && elevatedNeeds[0] === 'repair_service'
                     ? t('修复服务（需一次 UAC）')
                     : status.rebootRequired

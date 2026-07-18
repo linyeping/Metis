@@ -127,9 +127,11 @@ def _reboot_pending() -> bool:
 
 
 SERVICE_NAME = "MetisVMService"
+EXPECTED_SERVICE_VERSION = "0.3.0"
+EXPECTED_SERVICE_PROTOCOL = "metis.vm.svc.v2"
 
 
-def _service_state() -> Dict[str, bool]:
+def _service_state() -> Dict[str, Any]:
     """Whether the privileged service is installed / running / responding."""
     installed, running, responding = False, False, False
     try:
@@ -141,10 +143,29 @@ def _service_state() -> Dict[str, bool]:
         pass
     try:
         from backend.runtime import svc_client
-        responding = svc_client.service_available()
+        info = svc_client.service_info()
+        responding = bool(info.get("ok"))
     except Exception:
-        pass
-    return {"installed": installed, "running": running, "responding": responding}
+        info = {"ok": False, "responding": False, "error": "service handshake failed"}
+    service_version = str(info.get("version") or "")
+    service_protocol = str(info.get("protocol") or "")
+    pipe_responding = bool(info.get("responding"))
+    upgrade_required = bool(
+        installed
+        and pipe_responding
+        and (service_version != EXPECTED_SERVICE_VERSION or service_protocol != EXPECTED_SERVICE_PROTOCOL)
+    )
+    return {
+        "installed": installed,
+        "running": running,
+        "responding": responding,
+        "pipe_responding": pipe_responding,
+        "version": service_version,
+        "protocol": service_protocol,
+        "expected_version": EXPECTED_SERVICE_VERSION,
+        "upgrade_required": upgrade_required,
+        "error": str(info.get("error") or ""),
+    }
 
 
 def _svc_exe_path() -> str:
@@ -160,6 +181,8 @@ def _svc_exe_path() -> str:
         candidates.append(str(exe_dir.parent.parent / "runtime-svc" / "metis-vm-svc.exe"))
     candidates += [
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Metis", "resources", "runtime-svc", "metis-vm-svc.exe"),
+        str(Path(__file__).resolve().parents[2] / "desktop" / "resources" / "runtime-svc-build" / "metis-vm-svc.exe"),
+        str(Path(__file__).resolve().parents[2] / "desktop" / "resources" / "runtime-svc" / "metis-vm-svc.exe"),
         # dev build output
         str(Path(__file__).resolve().parent / "metis-vm-svc" / "metis-vm-svc.exe"),
     ]
@@ -230,6 +253,14 @@ def provision_status(deep: bool = False) -> Dict[str, Any]:
             "elevation": "admin",
             "reboot": "none",
         })
+    elif svc.get("upgrade_required"):
+        needs.append("upgrade_service")
+        actions.append({
+            "id": "upgrade_service",
+            "title": "Upgrade the Metis sandbox service",
+            "elevation": "admin",
+            "reboot": "none",
+        })
     elif not svc["responding"]:
         # Installed but the pipe isn't answering (stale/wedged instance) — a
         # restart re-creates the pipe + re-resolves the user ACL. Without this
@@ -247,7 +278,7 @@ def provision_status(deep: bool = False) -> Dict[str, Any]:
     # runtime pack exists. It still requires the explicit self-test to prove the
     # guest booted; the UI labels this as prerequisites-ready instead of a VM
     # pass so we do not show a false green sandbox.
-    ready = bool(available and svc["responding"] and bundle is not None)
+    ready = bool(available and svc["responding"] and not svc.get("upgrade_required") and bundle is not None)
 
     return {
         "schema": PROVISION_SCHEMA,
@@ -260,6 +291,11 @@ def provision_status(deep: bool = False) -> Dict[str, Any]:
         "service_installed": svc["installed"],
         "service_running": svc["running"],
         "service_responding": svc["responding"],
+        "service_pipe_responding": bool(svc.get("pipe_responding")),
+        "service_version": str(svc.get("version") or ""),
+        "service_expected_version": EXPECTED_SERVICE_VERSION,
+        "service_protocol": str(svc.get("protocol") or ""),
+        "service_upgrade_required": bool(svc.get("upgrade_required")),
         "svc_exe_path": _svc_exe_path(),
         "bundle_installed": bundle is not None,
         "bundle_path": str(bundle) if bundle else "",
@@ -286,6 +322,8 @@ def _ux_summary(ready: bool, has_bundle: bool, needs: List[str], reboot_required
         parts.append("install the runtime pack")
     if "install_service" in needs:
         parts.append("install the sandbox service")
+    if "upgrade_service" in needs:
+        parts.append("upgrade the sandbox service")
     tail = " (one UAC prompt"
     tail += " + one reboot)" if reboot_required else ")"
     return ("Setup needed: " + ", ".join(parts) + tail) if parts else "Setup needed."
@@ -312,13 +350,21 @@ def build_provision_script(actions: List[str]) -> str:
             "  } else { $results['vm_platform'] = 'already enabled' }",
             "} catch { $results['vm_platform'] = 'error: ' + $_.Exception.Message }",
         ]
-    if "install_service" in actions:
+    if "install_service" in actions or "upgrade_service" in actions:
         svc_exe = _svc_exe_path()
         if svc_exe:
+            escaped_svc_exe = svc_exe.replace("'", "''")
+            target_name = f"metis-vm-svc-{EXPECTED_SERVICE_VERSION}.exe"
             lines += [
-                "Write-Output '[metis] installing sandbox service...'",
+                "Write-Output '[metis] installing/upgrading sandbox service...'",
                 "try {",
-                f"  & '{svc_exe}' install 2>&1 | Out-Null",
+                "  $svcDir = Join-Path $env:ProgramData 'Metis\\RuntimeService'",
+                "  New-Item -ItemType Directory -Force -Path $svcDir | Out-Null",
+                "  & icacls.exe $svcDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null",
+                f"  $svcTarget = Join-Path $svcDir '{target_name}'",
+                f"  Copy-Item -LiteralPath '{escaped_svc_exe}' -Destination $svcTarget -Force",
+                "  & $svcTarget install 2>&1 | Out-Null",
+                "  if ($LASTEXITCODE -ne 0) { throw \"service installer exited $LASTEXITCODE\" }",
                 "  $results['service'] = 'installed'",
                 "} catch { $results['service'] = 'error: ' + $_.Exception.Message }",
             ]
@@ -362,7 +408,7 @@ def run_provision_elevated(actions: List[str], timeout_s: int = 180) -> Dict[str
     """
     if sys.platform != "win32":
         return {"ok": False, "error": "Windows only"}
-    actions = [a for a in actions if a in ("enable_vm_platform", "install_service", "repair_service", "add_hyperv_admins")]
+    actions = [a for a in actions if a in ("enable_vm_platform", "install_service", "upgrade_service", "repair_service", "add_hyperv_admins")]
     if not actions:
         return {"ok": True, "skipped": True, "message": "no elevated actions needed"}
 
@@ -402,6 +448,8 @@ def run_provision_elevated(actions: List[str], timeout_s: int = 180) -> Dict[str
 
 __all__ = [
     "PROVISION_SCHEMA",
+    "EXPECTED_SERVICE_VERSION",
+    "EXPECTED_SERVICE_PROTOCOL",
     "provision_status",
     "build_provision_script",
     "run_provision_elevated",

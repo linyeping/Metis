@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 from typing import Any, Dict, List
 
@@ -132,13 +133,23 @@ def _compact_local_vm_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _console_json(payload: Dict[str, Any], encoding: str | None = None) -> str:
+    """Serialize JSON without crashing on legacy Windows console encodings."""
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    codec = encoding or "utf-8"
+    try:
+        return rendered.encode(codec, errors="backslashreplace").decode(codec)
+    except LookupError:
+        return rendered
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate the MetisRuntime local_vm toolchain.")
     parser.add_argument("--root", default=os.getcwd(), help="Workspace root used for the local_vm runtime job.")
     parser.add_argument("--timeout", default=120, type=int, help="Command timeout in seconds.")
     args = parser.parse_args(argv)
     result = check_metis_wsl_toolchain(workspace_root=args.root, timeout=args.timeout)
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    print(_console_json(result, getattr(sys.stdout, "encoding", None)))
     return 0 if result.get("ok") else 2
 
 
@@ -151,5 +162,6 @@ __all__ = [
     "VM_TOOLCHAIN_CHECK_SCHEMA",
     "build_toolchain_check_command",
     "check_metis_wsl_toolchain",
+    "_console_json",
     "parse_toolchain_stdout",
 ]

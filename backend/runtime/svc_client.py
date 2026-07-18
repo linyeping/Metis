@@ -121,19 +121,30 @@ def _rpc(messages: List[Dict[str, Any]], read_budget: int = 4_000_000) -> List[D
         conn.close()
 
 
-def service_available() -> bool:
-    """True if the service is running and answers the handshake."""
+def service_info() -> Dict[str, Any]:
+    """Return the service handshake, including protocol and build version."""
     try:
         resps = _rpc([{"seq": 1, "method": "svc.hello", "params": {"protocol": PROTOCOL}}])
-        result = resps[0].get("result") if resps and isinstance(resps[0], dict) else None
-        return bool(
-            resps
-            and resps[0].get("ok")
-            and isinstance(result, dict)
-            and result.get("protocol") == PROTOCOL
-        )
-    except Exception:
-        return False
+        if not resps or not isinstance(resps[0], dict):
+            return {"ok": False, "responding": False, "error": "no handshake"}
+        response = resps[0]
+        result = response.get("result") if isinstance(response.get("result"), dict) else {}
+        compatible = bool(response.get("ok") and result.get("protocol") == PROTOCOL)
+        return {
+            "ok": compatible,
+            "responding": True,
+            "service": str(result.get("service") or ""),
+            "version": str(result.get("version") or ""),
+            "protocol": str(result.get("protocol") or response.get("protocol") or ""),
+            "error": "" if compatible else str(response.get("error") or "incompatible service handshake"),
+        }
+    except Exception as exc:
+        return {"ok": False, "responding": False, "error": str(exc)}
+
+
+def service_available() -> bool:
+    """True if the service is running and answers a compatible handshake."""
+    return bool(service_info().get("ok"))
 
 
 def service_status() -> Dict[str, Any]:
@@ -172,4 +183,4 @@ def close_session(session_id: str) -> bool:
     return False
 
 
-__all__ = ["service_available", "service_status", "run_job_via_service", "close_session", "PIPE_NAME"]
+__all__ = ["service_available", "service_info", "service_status", "run_job_via_service", "close_session", "PIPE_NAME"]

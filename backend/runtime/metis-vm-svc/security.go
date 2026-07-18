@@ -15,6 +15,7 @@ import (
 
 const (
 	serviceProtocol       = "metis.vm.svc.v2"
+	serviceVersion        = "0.3.0"
 	maxCommandBytes       = 64 * 1024
 	maxEnvironmentEntries = 128
 	maxEnvironmentBytes   = 256 * 1024

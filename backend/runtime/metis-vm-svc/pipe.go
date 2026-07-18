@@ -295,7 +295,7 @@ func dispatchRequest(line []byte, client *clientContext) []byte {
 	case "svc.hello":
 		return mustJSON(map[string]any{
 			"seq": req.Seq, "type": "response", "ok": true,
-			"result": map[string]any{"service": "metis-vm-svc", "version": "0.2.0", "protocol": serviceProtocol},
+			"result": map[string]any{"service": "metis-vm-svc", "version": serviceVersion, "protocol": serviceProtocol},
 		})
 	case "svc.status":
 		ok := true
@@ -307,7 +307,12 @@ func dispatchRequest(line []byte, client *clientContext) []byte {
 		b, found := findMetisBundle()
 		return mustJSON(map[string]any{
 			"seq": req.Seq, "type": "response", "ok": true,
-			"result": map[string]any{"hcs_available": ok, "hcs_reason": reason, "bundle_found": found, "bundle_vmlinuz": b.Vmlinuz},
+			"result": map[string]any{
+				"service": "metis-vm-svc", "version": serviceVersion, "protocol": serviceProtocol,
+				"hcs_available": ok, "hcs_reason": reason, "bundle_found": found,
+				"bundle_vmlinuz":    b.Vmlinuz,
+				"bundle_resolution": "request_bound_or_service_profile",
+			},
 		})
 	case "vm.run_job":
 		var jr RunJobRequest
