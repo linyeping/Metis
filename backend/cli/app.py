@@ -7,7 +7,14 @@ import traceback
 from pathlib import Path
 from typing import Sequence, TextIO
 
-from .args import CliUsageError, ParsedCliArgs, SessionCommandArgs, parse_args
+from .args import (
+    CliUsageError,
+    DoctorCommandArgs,
+    ParsedCliArgs,
+    SandboxCommandArgs,
+    SessionCommandArgs,
+    parse_args,
+)
 from .config import CliConfigError, build_cli_runtime
 from .headless import (
     EXIT_CANCELLED,
@@ -37,6 +44,10 @@ def main(
         args = parse_args(argv)
         if isinstance(args, SessionCommandArgs):
             return handle_session_command(args, stdout=stdout)
+        if isinstance(args, (DoctorCommandArgs, SandboxCommandArgs)):
+            from .doctor import handle_diagnostic_command
+
+            return handle_diagnostic_command(args, stdout=stdout)
         session_store = CliSessionStore()
         resume = session_store.resolve_resume(args.resume_id, latest=args.continue_session) if (args.resume_id or args.continue_session) else None
         workspace = _workspace_path(args.workspace or (resume.workspace if resume is not None else "."))

@@ -52,6 +52,25 @@ class SessionCommandArgs:
     archived: bool
 
 
+@dataclass(frozen=True)
+class DoctorCommandArgs:
+    command: str
+    workspace: str
+    output_format: str
+    deep: bool
+
+
+@dataclass(frozen=True)
+class SandboxCommandArgs:
+    command: str
+    action: str
+    workspace: str
+    output_format: str
+    deep: bool
+    allow_download: bool
+    force: bool
+
+
 def build_parser() -> MetisArgumentParser:
     parser = MetisArgumentParser(
         prog="metis",
@@ -61,7 +80,9 @@ def build_parser() -> MetisArgumentParser:
             "  metis resume ID [PROMPT]       Continue a session (alias for --resume).\n"
             "  metis sessions list            List durable desktop and CLI sessions.\n"
             "  metis sessions show ID         Show a transcript.\n"
-            "  metis sessions export ID       Export JSON or Markdown."
+            "  metis sessions export ID       Export JSON or Markdown.\n"
+            "  metis doctor                   Run read-only diagnostics.\n"
+            "  metis sandbox status|repair    Inspect or explicitly repair isolation."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -96,8 +117,14 @@ def build_parser() -> MetisArgumentParser:
     return parser
 
 
-def parse_args(argv: Sequence[str] | None = None) -> Union[ParsedCliArgs, SessionCommandArgs]:
+def parse_args(
+    argv: Sequence[str] | None = None,
+) -> Union[ParsedCliArgs, SessionCommandArgs, DoctorCommandArgs, SandboxCommandArgs]:
     raw = list(argv) if argv is not None else sys.argv[1:]
+    if raw and raw[0] == "doctor":
+        return _parse_doctor_command(raw[1:])
+    if raw and raw[0] == "sandbox":
+        return _parse_sandbox_command(raw[1:])
     if raw and raw[0] == "sessions":
         return _parse_session_command(raw[1:])
     if raw and raw[0] == "resume":
@@ -156,6 +183,51 @@ def _parse_session_command(argv: Sequence[str]) -> SessionCommandArgs:
         output=str(getattr(values, "output", "") or ""),
         limit=int(getattr(values, "limit", 20) or 20),
         archived=bool(getattr(values, "archived", False)),
+    )
+
+
+def _parse_doctor_command(argv: Sequence[str]) -> DoctorCommandArgs:
+    parser = MetisArgumentParser(prog="metis doctor", description="Run read-only Metis diagnostics")
+    parser.add_argument("--workspace", default=".")
+    parser.add_argument("--output-format", choices=("text", "json"), default="text")
+    parser.add_argument("--deep", action="store_true", help="Include slower VM/runtime probes.")
+    values = parser.parse_args(list(argv))
+    return DoctorCommandArgs(
+        command="doctor",
+        workspace=str(values.workspace or "."),
+        output_format=str(values.output_format),
+        deep=bool(values.deep),
+    )
+
+
+def _parse_sandbox_command(argv: Sequence[str]) -> SandboxCommandArgs:
+    parser = MetisArgumentParser(prog="metis sandbox", description="Inspect or explicitly repair the Metis sandbox")
+    subparsers = parser.add_subparsers(dest="action", required=True)
+
+    status_parser = subparsers.add_parser("status", help="Inspect sandbox readiness without changing it")
+    status_parser.add_argument("--workspace", default=".")
+    status_parser.add_argument("--output-format", choices=("text", "json"), default="text")
+    status_parser.add_argument("--deep", action="store_true", help="Include slower runtime-manager probes.")
+
+    repair_parser = subparsers.add_parser("repair", help="Run explicit, idempotent sandbox repair")
+    repair_parser.add_argument("--workspace", default=".")
+    repair_parser.add_argument("--output-format", choices=("text", "json"), default="text")
+    repair_parser.add_argument(
+        "--allow-download",
+        action="store_true",
+        help="Allow downloading a runtime pack when no bundled pack is available.",
+    )
+    repair_parser.add_argument("--force", action="store_true", help="Reinstall or re-run repair even when ready.")
+
+    values = parser.parse_args(list(argv))
+    return SandboxCommandArgs(
+        command="sandbox",
+        action=str(values.action),
+        workspace=str(values.workspace or "."),
+        output_format=str(values.output_format),
+        deep=bool(getattr(values, "deep", False)),
+        allow_download=bool(getattr(values, "allow_download", False)),
+        force=bool(getattr(values, "force", False)),
     )
 
 

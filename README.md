@@ -290,6 +290,18 @@ metis sessions export <session-id> --format markdown --output session.md
 
 JSON 列表、详情和导出分别使用 `metis.cli_sessions.v1`、`metis.cli_session.v1` 与 `metis.session_export.v1`；JSON 导出可以直接复制到另一台机器留档，Markdown 导出适合人工阅读。
 
+CLI 还提供默认只读的环境诊断与独立的沙箱检查/修复入口：
+
+```powershell
+metis doctor --output-format json
+metis doctor --deep
+metis sandbox status --deep
+metis sandbox repair
+metis sandbox repair --allow-download
+```
+
+`doctor` 检查配置、共享凭据是否存在、会话库完整性、workspace 权限、桌面工具、MCP、HCS/VM 服务版本与协议，但不会输出 API Key，也不会修改文件或系统状态。只有显式执行 `sandbox repair` 才会触发幂等修复；下载 runtime pack 还需要额外传入 `--allow-download`。
+
 ### 常用验证命令
 
 ```powershell

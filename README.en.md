@@ -212,7 +212,7 @@ cd desktop
 npm run build-cli
 ```
 
-The CLI supports human-readable `text`, one final `json` object, and event-by-event `stream-json`. A headless run never waits for an unavailable approval UI: when a tool requires confirmation, it emits a redacted error and exits with code `2`. The build output is `desktop/release/metis.exe`; run `metis --help` for the complete P0 command surface.
+The CLI supports human-readable `text`, one final `json` object, and event-by-event `stream-json`. A headless run never waits for an unavailable approval UI: when a tool requires confirmation, it emits a redacted error and exits with code `2`. The build output is `desktop/release/metis.exe`; run `metis --help` for the complete command surface.
 
 The standalone CLI reads model settings from `~/.metis/config.json`, `~/.metis/settings.json`, and workspace `.metis/settings.json`. On Windows, desktop and CLI share the API key through the current user's Windows Credential Manager, so configuration files do not contain plaintext secrets. Legacy Electron `safeStorage` and plaintext configurations migrate automatically after the desktop starts. Ephemeral automation can still inject `METIS_LLM_API_KEY`, which takes precedence over the system credential.
 
@@ -227,6 +227,18 @@ metis sessions export <session-id> --format markdown --output session.md
 ```
 
 JSON list, detail, and export responses use `metis.cli_sessions.v1`, `metis.cli_session.v1`, and `metis.session_export.v1`, respectively. JSON exports are portable archives; Markdown exports are intended for direct reading.
+
+The CLI also provides read-only environment diagnostics plus separate sandbox status and repair surfaces:
+
+```powershell
+metis doctor --output-format json
+metis doctor --deep
+metis sandbox status --deep
+metis sandbox repair
+metis sandbox repair --allow-download
+```
+
+`doctor` checks configuration, shared-credential presence, session database integrity, workspace permissions, desktop tools, MCP, and HCS/VM service version and protocol without emitting API keys or changing files or system state. Only an explicit `sandbox repair` performs idempotent repair; downloading a runtime pack additionally requires `--allow-download`.
 
 ---
 
