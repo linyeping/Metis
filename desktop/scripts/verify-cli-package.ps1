@@ -85,3 +85,8 @@ if (
 ) {
   Remove-Item -LiteralPath $resolvedProbe -Recurse -Force
 }
+
+# The negative usage probe intentionally leaves the native process exit code
+# at 64.  A PowerShell script otherwise propagates that stale code even though
+# every assertion above passed.
+exit 0
