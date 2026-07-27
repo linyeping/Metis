@@ -324,6 +324,44 @@ test('FABLEADV-11 build hygiene keeps Vite and backend packaging scoped', () => 
   assert.match(gitignore, /desktop\/resources\/backend-dist\//);
 });
 
+test('headless CLI keeps its public entry, single-file build, and packaged smoke gate wired', () => {
+  const repoRoot = path.resolve(root, '..');
+  const pkg = JSON.parse(read('package.json'));
+  const buildScript = read('scripts/build-cli.ps1');
+  const packageVerifier = read('scripts/verify-cli-package.ps1');
+  const spec = read('scripts/build-cli.spec');
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'cli-windows.yml'), 'utf8');
+  const backendPyproject = fs.readFileSync(path.join(repoRoot, 'backend', 'pyproject.toml'), 'utf8');
+  const backendMain = fs.readFileSync(path.join(repoRoot, 'backend', '__main__.py'), 'utf8');
+  const gitignore = fs.readFileSync(path.join(repoRoot, '.gitignore'), 'utf8');
+
+  assert.equal(pkg.scripts['build-cli'], 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-cli.ps1');
+  assert.equal(pkg.scripts['verify:cli-package'], 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-cli-package.ps1');
+  assert.match(backendPyproject, /metis = "backend\.cli:main"/);
+  assert.match(backendPyproject, /metis-backend = "backend\.runtime\.cli:main"/);
+  assert.match(backendMain, /from backend\.cli import main/);
+  assert.match(backendMain, /from backend\.runtime\.cli import main/);
+  assert.match(buildScript, /metis\.exe size/);
+  assert.match(buildScript, /PE icon matches Metis logo/);
+  assert.match(buildScript, /Packaged CLI runtime self-test passed/);
+  assert.match(buildScript, /missing the AST edit toolchain/);
+  assert.match(buildScript, /--output-format stream-json/);
+  assert.match(buildScript, /metis\.agent_event\.v1/);
+  assert.match(spec, /name="metis"/);
+  assert.match(spec, /console=True/);
+  assert.match(spec, /resources" \/ "icons" \/ "logo\.ico"/);
+  assert.match(fs.readFileSync(path.join(repoRoot, 'backend', 'requirements-build.txt'), 'utf8'), /astor/);
+  assert.match(packageVerifier, /Get-Command python/);
+  assert.match(packageVerifier, /Get-Command node/);
+  assert.match(packageVerifier, /metis\.cli_result\.v1/);
+  assert.match(packageVerifier, /metis\.agent_event\.v1/);
+  assert.match(packageVerifier, /LASTEXITCODE -ne 64/);
+  assert.match(workflow, /runs-on: windows-latest/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /metis-cli-release/);
+  assert.match(gitignore, /desktop\/resources\/cli-build\//);
+});
+
 test('FABLEADV-11 preview and tool card fixes stay wired', () => {
   const security = read('electron/security.cjs');
   const main = read('electron/main.cjs');

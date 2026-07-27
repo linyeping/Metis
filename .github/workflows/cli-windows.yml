@@ -1,0 +1,105 @@
+name: CLI Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/cli-windows.yml"
+      - "backend/**"
+      - "desktop/package.json"
+      - "desktop/resources/icons/logo.ico"
+      - "desktop/scripts/build-cli.ps1"
+      - "desktop/scripts/build-cli.spec"
+      - "desktop/scripts/verify-cli-package.ps1"
+  pull_request:
+    paths:
+      - ".github/workflows/cli-windows.yml"
+      - "backend/**"
+      - "desktop/package.json"
+      - "desktop/resources/icons/logo.ico"
+      - "desktop/scripts/build-cli.ps1"
+      - "desktop/scripts/build-cli.spec"
+      - "desktop/scripts/verify-cli-package.ps1"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/requirements-build.txt
+
+      - name: Test CLI contracts and exit-code mapping
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e backend/ pytest ruff
+          python -m pytest backend/tests/test_cli_headless.py backend/tests/test_agent_event_contract.py backend/tests/test_permission_rules.py backend/tests/test_permission_control_plane.py -q
+          python -m ruff check backend/cli backend/cli_entry.py backend/version.py backend/__main__.py backend/tests/test_cli_headless.py backend/web/llm_state.py
+
+      - name: Build single-file metis.exe
+        shell: pwsh
+        run: ./desktop/scripts/build-cli.ps1 -RecreateVenv
+
+      - name: Verify outside source tree without Python or Node on PATH
+        shell: pwsh
+        run: ./desktop/scripts/verify-cli-package.ps1
+
+      - name: Create checksum and release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "desktop/release/metis.exe"
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash *metis.exe" | Set-Content -LiteralPath "desktop/release/metis.exe.sha256" -Encoding ascii
+          $version = ((& $exe --version) -replace '^Metis\s+', '').Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($version)) {
+            throw "Cannot determine packaged CLI version"
+          }
+          @{
+            schema = "metis.cli_release.v1"
+            version = $version
+            source_repository = "${{ github.repository }}"
+            source_sha = "${{ github.sha }}"
+            source_ref = "${{ github.ref }}"
+            sha256 = $hash
+            bytes = (Get-Item -LiteralPath $exe).Length
+          } | ConvertTo-Json | Set-Content -LiteralPath "desktop/release/release-metadata.json" -Encoding utf8
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Upload verified CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metis-cli-release
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          path: |
+            desktop/release/metis.exe
+            desktop/release/metis.exe.sha256
+            desktop/release/release-metadata.json
+
+      - name: Build summary
+        shell: pwsh
+        run: |
+          @'
+          ## Metis CLI ${{ steps.metadata.outputs.version }}
+
+          - Artifact: `metis-cli-release`
+          - SHA256: `${{ steps.metadata.outputs.sha256 }}`
+          - Source: `${{ github.repository }}@${{ github.sha }}`
+          - Verified with Python and Node.js absent from the probe PATH
+          '@ >> $env:GITHUB_STEP_SUMMARY

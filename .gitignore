@@ -58,6 +58,7 @@ desktop/.dev-data/
 desktop/.electron-cache/
 desktop/resources/backend-build/
 desktop/resources/backend-dist/
+desktop/resources/cli-build/
 desktop/resources/open-design-runtime/
 backend/var/
 backend/build/

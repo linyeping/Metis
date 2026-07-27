@@ -421,8 +421,10 @@ def build_agent_config(
     permission_checker: Optional[Callable[[str, Dict[str, Any]], Optional[str]]] = None,
     tool_boundary_overrides: Optional[Callable[[str, Dict[str, Any]], Dict[str, bool]]] = None,
     workspace_root: str = "",
+    load_persistent: bool = True,
 ) -> AgentConfig:
-    load_persistent_config()
+    if load_persistent:
+        load_persistent_config()
     file_values = _env_file_values()
     backend = _configured(["METIS_LLM_BACKEND", "MIRO_LLM_BACKEND"], file_values, "openai")
     base_url = normalize_base_url(
