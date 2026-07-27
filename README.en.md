@@ -195,9 +195,19 @@ Development mode starts:
 - Electron desktop shell
 - Local Python backend managed by the Electron launcher
 
-### Headless CLI
+### CLI and TUI
 
-Metis also provides a one-shot CLI for scripts and CI. It reuses the same model resolution, agent loop, tools, permission rules, and the `metis.agent_event.v1` event contract.
+Metis provides an interactive terminal workbench and a one-shot CLI for scripts and CI. Both reuse the same model resolution, agent loop, tools, permission rules, and the `metis.agent_event.v1` event contract.
+
+Running `metis` in a real TTY opens the multi-turn TUI. An initial prompt starts immediately; `-p` or piped input keeps the headless behavior:
+
+```powershell
+metis
+metis "Inspect this repository and suggest fixes"
+"Inspect this repository" | metis -p --output-format stream-json --no-desktop
+```
+
+The TUI currently provides streaming answers, tool activity, plan summaries, terminal permission confirmation, session continuation, and workspace switching. Type `/help` for the implemented commands; `/sessions`, `/resume`, `/continue`, `/new`, `/workspace`, `/status`, `/clear`, and `/exit` each have a working end-to-end behavior. Non-TTY input, `-p`, and JSON/JSONL output never start the TUI.
 
 ```powershell
 # Run from source

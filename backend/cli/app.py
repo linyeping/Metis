@@ -48,6 +48,10 @@ def main(
             from .doctor import handle_diagnostic_command
 
             return handle_diagnostic_command(args, stdout=stdout)
+        if _should_run_tui(args, stdin=stdin, stdout=stdout):
+            from .tui import run_tui
+
+            return run_tui(args, stdin=stdin, stdout=stdout, stderr=stderr)
         prompt = _prompt_text(args, stdin)
         if args.attach:
             from .attach import CliAttachError, run_attached
@@ -158,6 +162,15 @@ def _isatty(stream: TextIO) -> bool:
         return bool(stream.isatty())
     except (AttributeError, OSError):
         return False
+
+
+def _should_run_tui(args: ParsedCliArgs, *, stdin: TextIO, stdout: TextIO) -> bool:
+    return (
+        not args.print_mode
+        and args.output_format == "text"
+        and _isatty(stdin)
+        and _isatty(stdout)
+    )
 
 
 def _configure_stream(stream: TextIO) -> None:

@@ -86,6 +86,7 @@ for package_name in (
     "pypdf",
     "pdfplumber",
     "reportlab",
+    "prompt_toolkit",
 ):
     try:
         package_datas, package_binaries, package_hiddenimports = collect_all(package_name)

@@ -75,7 +75,7 @@ class SandboxCommandArgs:
 def build_parser() -> MetisArgumentParser:
     parser = MetisArgumentParser(
         prog="metis",
-        description="Metis headless agent CLI",
+        description="Metis agent CLI",
         epilog=(
             "Session commands:\n"
             "  metis resume ID [PROMPT]       Continue a session (alias for --resume).\n"
@@ -87,8 +87,8 @@ def build_parser() -> MetisArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("prompt", nargs="?", default="", help="Task prompt. With -p it may also come from stdin.")
-    parser.add_argument("-p", "--print", dest="print_mode", action="store_true", help="Run non-interactively and exit.")
+    parser.add_argument("prompt", nargs="?", default="", help="Initial TUI task, or one-shot task with -p/stdin.")
+    parser.add_argument("-p", "--print", dest="print_mode", action="store_true", help="Run one non-interactive task and exit.")
     parser.add_argument(
         "--attach",
         action="store_true",

@@ -257,9 +257,19 @@ npm run dev
 
 开发模式会启动 Vite renderer、Electron desktop shell 和由 Electron launcher 管理的本机 Python backend。Metis Design 位于仓库的 `open-design/` 工作区，并使用同一套桌面开发流程。
 
-### Headless CLI
+### CLI 与 TUI
 
-Metis 也提供面向脚本和 CI 的一次性命令行入口，复用同一套模型解析、agent loop、工具、权限规则与 `metis.agent_event.v1` 事件契约。
+Metis 提供交互式终端工作台和面向脚本/CI 的一次性命令行入口。两者复用同一套模型解析、agent loop、工具、权限规则与 `metis.agent_event.v1` 事件契约。
+
+在真实 TTY 中直接运行 `metis` 会进入多轮 TUI；传入初始任务可以立即开始，`-p` 或管道输入则保持 headless 行为：
+
+```powershell
+metis
+metis "检查当前仓库并提出修复建议"
+"检查当前仓库并给出结论" | metis -p --output-format stream-json --no-desktop
+```
+
+TUI 当前提供流式回答、工具活动、计划摘要、终端权限确认、会话续接和工作区切换。输入 `/help` 查看已实现命令；`/sessions`、`/resume`、`/continue`、`/new`、`/workspace`、`/status`、`/clear` 与 `/exit` 都有对应闭环。非 TTY、`-p` 和 JSON/JSONL 输出不会启动 TUI。
 
 ```powershell
 # 源码运行
