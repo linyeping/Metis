@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, Mapping, TextIO
 
+from .sessions import tool_transcript_record
+
 EXIT_SUCCESS = 0
 EXIT_TASK_FAILED = 1
 EXIT_PERMISSION = 2
@@ -53,6 +55,7 @@ class HeadlessRenderer:
         self.serializer = serializer
         self._delta_text = ""
         self._delta_open = False
+        self.transcript_records: list[Dict[str, Any]] = []
 
     def event(self, event: Any, result: HeadlessResult) -> None:
         result.event_count += 1
@@ -61,6 +64,10 @@ class HeadlessRenderer:
             self._json_line(self.stdout, self.serializer(event))
         elif self.output_format == "text":
             self._text_event(kind, event)
+
+        transcript_record = tool_transcript_record(event)
+        if transcript_record is not None:
+            self.transcript_records.append(transcript_record)
 
         if kind in {"content", "content_delta", "text_delta"}:
             text = str(getattr(event, "text", "") or "")

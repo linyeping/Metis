@@ -13,12 +13,19 @@ from backend.cli.args import parse_args
 from backend.cli.config import merged_settings
 from backend.cli.headless import EXIT_BUDGET, EXIT_PERMISSION, EXIT_SUCCESS, EXIT_USAGE
 from backend.cli.policy import CliPolicyError, build_permission_checker
+from backend.core.paths import clear_metis_home_cache
 from backend.runtime import agent_loop
+from backend.web import session_db as session_db_module
 
 
 @pytest.fixture(autouse=True)
-def no_real_credential_store(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolated_cli_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.setenv("METIS_HOME", str(tmp_path / "metis-home"))
     monkeypatch.setattr(cli_config, "read_api_key", lambda: None)
+    monkeypatch.setattr(session_db_module, "legacy_data_root", lambda: str(tmp_path / "legacy-miro"))
+    clear_metis_home_cache()
+    yield
+    clear_metis_home_cache()
 
 
 def _event_generator(events: Iterable[Any]):

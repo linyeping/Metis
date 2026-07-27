@@ -278,6 +278,18 @@ CLI 支持 `text`、单个结果对象 `json` 和逐事件 `stream-json`。非�
 
 独立 CLI 会读取 `~/.metis/config.json`、`~/.metis/settings.json` 和工作区 `.metis/settings.json` 的模型设置。在 Windows 上，桌面端和 CLI 通过当前用户的 Windows Credential Manager 共用 API Key，配置文件不保存明文；旧版 Electron `safeStorage` 和明文配置会在桌面启动后自动迁移。CI 等临时环境仍可通过 `METIS_LLM_API_KEY` 注入，且环境变量优先于系统凭据。
 
+CLI 任务会写入与桌面端相同的会话库，因此可以列出、续接和导出，不会生成一套彼此不可见的“CLI 历史”：
+
+```powershell
+metis sessions list
+metis sessions show <session-id> --output-format json
+metis --resume <session-id-or-prefix> "继续检查未完成项"
+metis --continue "接着最近的会话"
+metis sessions export <session-id> --format markdown --output session.md
+```
+
+JSON 列表、详情和导出分别使用 `metis.cli_sessions.v1`、`metis.cli_session.v1` 与 `metis.session_export.v1`；JSON 导出可以直接复制到另一台机器留档，Markdown 导出适合人工阅读。
+
 ### 常用验证命令
 
 ```powershell

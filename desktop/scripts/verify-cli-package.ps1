@@ -61,6 +61,30 @@ try {
       throw "Packaged CLI stream-json did not emit exactly one done event"
     }
 
+    & $probeExe sessions list --output-format json 1> sessions.stdout 2> sessions.stderr
+    if ($LASTEXITCODE -ne 0) { throw "Packaged CLI sessions list probe failed" }
+    $sessions = Get-Content -LiteralPath "sessions.stdout" -Raw | ConvertFrom-Json
+    if ($sessions.schema -ne "metis.cli_sessions.v1" -or @($sessions.sessions).Count -lt 3) {
+      throw "Packaged CLI sessions list contract is invalid"
+    }
+    if (@($sessions.sessions | Where-Object { $_.id -eq $jsonResult.session_id }).Count -ne 1) {
+      throw "Packaged CLI did not persist the JSON probe session"
+    }
+
+    & $probeExe --resume $jsonResult.session_id "follow up" -p --backend fake --model fake-model --no-desktop --no-mcp --permission-mode plan --max-turns 2 --output-format json 1> resume.stdout 2> resume.stderr
+    if ($LASTEXITCODE -ne 0) { throw "Packaged CLI resume probe failed" }
+    $resumeResult = Get-Content -LiteralPath "resume.stdout" -Raw | ConvertFrom-Json
+    if ($resumeResult.schema -ne "metis.cli_result.v1" -or $resumeResult.session_id -ne $jsonResult.session_id) {
+      throw "Packaged CLI resume contract is invalid"
+    }
+
+    & $probeExe sessions export $jsonResult.session_id --output session-export.json 1> export.stdout 2> export.stderr
+    if ($LASTEXITCODE -ne 0) { throw "Packaged CLI session export probe failed" }
+    $sessionExport = Get-Content -LiteralPath "session-export.json" -Raw | ConvertFrom-Json
+    if ($sessionExport.schema -ne "metis.session_export.v1" -or $sessionExport.session.id -ne $jsonResult.session_id) {
+      throw "Packaged CLI session export contract is invalid"
+    }
+
     & $probeExe "task" -p --workspace (Join-Path $probeRoot "missing") 1> usage.stdout 2> usage.stderr
     if ($LASTEXITCODE -ne 64) { throw "Packaged CLI usage error did not exit 64" }
   }

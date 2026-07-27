@@ -216,6 +216,18 @@ The CLI supports human-readable `text`, one final `json` object, and event-by-ev
 
 The standalone CLI reads model settings from `~/.metis/config.json`, `~/.metis/settings.json`, and workspace `.metis/settings.json`. On Windows, desktop and CLI share the API key through the current user's Windows Credential Manager, so configuration files do not contain plaintext secrets. Legacy Electron `safeStorage` and plaintext configurations migrate automatically after the desktop starts. Ephemeral automation can still inject `METIS_LLM_API_KEY`, which takes precedence over the system credential.
 
+CLI runs are written to the same session store as the desktop app, so listing, resuming, and exporting do not create a separate invisible history:
+
+```powershell
+metis sessions list
+metis sessions show <session-id> --output-format json
+metis --resume <session-id-or-prefix> "Continue the unfinished checks"
+metis --continue "Continue the most recent session"
+metis sessions export <session-id> --format markdown --output session.md
+```
+
+JSON list, detail, and export responses use `metis.cli_sessions.v1`, `metis.cli_session.v1`, and `metis.session_export.v1`, respectively. JSON exports are portable archives; Markdown exports are intended for direct reading.
+
 ---
 
 ## Common Commands
