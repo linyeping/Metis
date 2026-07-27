@@ -48,10 +48,38 @@ def main(
             from .doctor import handle_diagnostic_command
 
             return handle_diagnostic_command(args, stdout=stdout)
+        prompt = _prompt_text(args, stdin)
+        if args.attach:
+            from .attach import CliAttachError, run_attached
+
+            if args.workspace:
+                workspace = _workspace_path(args.workspace)
+            elif args.resume_id or args.continue_session:
+                workspace = None
+            else:
+                workspace = _workspace_path(".")
+            try:
+                result = run_attached(
+                    args,
+                    prompt=prompt,
+                    workspace=workspace,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            except KeyboardInterrupt:
+                stderr.write('{"error":"cancelled","message":"Run cancelled by user."}\n')
+                stderr.flush()
+                return EXIT_CANCELLED
+            except CliAttachError as exc:
+                stderr.write(f"metis: attach failed: {exc}\n")
+                stderr.flush()
+                if args.debug:
+                    traceback.print_exc(file=stderr)
+                return EXIT_ENVIRONMENT
+            return result.exit_code
         session_store = CliSessionStore()
         resume = session_store.resolve_resume(args.resume_id, latest=args.continue_session) if (args.resume_id or args.continue_session) else None
         workspace = _workspace_path(args.workspace or (resume.workspace if resume is not None else "."))
-        prompt = _prompt_text(args, stdin)
         session_id, messages = session_store.begin_run(prompt=prompt, workspace=workspace, resume=resume)
         permission_checker = build_permission_checker(workspace, args.policy)
     except SystemExit as exc:

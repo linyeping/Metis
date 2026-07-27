@@ -228,6 +228,16 @@ metis sessions export <session-id> --format markdown --output session.md
 
 JSON list, detail, and export responses use `metis.cli_sessions.v1`, `metis.cli_session.v1`, and `metis.session_export.v1`, respectively. JSON exports are portable archives; Markdown exports are intended for direct reading.
 
+When the desktop app is running, the CLI can hand a task to that active desktop runtime. The desktop instance owns the agent loop, model configuration, tool state, and approval UI while stdout keeps the same `text`, `json`, or `stream-json` contract:
+
+```powershell
+metis --attach "Inspect this project"
+metis --attach --resume <session-id-or-prefix> "Continue"
+metis --attach --continue "Continue the most recent session"
+```
+
+An attached run waits for the user to approve or deny permission requests in the Metis desktop app instead of immediately exiting with code `2`. The CLI does not scan local ports: the production desktop backend publishes a random token and data-home pointer under `%LOCALAPPDATA%\Metis\runtime` with a current-user ACL, then the CLI verifies the PID, instance ID, attach protocol, and event schema during its handshake. This keeps the CLI on the same session store even when the installation data directory is customized; development uses a separate discovery record and cannot replace the production identity. Because `--attach` uses the desktop runtime configuration, model, permission, policy, tool-toggle, and max-turn overrides are rejected.
+
 The CLI also provides read-only environment diagnostics plus separate sandbox status and repair surfaces:
 
 ```powershell
@@ -299,11 +309,11 @@ npm run build
 ```text
 Miro/
 ├── backend/
-│   ├── cli/            # headless lifecycle, config merge, output contract, permission fail-fast
+│   ├── cli/            # headless/attach lifecycle, sessions, diagnostics, output and permission contracts
 │   ├── bridges/        # event contracts and provider/tool protocol bridges
 │   ├── runtime/        # agent loop, tool registry, skills, checkpoint, context budget
 │   ├── tools/          # code, browser, desktop, retrieval, and other tools
-│   ├── web/            # Flask API, SSE, Preview Browser bridge
+│   ├── web/            # Flask API, SSE, CLI attach, Preview Browser bridge
 │   └── assets/         # cover, architecture, and feature showcase images
 ├── desktop/
 │   ├── electron/       # Electron main/preload, OAuth, packaging entry
@@ -318,7 +328,7 @@ Miro/
 ## Privacy and Safety
 
 - Metis does not require a platform account and does not include built-in telemetry.
-- API keys and OAuth tokens stay in local configuration/encrypted storage.
+- On Windows, the desktop and CLI share the model API key through the current user's Credential Manager; legacy `safeStorage` or plaintext values are migrated and removed.
 - Connector tokens are not inserted into model context.
 - Tool actions are audited for traceability.
 - `/computer` and `/browser` distinguish reading information from sending or submitting data; external side effects, sensitive data, deletion, uploads, and authorization changes should be confirmed first.

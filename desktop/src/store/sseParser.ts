@@ -7,7 +7,7 @@
 import { normalizeChatStreamEvent, type NormalizedChatEvent } from '../lib/agentEvents';
 import { answerPermissionRequest, markPermissionDisplayed } from '../lib/api';
 import { findSafeLocalPreviewUrl } from '../lib/webPreview';
-import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoItem, ChatTodoNotice, ChatToolEvent, CoworkPlanSnapshot, RuntimeStatus } from '../lib/types';
+import type { ChatMessage, ChatMessagePart, ChatStreamEvent, ChatSubagentEvent, ChatTodoItem, ChatTodoNotice, ChatToolEvent, CoworkPlanSnapshot, PermissionRequestMetadata, RuntimeStatus } from '../lib/types';
 import { useUiStore } from './uiStore';
 import {
   formatError,
@@ -811,6 +811,32 @@ async function requestToolPermission(event: NormalizedChatEvent, assistantId: st
   } finally {
     pendingPermissionDialogs.delete(event.requestId);
   }
+}
+
+export async function requestPolledPermission(permission: PermissionRequestMetadata): Promise<void> {
+  const requestId = String(permission.requestId || '');
+  const status = String(permission.status || '');
+  if (!requestId || (status !== 'requested' && status !== 'displayed')) return;
+  const event: NormalizedChatEvent = {
+    kind: 'permission_request',
+    text: '',
+    toolName: String(permission.toolName || ''),
+    args: permission.argumentsPreview ?? {},
+    result: null,
+    summary: '',
+    callId: String(permission.callId || ''),
+    requestId,
+    error: { code: '', title: '', message: '', hint: '', recoverable: true },
+    usage: null,
+    contextLedger: null,
+    runtimeStatus: null,
+    compactStatus: null,
+    memory: null,
+    todo: null,
+    subagent: null,
+    permission,
+  };
+  await requestToolPermission(event, `attached-${permission.runId || requestId}`);
 }
 
 function permissionDialogChoices(event: NormalizedChatEvent): NonNullable<NonNullable<NormalizedChatEvent['permission']>['choices']> {

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 from backend.core.credential_store import CredentialStoreError, read_api_key
+from backend.core.paths import metis_home
 
 from .args import ParsedCliArgs
 
@@ -96,7 +97,8 @@ def build_cli_runtime(args: ParsedCliArgs, *, workspace: Path, session_id: str) 
 
 
 def merged_settings(args: ParsedCliArgs, *, workspace: Path) -> Dict[str, Any]:
-    user_root = Path(os.environ.get("METIS_HOME") or (Path.home() / ".metis")).expanduser()
+    explicit_home = str(os.environ.get("METIS_HOME") or "").strip()
+    user_root = Path(explicit_home).expanduser().resolve(strict=False) if explicit_home else metis_home()
     merged: Dict[str, Any] = {}
     for path in (
         user_root / "config.json",

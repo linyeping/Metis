@@ -106,12 +106,12 @@ def _run_desktop(args: argparse.Namespace) -> None:
 
 
 def _run_web(args: argparse.Namespace) -> None:
-    from backend.web.app import app
+    from backend.web.app import start_server
 
     port = args.port or int(_env("METIS_PORT", "MIRO_PORT", "5000"))
     os.environ["METIS_PORT"] = str(port)
     print(f"Metis Agent web mode: http://127.0.0.1:{port}")
-    app.run(host="127.0.0.1", port=port, threaded=True, debug=False)
+    start_server(port, host="127.0.0.1")
 
 
 def _run_cli(args: argparse.Namespace) -> None:

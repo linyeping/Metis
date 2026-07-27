@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ChatTodoItem, ChatTodoNotice } from '../../lib/types';
-import { _bindChatStore, _bindSessionStore, applyChatEvent, flushAssistantText } from '../sseParser';
+import { useUiStore } from '../uiStore';
+import { _bindChatStore, _bindSessionStore, applyChatEvent, flushAssistantText, requestPolledPermission } from '../sseParser';
 
 function bindParserState() {
   const state: {
@@ -38,6 +39,55 @@ function bindParserState() {
 }
 
 describe('sseParser ordered message parts', () => {
+  it('opens the existing desktop approval dialog for a polled attached permission', async () => {
+    bindParserState();
+    const previousRequestChoice = useUiStore.getState().requestChoice;
+    const requestChoice = vi.fn().mockResolvedValue({ confirmed: true, choice: 'once' });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify({
+        ok: true,
+        request: {
+          schema: 'metis.permission_request.v1',
+          request_id: 'attached-permission',
+          call_id: 'attached-call',
+          status: 'answered',
+        },
+      })),
+    });
+    vi.stubGlobal('metis', { backendPort: () => Promise.resolve(9123) });
+    vi.stubGlobal('fetch', fetchMock);
+    useUiStore.setState({ requestChoice });
+
+    try {
+      await requestPolledPermission({
+        schema: 'metis.permission_request.v1',
+        requestId: 'attached-permission',
+        callId: 'attached-call',
+        runId: 'attached-run',
+        sessionId: 'attached-session',
+        toolName: 'write_file',
+        status: 'requested',
+        argumentsPreview: { path: 'notes.md' },
+        choices: [{ value: 'once', label: '仅本次允许', approved: true }],
+        suggestedWritableRoot: '',
+        suggestedWritableRoots: [],
+        canGrantWritableRoot: false,
+        canGrantFullAccess: false,
+        workspaceRoot: 'D:/workspace',
+      });
+    } finally {
+      useUiStore.setState({ requestChoice: previousRequestChoice });
+      vi.unstubAllGlobals();
+    }
+
+    expect(requestChoice).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/permissions/requests/attached-permission/displayed');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/permissions/requests/attached-permission/answer');
+  });
+
   it('moves an applied follow-up from the pending card into the live timeline', () => {
     const state = bindParserState();
     state.messages[0].content = 'First answer';

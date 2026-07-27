@@ -97,6 +97,14 @@ class HeadlessRenderer:
         self._json_line(self.stderr, error)
         return error
 
+    def permission_waiting(self, event: Any) -> None:
+        if self.output_format != "text":
+            return
+        self._ensure_line_break()
+        tool_name = str(getattr(event, "tool_name", "") or getattr(event, "tool", "") or "tool")
+        self.stderr.write(f"[permission] Approve or deny {tool_name} in the Metis desktop app.\n")
+        self.stderr.flush()
+
     def finish(self, result: HeadlessResult) -> None:
         if self._delta_open:
             self.stdout.write("\n")
@@ -171,6 +179,7 @@ def drive_headless(
     *,
     renderer: HeadlessRenderer,
     session_id: str,
+    permission_fail_fast: bool = True,
 ) -> HeadlessResult:
     result = HeadlessResult(session_id=session_id)
     saw_done = False
@@ -184,11 +193,13 @@ def drive_headless(
             renderer.event(event, result)
             kind = str(getattr(event, "type", "") or getattr(event, "kind", "") or "")
             if kind == "permission_request":
-                result.exit_code = EXIT_PERMISSION
-                result.error = renderer.permission_error(event)
-                events.close()
-                renderer.finish(result)
-                return result
+                if permission_fail_fast:
+                    result.exit_code = EXIT_PERMISSION
+                    result.error = renderer.permission_error(event)
+                    events.close()
+                    renderer.finish(result)
+                    return result
+                renderer.permission_waiting(event)
             if kind == "error" and not bool(getattr(event, "recoverable", False)):
                 fatal_exit = classify_error_exit(str(getattr(event, "code", "") or ""))
             if kind == "done":

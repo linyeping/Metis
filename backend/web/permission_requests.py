@@ -8,7 +8,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
 
-
 PERMISSION_REQUEST_SCHEMA = "metis.permission_request.v1"
 PERMISSION_REQUEST_VERSION = 1
 DEFAULT_PERMISSION_TIMEOUT_SECONDS = 300
@@ -36,6 +35,7 @@ class PermissionRequestStore:
         decision: Mapping[str, Any] | None = None,
         path_safety: Mapping[str, Any] | None = None,
         choices: List[Mapping[str, Any]] | None = None,
+        metadata: Mapping[str, Any] | None = None,
         workspace_root: str = "",
         timeout_seconds: int = DEFAULT_PERMISSION_TIMEOUT_SECONDS,
         created_at: float | None = None,
@@ -66,6 +66,20 @@ class PermissionRequestStore:
                 "audit_id": "",
                 "history": [{"status": "requested", "at": _iso_timestamp(now)}],
             }
+            extra = dict(metadata or {})
+            for key in (
+                "explainer",
+                "permission_explainer",
+                "autoguard",
+                "tool_contract",
+                "suggested_writable_root",
+                "suggested_writable_roots",
+                "can_grant_writable_root",
+                "can_grant_full_access",
+                "default_choice",
+            ):
+                if key in extra:
+                    payload[key] = _json_safe(extra[key])
             self._requests[str(request_id)] = payload
             return dict(payload)
 
@@ -73,6 +87,16 @@ class PermissionRequestStore:
         with self._lock:
             request = self._requests.get(str(request_id or ""))
             return dict(request) if request else None
+
+    def list_pending(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            requests = [
+                dict(request)
+                for request in self._requests.values()
+                if str(request.get("status") or "") in {"requested", "displayed"}
+            ]
+        requests.sort(key=lambda item: str(item.get("created_at") or ""))
+        return requests
 
     def mark_displayed(self, request_id: str, *, surface: str = "desktop", displayed_at: Any = None) -> Optional[Dict[str, Any]]:
         return self._update(

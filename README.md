@@ -122,7 +122,7 @@ Design 使用 Metis 当前的模型配置与 API 凭据，并共享主题、语�
 - 支持 DeepSeek 与 OpenAI-compatible API，可配置自定义 Base URL、API Key 和模型名。
 - 从当前 API 读取可用模型目录，在 Composer 或模型面板快速切换。
 - 展示上下文窗口、模型类型、提供方信息与可用用量数据。
-- API Key 保存在本机配置中，不写入聊天记录、日志或模型上下文。
+- Windows 下 API Key 保存在当前用户的 Credential Manager 中，不写入明文配置、聊天记录、日志或模型上下文。
 - Design 与其它工作面使用同一套模型配置，无需维护第二套账号或凭据。
 
 ### 命令中心
@@ -290,6 +290,16 @@ metis sessions export <session-id> --format markdown --output session.md
 
 JSON 列表、详情和导出分别使用 `metis.cli_sessions.v1`、`metis.cli_session.v1` 与 `metis.session_export.v1`；JSON 导出可以直接复制到另一台机器留档，Markdown 导出适合人工阅读。
 
+桌面应用正在运行时，CLI 还可以把任务交给当前桌面 runtime；agent loop、模型配置、工具状态和权限确认都由桌面实例负责，输出仍保持相同的 `text` / `json` / `stream-json` 契约：
+
+```powershell
+metis --attach "检查当前项目"
+metis --attach --resume <session-id-or-prefix> "继续"
+metis --attach --continue "接着最近的会话"
+```
+
+attached run 遇到权限请求时会等待用户在 Metis 桌面端允许或拒绝，而不是像独立 headless run 那样以退出码 `2` 立即结束。CLI 不扫描本机端口；正式桌面 backend 在 `%LOCALAPPDATA%\Metis\runtime` 下使用当前用户 ACL 发布随机令牌和数据目录指针，并在连接时校验 PID、实例 ID、attach 协议与事件 schema。这样即使安装数据目录经过自定义，CLI 仍能找到同一会话库；开发版使用独立发现记录，不覆盖正式版。`--attach` 使用桌面的运行配置，因此不接受模型、权限、policy、工具开关或最大轮次覆盖参数。
+
 CLI 还提供默认只读的环境诊断与独立的沙箱检查/修复入口：
 
 ```powershell
@@ -353,12 +363,12 @@ npm run dist:win
 Miro/
 ├── .github/workflows/       # CI、运行时构建与发布工作流
 ├── backend/
-│   ├── cli/                 # Headless CLI、配置合并、输出契约与权限 fail-fast
+│   ├── cli/                 # Headless/attach CLI、会话、诊断、输出与权限契约
 │   ├── core/                # 配置、常量与共享基础能力
 │   ├── bridges/             # 事件、供应商与工具协议桥接
 │   ├── runtime/             # agent loop、模型路由、run、checkpoint 与执行环境
 │   ├── tools/               # 代码、浏览器、桌面、检索与文档工具
-│   ├── web/                 # Flask API、SSE 与 Preview Browser bridge
+│   ├── web/                 # Flask API、SSE、CLI attach 与 Preview Browser bridge
 │   └── tests/               # 后端单元、集成、安全与运行时测试
 ├── desktop/
 │   ├── electron/            # 窗口、托盘、PTY、OAuth、预览与 runtime 生命周期
@@ -387,7 +397,7 @@ Metis 不要求平台账号。模型服务、连接器和外部工具由用户�
 |---|---|
 | **项目与会话** | 写入统一数据目录；默认优先使用安装目录下的 `data/`，不可写时回退到 `%LOCALAPPDATA%/Metis/data` |
 | **数据目录** | 可通过安装目录的 `data-root.json` 或 `METIS_DATA_ROOT` 调整；`METIS_HOME` 单独覆盖后端工作目录 |
-| **模型 API Key** | 使用 Electron `safeStorage` 加密后落盘；启动本机后端时在进程内解密注入 |
+| **模型 API Key** | Windows 下保存到当前用户的 Credential Manager（target：`Metis/LLM/API-Key`），桌面与 CLI 读取同一凭据；旧版 `safeStorage` / 明文配置会迁移后清除 |
 | **OAuth 与连接器凭据** | 按服务分别加密保存，只在对应连接器或本机运行时需要时解密使用 |
 | **Design 数据采集** | Metis 受管配置关闭 metrics、content 与 artifact manifest telemetry |
 | **工具动作** | 权限请求、允许/拒绝结果、运行状态和诊断信息保持可回看 |

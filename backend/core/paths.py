@@ -6,6 +6,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from backend.core.cli_attach_path import cli_shared_metis_home
+
 
 @lru_cache(maxsize=1)
 def metis_home() -> Path:
@@ -14,7 +16,8 @@ def metis_home() -> Path:
     Resolution order:
     1. METIS_HOME environment override.
     2. Portable marker next to the executable: metis-portable.marker -> data/metis.
-    3. Backward-compatible fallback: ~/.metis.
+    3. Current-user desktop data-home pointer.
+    4. Backward-compatible fallback: ~/.metis.
     """
     env = os.environ.get("METIS_HOME", "").strip()
     if env:
@@ -22,6 +25,9 @@ def metis_home() -> Path:
     portable = _portable_data_dir()
     if portable is not None:
         return portable.resolve(strict=False)
+    shared = cli_shared_metis_home()
+    if shared is not None:
+        return shared
     return (Path.home() / ".metis").resolve(strict=False)
 
 

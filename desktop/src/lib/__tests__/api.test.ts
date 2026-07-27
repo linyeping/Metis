@@ -235,6 +235,37 @@ describe('streamRunEvents', () => {
 });
 
 describe('permission request protocol', () => {
+  it('lists pending permission requests for desktop-wide approval', async () => {
+    fetchMock.mockReturnValueOnce(jsonResponse({
+      ok: true,
+      requests: [
+        {
+          schema: 'metis.permission_request.v1',
+          request_id: 'perm-attached',
+          call_id: 'call-attached',
+          run_id: 'run-attached',
+          session_id: 'session-attached',
+          tool_name: 'write_file',
+          status: 'requested',
+          arguments_preview: { path: 'notes.md' },
+        },
+      ],
+    }));
+
+    const requests = await api.listPendingPermissionRequests();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toContain('/permissions/requests');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      requestId: 'perm-attached',
+      runId: 'run-attached',
+      sessionId: 'session-attached',
+      toolName: 'write_file',
+      status: 'requested',
+    });
+  });
+
   it('marks a permission request displayed', async () => {
     fetchMock.mockReturnValueOnce(jsonResponse({
       ok: true,

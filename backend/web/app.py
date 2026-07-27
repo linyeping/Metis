@@ -117,6 +117,12 @@ from backend.web.workspaces import get_workspace_manager  # noqa: E402
 from backend.web.runtime_state import RuntimeState  # noqa: E402
 from backend.web.preview_bridge import preview_bridge_bp  # noqa: E402
 from backend.web.marketplace_routes import marketplace_bp  # noqa: E402
+from backend.web.cli_attach import (  # noqa: E402
+    attach_hello_payload,
+    authorize_attach_request,
+    clear_attach_discovery,
+    publish_attach_discovery,
+)
 from backend.web.permission_requests import (  # noqa: E402
     DEFAULT_PERMISSION_TIMEOUT_SECONDS,
     PermissionRequestStore,
@@ -2721,6 +2727,7 @@ def _stream_agent_response(
                         decision=permission_decision.to_dict(),
                         path_safety=permission_meta.get("path_safety") if isinstance(permission_meta.get("path_safety"), dict) else {},
                         choices=choices,
+                        metadata=permission_meta,
                         workspace_root=config.workspace_root,
                         timeout_seconds=DEFAULT_PERMISSION_TIMEOUT_SECONDS,
                     )
@@ -3222,6 +3229,128 @@ def index() -> Any:
 @app.route("/health", methods=["GET"])
 def health() -> Any:
     return jsonify({"ok": True})
+
+
+def _cli_attach_auth_error() -> Any:
+    if authorize_attach_request(
+        str(request.remote_addr or ""),
+        str(request.headers.get("X-Metis-CLI-Token") or ""),
+    ):
+        return None
+    return jsonify({"ok": False, "error": "CLI attach authorization failed"}), 403
+
+
+@app.route("/api/cli/v1/hello", methods=["GET"])
+def cli_attach_hello() -> Any:
+    error = _cli_attach_auth_error()
+    if error:
+        return error
+    return jsonify(attach_hello_payload())
+
+
+@app.route("/api/cli/v1/sessions", methods=["POST"])
+def cli_attach_session() -> Any:
+    error = _cli_attach_auth_error()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    manager = get_session_manager()
+    requested_id = str(data.get("session_id") or data.get("sessionId") or "").strip()
+    continue_session = bool(data.get("continue_session") or data.get("continueSession"))
+    if requested_id and continue_session:
+        return jsonify({"ok": False, "error": "session_id and continue_session are mutually exclusive"}), 400
+
+    session = None
+    if continue_session:
+        candidates = manager.list_sessions()
+        if not candidates:
+            return jsonify({"ok": False, "error": "no sessions are available to continue"}), 404
+        session = manager.get_session(candidates[0].id)
+    elif requested_id:
+        session = manager.get_session(requested_id)
+        if session is None:
+            matches = [item for item in manager.list_sessions() if item.id.startswith(requested_id)]
+            if len(matches) > 1:
+                return jsonify({"ok": False, "error": "session prefix is ambiguous"}), 409
+            if len(matches) == 1:
+                session = manager.get_session(matches[0].id)
+        if session is None:
+            return jsonify({"ok": False, "error": "session not found"}), 404
+    if session is not None and _active_run_for_session(session.id) is not None:
+        return jsonify({"ok": False, "error": "session already has an active run"}), 409
+
+    workspace_value = str(data.get("workspace") or "").strip()
+    workspace_manager = get_workspace_manager()
+    if workspace_value:
+        workspace_root = os.path.abspath(workspace_value)
+        if not os.path.isdir(workspace_root):
+            return jsonify({"ok": False, "error": "valid workspace directory required"}), 400
+        workspace = workspace_manager.create_workspace(workspace_root)
+    elif session is not None and session.workspace_id:
+        workspace = workspace_manager.get_workspace(session.workspace_id)
+        if workspace is None or not os.path.isdir(workspace.path):
+            return jsonify({"ok": False, "error": "stored session workspace is unavailable; pass --workspace"}), 409
+    else:
+        return jsonify({"ok": False, "error": "valid workspace directory required"}), 400
+
+    if session is not None:
+        if session.workspace_id != workspace.id:
+            manager.update_session(session.id, workspace_id=workspace.id)
+        session = manager.get_session(session.id) or session
+        created = False
+    else:
+        mode = str(data.get("mode") or "code").strip().lower()
+        if mode not in {"chat", "cowork", "code"}:
+            mode = "code"
+        session = manager.create_session(
+            title=str(data.get("title") or "CLI session").strip(),
+            workspace_id=workspace.id,
+            mode=mode,
+        )
+        created = True
+    return jsonify(
+        {
+            "schema": "metis.cli_attach.session.v1",
+            "ok": True,
+            "created": created,
+            "session_id": session.id,
+            "mode": session.mode,
+            "workspace": workspace.path,
+            "workspace_id": workspace.id,
+        }
+    )
+
+
+@app.route("/api/cli/v1/runs", methods=["POST"])
+def cli_attach_create_run() -> Any:
+    error = _cli_attach_auth_error()
+    if error:
+        return error
+    return create_run()
+
+
+@app.route("/api/cli/v1/runs/<run_id>", methods=["GET"])
+def cli_attach_get_run(run_id: str) -> Any:
+    error = _cli_attach_auth_error()
+    if error:
+        return error
+    return get_run(run_id)
+
+
+@app.route("/api/cli/v1/runs/<run_id>/events", methods=["GET"])
+def cli_attach_run_events(run_id: str) -> Any:
+    error = _cli_attach_auth_error()
+    if error:
+        return error
+    return run_events(run_id)
+
+
+@app.route("/api/cli/v1/runs/<run_id>/cancel", methods=["POST", "DELETE"])
+def cli_attach_cancel_run(run_id: str) -> Any:
+    error = _cli_attach_auth_error()
+    if error:
+        return error
+    return cancel_run(run_id)
 
 
 @app.route("/contract/agent-events", methods=["GET"])
@@ -4512,6 +4641,7 @@ def _ensure_permission_request_from_context(request_id: str, context: Dict[str, 
         decision=decision if isinstance(decision, dict) else {},
         path_safety=path_safety,
         choices=choices if all(isinstance(choice, dict) for choice in choices) else [],
+        metadata=permission,
         workspace_root=str(context.get("workspace_root") or permission.get("workspace_root") or ""),
     )
     merged = {**permission, **request_payload, "choices": choices}
@@ -4779,6 +4909,11 @@ def get_permission_request(request_id: str) -> Any:
     if request_payload is None:
         return jsonify({"error": "permission request not found"}), 404
     return jsonify({"ok": True, "request": request_payload})
+
+
+@app.route("/permissions/requests", methods=["GET"])
+def list_pending_permission_requests() -> Any:
+    return jsonify({"ok": True, "requests": _permission_request_store.list_pending()})
 
 
 @app.route("/permissions/requests/<request_id>/displayed", methods=["POST"])
@@ -5406,14 +5541,21 @@ def start_server(preferred_port: int = 5000, *, host: str = "127.0.0.1", max_att
     for offset in range(max_attempts):
         candidate = preferred_port + offset
         try:
+            publish_attach_discovery(host=host, port=candidate)
+        except Exception as exc:
+            logger.warning("CLI attach discovery unavailable: %s", sanitize_for_log(exc))
+        try:
             app.run(host=host, port=candidate, threaded=True, debug=False)
             return
         except OSError as exc:
+            clear_attach_discovery()
             message = str(exc)
             if "Address already in use" in message or "10048" in message:
                 logger.warning("Port %s is in use, trying %s", candidate, candidate + 1)
                 continue
             raise
+        finally:
+            clear_attach_discovery()
     raise RuntimeError(f"No available port in range {preferred_port}-{preferred_port + max_attempts - 1}")
 
 
