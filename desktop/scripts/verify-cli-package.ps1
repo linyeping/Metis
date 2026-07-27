@@ -23,6 +23,9 @@ $previousPath = $env:PATH
 $previousPythonPath = $env:PYTHONPATH
 $previousMetisHome = $env:METIS_HOME
 $previousPythonHome = $env:PYTHONHOME
+$previousApiKey = $env:METIS_LLM_API_KEY
+$previousBackend = $env:METIS_LLM_BACKEND
+$previousModel = $env:METIS_LLM_MODEL
 try {
   # The runner may have Python and Node installed, but the packaged probe must
   # run with neither runtime discoverable on PATH and outside the source tree.
@@ -85,6 +88,28 @@ try {
       throw "Packaged CLI session export contract is invalid"
     }
 
+    $doctorSecret = "sk-packaged-doctor-must-not-print"
+    $env:METIS_LLM_API_KEY = $doctorSecret
+    $env:METIS_LLM_BACKEND = "fake"
+    $env:METIS_LLM_MODEL = "fake-model"
+    & $probeExe doctor --workspace $probeRoot --output-format json 1> doctor.stdout 2> doctor.stderr
+    if ($LASTEXITCODE -ne 0) { throw "Packaged CLI doctor probe failed" }
+    $doctor = Get-Content -LiteralPath "doctor.stdout" -Raw | ConvertFrom-Json
+    if ($doctor.schema -ne "metis.cli_doctor.v1" -or -not $doctor.ok) {
+      throw "Packaged CLI doctor contract is invalid"
+    }
+    if ((Get-Content -LiteralPath "doctor.stdout" -Raw).Contains($doctorSecret)) {
+      throw "Packaged CLI doctor leaked the API key"
+    }
+
+    & $probeExe sandbox status --workspace $probeRoot --output-format json 1> sandbox.stdout 2> sandbox.stderr
+    $sandboxExit = $LASTEXITCODE
+    if ($sandboxExit -notin @(0, 3)) { throw "Packaged CLI sandbox status returned an invalid exit code" }
+    $sandbox = Get-Content -LiteralPath "sandbox.stdout" -Raw | ConvertFrom-Json
+    if ($sandbox.schema -ne "metis.cli_sandbox_status.v1" -or $sandbox.service.expected_protocol -ne "metis.vm.svc.v2") {
+      throw "Packaged CLI sandbox status contract is invalid"
+    }
+
     & $probeExe "task" -p --workspace (Join-Path $probeRoot "missing") 1> usage.stdout 2> usage.stderr
     if ($LASTEXITCODE -ne 64) { throw "Packaged CLI usage error did not exit 64" }
   }
@@ -97,6 +122,9 @@ finally {
   $env:PYTHONPATH = $previousPythonPath
   $env:PYTHONHOME = $previousPythonHome
   $env:METIS_HOME = $previousMetisHome
+  $env:METIS_LLM_API_KEY = $previousApiKey
+  $env:METIS_LLM_BACKEND = $previousBackend
+  $env:METIS_LLM_MODEL = $previousModel
 }
 
 Write-Host "Packaged CLI clean-path verification passed: $probeExe"
