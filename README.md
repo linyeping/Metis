@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis 26.7.17 · Design" width="100%" />
+<img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis Chat、Cowork、Code 与 Design" width="100%" />
 
 # Metis
 
@@ -15,8 +15,8 @@
 </p>
 
 <p>
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.17/Metis-Setup-26.7.17.exe"><img alt="下载 Metis 26.7.17" src="https://img.shields.io/badge/下载_Metis-26.7.17-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
-  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.17"><img alt="查看 Release Notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.27/Metis-Setup-26.7.27.exe"><img alt="下载 Metis 26.7.27" src="https://img.shields.io/badge/下载_Metis-26.7.27-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.27"><img alt="查看 Release Notes" src="https://img.shields.io/badge/查看-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
 </p>
 
 <sub>Windows 10 / 11 · 64 位 · DeepSeek / OpenAI-compatible API</sub><br />
@@ -183,18 +183,14 @@ Runtime Manager 提供系统基础能力、运行组件、隔离执行、镜像/
 
 ---
 
-## 26.7.17 版本重点
+## 26.7.27 版本重点
 
-- 新增完整的 Metis Design 工作面：项目、Studio、素材、设计系统、评论、预览、版本与多格式导出。
-- Chat / Cowork / Code / Design 共享模型配置、主题、语言、通知与桌面宠物状态。
-- 新增后台运行、活动中心、会话恢复、未读/归档和长任务恢复诊断。
-- 新增独立 Side Chat、命令中心、模型目录、用量信息和上下文额度显示。
-- 完善九类工作卡、多标签网页预览、交互式 PTY、多文件 Diff 和逐文件回退。
-- 增加开发服务器自动预览、Preview Browser 自动化、视觉验证和证据保存。
-- 完善 Skills、Connectors、外部 MCP 与权限中心的批量管理、导入导出。
-- 完成 Worktree、WSL 与 HCS VM 执行链路，补齐持久数据盘、guest handshake 与 boot verifier。
-- 大型工作区快照改为完整复制或显式失败，避免静默截断造成文件缺失和伪删除。
-- 新增任务完成通知、会话状态联动和可导入的桌面宠物库。
+- 新增 Thinking Orbs：根据真实运行事件区分理解任务、检索资料、执行工具与组织回答。
+- 运行状态进入当前 AI 回复，与本轮工具活动保持在同一条时间线中，不再占用输入框上方空间。
+- 状态提示改为面向任务的自然文案，并保留轮次、步骤与耗时信息。
+- 20px 内联动画对齐 Thinking Orbs 原始 64px 演示节奏，兼顾清晰度与长任务观看体验。
+- 准备、重试和重连统一使用 Orb；真正失败时直接显示错误标志，不再闪烁心电图图标。
+- 排队消息与后台子智能体继续保留在输入区附近，区分当前回复状态和跨任务状态。
 
 ---
 
@@ -220,13 +216,13 @@ Runtime Manager 提供系统基础能力、运行组件、隔离执行、镜像/
 <h2 align="center">下载与首次启动</h2>
 
 <p align="center">
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.17/Metis-Setup-26.7.17.exe"><b>下载 Metis 26.7.17 for Windows</b></a><br />
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.27/Metis-Setup-26.7.27.exe"><b>下载 Metis 26.7.27 for Windows</b></a><br />
   <sub>Windows 10 / 11 · x64 · NSIS 安装程序</sub>
 </p>
 
 <table align="center" width="100%">
   <tr>
-    <td width="25%" valign="top"><b>1 · 下载</b><br /><br />从 <a href="https://github.com/linyeping/Metis/releases/latest">Latest Release</a> 获取 <code>Metis-Setup-26.7.17.exe</code>。</td>
+    <td width="25%" valign="top"><b>1 · 下载</b><br /><br />从 <a href="https://github.com/linyeping/Metis/releases/latest">Latest Release</a> 获取 <code>Metis-Setup-26.7.27.exe</code>。</td>
     <td width="25%" valign="top"><b>2 · 安装</b><br /><br />运行安装程序，选择安装目录并完成桌面快捷方式创建。</td>
     <td width="25%" valign="top"><b>3 · 配置模型</b><br /><br />在设置中选择提供方，填写 API Key，并测试连接或读取模型目录。</td>
     <td width="25%" valign="top"><b>4 · 开始任务</b><br /><br />选择 Chat、Cowork、Code 或 Design；需要时再连接 Skills、MCP 与 Connectors。</td>

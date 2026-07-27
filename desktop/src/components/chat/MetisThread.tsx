@@ -15,7 +15,7 @@ import { ChatBubbleIcon, CoworkTaskIcon } from '../icons/MetisIcons';
 import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentProps, RefObject } from 'react';
 import { themes } from '../../lib/themes';
-import type { AppMode, RuntimeStatus } from '../../lib/types';
+import type { AppMode } from '../../lib/types';
 import { useMetisRuntime } from '../../runtime/metisRuntime';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
@@ -25,7 +25,7 @@ import { Composer } from './Composer';
 import { ImageAttachmentPreview } from './ImageAttachmentPreview';
 import { PendingFollowups } from './PendingFollowups';
 import { AssistantMessage, SystemMessage, UserMessage } from './MessageBubble';
-import { AwaySummaryNotice, ContextOrganizingNotice, LearningNotice, RunRecoveryNotice, RuntimeStatusBar, TodoNotice } from './NoticeCards';
+import { AwaySummaryNotice, ContextOrganizingNotice, LearningNotice, RunRecoveryNotice, TodoNotice } from './NoticeCards';
 import { SubagentGroup } from './SubagentGroup';
 
 const coworkBackdropUrl = new URL('../../assets/cowork-dotwave-b.html', import.meta.url).href;
@@ -74,7 +74,6 @@ export function MetisThread() {
   const clearRecoverySnapshot = useChatStore(state => state.clearRecoverySnapshot);
   const compacting = useChatStore(state => state.compacting);
   const subagents = useChatStore(state => state.subagents);
-  const runtimeStatus = useChatStore(state => state.runtimeStatus);
   const activeSessionId = useSessionStore(state => state.activeSessionId);
   const activeWorkspaceId = useSessionStore(state => state.activeWorkspaceId);
   const sessions = useSessionStore(state => state.sessions);
@@ -119,10 +118,6 @@ export function MetisThread() {
       UserMessage,
     }),
     [],
-  );
-  const dockRuntimeStatus = useMemo(
-    () => runtimeStatusForDock(runtimeStatus, appMode),
-    [appMode, runtimeStatus],
   );
 
   return (
@@ -187,32 +182,12 @@ export function MetisThread() {
         </ThreadPrimitive.Root>
         <div className="thread-dock" ref={dockRef}>
           {showSubagentStrip && <SubagentGroup items={subagents} onDismiss={() => setHiddenSubagentSignature(subagentSignature)} />}
-          {dockRuntimeStatus && <RuntimeStatusBar status={dockRuntimeStatus} />}
           <PendingFollowups />
           <Composer />
         </div>
       </div>
     </AssistantRuntimeProvider>
   );
-}
-
-function runtimeStatusForDock(status: RuntimeStatus | null, appMode: AppMode): RuntimeStatus | null {
-  if (!status) return null;
-  if (appMode !== 'chat') return status;
-  const phase = String(status.phase || '').toLowerCase();
-  if (phase === 'llm_request' || phase === 'streaming') {
-    return {
-      ...status,
-      callId: '',
-      display: '正在整理答案',
-      hint: status.message && status.message !== status.display ? status.message : '来源已返回，正在综合结论',
-      toolName: '',
-    };
-  }
-  if (['failed', 'timeout', 'timed_out', 'tool_timeout', 'retrying', 'sse_reconnecting', 'cancel_requested'].includes(phase)) {
-    return status;
-  }
-  return null;
 }
 
 function ModeBackdrop({ scene, visible }: { scene: AppMode; visible: boolean }) {

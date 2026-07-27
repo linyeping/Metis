@@ -26,14 +26,16 @@ import { useEffect, useMemo, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { useChatStore } from '../../store/chatStore';
 import { useUiStore } from '../../store/uiStore';
+import { assistantRuntimeStatus } from '../../lib/orbState';
 import { apiBase, getResearchJob, getResearchJobs, getWorkspaceFile } from '../../lib/api';
 import { isCompactBoundary, parseCompactBoundary } from '../../lib/compactBoundary';
 import { chatLinkActionFromHref } from '../../lib/metisLinks';
-import type { ParsedFile, ResearchJob } from '../../lib/types';
+import type { ParsedFile, ResearchJob, RuntimeStatus } from '../../lib/types';
 import type { FileChangeSummary } from '../../lib/diffPreview';
 import { isPreviewableWebFilePath, localFilePreviewUrl } from '../../lib/webPreview';
 import { useT } from '../../hooks/useT';
 import { FileChangeReviewCard, summarizeMessageFileChanges } from './FileChangeReviewCard';
+import { RuntimeStatusBar } from './NoticeCards';
 import { completedResearchReportFromContent, CompletedResearchReportEntry, ToolActivityGroup, ToolCard } from './ToolCallBlock';
 import type { CompletedResearchReportSummary } from './ToolCallBlock';
 import {
@@ -62,12 +64,27 @@ export function AssistantMessage() {
   const messageId = useAuiState(state => state.message.id);
   const content = useAuiState(state => state.message.content);
   const text = useAuiState(state => messageText(state.message.content));
+  const runtimeStatus = useChatStore(state => state.runtimeStatus);
+  const isLatestAssistantMessage = useChatStore(state => {
+    const latest = [...state.messages].reverse().find(message => message.role === 'assistant');
+    return latest?.id === messageId;
+  });
   const appMode = useUiStore(state => state.appMode);
   const setWebPreviewUrl = useUiStore(state => state.setWebPreviewUrl);
   const setPreviewPath = useUiStore(state => state.setPreviewPath);
   const pushToast = useUiStore(state => state.pushToast);
   const requestConfirm = useUiStore(state => state.requestConfirm);
   const [copied, setCopied] = useState(false);
+  const initialRuntimeStatus = useMemo<RuntimeStatus>(() => ({
+    phase: 'starting',
+    message: '',
+    display: '正在准备工作',
+    severity: 'working',
+    toolName: '',
+    hint: '先理清任务，再开始动手',
+    recoverable: false,
+    startedAt: Date.now(),
+  }), []);
   const fileChangeSummary = useMemo(() => summarizeMessageFileChanges(messageId, content), [content, messageId]);
   const toolStats = useMemo(() => messageToolStats(content), [content]);
   const completedResearchReport = useMemo(() => completedResearchReportFromContent(content, t), [content, t]);
@@ -159,6 +176,9 @@ export function AssistantMessage() {
           lastToolIndex={toolStats.lastToolIndex}
           suppressLongResearchReport={suppressLongResearchReport}
         />
+        {isLatestAssistantMessage && (status === 'running' || runtimeStatus?.severity === 'error' || runtimeStatus?.severity === 'warning') && (
+          <RuntimeStatusBar status={runtimeStatus ? assistantRuntimeStatus(runtimeStatus) : initialRuntimeStatus} />
+        )}
         {showToolResearchReportEntry && effectiveResearchReport && (
           <CompletedResearchReportEntry report={effectiveResearchReport} />
         )}

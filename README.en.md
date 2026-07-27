@@ -1,13 +1,13 @@
 <div align="center">
 
-<img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis 26.7.17 · Design" width="100%" />
+<img src="backend/assets/Metis-26.7.17-Design.jpg" alt="Metis Chat, Cowork, Code, and Design" width="100%" />
 
-# Metis · 墨提斯
+# Metis
 
 **Connect models to code, terminals, browsers, and Windows, then carry a goal through to verifiable results.**
 
 <p>
-  <img alt="Electron 40" src="https://img.shields.io/badge/Electron-40-47848F?style=flat-square&logo=electron&logoColor=white" />
+  <img alt="Electron 41" src="https://img.shields.io/badge/Electron-41-47848F?style=flat-square&logo=electron&logoColor=white" />
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=111111" />
   <img alt="TypeScript 6" src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white" />
   <img alt="Python 3.11" src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" />
@@ -15,8 +15,8 @@
 </p>
 
 <p>
-  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.17/Metis-Setup-26.7.17.exe"><img alt="Download Metis 26.7.17" src="https://img.shields.io/badge/Download_Metis-26.7.17-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
-  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.17"><img alt="View Release Notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/download/v26.7.27/Metis-Setup-26.7.27.exe"><img alt="Download Metis 26.7.27" src="https://img.shields.io/badge/Download_Metis-26.7.27-357EC7?style=for-the-badge&logo=windows11&logoColor=white" /></a>
+  <a href="https://github.com/linyeping/Metis/releases/tag/v26.7.27"><img alt="View Release Notes" src="https://img.shields.io/badge/View-Release_Notes-2E8B72?style=for-the-badge&logo=github&logoColor=white" /></a>
 </p>
 
 <sub>Windows 10 / 11 · 64-bit · DeepSeek / OpenAI-compatible API</sub><br />
@@ -76,8 +76,6 @@
   </tr>
 </table>
 
-<p align="center"><sub>One installer provides Chat / Cowork / Code / Design. No separate Design source download is required.</sub></p>
-
 <br />
 
 <h2 align="center">Not Just Answers. Finished Work.</h2>
@@ -133,13 +131,13 @@
 <br />
 
 <details>
-  <summary><b>What's new in 26.7.17</b></summary>
+  <summary><b>What's new in 26.7.27</b></summary>
   <br />
   <ul>
-    <li>Introduced native Metis Design with a project home, conversational Studio, live preview, design systems, and multi-format export bundled with the desktop app.</li>
-    <li>Unified Design with Metis theme, locale, model configuration, task notifications, and desktop-pet state.</li>
-    <li>Added completion notifications, unread/archive session controls, a custom pet library, and faster tray recovery and surface switching.</li>
-    <li>Completed HCS direct-runner persistence, guest handshake, and boot verification; large workspace snapshots are now complete-or-fail.</li>
+    <li>Added Thinking Orbs driven by real runtime events for task understanding, search, tool execution, and response composition.</li>
+    <li>Moved live runtime status into the current assistant turn instead of reserving space above the composer.</li>
+    <li>Added concise user-facing activity copy while retaining turn, step, and elapsed-time details.</li>
+    <li>Matched the inline animation pacing to the original repository demo and removed the transient heartbeat icon before failures.</li>
   </ul>
 </details>
 

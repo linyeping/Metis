@@ -6642,21 +6642,21 @@ button.message-attachment-card:focus-visible {
 }
 
 .runtime-status-wrap {
-  width: min(860px, calc(100% - max(56px, 16vw)));
-  margin: 0 auto 6px;
+  width: 100%;
+  margin: 2px 0 5px;
 }
 
 .runtime-status {
   display: grid;
   min-height: 28px;
-  width: 100%;
-  grid-template-columns: 16px minmax(0, 1fr) auto minmax(0, 1fr);
+  width: min(100%, 760px);
+  grid-template-columns: 20px auto auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-2);
-  padding: 4px 9px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--accent));
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-secondary) 90%, var(--accent) 10%);
+  padding: 3px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   font-size: var(--ui-font-size-sm);
@@ -6668,8 +6668,20 @@ button.message-attachment-card:focus-visible {
   cursor: default;
 }
 
+.runtime-status:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  border-radius: var(--radius-sm);
+}
+
 .runtime-status svg {
   color: var(--accent);
+}
+
+.metis-thinking-orb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
 }
 
 .runtime-status span,
@@ -6698,8 +6710,7 @@ button.message-attachment-card:focus-visible {
 }
 
 .runtime-status[data-severity='error'] {
-  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
-  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--danger) 12%);
+  color: var(--danger);
 }
 
 .runtime-status[data-severity='error'] svg {
@@ -6707,16 +6718,11 @@ button.message-attachment-card:focus-visible {
 }
 
 .runtime-status[data-severity='warning'] {
-  border-color: color-mix(in srgb, var(--accent-strong) 42%, var(--border));
-  background: color-mix(in srgb, var(--bg-secondary) 86%, var(--accent-strong) 14%);
+  color: var(--accent-strong);
 }
 
 .runtime-status[data-severity='warning'] svg {
   color: var(--accent-strong);
-}
-
-.runtime-status .spin {
-  animation: runtime-spin 900ms linear infinite;
 }
 
 .composer-wrap {
@@ -22346,7 +22352,7 @@ body.metis-pet-shell #root {
   }
 
   .runtime-status-wrap {
-    width: calc(100% - 32px);
+    width: 100%;
   }
 
   .connectors-manager {

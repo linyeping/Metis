@@ -5,12 +5,10 @@
  * RuntimeStatusBar、ContextOrganizingNotice。
  */
 import {
-  Activity,
   AlertTriangle,
   Brain,
   CheckCircle2,
   ClipboardCheck,
-  LoaderCircle,
   Settings,
   Sparkles,
   X,
@@ -18,6 +16,8 @@ import {
 import { useEffect, useState } from 'react';
 import { useUiStore } from '../../store/uiStore';
 import type { ChatMemoryNotice, ChatRunRecoverySnapshot, ChatTodoNotice, RuntimeStatus } from '../../lib/types';
+import { orbStateForRuntime } from '../../lib/orbState';
+import { MetisThinkingOrb } from '../common/MetisThinkingOrb';
 import { compactPath, formatNoticeTime } from './threadUtils';
 import { useT } from '../../hooks/useT';
 
@@ -209,7 +209,10 @@ export function RuntimeStatusBar({ status }: { status: RuntimeStatus | null }) {
     return () => window.clearInterval(timer);
   }, [status]);
   if (!status) return null;
-  const Icon = status.severity === 'error' ? AlertTriangle : status.severity === 'done' ? CheckCircle2 : status.severity === 'working' ? LoaderCircle : Activity;
+  const showOrb = status.severity === 'working' || status.severity === 'info' || status.severity === 'warning';
+  const Icon = status.severity === 'done' ? CheckCircle2 : AlertTriangle;
+  const display = t(status.display);
+  const hint = t(status.hint);
   const elapsed = status.startedAt ? liveElapsed(now - status.startedAt) : '';
   const meta = [
     status.turn ? `${t('第 ')}${status.turn}${t(' 轮')}` : '',
@@ -225,12 +228,16 @@ export function RuntimeStatusBar({ status }: { status: RuntimeStatus | null }) {
     target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
   return (
-    <div className="runtime-status-wrap" aria-live="polite">
+    <div className="runtime-status-wrap assistant-runtime-status" aria-live="polite">
       <button className="runtime-status" data-severity={status.severity} type="button" onClick={jumpToTool} disabled={!status.callId}>
-        <Icon className={status.severity === 'working' ? 'spin' : undefined} size={14} />
-        <span>{status.display}</span>
+        {showOrb ? (
+          <MetisThinkingOrb state={orbStateForRuntime(status)} label={display} />
+        ) : (
+          <Icon size={14} />
+        )}
+        <span>{display}</span>
         {meta && <b>{meta}</b>}
-        {status.hint && <em>{status.hint}</em>}
+        {hint && <em>{hint}</em>}
       </button>
     </div>
   );

@@ -1894,13 +1894,13 @@ async function verifyDeveloperWorkflowPolish(checks: SmokeCheck[]): Promise<void
 }
 
 async function verifyStandardStream(checks: SmokeCheck[]): Promise<void> {
-  const display = await sendSmokeMessageAndCaptureStatus('standard smoke', value => value.includes('连接模型中'));
+  const display = await sendSmokeMessageAndCaptureStatus('standard smoke', value => value.includes('正在理解你的要求'));
   const state = useChatStore.getState();
   const assistant = lastAssistant();
   const tool = assistant?.tools?.find(item => item.callId === 'standard-call-1');
   const notice = state.memoryNotice;
 
-  record(checks, 'standard-runtime-status-visible', display.includes('连接模型中'), display);
+  record(checks, 'standard-runtime-status-visible', display.includes('正在理解你的要求'), display);
   record(checks, 'standard-text-delta', Boolean(assistant?.content.includes('Hello from fake backend.')), assistant?.content);
   const assistantCopyButton = document.querySelector<HTMLButtonElement>('.assistant-copy-button');
   record(
@@ -3186,11 +3186,11 @@ async function verifyLearningNoticeUi(checks: SmokeCheck[]): Promise<void> {
 }
 
 async function verifyLegacyStream(checks: SmokeCheck[]): Promise<void> {
-  const display = await sendSmokeMessageAndCaptureStatus('legacy smoke', value => value.includes('连接模型中'));
+  const display = await sendSmokeMessageAndCaptureStatus('legacy smoke', value => value.includes('正在理解你的要求'));
   const assistant = lastAssistant();
   const tool = assistant?.tools?.find(item => item.callId === 'legacy-call-1');
 
-  record(checks, 'legacy-runtime-status-visible', display.includes('连接模型中'), display);
+  record(checks, 'legacy-runtime-status-visible', display.includes('正在理解你的要求'), display);
   record(checks, 'legacy-text-delta', Boolean(assistant?.content.includes('Legacy stream OK.')), assistant?.content);
   record(
     checks,

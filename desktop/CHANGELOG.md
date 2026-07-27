@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning after the first public release.
 
+## [26.7.27] - 2026-07-27
+
+### Added
+
+- Added Thinking Orbs for task understanding, search, tool execution, and response composition, driven by real runtime events.
+- Added inline assistant-turn status copy with turn, step, elapsed-time, and tool-jump details.
+
+### Changed
+
+- Moved active runtime status from the composer dock into the current assistant response.
+- Matched 20px inline animation pacing to the upstream 64px demo while retaining the compact preset geometry.
+- Kept queued follow-ups and background subagents near the composer as distinct cross-turn state.
+
+### Fixed
+
+- Removed the transient heartbeat activity icon shown during preparation, retries, reconnects, and failure transitions.
+
 ## [26.7.17] - 2026-07-17
 
 ### Added
