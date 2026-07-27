@@ -3650,6 +3650,7 @@ async function startBackend(emit = () => {}) {
   const decryptedKey = decryptApiKeyFromConfig()
   if (decryptedKey && !backendEnv.METIS_LLM_API_KEY) {
     backendEnv.METIS_LLM_API_KEY = decryptedKey
+    backendEnv.METIS_LLM_API_KEY_SOURCE = 'electron-safe-storage'
   }
 
   // Inject connector tokens so backend/runtime/connectors/token_store.py can

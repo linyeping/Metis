@@ -8,11 +8,17 @@ from typing import Any, Iterable
 
 import pytest
 from backend.cli import app as cli_app
+from backend.cli import config as cli_config
 from backend.cli.args import parse_args
 from backend.cli.config import merged_settings
 from backend.cli.headless import EXIT_BUDGET, EXIT_PERMISSION, EXIT_SUCCESS, EXIT_USAGE
 from backend.cli.policy import CliPolicyError, build_permission_checker
 from backend.runtime import agent_loop
+
+
+@pytest.fixture(autouse=True)
+def no_real_credential_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_config, "read_api_key", lambda: None)
 
 
 def _event_generator(events: Iterable[Any]):
@@ -268,6 +274,48 @@ def test_canonical_metis_environment_wins_provider_aliases(
 
     assert settings["model"] == "canonical-model"
     assert settings["api_key"] == "canonical-key"
+
+
+def test_cli_uses_shared_credential_as_final_api_key_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    user_root = tmp_path / "user"
+    user_root.mkdir()
+    monkeypatch.setenv("METIS_HOME", str(user_root))
+    monkeypatch.setattr(cli_config, "read_api_key", lambda: "credential-key")
+
+    settings = merged_settings(parse_args(["task"]), workspace=tmp_path)
+
+    assert settings["api_key"] == "credential-key"
+
+
+def test_cli_explicit_configuration_wins_shared_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    user_root = tmp_path / "user"
+    user_root.mkdir()
+    (user_root / "config.json").write_text(json.dumps({"api_key": "config-key"}), encoding="utf-8")
+    monkeypatch.setenv("METIS_HOME", str(user_root))
+    monkeypatch.setattr(cli_config, "read_api_key", lambda: "credential-key")
+
+    assert merged_settings(parse_args(["task"]), workspace=tmp_path)["api_key"] == "config-key"
+
+    monkeypatch.setenv("METIS_LLM_API_KEY", "environment-key")
+    assert merged_settings(parse_args(["task"]), workspace=tmp_path)["api_key"] == "environment-key"
+
+
+def test_cli_ignores_credential_manager_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fail_read() -> str:
+        raise cli_config.CredentialStoreError("read failed")
+
+    monkeypatch.setattr(cli_config, "read_api_key", fail_read)
+
+    assert "api_key" not in merged_settings(parse_args(["task"]), workspace=tmp_path)
 
 
 def test_policy_supports_current_and_p0_future_rule_shapes(tmp_path: Path) -> None:

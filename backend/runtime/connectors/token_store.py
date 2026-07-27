@@ -6,8 +6,9 @@ The Electron desktop layer owns connector secret storage. It encrypts each
 connector token with OS-level ``safeStorage`` (DPAPI on Windows, Keychain on
 macOS, libsecret on Linux) into ``<userData>/connectors/<service>.enc``, and at
 backend-spawn time it decrypts every stored token and injects it into THIS
-process's environment under the connector's ``token_env`` — exactly mirroring how
-the LLM key becomes ``METIS_LLM_API_KEY`` (see desktop/electron/backend.cjs).
+process's environment under the connector's ``token_env``. LLM API keys use a
+separate shared system credential store; only legacy Electron ``safeStorage``
+keys are temporarily injected during migration (see desktop/electron/backend.cjs).
 
 The Python backend can NOT decrypt ``safeStorage`` blobs (they are bound to the
 OS user via DPAPI/Keychain and only Electron's ``os_crypt`` can open them). So

@@ -6,6 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
+from backend.core.credential_store import CredentialStoreError, read_api_key
+
 from .args import ParsedCliArgs
 
 _SETTING_ENV = {
@@ -113,6 +115,17 @@ def merged_settings(args: ParsedCliArgs, *, workspace: Path) -> Dict[str, Any]:
         if value not in (None, ""):
             environment_settings.setdefault(_setting_key_for_env(key), value)
     merged.update(environment_settings)
+
+    # Credential Manager is the final user-level fallback. Explicit process
+    # environment and both project/user settings retain their documented
+    # precedence, while the standalone EXE can share the desktop credential.
+    if not merged.get("api_key"):
+        try:
+            stored_api_key = read_api_key()
+        except CredentialStoreError:
+            stored_api_key = None
+        if stored_api_key:
+            merged["api_key"] = stored_api_key
 
     if args.backend:
         merged["backend"] = args.backend
