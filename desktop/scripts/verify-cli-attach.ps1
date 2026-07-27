@@ -44,7 +44,7 @@ try {
   $env:METIS_LLM_MODEL = "fake-model"
   $backendProcess = Start-Process `
     -FilePath $pythonCommand.Source `
-    -ArgumentList @("-m", "backend", "--mode", "web", "--port", [string]$port) `
+    -ArgumentList @("-X", "utf8", "-m", "backend", "--mode", "web", "--port", [string]$port) `
     -WorkingDirectory $repoRoot `
     -RedirectStandardOutput (Join-Path $probeRoot "backend.stdout") `
     -RedirectStandardError (Join-Path $probeRoot "backend.stderr") `
