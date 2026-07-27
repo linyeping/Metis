@@ -264,6 +264,10 @@ metis sandbox repair --allow-download
 
 The SDK is the in-process form of the headless runtime. It directly reuses the same agent loop and `metis.agent_event.v1`; it does not start a subprocess or parse CLI text:
 
+```powershell
+python -m pip install metis-agent-sdk
+```
+
 ```python
 from metis import Agent
 

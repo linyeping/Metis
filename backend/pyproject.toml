@@ -1,12 +1,25 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "metis-backend"
+name = "metis-agent-sdk"
 version = "26.7.27"
 description = "Metis personal AI agent with coding, desktop automation, and MCP"
+readme = "PYPI_README.md"
 requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Metis contributors" }]
+keywords = ["ai-agent", "agent-sdk", "automation", "mcp", "coding-agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
 dependencies = [
     "astor>=0.8.1",
     "flask>=3.0",
@@ -36,7 +49,7 @@ browser = [
     "langchain-anthropic>=0.2",
     "langchain-google-genai>=2.0",
 ]
-all = ["metis-backend[mcp,desktop,langgraph]"]
+all = ["metis-agent-sdk[mcp,desktop,langgraph]"]
 build = [
     "pyinstaller>=6.0",
 ]
@@ -44,6 +57,12 @@ build = [
 [project.scripts]
 metis = "backend.cli:main"
 metis-backend = "backend.runtime.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/linyeping/Metis"
+Documentation = "https://github.com/linyeping/Metis/blob/main/docs/python-sdk.md"
+Issues = "https://github.com/linyeping/Metis/issues"
+Source = "https://github.com/linyeping/Metis"
 
 [tool.setuptools]
 include-package-data = false
@@ -81,3 +100,10 @@ extend-exclude = [
 [tool.ruff.lint]
 select = ["E", "W", "F", "I"]
 ignore = ["E501", "W291", "W292", "W293"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+follow_imports = "skip"
+warn_unreachable = true
+show_error_codes = true

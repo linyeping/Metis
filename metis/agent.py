@@ -6,7 +6,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Generator, Iterable, Mapping, TextIO
+from typing import Any, Callable, Generator, Iterable, Iterator, Mapping, TextIO, cast
 
 from backend.bridges.event_serializer import agent_event_payload
 from backend.cli.args import ParsedCliArgs
@@ -54,7 +54,7 @@ class AgentResult:
 
     @property
     def ok(self) -> bool:
-        return self.exit_code == EXIT_SUCCESS
+        return self.exit_code == int(EXIT_SUCCESS)
 
 
 class AgentRunError(RuntimeError):
@@ -215,7 +215,7 @@ class Agent:
                 try:
                     event = next(stream)
                 except StopIteration as stop:
-                    result = stop.value
+                    result = cast(AgentResult, stop.value)
                     completed = True
                     break
                 if on_event is not None:
@@ -301,7 +301,7 @@ class _MutableResult:
 
 
 @contextlib.contextmanager
-def _temporary_environment(explicit: Mapping[str, str]):
+def _temporary_environment(explicit: Mapping[str, str]) -> Iterator[None]:
     snapshot = {key: os.environ.get(key) for key in _RUNTIME_ENV_KEYS}
     try:
         for key, value in explicit.items():
@@ -309,11 +309,11 @@ def _temporary_environment(explicit: Mapping[str, str]):
                 os.environ[key] = value
         yield
     finally:
-        for key, value in snapshot.items():
-            if value is None:
-                os.environ.pop(key, None)
+        for snapshot_key, snapshot_value in snapshot.items():
+            if snapshot_value is None:
+                os.environ.pop(snapshot_key, None)
             else:
-                os.environ[key] = value
+                os.environ[snapshot_key] = snapshot_value
 
 
 def _workspace_path(value: str | Path) -> Path:
@@ -326,7 +326,7 @@ def _workspace_path(value: str | Path) -> Path:
 
 
 @contextlib.contextmanager
-def _working_directory(workspace: Path):
+def _working_directory(workspace: Path) -> Iterator[None]:
     previous = Path.cwd()
     os.chdir(workspace)
     try:

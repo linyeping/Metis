@@ -2,7 +2,15 @@
 
 The Python SDK is the in-process form of Metis headless execution. It imports the same agent loop, model routing, tools, permission engine, session database, and `metis.agent_event.v1` serializer used by desktop and CLI. It does not start `metis.exe`, parse terminal output, or maintain a second event protocol.
 
-## Install from source
+## Install
+
+Stable releases are published as `metis-agent-sdk` while the public import remains `metis`:
+
+```powershell
+python -m pip install metis-agent-sdk
+```
+
+Install the latest source revision with:
 
 ```powershell
 python -m pip install "git+https://github.com/linyeping/Metis.git#subdirectory=backend"
@@ -14,7 +22,13 @@ For repository development:
 python -m pip install -e backend/
 ```
 
-The distribution name is currently `metis-backend`; the public import is `metis`.
+The distribution name is `metis-agent-sdk`; the public import is `metis`.
+
+## Version and compatibility
+
+Metis uses the product version for package releases (for example `26.7.27`) and a separate stable API level exposed as `metis.SDK_API_VERSION`. API level `1` covers the public names exported by `metis`, the `Agent` constructor and run methods, immutable `AgentEvent` mapping behavior, `AgentResult`, and the `metis.agent_event.v1` envelope.
+
+Within API level 1, patch and product-version updates may add optional parameters, event fields, or event kinds, but do not remove public names or change existing field meaning without a deprecation cycle. Runtime tools and provider behavior are capabilities rather than a frozen Python API. See [SDK compatibility policy](python-sdk-compatibility.md).
 
 ## Stream typed events
 

@@ -2386,7 +2386,7 @@ test('NEW-112 project structure reorganization stays wired', () => {
   assert.match(pyinstallerSpec, /BACKEND_ROOT = REPO_ROOT \/ "backend"/);
   assert.match(pyinstallerSpec, /collect_submodules\("backend\.tools"\)/);
   assert.doesNotMatch(pyinstallerSpec, /MIRO_ROOT|hermes_bridge|\"Tools\"/);
-  assert.match(backendPyproject, /name = "metis-backend"/);
+  assert.match(backendPyproject, /name = "metis-agent-sdk"/);
   assert.match(backendPyproject, /metis-backend = "backend\.runtime\.cli:main"/);
   assert.match(ci, /cd desktop && npm ci/);
   assert.match(ci, /pip install -e backend\//);
