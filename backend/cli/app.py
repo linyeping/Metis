@@ -4,11 +4,10 @@ import contextlib
 import os
 import sys
 import traceback
-import uuid
 from pathlib import Path
 from typing import Sequence, TextIO
 
-from .args import CliUsageError, ParsedCliArgs, parse_args
+from .args import CliUsageError, ParsedCliArgs, SessionCommandArgs, parse_args
 from .config import CliConfigError, build_cli_runtime
 from .headless import (
     EXIT_CANCELLED,
@@ -18,6 +17,7 @@ from .headless import (
     drive_headless,
 )
 from .policy import CliPolicyError, build_permission_checker
+from .sessions import CliSessionError, CliSessionStore, handle_session_command
 
 
 def main(
@@ -35,16 +35,24 @@ def main(
 
     try:
         args = parse_args(argv)
-        workspace = _workspace_path(args.workspace)
+        if isinstance(args, SessionCommandArgs):
+            return handle_session_command(args, stdout=stdout)
+        session_store = CliSessionStore()
+        resume = session_store.resolve_resume(args.resume_id, latest=args.continue_session) if (args.resume_id or args.continue_session) else None
+        workspace = _workspace_path(args.workspace or (resume.workspace if resume is not None else "."))
         prompt = _prompt_text(args, stdin)
-        session_id = f"cli_{uuid.uuid4().hex}"
+        session_id, messages = session_store.begin_run(prompt=prompt, workspace=workspace, resume=resume)
         permission_checker = build_permission_checker(workspace, args.policy)
     except SystemExit as exc:
         return 0 if int(exc.code or 0) == 0 else EXIT_USAGE
-    except (CliUsageError, CliConfigError, CliPolicyError) as exc:
+    except (CliUsageError, CliConfigError, CliPolicyError, CliSessionError) as exc:
         stderr.write(f"metis: {exc}\n")
         stderr.flush()
         return EXIT_USAGE
+    except Exception as exc:
+        stderr.write(f"metis: startup failed: {type(exc).__name__}: {exc}\n")
+        stderr.flush()
+        return EXIT_ENVIRONMENT
 
     # Keep stdout machine-readable even when imported libraries or tools emit
     # incidental diagnostics. Renderers retain the original stdout handle.
@@ -61,7 +69,7 @@ def main(
                 stderr=stderr,
                 serializer=agent_event_payload,
             )
-            events = run([{"role": "user", "content": prompt}], config, registry=registry)
+            events = run(messages, config, registry=registry)
             result = drive_headless(events, renderer=renderer, session_id=session_id)
     except KeyboardInterrupt:
         stderr.write('{"error":"cancelled","message":"Run cancelled by user."}\n')
@@ -80,6 +88,11 @@ def main(
         if args.debug:
             traceback.print_exc(file=stderr)
         return EXIT_ENVIRONMENT
+    session_store.finish_run(
+        session_id,
+        transcript_records=renderer.transcript_records,
+        final_text=result.final_text,
+    )
     return result.exit_code
 
 
