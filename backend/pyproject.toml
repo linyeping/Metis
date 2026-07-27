@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "metis-backend"
-version = "2.0.0"
+version = "26.7.27"
 description = "Metis personal AI agent with coding, desktop automation, and MCP"
 requires-python = ">=3.9"
 dependencies = [
+    "astor>=0.8.1",
     "flask>=3.0",
     "requests>=2.28",
     "ddgs>=9.0",
@@ -39,7 +40,7 @@ build = [
 ]
 
 [project.scripts]
-metis = "backend.runtime.cli:main"
+metis = "backend.cli:main"
 metis-backend = "backend.runtime.cli:main"
 
 [tool.setuptools.packages.find]

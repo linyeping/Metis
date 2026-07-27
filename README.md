@@ -257,6 +257,27 @@ npm run dev
 
 开发模式会启动 Vite renderer、Electron desktop shell 和由 Electron launcher 管理的本机 Python backend。Metis Design 位于仓库的 `open-design/` 工作区，并使用同一套桌面开发流程。
 
+### Headless CLI
+
+Metis 也提供面向脚本和 CI 的一次性命令行入口，复用同一套模型解析、agent loop、工具、权限规则与 `metis.agent_event.v1` 事件契约。
+
+```powershell
+# 源码运行
+"检查当前仓库并给出结论" | python -m backend -p `
+  --workspace . `
+  --permission-mode plan `
+  --output-format stream-json `
+  --no-desktop
+
+# 构建不依赖系统 Python / Node.js 的单文件 CLI
+cd desktop
+npm run build-cli
+```
+
+CLI 支持 `text`、单个结果对象 `json` 和逐事件 `stream-json`。非交互任务遇到需要确认的工具动作时不会挂起：它会输出脱敏错误并以退出码 `2` 结束。构建产物为 `desktop/release/metis.exe`；完整参数见 `metis --help`。
+
+独立 CLI 会读取 `~/.metis/config.json`、`~/.metis/settings.json` 和工作区 `.metis/settings.json` 的非敏感模型设置。桌面端 API Key 由 Electron `safeStorage` 加密，独立 EXE 不能在没有 Electron 的情况下直接解密；自动化环境应通过 `METIS_LLM_API_KEY` 注入凭据。后续需要统一到可由两个进程安全读取的系统凭据存储，不能用明文复制规避这个边界。
+
 ### 常用验证命令
 
 ```powershell
@@ -308,6 +329,7 @@ npm run dist:win
 Miro/
 ├── .github/workflows/       # CI、运行时构建与发布工作流
 ├── backend/
+│   ├── cli/                 # Headless CLI、配置合并、输出契约与权限 fail-fast
 │   ├── core/                # 配置、常量与共享基础能力
 │   ├── bridges/             # 事件、供应商与工具协议桥接
 │   ├── runtime/             # agent loop、模型路由、run、checkpoint 与执行环境

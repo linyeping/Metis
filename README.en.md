@@ -50,7 +50,7 @@
 <h2 align="center">Metis Design: From One Prompt to a Deliverable</h2>
 
 <p align="center">
-  Design is not an external website or a bridge that asks users to install another source tree. Project management, agent chat, live preview, and the export runtime ship inside Metis.
+  Project management, agent chat, live preview, and export form one integrated Metis work surface.
 </p>
 
 <table align="center" width="100%">
@@ -195,6 +195,27 @@ Development mode starts:
 - Electron desktop shell
 - Local Python backend managed by the Electron launcher
 
+### Headless CLI
+
+Metis also provides a one-shot CLI for scripts and CI. It reuses the same model resolution, agent loop, tools, permission rules, and the `metis.agent_event.v1` event contract.
+
+```powershell
+# Run from source
+"Inspect this repository and report the result" | python -m backend -p `
+  --workspace . `
+  --permission-mode plan `
+  --output-format stream-json `
+  --no-desktop
+
+# Build a single-file CLI that needs no system Python or Node.js
+cd desktop
+npm run build-cli
+```
+
+The CLI supports human-readable `text`, one final `json` object, and event-by-event `stream-json`. A headless run never waits for an unavailable approval UI: when a tool requires confirmation, it emits a redacted error and exits with code `2`. The build output is `desktop/release/metis.exe`; run `metis --help` for the complete P0 command surface.
+
+The standalone CLI reads non-secret model settings from `~/.metis/config.json`, `~/.metis/settings.json`, and workspace `.metis/settings.json`. Desktop API keys are encrypted by Electron `safeStorage`, which a standalone EXE cannot decrypt without Electron; automation should inject credentials through `METIS_LLM_API_KEY`. A future shared system-credential store should close this cross-process gap without copying secrets into plaintext configuration.
+
 ---
 
 ## Common Commands
@@ -254,6 +275,7 @@ npm run build
 ```text
 Miro/
 ├── backend/
+│   ├── cli/            # headless lifecycle, config merge, output contract, permission fail-fast
 │   ├── bridges/        # event contracts and provider/tool protocol bridges
 │   ├── runtime/        # agent loop, tool registry, skills, checkpoint, context budget
 │   ├── tools/          # code, browser, desktop, retrieval, and other tools
