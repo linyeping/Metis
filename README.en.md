@@ -260,6 +260,23 @@ metis sandbox repair --allow-download
 
 `doctor` checks configuration, shared-credential presence, session database integrity, workspace permissions, desktop tools, MCP, and HCS/VM service version and protocol without emitting API keys or changing files or system state. Only an explicit `sandbox repair` performs idempotent repair; downloading a runtime pack additionally requires `--allow-download`.
 
+### Python SDK
+
+The SDK is the in-process form of the headless runtime. It directly reuses the same agent loop and `metis.agent_event.v1`; it does not start a subprocess or parse CLI text:
+
+```python
+from metis import Agent
+
+result = Agent(permission_mode="ask").run_to_completion(
+    "Inspect this project",
+    workspace=".",
+    on_event=lambda event: print(event.kind),
+)
+print(result.final_text)
+```
+
+`Agent.run()` exposes the typed event iterator and accepts a one-time generator `.send(True/False)` decision after `permission_request`. Without an explicit callback or `.send(True)`, the SDK denies the request. SDK, desktop, and CLI share credentials and sessions. A consumer that stops early should call `stream.close()` to immediately restore the working directory and temporary environment. See the [Python SDK guide](docs/python-sdk.md) for installation, types, and complete examples.
+
 ---
 
 ## Common Commands

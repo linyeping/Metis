@@ -322,6 +322,23 @@ metis sandbox repair --allow-download
 
 `doctor` 检查配置、共享凭据是否存在、会话库完整性、workspace 权限、桌面工具、MCP、HCS/VM 服务版本与协议，但不会输出 API Key，也不会修改文件或系统状态。只有显式执行 `sandbox repair` 才会触发幂等修复；下载 runtime pack 还需要额外传入 `--allow-download`。
 
+### Python SDK
+
+SDK 是 headless runtime 的进程内形态，直接复用同一 agent loop 和 `metis.agent_event.v1`，不会启动子进程或反解析 CLI 文本：
+
+```python
+from metis import Agent
+
+result = Agent(permission_mode="ask").run_to_completion(
+    "检查当前项目",
+    workspace=".",
+    on_event=lambda event: print(event.kind),
+)
+print(result.final_text)
+```
+
+`Agent.run()` 可逐事件迭代，并在 `permission_request` 后用 generator `.send(True/False)` 做单次决策；没有显式 callback 或 `.send(True)` 时默认拒绝。SDK 与桌面/CLI 共用凭据和会话库，提前停止迭代时应调用 `stream.close()` 以立即恢复工作目录与临时环境。安装、类型和完整示例见 [Python SDK 文档](docs/python-sdk.md)。
+
 ### 常用验证命令
 
 ```powershell

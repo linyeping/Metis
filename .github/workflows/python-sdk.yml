@@ -1,0 +1,112 @@
+name: Python SDK
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/python-sdk.yml"
+      - "backend/**"
+      - "metis/**"
+  pull_request:
+    paths:
+      - ".github/workflows/python-sdk.yml"
+      - "backend/**"
+      - "metis/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install SDK and test tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e backend/ pytest ruff
+
+      - name: Verify SDK types, sessions, and event contract
+        run: |
+          python -m ruff check metis backend/tests/test_python_sdk.py
+          python -m pytest backend/tests/test_python_sdk.py backend/tests/test_agent_event_contract.py backend/tests/test_cli_sessions.py -q
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist backend/
+
+      - name: Verify wheel contents and isolated import
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python - "$wheel" <<'PY'
+          import sys, zipfile
+
+          required = {
+              "backend/core/prompts/MAIN_PROMPT.txt",
+              "backend/resources/builtin_skills/coding-agent/SKILL.md",
+              "metis/__init__.py",
+              "metis/agent.py",
+              "metis/events.py",
+              "metis/py.typed",
+          }
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              names = set(archive.namelist())
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"wheel is missing SDK files: {missing}")
+          unexpected_build_files = sorted(
+              name for name in names if name.startswith("backend/build/")
+          )
+          if unexpected_build_files:
+              raise SystemExit(
+                  "wheel contains generated backend/build files: "
+                  f"{unexpected_build_files[:10]}"
+              )
+          PY
+          python -m venv "$RUNNER_TEMP/sdk-smoke"
+          "$RUNNER_TEMP/sdk-smoke/bin/python" -m pip install "$wheel"
+          (
+            cd "$RUNNER_TEMP"
+            "$RUNNER_TEMP/sdk-smoke/bin/python" -c "from metis import Agent; result = Agent(backend='fake', model='fake-model', permission_mode='plan', allowed_tools=['read_file']).run_to_completion('reply ok', workspace='$RUNNER_TEMP'); assert result.ok and result.final_text == 'fake backend response'; print(result.session_id, result.final_text)"
+          )
+          sha256sum "$wheel" | tee "$wheel.sha256"
+
+      - name: Upload verified SDK wheel
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: metis-python-sdk-wheel
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/*.whl
+            dist/*.sha256

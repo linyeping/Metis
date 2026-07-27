@@ -44,10 +44,26 @@ build = [
 metis = "backend.cli:main"
 metis-backend = "backend.runtime.cli:main"
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = [".."]
-include = ["backend*"]
-exclude = ["backend.tests*"]
+include = ["backend*", "metis*"]
+exclude = ["backend.tests*", "backend.build*"]
+
+[tool.setuptools.package-data]
+backend = [
+    "core/prompts/**/*.txt",
+    "core/prompts/**/*.md",
+    "resources/**/*.md",
+    "resources/**/*.json",
+    "resources/**/*.svg",
+    "tools/desk_automation/**/*.html",
+    "tools/desk_automation/**/*.md",
+    "tools/desk_automation/**/*.txt",
+]
+metis = ["py.typed"]
 
 [tool.ruff]
 line-length = 120
