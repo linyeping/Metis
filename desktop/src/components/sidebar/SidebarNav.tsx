@@ -4,7 +4,6 @@ import {
   FilePlus2,
   Folder,
   MousePointer2,
-  NotebookPen,
   Settings,
   SquarePen,
   Store,
@@ -29,8 +28,7 @@ const SETTINGS_ITEM: NavItem = { kind: 'settings', icon: Settings, zh: '设置',
 // surfaces only the tools that belong to it (Metis Desktop style).
 const NAV_BY_MODE: Record<AppMode, NavItem[]> = {
   chat: [
-    { kind: 'section', id: 'projects' as SectionId, icon: Folder, zh: '项目', en: 'Projects', disabled: true },
-    { kind: 'section', id: 'artifacts' as SectionId, icon: NotebookPen, zh: '会话文件', en: 'Session files', disabled: true, progress: true },
+    { kind: 'section', id: 'projects', icon: Folder, zh: '项目', en: 'Projects' },
   ],
   cowork: [
     { kind: 'section', id: 'cron', icon: CalendarCheck2, zh: '定时任务', en: 'Scheduled' },

@@ -19134,6 +19134,42 @@ body.metis-pet-shell #root {
   overflow: hidden;
 }
 
+.project-panel {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.project-panel-intro {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-sm);
+  line-height: 1.55;
+}
+
+.project-scope-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.project-scope-strip span {
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent-soft));
+  color: var(--text-muted);
+  font-size: var(--ui-font-size-xs);
+}
+
+.project-row[data-active='true'] {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent-soft));
+}
+
+.project-row small {
+  color: var(--text-faint);
+  font-size: var(--ui-font-size-xs);
+}
+
 .zone-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

@@ -15,6 +15,7 @@ import { exportResearchJob, getResearchJob, registerArtifact } from '../../lib/a
 import { syncDocumentLibraryFromArtifacts, upsertDocumentLibraryItem } from '../../lib/documentLibrary';
 import type { ResearchJob, ResearchJobSource } from '../../lib/types';
 import { useUiStore } from '../../store/uiStore';
+import { useSessionStore } from '../../store/sessionStore';
 import { useT } from '../../hooks/useT';
 import { MarkdownText } from '../chat/threadUtils';
 
@@ -30,6 +31,7 @@ export function ResearchReportViewer() {
   const jobId = useUiStore(state => state.activeResearchReportJobId);
   const closeReport = useUiStore(state => state.setResearchReportView);
   const pushToast = useUiStore(state => state.pushToast);
+  const activeSessionId = useSessionStore(state => state.activeSessionId);
   const [job, setJob] = useState<ResearchJob | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -175,6 +177,7 @@ export function ResearchReportViewer() {
           title: job.title || job.query || job.report_filename || t('研究报告'),
           path: job.report_path,
           mime: 'text/markdown',
+          sessionId: activeSessionId || undefined,
           metadata: {
             job_id: job.id,
             research_kind: job.kind,
@@ -183,7 +186,7 @@ export function ResearchReportViewer() {
           },
         });
       }
-      await syncDocumentLibraryFromArtifacts();
+      if (activeSessionId) await syncDocumentLibraryFromArtifacts({ sessionId: activeSessionId, includeUnscoped: false });
       pushToast({
         title: t('已保存到会话文件'),
         description: t('可在 Chat 右上角会话文件中查看。'),
@@ -192,6 +195,7 @@ export function ResearchReportViewer() {
     } catch (err) {
       upsertDocumentLibraryItem({
         id: `research:${job.id}`,
+        sessionId: activeSessionId || '',
         jobId: job.id,
         kind: 'research_report',
         path: job.report_path || '',

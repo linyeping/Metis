@@ -32,7 +32,7 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState } from
 import type { CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { apiBase, cancelChatRun, getChatRuns, getProviderStatus, getResearchJob, getResearchJobs, getWorkspaceFile, getWorkspaceTree, pingHealth, resumeRun } from '../../lib/api';
-import { DOCUMENT_LIBRARY_EVENT, listDocumentLibraryItems, syncDocumentLibraryFromArtifacts, upsertDocumentLibraryItem, type DocumentLibraryItem } from '../../lib/documentLibrary';
+import { DOCUMENT_LIBRARY_EVENT, listDocumentLibraryItems, syncDocumentLibraryFromArtifacts, type DocumentLibraryItem } from '../../lib/documentLibrary';
 import type { FileChangeFileSummary, FileChangePreview } from '../../lib/diffPreview';
 import { navigateToSession } from '../../lib/modeNavigation';
 import type { AppMode, BrowserActivityItem, BrowserActivityPayload, ChatMessage, ChatRunPayload, ChatSubagentEvent, ChatTodoItem, CoworkPlanSnapshot, CoworkPlanSubrun, DevServerStatus, ParsedFile, PreviewAuditResult, ProviderStatusPayload, ResearchJob, ResearchJobPhase, ResearchJobSource, RuntimeStatus, SessionMeta, Workspace, WorkspaceFile, WorkspaceTreeNode } from '../../lib/types';
@@ -2032,7 +2032,6 @@ function SessionWorkspacePanel({
   t: (text: string) => string;
 }) {
   const activeSessionId = useSessionStore(state => state.activeSessionId);
-  const [reports, setReports] = useState<ResearchJob[]>([]);
   const [libraryItems, setLibraryItems] = useState<DocumentLibraryItem[]>([]);
   const attachments = useMemo(() => {
     const rows = new Map<string, ParsedFile>();
@@ -2048,7 +2047,7 @@ function SessionWorkspacePanel({
   }, [messages, pendingAttachments]);
 
   useEffect(() => {
-    const refreshLibrary = () => setLibraryItems(listDocumentLibraryItems().slice(0, 12));
+    const refreshLibrary = () => setLibraryItems(activeSessionId ? listDocumentLibraryItems(activeSessionId).slice(0, 12) : []);
     refreshLibrary();
     window.addEventListener(DOCUMENT_LIBRARY_EVENT, refreshLibrary);
     window.addEventListener('storage', refreshLibrary);
@@ -2056,33 +2055,20 @@ function SessionWorkspacePanel({
       window.removeEventListener(DOCUMENT_LIBRARY_EVENT, refreshLibrary);
       window.removeEventListener('storage', refreshLibrary);
     };
-  }, []);
+  }, [activeSessionId]);
 
   useEffect(() => {
-    if (!backendReady) {
-      setReports([]);
+    if (!backendReady || !activeSessionId) {
+      setLibraryItems([]);
       return undefined;
     }
     let disposed = false;
     const refresh = async () => {
-      let artifactSynced = false;
       try {
-        const synced = await syncDocumentLibraryFromArtifacts({ sessionId: activeSessionId || '', includeUnscoped: true });
-        artifactSynced = true;
+        const synced = await syncDocumentLibraryFromArtifacts({ sessionId: activeSessionId, includeUnscoped: false });
         if (!disposed) setLibraryItems(synced.slice(0, 12));
       } catch {
-        artifactSynced = false;
-      }
-      try {
-        const payload = await getResearchJobs(24);
-        if (disposed) return;
-        const reportJobs = payload.jobs.filter(job => isReportDocumentJob(job)).slice(0, 10);
-        if (!artifactSynced) for (const job of reportJobs) {
-          upsertDocumentLibraryItem(documentItemFromResearchJob(job, t));
-        }
-        setReports(reportJobs);
-      } catch {
-        if (!disposed) setReports([]);
+        if (!disposed) setLibraryItems(listDocumentLibraryItems(activeSessionId).slice(0, 12));
       }
     };
     void refresh();
@@ -2094,12 +2080,12 @@ function SessionWorkspacePanel({
   }, [activeSessionId, backendReady, t]);
 
   const generatedItems = useMemo(
-    () => libraryItems.filter(item => item.artifactId || ['research_report', 'report', 'document', 'diff', 'file_change', 'preview_evidence', 'download', 'workspace_file'].includes(item.kind)),
-    [libraryItems],
+    () => activeSessionId
+      ? libraryItems.filter(item => item.sessionId === activeSessionId && (item.artifactId || ['research_report', 'report', 'document', 'diff', 'file_change', 'preview_evidence', 'download', 'workspace_file'].includes(item.kind)))
+      : [],
+    [activeSessionId, libraryItems],
   );
-  const libraryReportIds = useMemo(() => new Set(generatedItems.map(item => item.jobId).filter(Boolean)), [generatedItems]);
-  const looseReports = useMemo(() => reports.filter(report => !libraryReportIds.has(report.id)), [libraryReportIds, reports]);
-  const hasContent = attachments.length > 0 || reports.length > 0 || libraryItems.length > 0;
+  const hasContent = attachments.length > 0 || generatedItems.length > 0;
   const openGeneratedFile = (item: DocumentLibraryItem) => {
     if (item.jobId && (item.kind === 'research_report' || item.kind === 'report')) {
       setResearchReportView(item.jobId);
@@ -2114,13 +2100,6 @@ function SessionWorkspacePanel({
       return;
     }
     if (item.jobId) setResearchReportView(item.jobId);
-  };
-  const openGeneratedReport = (report: ResearchJob) => {
-    if (report.report_path) {
-      void window.metis?.openPath?.(report.report_path);
-      return;
-    }
-    setResearchReportView(report.id);
   };
   return (
     <div className="session-workspace-pane">
@@ -2166,40 +2145,8 @@ function SessionWorkspacePanel({
           ))}
         </section>
       )}
-      {looseReports.length > 0 && (
-        <section className="session-workspace-section">
-          <header>{t('生成文件')}</header>
-          {looseReports.map(report => (
-            <button type="button" key={report.id} onClick={() => openGeneratedReport(report)}>
-              <FileText size={13} />
-              <span>
-                <strong>{report.report_filename || generatedFileName(report.title || report.query || t('生成文件'))}</strong>
-                <small>{report.report_path || researchJobEntryMeta(report, t)}</small>
-              </span>
-            </button>
-          ))}
-        </section>
-      )}
     </div>
   );
-}
-
-function isReportDocumentJob(job: ResearchJob): boolean {
-  return Boolean(job.report_filename || job.report_path || String(job.report || '').trim());
-}
-
-function documentItemFromResearchJob(job: ResearchJob, t: (text: string) => string): DocumentLibraryItem {
-  return {
-    id: `research:${job.id}`,
-    jobId: job.id,
-    kind: 'research_report',
-    path: job.report_path || '',
-    source: 'research',
-    subtitle: researchJobEntryMeta(job, t),
-    title: job.title || job.query || job.report_filename || t('研究报告'),
-    createdAt: Number(job.created_at || Date.now()),
-    updatedAt: Number(job.updated_at || Date.now()),
-  };
 }
 
 function attachmentName(file: ParsedFile): string {

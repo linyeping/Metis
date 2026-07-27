@@ -74,11 +74,13 @@ import { ConnectorLogo } from '../connectors/ConnectorLogo';
 import metisMark from '../../assets/metis-M-128.png';
 
 import { ChatListPanel } from './ChatListPanel';
+import { ProjectPanel } from './ProjectPanel';
 
 type ZoneSection = Exclude<SectionId, 'chat' | 'cron'>;
 
 export function SectionMain({ section }: { section: ZoneSection }) {
   if (section === 'chat-list') return <ChatListPanel />;
+  if (section === 'projects') return <ProjectPanel />;
   if (section === 'skills') return <SkillsPanel />;
   if (section === 'mcp') return <McpPanel />;
   if (section === 'store') return <StorePanel />;

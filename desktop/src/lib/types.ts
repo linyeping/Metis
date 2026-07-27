@@ -28,7 +28,7 @@ export type ThemeName =
   | 'mistbound-jade'
   | 'crimson-reliquary';
 
-export type SectionId = 'chat' | 'chat-list' | 'skills' | 'mcp' | 'computer' | 'cron' | 'store';
+export type SectionId = 'chat' | 'chat-list' | 'projects' | 'skills' | 'mcp' | 'computer' | 'cron' | 'store';
 
 // Product surfaces live above Assistant modes. Design is intentionally not an
 // AppMode: switching products must not reset the active Chat/Cowork/Code state.
