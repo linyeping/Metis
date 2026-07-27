@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import requests
 
 from backend.bridges.model_capability import detect_from_model_name, tier_compact_thresholds
+from backend.core.credential_store import CredentialStoreError, read_api_key, write_api_key
 from backend.core.engine.prompt_runtime import compile_prompt_runtime
 from backend.core.paths import legacy_miro_path, metis_path
 from backend.runtime.agent_loop import AgentConfig
@@ -370,22 +371,50 @@ def load_persistent_config() -> None:
     if not os.path.isfile(path):
         legacy_path = config_path(legacy=True)
         path = legacy_path if os.path.isfile(legacy_path) else path
-    if not os.path.isfile(path):
-        return
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except json.JSONDecodeError:
-        backup = f"{path}.corrupt.{int(time.time())}"
+    data: Dict[str, Any] = {}
+    if os.path.isfile(path):
         try:
-            shutil.copy2(path, backup)
-            logger.warning("Config corrupted, backed up to %s. Using defaults.", sanitize_for_log(backup))
+            with open(path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+            data = loaded if isinstance(loaded, dict) else {}
+        except json.JSONDecodeError:
+            backup = f"{path}.corrupt.{int(time.time())}"
+            try:
+                shutil.copy2(path, backup)
+                logger.warning("Config corrupted, backed up to %s. Using defaults.", sanitize_for_log(backup))
+            except OSError as exc:
+                logger.warning("Config corrupted and backup failed: %s", sanitize_for_log(exc))
+            return
         except OSError as exc:
-            logger.warning("Config corrupted and backup failed: %s", sanitize_for_log(exc))
-        return
-    except OSError as exc:
-        logger.warning("Config load failed: %s", sanitize_for_log(exc))
-        return
+            logger.warning("Config load failed: %s", sanitize_for_log(exc))
+            return
+
+    plaintext_key = _strip_config_whitespace(str(data.get("api_key") or ""))
+    injected_key = ""
+    if os.environ.get("METIS_LLM_API_KEY_SOURCE") == "electron-safe-storage":
+        injected_key = _strip_config_whitespace(os.environ.get("METIS_LLM_API_KEY", ""))
+        # Only migrate once per backend process. A failed attempt is retried on
+        # the next desktop start without rewriting Credential Manager on every
+        # settings read during the current run.
+        os.environ.pop("METIS_LLM_API_KEY_SOURCE", None)
+    migration_key = injected_key or plaintext_key
+    migrated = False
+    if migration_key:
+        try:
+            migrated = write_api_key(migration_key)
+        except CredentialStoreError as exc:
+            logger.warning("Credential Manager migration failed; preserving compatibility storage: %s", sanitize_for_log(exc))
+    if migrated and data and ("api_key" in data or "api_key_encrypted" in data):
+        cleaned = dict(data)
+        cleaned.pop("api_key", None)
+        cleaned.pop("api_key_encrypted", None)
+        try:
+            _atomic_write_json(path, cleaned)
+            data = cleaned
+        except OSError:
+            # The credential is already durable; leave the old config intact
+            # and retry cleanup on the next desktop start.
+            pass
 
     mapping = {
         "backend": "METIS_LLM_BACKEND",
@@ -409,6 +438,14 @@ def load_persistent_config() -> None:
         value = data.get(key) if isinstance(data, dict) else None
         if value not in (None, ""):
             os.environ[env_var] = str(value)
+    if not env_any(_runtime_keys("api_key", str(data.get("backend") or "openai"))):
+        try:
+            stored_api_key = read_api_key()
+        except CredentialStoreError as exc:
+            logger.warning("Credential Manager read failed: %s", sanitize_for_log(exc))
+            stored_api_key = None
+        if stored_api_key:
+            os.environ["METIS_LLM_API_KEY"] = stored_api_key
     if isinstance(data, dict):
         _apply_proxy_runtime(data)
 
@@ -614,11 +651,17 @@ def persist_runtime_settings(data: Dict[str, Any]) -> None:
                 or _runtime_value("base_url", backend, file_values, default_base_url(backend))
             ),
         )
+        effective_key = incoming_key if incoming_key and not _is_masked_api_key(incoming_key) else existing_key
+        key_stored_securely = False
+        if effective_key:
+            try:
+                key_stored_securely = write_api_key(effective_key)
+            except CredentialStoreError as exc:
+                logger.warning("Credential Manager write failed; preserving compatibility storage: %s", sanitize_for_log(exc))
         config_data = {
             "backend": backend,
             "provider_id": backend,
             "base_url": base_url,
-            "api_key": incoming_key if incoming_key and not _is_masked_api_key(incoming_key) else existing_key,
             "model": str(
                 data.get("model")
                 or _runtime_value("model", backend, file_values, default_model(backend))
@@ -640,6 +683,10 @@ def persist_runtime_settings(data: Dict[str, Any]) -> None:
             "terminal_shell": str(data.get("terminal_shell") or env("METIS_TERMINAL_SHELL", "MIRO_TERMINAL_SHELL", "powershell")).strip(),
             "python_path": str(data.get("python_path") or env("METIS_PYTHON", "MIRO_PYTHON", "")).strip(),
         }
+        if effective_key and not key_stored_securely:
+            # Non-Windows and unavailable/failed WinCred retain the existing
+            # behavior so a settings save can never silently discard a key.
+            config_data["api_key"] = effective_key
         _atomic_write_json(config_path(), config_data)
 
 

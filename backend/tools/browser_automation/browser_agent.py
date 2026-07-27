@@ -258,7 +258,7 @@ def _build_browser_use_llm(config: BrowserLLMConfig | None = None) -> tuple[Any,
     if config.api_key_required and not config.api_key:
         raise ValueError(
             f"外部 browser-use 缺少 {config.display_name} API Key。"
-            "请先在设置页保存 API Key，或设置对应环境变量；Electron 启动后端时会自动解密 api_key_encrypted。"
+            "请先在设置页保存 API Key，或设置对应环境变量；Windows 桌面端与 CLI 会共用系统凭据。"
         )
     if config.openai_compatible and not config.base_url:
         raise ValueError(f"外部 browser-use 缺少 {config.display_name} Base URL。请在设置页填写供应商 OpenAI-compatible base_url。")

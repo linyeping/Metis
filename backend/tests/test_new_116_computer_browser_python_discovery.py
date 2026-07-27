@@ -163,7 +163,7 @@ def test_fableadv_50_browser_use_missing_key_is_clear() -> None:
 
     message = str(exc.value)
     assert "API Key" in message
-    assert "api_key_encrypted" in message
+    assert "系统凭据" in message
 
 
 def test_fableadv_50_browser_use_reads_metis_runtime_provider(monkeypatch) -> None:

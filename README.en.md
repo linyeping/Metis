@@ -214,7 +214,7 @@ npm run build-cli
 
 The CLI supports human-readable `text`, one final `json` object, and event-by-event `stream-json`. A headless run never waits for an unavailable approval UI: when a tool requires confirmation, it emits a redacted error and exits with code `2`. The build output is `desktop/release/metis.exe`; run `metis --help` for the complete P0 command surface.
 
-The standalone CLI reads non-secret model settings from `~/.metis/config.json`, `~/.metis/settings.json`, and workspace `.metis/settings.json`. Desktop API keys are encrypted by Electron `safeStorage`, which a standalone EXE cannot decrypt without Electron; automation should inject credentials through `METIS_LLM_API_KEY`. A future shared system-credential store should close this cross-process gap without copying secrets into plaintext configuration.
+The standalone CLI reads model settings from `~/.metis/config.json`, `~/.metis/settings.json`, and workspace `.metis/settings.json`. On Windows, desktop and CLI share the API key through the current user's Windows Credential Manager, so configuration files do not contain plaintext secrets. Legacy Electron `safeStorage` and plaintext configurations migrate automatically after the desktop starts. Ephemeral automation can still inject `METIS_LLM_API_KEY`, which takes precedence over the system credential.
 
 ---
 

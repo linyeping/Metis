@@ -276,7 +276,7 @@ npm run build-cli
 
 CLI 支持 `text`、单个结果对象 `json` 和逐事件 `stream-json`。非交互任务遇到需要确认的工具动作时不会挂起：它会输出脱敏错误并以退出码 `2` 结束。构建产物为 `desktop/release/metis.exe`；完整参数见 `metis --help`。
 
-独立 CLI 会读取 `~/.metis/config.json`、`~/.metis/settings.json` 和工作区 `.metis/settings.json` 的非敏感模型设置。桌面端 API Key 由 Electron `safeStorage` 加密，独立 EXE 不能在没有 Electron 的情况下直接解密；自动化环境应通过 `METIS_LLM_API_KEY` 注入凭据。后续需要统一到可由两个进程安全读取的系统凭据存储，不能用明文复制规避这个边界。
+独立 CLI 会读取 `~/.metis/config.json`、`~/.metis/settings.json` 和工作区 `.metis/settings.json` 的模型设置。在 Windows 上，桌面端和 CLI 通过当前用户的 Windows Credential Manager 共用 API Key，配置文件不保存明文；旧版 Electron `safeStorage` 和明文配置会在桌面启动后自动迁移。CI 等临时环境仍可通过 `METIS_LLM_API_KEY` 注入，且环境变量优先于系统凭据。
 
 ### 常用验证命令
 
