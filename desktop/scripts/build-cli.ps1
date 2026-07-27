@@ -124,6 +124,21 @@ finally {
   $expectedIcon.Dispose()
 }
 
+$archiveViewer = Join-Path $venvRoot "Scripts\pyi-archive_viewer.exe"
+if (-not (Test-Path -LiteralPath $archiveViewer -PathType Leaf)) {
+  throw "PyInstaller archive viewer is missing: $archiveViewer"
+}
+$archiveListing = (& $archiveViewer -r -b $exe 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0) {
+  throw "Cannot inspect packaged CLI archive"
+}
+foreach ($requiredModule in @("backend.cli.tui", "prompt_toolkit.application.application", "prompt_toolkit.shortcuts.prompt")) {
+  if ($archiveListing -notmatch [regex]::Escape($requiredModule)) {
+    throw "Packaged CLI is missing TUI module: $requiredModule"
+  }
+}
+Write-Host "Packaged CLI contains the interactive TUI runtime"
+
 if (-not $SkipCliSelfTest) {
   $versionOutput = (& $exe --version 2>&1 | Out-String)
   $versionExitCode = $LASTEXITCODE
@@ -132,7 +147,7 @@ if (-not $SkipCliSelfTest) {
   }
   $helpOutput = (& $exe --help 2>&1 | Out-String)
   $helpExitCode = $LASTEXITCODE
-  if ($helpExitCode -ne 0 -or $helpOutput -notmatch "Metis headless agent CLI") {
+  if ($helpExitCode -ne 0 -or $helpOutput -notmatch "Metis agent CLI") {
     throw "Packaged CLI --help self-test failed"
   }
 

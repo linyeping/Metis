@@ -370,5 +370,5 @@ def test_policy_rejects_unimplemented_match_fields(tmp_path: Path) -> None:
 def test_help_does_not_initialize_runtime(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli_app.main(["--help"]) == 0
     captured = capsys.readouterr()
-    assert "Metis headless agent CLI" in captured.out
+    assert "Metis agent CLI" in captured.out
     assert "FALLBACK" not in captured.out + captured.err
