@@ -277,6 +277,17 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
     setMemory(await getMemory());
   }, []);
 
+  const refreshModelCapabilities = useCallback(async () => {
+    if (!settings) return;
+    setModelCapabilitiesError('');
+    try {
+      setModelCapabilities(await getModelCapabilities(settings));
+    } catch (error) {
+      setModelCapabilities(null);
+      setModelCapabilitiesError(error instanceof Error ? error.message : String(error));
+    }
+  }, [settings]);
+
   const refreshPermissions = useCallback(async (force = false) => {
     setPermissions(await getPermissionsCached(force));
   }, []);
@@ -660,6 +671,7 @@ export function SettingsDialog({ onSaved }: SettingsDialogProps = {}) {
             }}
             onCheckProvider={checkProvider}
             onRefreshModelCatalog={refreshModelCatalog}
+            onRefreshCapabilities={refreshModelCapabilities}
             onSettingsChange={value => {
               if (
                 value.backend !== settings.backend ||

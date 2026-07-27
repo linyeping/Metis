@@ -53,7 +53,6 @@ from backend.bridges.model_capability import (
     DEEPSEEK_EFFICIENCY_MARKER,
     detect_from_model_name,
     family_prompt_for_model,
-    tier_compact_thresholds,
 )
 from backend.bridges.provider_registry import resolve_provider_for_config, requires_reasoning_passback_enabled
 from backend.runtime.tool_tiers import INTERNAL_TOOLS, expose_internal_tools, tools_for_tier
@@ -671,7 +670,7 @@ def _auto_compact_ratio(model_name: str = "") -> float:
         except ValueError:
             logger.warning("invalid METIS_AUTO_COMPACT_RATIO=%r; using model-tier threshold", raw)
     capabilities = detect_from_model_name(model_name)
-    _stage_1, stage_2, _stage_3 = tier_compact_thresholds(capabilities.tier)
+    _stage_1, stage_2, _stage_3 = capabilities.compact_thresholds
     return stage_2
 
 

@@ -1,5 +1,6 @@
-import { memo, useMemo } from 'react';
-import { Cpu, RefreshCw, Server, SlidersHorizontal } from 'lucide-react';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { Cpu, RefreshCw, RotateCcw, Save, Server, SlidersHorizontal } from 'lucide-react';
+import { resetModelProfile, saveModelProfile } from '../../../lib/api';
 import type {
   Language,
   ModelCapabilities,
@@ -22,6 +23,7 @@ interface ModelTabProps {
   onApiKeyChange: (value: string) => void;
   onCheckProvider: (deepProbe?: boolean) => void | Promise<void>;
   onRefreshModelCatalog: () => void | Promise<void>;
+  onRefreshCapabilities: () => void | Promise<void>;
   onSettingsChange: (value: RuntimeSettings) => void;
   providerCheck: ProviderValidation | null;
   settings: RuntimeSettings;
@@ -67,6 +69,7 @@ export const ModelTab = memo(function ModelTab({
   onApiKeyChange,
   onCheckProvider,
   onRefreshModelCatalog,
+  onRefreshCapabilities,
   onSettingsChange,
   providerCheck,
   settings,
@@ -99,6 +102,64 @@ export const ModelTab = memo(function ModelTab({
       ].filter(Boolean)
     : [];
   const serviceName = settings.providerId || settings.backend || t('模型服务');
+  const [profileDraft, setProfileDraft] = useState({
+    contextWindow: 128_000,
+    maxOutputTokens: 32_768,
+    stage1: 60,
+    stage2: 80,
+    stage3: 92,
+  });
+  const [profileBusy, setProfileBusy] = useState('');
+  const [profileMessage, setProfileMessage] = useState('');
+
+  useEffect(() => {
+    if (!capabilities) return;
+    setProfileDraft({
+      contextWindow: capabilities.effectiveContext,
+      maxOutputTokens: capabilities.maxOutputTokens,
+      stage1: Math.round(capabilities.compactThresholds[0] * 100),
+      stage2: Math.round(capabilities.compactThresholds[1] * 100),
+      stage3: Math.round(capabilities.compactThresholds[2] * 100),
+    });
+    setProfileMessage('');
+  }, [capabilities, settings.model]);
+
+  const persistProfile = async () => {
+    if (!settings.model.trim()) return;
+    setProfileBusy('save');
+    setProfileMessage('');
+    try {
+      await saveModelProfile({
+        model: settings.model,
+        contextWindow: profileDraft.contextWindow,
+        maxOutputTokens: profileDraft.maxOutputTokens,
+        compactThresholds: [profileDraft.stage1 / 100, profileDraft.stage2 / 100, profileDraft.stage3 / 100],
+      });
+      await onRefreshCapabilities();
+      window.dispatchEvent(new CustomEvent('metis:settings-refresh'));
+      setProfileMessage(t('已保存到 models.toml，运行时立即生效。'));
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProfileBusy('');
+    }
+  };
+
+  const restoreProfile = async () => {
+    if (!settings.model.trim()) return;
+    setProfileBusy('reset');
+    setProfileMessage('');
+    try {
+      await resetModelProfile(capabilities?.contextSource === 'user' ? capabilities.contextMatchedModel || settings.model : settings.model);
+      await onRefreshCapabilities();
+      window.dispatchEvent(new CustomEvent('metis:settings-refresh'));
+      setProfileMessage(t('已恢复 Metis 内置资料。'));
+    } catch (error) {
+      setProfileMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProfileBusy('');
+    }
+  };
 
   return (
     <div className="settings-card-grid model-settings-grid">
@@ -306,6 +367,68 @@ export const ModelTab = memo(function ModelTab({
         </div>
       </section>
 
+      <section className="settings-section model-profile-section">
+        <div className="settings-section-header settings-section-header-with-action">
+          <span className="settings-section-title">
+            <Cpu size={16} className="section-icon" />
+            <h3>{t('上下文与压缩')}</h3>
+          </span>
+          {capabilities && (
+            <span className="settings-badge" data-variant={capabilities.contextIsEstimate ? 'warning' : capabilities.contextSource === 'user' ? 'success' : 'neutral'}>
+              {capabilities.contextSource === 'user'
+                ? t('用户配置')
+                : capabilities.contextSource === 'builtin'
+                  ? t('内置资料')
+                  : capabilities.contextSource === 'builtin_estimate'
+                    ? t('家族估算')
+                    : t('未确认默认值')}
+            </span>
+          )}
+        </div>
+        <p className="section-desc">
+          {t('这组值同时控制运行时 token 预算、最大输出和自动压缩触发点；用户配置优先于内置资料。')}
+        </p>
+        {capabilities?.contextIsEstimate && (
+          <p className="section-desc section-desc-warning">
+            {t('当前模型没有可确认的精确资料。请按供应商文档填写，不会把自动探测结果冒充准确值。')}
+          </p>
+        )}
+        <div className="settings-inline-grid model-profile-grid">
+          <label>
+            <span>{t('上下文上限')}</span>
+            <input type="number" min={4096} step={1024} value={profileDraft.contextWindow} onChange={event => setProfileDraft(value => ({ ...value, contextWindow: Number(event.target.value) }))} />
+          </label>
+          <label>
+            <span>{t('最大输出 tokens')}</span>
+            <input type="number" min={256} step={256} value={profileDraft.maxOutputTokens} onChange={event => setProfileDraft(value => ({ ...value, maxOutputTokens: Number(event.target.value) }))} />
+          </label>
+        </div>
+        <div className="settings-inline-grid model-profile-threshold-grid">
+          <label>
+            <span>{t('提醒阈值 %')}</span>
+            <input type="number" min={10} max={99} value={profileDraft.stage1} onChange={event => setProfileDraft(value => ({ ...value, stage1: Number(event.target.value) }))} />
+          </label>
+          <label>
+            <span>{t('自动压缩 %')}</span>
+            <input type="number" min={10} max={99} value={profileDraft.stage2} onChange={event => setProfileDraft(value => ({ ...value, stage2: Number(event.target.value) }))} />
+          </label>
+          <label>
+            <span>{t('紧急阈值 %')}</span>
+            <input type="number" min={10} max={99} value={profileDraft.stage3} onChange={event => setProfileDraft(value => ({ ...value, stage3: Number(event.target.value) }))} />
+          </label>
+        </div>
+        <div className="model-profile-actions">
+          <button type="button" className="settings-inline-button" disabled={Boolean(profileBusy) || !settings.model.trim()} onClick={() => void persistProfile()}>
+            <Save size={14} /> {profileBusy === 'save' ? t('保存中...') : t('保存模型配置')}
+          </button>
+          <button type="button" className="settings-inline-button" disabled={Boolean(profileBusy) || capabilities?.contextSource !== 'user'} onClick={() => void restoreProfile()}>
+            <RotateCcw size={14} /> {profileBusy === 'reset' ? t('恢复中...') : t('恢复内置')}
+          </button>
+          {capabilities?.contextSourcePath && <code title={capabilities.contextSourcePath}>{capabilities.contextSourcePath}</code>}
+        </div>
+        {profileMessage && <p className="section-desc">{profileMessage}</p>}
+      </section>
+
       <section className="settings-section">
         <div className="settings-section-header">
           <Cpu size={16} className="section-icon" />
@@ -331,6 +454,10 @@ export const ModelTab = memo(function ModelTab({
               <span className="cap-value">{capabilities.toolCount} / {capabilities.totalToolCount}</span>
               <span className="cap-label">{t('上下文窗口')}</span>
               <span className="cap-value">{formatSettingsTokenCount(capabilities.effectiveContext)} tokens</span>
+              <span className="cap-label">{t('最大输出')}</span>
+              <span className="cap-value">{formatSettingsTokenCount(capabilities.maxOutputTokens)} tokens</span>
+              <span className="cap-label">{t('压缩阈值')}</span>
+              <span className="cap-value">{capabilities.compactThresholds.map(value => `${Math.round(value * 100)}%`).join(' / ')}</span>
               <span className="cap-label">{t('指令遵循')}</span>
               <span className="cap-value">{capabilities.instructionAdherence}</span>
             </div>

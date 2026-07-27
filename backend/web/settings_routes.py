@@ -8,6 +8,12 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
+from backend.bridges.model_capability import detect_from_model_name
+from backend.bridges.model_profiles import (
+    delete_user_model_profile,
+    model_profiles_payload,
+    save_user_model_profile,
+)
 from backend.runtime.error_catalog import classify_llm_error
 from backend.web.desktop_window import handle_window_action
 from backend.web.helpers import error_response_payload, request_client_is_loopback
@@ -35,6 +41,31 @@ _URL_TRAILING_MARKERS = ("，", "。", "！", "？", "；", "：", "、", "）",
 @settings_bp.route("/settings", methods=["GET"])
 def get_settings() -> Any:
     return jsonify(get_runtime_settings())
+
+
+@settings_bp.route("/settings/model-profiles", methods=["GET"])
+def get_model_profiles() -> Any:
+    model = str(request.args.get("model") or "").strip()
+    tier = detect_from_model_name(model).tier
+    return jsonify(model_profiles_payload(model, tier=tier))
+
+
+@settings_bp.route("/settings/model-profiles", methods=["POST"])
+def update_model_profile() -> Any:
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action") or "save").strip().lower()
+    model = str(data.get("model") or "").strip()
+    try:
+        if action in {"delete", "reset"}:
+            delete_user_model_profile(model)
+        elif action == "save":
+            save_user_model_profile(data)
+        else:
+            return jsonify({"error": "action must be save, reset, or delete"}), 400
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    tier = detect_from_model_name(model).tier
+    return jsonify(model_profiles_payload(model, tier=tier))
 
 
 @settings_bp.route("/settings/document-converters", methods=["GET"])
@@ -96,6 +127,7 @@ def runtime_manager_provision_route() -> Any:
 @settings_bp.route("/settings/runtime-manager/storage", methods=["GET"])
 def runtime_manager_storage_route() -> Any:
     import json as _json
+
     from backend.runtime.isolated_runtime import metis_runtime_storage_usage
 
     root = str(request.args.get("root") or ".").strip() or "."
@@ -105,6 +137,7 @@ def runtime_manager_storage_route() -> Any:
 @settings_bp.route("/settings/runtime-manager/cleanup", methods=["POST"])
 def runtime_manager_cleanup_route() -> Any:
     import json as _json
+
     from backend.runtime.isolated_runtime import metis_runtime_gc
 
     payload = request.get_json(silent=True) or {}
@@ -314,7 +347,11 @@ def providers_usage() -> Any:
 
 @settings_bp.route("/providers/registry", methods=["GET"])
 def providers_registry() -> Any:
-    from backend.bridges.provider_registry import is_builtin_provider_id, list_provider_profiles, provider_profile_payload
+    from backend.bridges.provider_registry import (
+        is_builtin_provider_id,
+        list_provider_profiles,
+        provider_profile_payload,
+    )
 
     profiles = []
     for profile in list_provider_profiles():
