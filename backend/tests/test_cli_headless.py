@@ -28,6 +28,11 @@ def isolated_cli_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     clear_metis_home_cache()
 
 
+@pytest.fixture(autouse=True)
+def no_real_credential_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_config, "read_api_key", lambda: None)
+
+
 def _event_generator(events: Iterable[Any]):
     yield from events
 
