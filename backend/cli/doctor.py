@@ -517,7 +517,10 @@ def _check(check_id: str, name: str, status: str, message: str, **details: Any) 
 
 
 def _metis_home() -> Path:
-    return Path(os.environ.get("METIS_HOME") or (Path.home() / ".metis")).expanduser().resolve(strict=False)
+    from backend.core.paths import metis_home
+
+    explicit_home = str(os.environ.get("METIS_HOME") or "").strip()
+    return Path(explicit_home).expanduser().resolve(strict=False) if explicit_home else metis_home()
 
 
 def _workspace_path(value: str) -> Path:

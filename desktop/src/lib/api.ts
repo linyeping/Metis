@@ -1,3 +1,4 @@
+import { normalizeChatStreamEvent } from './agentEvents';
 import type {
   AgentEventContract,
   AgentRuntimeProfilePayload,
@@ -2028,6 +2029,8 @@ function skillSummaryFromRecord(row: Record<string, unknown>): SkillSummary {
 }
 
 function permissionRequestFromRecord(row: Record<string, unknown>): PermissionRequestMetadata {
+  const normalized = normalizeChatStreamEvent({ type: 'permission_request', payload: row });
+  if (normalized.permission) return normalized.permission;
   const choicesRaw = Array.isArray(row.choices) ? row.choices : [];
   const pathSafety = recordValue(row.path_safety ?? row.pathSafety);
   return {
@@ -2478,6 +2481,12 @@ export async function answerToolPermission(
 export async function getPermissionRequest(requestId: string): Promise<PermissionRequestMetadata> {
   const data = await requestJson<Record<string, unknown>>(`/permissions/requests/${encodeURIComponent(requestId)}`);
   return permissionRequestFromRecord(recordValue(data.request ?? data));
+}
+
+export async function listPendingPermissionRequests(): Promise<PermissionRequestMetadata[]> {
+  const data = await requestJson<Record<string, unknown>>('/permissions/requests');
+  const requests = Array.isArray(data.requests) ? data.requests : [];
+  return requests.map(item => permissionRequestFromRecord(recordValue(item)));
 }
 
 export async function markPermissionDisplayed(

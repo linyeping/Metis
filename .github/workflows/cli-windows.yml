@@ -12,6 +12,7 @@ on:
       - "desktop/resources/icons/logo.ico"
       - "desktop/scripts/build-cli.ps1"
       - "desktop/scripts/build-cli.spec"
+      - "desktop/scripts/verify-cli-attach.ps1"
       - "desktop/scripts/verify-cli-package.ps1"
   pull_request:
     paths:
@@ -21,6 +22,7 @@ on:
       - "desktop/resources/icons/logo.ico"
       - "desktop/scripts/build-cli.ps1"
       - "desktop/scripts/build-cli.spec"
+      - "desktop/scripts/verify-cli-attach.ps1"
       - "desktop/scripts/verify-cli-package.ps1"
 
 permissions:
@@ -46,12 +48,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e backend/ pytest ruff
-          python -m pytest backend/tests/test_credential_store.py backend/tests/test_cli_headless.py backend/tests/test_cli_sessions.py backend/tests/test_cli_doctor.py backend/tests/test_agent_event_contract.py backend/tests/test_permission_rules.py backend/tests/test_permission_control_plane.py -q
-          python -m ruff check backend/core/credential_store.py backend/cli backend/cli_entry.py backend/version.py backend/__main__.py backend/tests/test_credential_store.py backend/tests/test_cli_headless.py backend/tests/test_cli_sessions.py backend/tests/test_cli_doctor.py backend/web/llm_state.py
+          python -m pytest backend/tests/test_credential_store.py backend/tests/test_cli_headless.py backend/tests/test_cli_sessions.py backend/tests/test_cli_doctor.py backend/tests/test_cli_attach.py backend/tests/test_web_cli_attach.py backend/tests/test_agent_event_contract.py backend/tests/test_permission_rules.py backend/tests/test_permission_control_plane.py -q
+          python -m ruff check backend/core/credential_store.py backend/core/cli_attach_path.py backend/core/paths.py backend/cli backend/cli_entry.py backend/version.py backend/__main__.py backend/runtime/cli.py backend/runtime/desktop.py backend/tests/test_credential_store.py backend/tests/test_cli_headless.py backend/tests/test_cli_sessions.py backend/tests/test_cli_doctor.py backend/tests/test_cli_attach.py backend/tests/test_web_cli_attach.py backend/web/cli_attach.py backend/web/permission_requests.py backend/web/llm_state.py
 
       - name: Build single-file metis.exe
         shell: pwsh
         run: ./desktop/scripts/build-cli.ps1 -RecreateVenv
+
+      - name: Verify packaged CLI attach and resume against a live backend
+        shell: pwsh
+        run: ./desktop/scripts/verify-cli-attach.ps1
 
       - name: Verify outside source tree without Python or Node on PATH
         shell: pwsh

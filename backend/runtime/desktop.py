@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import os
 import socket
 import sys
 import threading
 import time
-import inspect
 from typing import Any, Optional
 
 _BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -165,16 +165,10 @@ def launch(
     def run_flask() -> None:
         import logging
 
-        from backend.web.app import app
+        from backend.web.app import start_server
 
         logging.getLogger("werkzeug").setLevel(logging.WARNING)
-        app.run(
-            host="127.0.0.1",
-            port=selected_port,
-            threaded=True,
-            debug=False,
-            use_reloader=False,
-        )
+        start_server(selected_port, host="127.0.0.1", max_attempts=1)
 
     flask_thread = threading.Thread(target=run_flask, daemon=True, name="miro-flask")
     flask_thread.start()

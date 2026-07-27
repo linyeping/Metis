@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getFirstRun, getSettings, pingHealth } from './lib/api';
+import { getFirstRun, getSettings, listPendingPermissionRequests, pingHealth } from './lib/api';
 import { navigateToSession } from './lib/modeNavigation';
 import type { BootEvent, BootState, RuntimeSettings } from './lib/types';
 import { useTheme } from './hooks/useTheme';
@@ -23,6 +23,7 @@ import { DesignSurface } from './components/design/DesignSurface';
 import { useChatStore } from './store/chatStore';
 import { useSessionStore } from './store/sessionStore';
 import { useUiStore } from './store/uiStore';
+import { requestPolledPermission } from './store/sseParser';
 
 const emptyBootState: BootState = {
   status: 'idle',
@@ -249,6 +250,38 @@ export function App() {
     if (useChatStore.getState().loadedSessionId === activeSessionId) return;
     void loadChatSession(activeSessionId);
   }, [activeSessionId, loadChatSession, sessions]);
+
+  useEffect(() => {
+    if (!backendReady) return undefined;
+    let disposed = false;
+    let checking = false;
+    const tick = async () => {
+      if (checking || disposed) return;
+      checking = true;
+      try {
+        const requests = await listPendingPermissionRequests();
+        if (disposed || requests.length === 0) return;
+        const knownSessions = new Set(useSessionStore.getState().sessions.map(session => session.id));
+        if (requests.some(request => request.sessionId && !knownSessions.has(request.sessionId))) {
+          await loadSessions();
+        }
+        for (const request of requests) {
+          if (disposed) break;
+          await requestPolledPermission(request);
+        }
+      } catch {
+        // Backend restart windows are handled by the existing health monitor.
+      } finally {
+        checking = false;
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 750);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [backendReady, loadSessions]);
 
   // FABLEADV-34: 心跳探测——进程活着但 API 假死时也能显示"正在重新连接 x/5"并自动恢复。
   useEffect(() => {

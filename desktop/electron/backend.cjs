@@ -3640,6 +3640,7 @@ async function startBackend(emit = () => {}) {
     ...process.env,
     METIS_DATA_ROOT: storage.dataRoot,
     METIS_HOME: storage.metisHome,
+    METIS_CLI_ATTACH_CHANNEL: app.isPackaged ? "stable" : "dev",
     METIS_BUNDLED_RUNTIME_PACK_DIR: runtimePackDir,
     METIS_RUNTIME_PACK_BUNDLED_DIR: runtimePackDir,
     METIS_HTTP_PORT: String(port),

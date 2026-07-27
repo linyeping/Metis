@@ -24,6 +24,7 @@ class MetisArgumentParser(argparse.ArgumentParser):
 class ParsedCliArgs:
     prompt: str
     print_mode: bool
+    attach: bool
     output_format: str
     workspace: str
     permission_mode: str
@@ -89,6 +90,11 @@ def build_parser() -> MetisArgumentParser:
     parser.add_argument("prompt", nargs="?", default="", help="Task prompt. With -p it may also come from stdin.")
     parser.add_argument("-p", "--print", dest="print_mode", action="store_true", help="Run non-interactively and exit.")
     parser.add_argument(
+        "--attach",
+        action="store_true",
+        help="Run through the active Metis desktop instance and use its permission UI.",
+    )
+    parser.add_argument(
         "--output-format",
         choices=OUTPUT_FORMATS,
         default="text",
@@ -138,6 +144,7 @@ def parse_args(
     return ParsedCliArgs(
         prompt=str(values.prompt or ""),
         print_mode=bool(values.print_mode),
+        attach=bool(values.attach),
         output_format=str(values.output_format),
         workspace=str(values.workspace or ""),
         permission_mode=str(values.permission_mode or ""),

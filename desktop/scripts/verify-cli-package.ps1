@@ -26,6 +26,7 @@ $previousPythonHome = $env:PYTHONHOME
 $previousApiKey = $env:METIS_LLM_API_KEY
 $previousBackend = $env:METIS_LLM_BACKEND
 $previousModel = $env:METIS_LLM_MODEL
+$previousAttachDiscovery = $env:METIS_CLI_ATTACH_DISCOVERY
 try {
   # The runner may have Python and Node installed, but the packaged probe must
   # run with neither runtime discoverable on PATH and outside the source tree.
@@ -33,6 +34,7 @@ try {
   $env:PYTHONPATH = ""
   $env:PYTHONHOME = ""
   $env:METIS_HOME = $probeHome
+  $env:METIS_CLI_ATTACH_DISCOVERY = Join-Path $probeRoot "missing-desktop-attach.json"
   if (Get-Command python -ErrorAction SilentlyContinue) {
     throw "Clean CLI probe unexpectedly found Python on PATH"
   }
@@ -112,6 +114,19 @@ try {
 
     & $probeExe "task" -p --workspace (Join-Path $probeRoot "missing") 1> usage.stdout 2> usage.stderr
     if ($LASTEXITCODE -ne 64) { throw "Packaged CLI usage error did not exit 64" }
+
+    & $probeExe "attached task" -p --attach --workspace $probeRoot --output-format json 1> attach.stdout 2> attach.stderr
+    if ($LASTEXITCODE -ne 3) { throw "Packaged CLI missing-desktop attach probe did not exit 3" }
+    $attachStdout = Get-Content -LiteralPath "attach.stdout" -Raw
+    if (-not [string]::IsNullOrWhiteSpace([string]$attachStdout)) {
+      throw "Packaged CLI attach failure polluted machine-readable stdout"
+    }
+    if ((Get-Content -LiteralPath "attach.stderr" -Raw) -notmatch "desktop is not running|discovery is unavailable") {
+      throw "Packaged CLI attach failure did not explain the missing desktop endpoint"
+    }
+
+    & $probeExe "attached task" -p --attach --workspace $probeRoot --model ignored 1> attach-usage.stdout 2> attach-usage.stderr
+    if ($LASTEXITCODE -ne 64) { throw "Packaged CLI attach override usage error did not exit 64" }
   }
   finally {
     Pop-Location
@@ -125,6 +140,7 @@ finally {
   $env:METIS_LLM_API_KEY = $previousApiKey
   $env:METIS_LLM_BACKEND = $previousBackend
   $env:METIS_LLM_MODEL = $previousModel
+  $env:METIS_CLI_ATTACH_DISCOVERY = $previousAttachDiscovery
 }
 
 Write-Host "Packaged CLI clean-path verification passed: $probeExe"
@@ -138,7 +154,7 @@ if (
   Remove-Item -LiteralPath $resolvedProbe -Recurse -Force
 }
 
-# The negative usage probe intentionally leaves the native process exit code
-# at 64.  A PowerShell script otherwise propagates that stale code even though
+# The negative attach probe intentionally leaves the native process exit code
+# at 64. A PowerShell script otherwise propagates that stale code even though
 # every assertion above passed.
 exit 0
