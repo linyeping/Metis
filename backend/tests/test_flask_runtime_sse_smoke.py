@@ -8,20 +8,21 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import pytest
-
 from backend.core.paths import clear_metis_home_cache
-from backend.runtime.cancellation import OperationCancelled, current_cancel_event
 from backend.runtime import cowork_coordinator
 from backend.runtime.agent_loop import (
     AgentConfig,
     DoneEvent,
     _chat_surface_blocked_tool_result,
     _chat_surface_blocks_tool,
+)
+from backend.runtime.agent_loop import (
     run_stream as real_run_stream,
 )
-from backend.runtime.worktree_manager import WorktreeRecord
+from backend.runtime.cancellation import OperationCancelled, current_cancel_event
 from backend.runtime.llm_backends import LLMBackend, LLMResponse, ToolCall
 from backend.runtime.tool_registry import ToolDefinition, ToolRegistry
+from backend.runtime.worktree_manager import WorktreeRecord
 from backend.web import app as web_app
 from backend.web import helpers as web_helpers
 from backend.web import session_routes as web_session_routes
@@ -210,6 +211,23 @@ def test_create_session_can_preserve_active_context(isolated_flask_app: Any) -> 
     assert payload["id"] != active.id
     assert web_app._runtime_state.active_session_id == active.id
     assert web_app._runtime_state.active_workspace_id == active_workspace_id
+
+
+def test_switch_session_clears_unread_and_activates_session(isolated_flask_app: Any) -> None:
+    app, session_manager = isolated_flask_app
+    workspace_id = web_app._runtime_state.active_workspace_id
+    session = session_manager.create_session("Unread session", workspace_id=workspace_id, mode="code")
+    assert session_manager.set_session_unread(session.id, True) is True
+
+    with app.test_client() as client:
+        response = client.post(f"/sessions/{session.id}/switch")
+
+    assert response.status_code == 200
+    assert response.get_json()["id"] == session.id
+    assert web_app._runtime_state.active_session_id == session.id
+    saved = session_manager.get_session(session.id)
+    assert saved is not None
+    assert saved.unread is False
 
 
 def test_metis_design_transport_requires_token_and_exact_managed_project(
