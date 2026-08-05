@@ -4,10 +4,10 @@ import json
 from collections.abc import Mapping as MappingABC
 from typing import Any, Dict, List, Mapping, Optional
 
+from backend.bridges.model_profiles import resolve_model_profile
+
 from .llm_backends import Usage
 
-
-_DEFAULT_CONTEXT_LIMIT = 128_000
 IMAGE_BLOCK_TOKEN_ESTIMATE = 1600
 _SYSTEM_BREAKDOWN_KEYS = ("system_prompt", "skills", "memory")
 _SCHEMA_BREAKDOWN_KEYS = ("mcp", "builtin")
@@ -18,36 +18,8 @@ _SYSTEM_MARKER_CATEGORIES = {
     "[Project Memory — from previous sessions]": ("memory", "Project Memory"),
     "[Metis Project Profile]": ("memory", "Metis Project Profile"),
 }
-_MODEL_CONTEXT_LIMITS: Dict[str, int] = {
-    "deepseek-v4-flash": 1_000_000,
-    "deepseek-v4-pro": 1_000_000,
-    "deepseek-chat": 128_000,
-    "deepseek-coder": 128_000,
-    "deepseek-reasoner": 64_000,
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "gpt-4-turbo": 128_000,
-    "gpt-4.1": 1_047_576,
-    "o3": 200_000,
-    "o3-mini": 200_000,
-    "o4-mini": 200_000,
-    "claude": 200_000,
-    "gpt-5.5": 1_000_000,
-    "gpt-5.4": 1_000_000,
-    "codex-auto-review": 1_000_000,
-    "qwen3-coder-plus": 1_000_000,
-    "gemini-2.0-flash": 1_000_000,
-}
-
-
 def context_limit_for_model(model: str = "") -> int:
-    name = str(model or "").strip().lower()
-    if not name:
-        return _DEFAULT_CONTEXT_LIMIT
-    for key, limit in _MODEL_CONTEXT_LIMITS.items():
-        if key in name:
-            return limit
-    return _DEFAULT_CONTEXT_LIMIT
+    return resolve_model_profile(model).context_window
 
 
 def estimate_tokens(value: Any) -> int:
@@ -289,7 +261,8 @@ def context_ledger(
     system_detail_parts = _system_details(messages)
     schema_detail_parts = _schema_details(tools)
     estimated_total = system_tokens + schema_tokens + history_tokens
-    limit = context_limit_for_model(model)
+    profile = resolve_model_profile(model)
+    limit = profile.context_window
     cache_hit = int(getattr(usage, "prompt_cache_hit_tokens", 0) or 0)
     cache_miss = int(getattr(usage, "prompt_cache_miss_tokens", 0) or 0)
 
@@ -300,6 +273,13 @@ def context_ledger(
         "estimated_total_tokens": estimated_total,
         "context_limit": limit,
         "context_ratio": round(estimated_total / limit, 4) if limit > 0 else 0.0,
+        "context_source": profile.source,
+        "context_source_label": profile.to_dict()["source_label"],
+        "context_source_path": profile.source_path,
+        "context_matched_model": profile.matched_model,
+        "context_is_estimate": profile.is_estimate,
+        "max_output_tokens": profile.max_output_tokens,
+        "compact_thresholds": list(profile.compact_thresholds),
         "cache_hit_tokens": cache_hit,
         "cache_miss_tokens": cache_miss,
         # FABLEADV-25: 命中率突降 = prompt 前缀有变（缓存被打破）。是诊断负优化的核心指标。

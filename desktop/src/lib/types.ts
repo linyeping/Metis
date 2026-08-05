@@ -28,7 +28,7 @@ export type ThemeName =
   | 'mistbound-jade'
   | 'crimson-reliquary';
 
-export type SectionId = 'chat' | 'chat-list' | 'skills' | 'mcp' | 'computer' | 'cron' | 'store';
+export type SectionId = 'chat' | 'chat-list' | 'projects' | 'skills' | 'mcp' | 'computer' | 'cron' | 'store';
 
 // Product surfaces live above Assistant modes. Design is intentionally not an
 // AppMode: switching products must not reset the active Chat/Cowork/Code state.
@@ -485,7 +485,30 @@ export interface RuntimeSettings {
   proxyBypass: string;
   terminalShell: TerminalShell;
   pythonPath: string;
+  modelProfile: ModelProfile;
   providerValidation?: ProviderValidation;
+}
+
+export type ModelProfileSource = 'user' | 'builtin' | 'builtin_estimate' | 'default' | string;
+
+export interface ModelProfile {
+  model: string;
+  matchedModel: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+  compactThresholds: [number, number, number];
+  source: ModelProfileSource;
+  sourceLabel: string;
+  sourcePath: string;
+  isEstimate: boolean;
+}
+
+export interface ModelProfilesPayload {
+  schema: string;
+  version: number;
+  path: string;
+  resolved: ModelProfile;
+  overrides: Array<Pick<ModelProfile, 'model' | 'contextWindow' | 'maxOutputTokens' | 'compactThresholds'>>;
 }
 
 export interface DocumentConverterCandidate {
@@ -695,6 +718,12 @@ export interface ModelCapabilities {
   model: string;
   detectionMethod: string;
   effectiveContext: number;
+  maxOutputTokens: number;
+  compactThresholds: [number, number, number];
+  contextSource: ModelProfileSource;
+  contextSourcePath: string;
+  contextMatchedModel: string;
+  contextIsEstimate: boolean;
   supportsVision: boolean;
   visionProtocol: string;
   supportsToolCalling: boolean;
@@ -1613,6 +1642,13 @@ export interface ContextLedger {
   estimatedTotalTokens: number;
   contextLimit: number;
   contextRatio: number;
+  contextSource: ModelProfileSource;
+  contextSourceLabel: string;
+  contextSourcePath: string;
+  contextMatchedModel: string;
+  contextIsEstimate: boolean;
+  maxOutputTokens: number;
+  compactThresholds: [number, number, number];
   cacheHitTokens: number;
   cacheMissTokens: number;
   cacheHitRate: number;

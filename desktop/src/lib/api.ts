@@ -33,6 +33,8 @@ import type {
   MetisRuntimeStatus,
   MetisRuntimeStep,
   ModelCapabilities,
+  ModelProfile,
+  ModelProfilesPayload,
   NetworkCheckPayload,
   ParsedFile,
   PermissionAccessMode,
@@ -102,6 +104,25 @@ function stringValue(value: unknown): string {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function thresholdTuple(value: unknown): [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) return [0.6, 0.8, 0.92];
+  return [numberValue(value[0]), numberValue(value[1]), numberValue(value[2])];
+}
+
+function modelProfileFromRecord(row: Record<string, unknown>): ModelProfile {
+  return {
+    model: stringValue(row.model),
+    matchedModel: stringValue(row.matched_model ?? row.matchedModel),
+    contextWindow: numberValue(row.context_window ?? row.contextWindow) || 128_000,
+    maxOutputTokens: numberValue(row.max_output_tokens ?? row.maxOutputTokens) || 32_768,
+    compactThresholds: thresholdTuple(row.compact_thresholds ?? row.compactThresholds),
+    source: stringValue(row.source) || 'default',
+    sourceLabel: stringValue(row.source_label ?? row.sourceLabel) || '未确认默认值',
+    sourcePath: stringValue(row.source_path ?? row.sourcePath),
+    isEstimate: Boolean(row.is_estimate ?? row.isEstimate),
+  };
 }
 
 function stringArray(value: unknown): string[] {
@@ -421,6 +442,12 @@ function modelCapabilitiesFromRecord(row: Record<string, unknown>): ModelCapabil
     model: stringValue(row.model),
     detectionMethod: stringValue(row.detection_method ?? row.detectionMethod),
     effectiveContext: numberValue(row.effective_context ?? row.effectiveContext),
+    maxOutputTokens: numberValue(row.max_output_tokens ?? row.maxOutputTokens) || 32_768,
+    compactThresholds: thresholdTuple(row.compact_thresholds ?? row.compactThresholds),
+    contextSource: stringValue(row.context_source ?? row.contextSource) || 'default',
+    contextSourcePath: stringValue(row.context_source_path ?? row.contextSourcePath),
+    contextMatchedModel: stringValue(row.context_matched_model ?? row.contextMatchedModel),
+    contextIsEstimate: Boolean(row.context_is_estimate ?? row.contextIsEstimate),
     supportsVision: Boolean(row.supports_vision ?? row.supportsVision),
     visionProtocol: stringValue(row.vision_protocol ?? row.visionProtocol) || 'legacy',
     supportsToolCalling: Boolean(row.supports_tool_calling ?? row.supportsToolCalling),
@@ -865,8 +892,51 @@ export async function getSettings(): Promise<RuntimeSettings> {
     proxyBypass: stringValue(data.proxy_bypass),
     terminalShell: terminalShellValue(data.terminal_shell),
     pythonPath: stringValue(data.python_path),
+    modelProfile: modelProfileFromRecord(recordValue(data.model_profile ?? data.modelProfile)),
     providerValidation: providerValidationFromRecord(recordValue(data.provider_validation)),
   };
+}
+
+function modelProfilesPayloadFromRecord(data: Record<string, unknown>): ModelProfilesPayload {
+  const overrides = Array.isArray(data.overrides) ? data.overrides : [];
+  return {
+    schema: stringValue(data.schema),
+    version: numberValue(data.version),
+    path: stringValue(data.path),
+    resolved: modelProfileFromRecord(recordValue(data.resolved)),
+    overrides: overrides.map(value => modelProfileFromRecord(recordValue(value))),
+  };
+}
+
+export async function getModelProfiles(model: string): Promise<ModelProfilesPayload> {
+  const data = await requestJson<Record<string, unknown>>(`/settings/model-profiles?model=${encodeURIComponent(model)}`);
+  return modelProfilesPayloadFromRecord(data);
+}
+
+export async function saveModelProfile(input: {
+  model: string;
+  contextWindow: number;
+  maxOutputTokens: number;
+  compactThresholds: [number, number, number];
+}): Promise<ModelProfilesPayload> {
+  const data = await requestJson<Record<string, unknown>>('/settings/model-profiles', {
+    method: 'POST',
+    body: JSON.stringify({
+      model: input.model,
+      context_window: input.contextWindow,
+      max_output_tokens: input.maxOutputTokens,
+      compact_thresholds: input.compactThresholds,
+    }),
+  });
+  return modelProfilesPayloadFromRecord(data);
+}
+
+export async function resetModelProfile(model: string): Promise<ModelProfilesPayload> {
+  const data = await requestJson<Record<string, unknown>>('/settings/model-profiles', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'reset', model }),
+  });
+  return modelProfilesPayloadFromRecord(data);
 }
 
 function terminalShellValue(value: unknown): RuntimeSettings['terminalShell'] {

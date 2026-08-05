@@ -326,6 +326,10 @@ metis sandbox repair --allow-download
 
 SDK 是 headless runtime 的进程内形态，直接复用同一 agent loop 和 `metis.agent_event.v1`，不会启动子进程或反解析 CLI 文本：
 
+```powershell
+python -m pip install metis-agent-sdk
+```
+
 ```python
 from metis import Agent
 

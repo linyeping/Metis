@@ -14,7 +14,8 @@ from urllib.parse import urlparse
 
 import requests
 
-from backend.bridges.model_capability import detect_from_model_name, tier_compact_thresholds
+from backend.bridges.model_capability import detect_from_model_name
+from backend.bridges.model_profiles import resolve_model_profile
 from backend.core.credential_store import CredentialStoreError, read_api_key, write_api_key
 from backend.core.engine.prompt_runtime import compile_prompt_runtime
 from backend.core.paths import legacy_miro_path, metis_path
@@ -61,37 +62,6 @@ except ImportError:  # pragma: no cover - supports running from inside miro/
     )
 
 
-_MODEL_CONTEXT_LIMITS: Dict[str, int] = {
-    "deepseek-v4-flash": 1000000,
-    "deepseek-v4-pro": 1000000,
-    "deepseek-chat": 128000,
-    "deepseek-coder": 128000,
-    "deepseek-reasoner": 64000,
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "gpt-4-turbo": 128000,
-    "gpt-4.1": 1047576,
-    "gpt-4.1-mini": 1047576,
-    "o3": 200000,
-    "o3-mini": 200000,
-    "o4-mini": 200000,
-    "claude-sonnet-4-20250514": 200000,
-    "claude-opus-4-20250514": 200000,
-    "claude-3-5-sonnet": 200000,
-    "gpt-5.5": 1000000,
-    "gpt-5.4": 1000000,
-    "gpt-5.4-mini": 1000000,
-    "codex-auto-review": 1000000,
-    "kimi-k2.6": 262144,
-    "glm-5.1": 200000,
-    "qwen3-coder-plus": 1000000,
-    "qwen3-max": 262144,
-    "qwen2.5:7b": 32768,
-}
-_DEFAULT_CONTEXT_LIMIT = 128000
-_COMPACT_STAGE_1_THRESHOLD = 0.60
-_COMPACT_STAGE_2_THRESHOLD = 0.80
-_COMPACT_STAGE_3_THRESHOLD = 0.92
 _PROVIDER_SETTINGS_LOCK = threading.RLock()
 _PROVIDER_PROBE_CACHE_LOCK = threading.RLock()
 _PROVIDER_MODEL_CACHE_TTL_SECONDS = 300.0
@@ -492,6 +462,8 @@ def build_agent_config(
         include_repo_map_hint=False,
         include_workspace_memory_hint=False,
     )
+    profile = resolve_model_profile(resolved["model"], tier=model_capabilities.tier)
+    requested_max_tokens = int(env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096"))
     return AgentConfig(
         llm_backend=resolved["backend"],
         llm_base_url=resolved["base_url"],
@@ -499,7 +471,7 @@ def build_agent_config(
         llm_model=resolved["model"],
         reasoning_effort=env("METIS_REASONING_EFFORT", "MIRO_REASONING_EFFORT", ""),
         temperature=float(env("METIS_TEMPERATURE", "MIRO_TEMPERATURE", "0.3")),
-        max_tokens=int(env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096")),
+        max_tokens=min(requested_max_tokens, profile.max_output_tokens),
         max_turns=int(env("METIS_MAX_TURNS", "MIRO_MAX_TURNS", "64")),
         timeout=float(env("METIS_LLM_TIMEOUT", "MIRO_LLM_TIMEOUT", "120")),
         system_prompt=prompt_snapshot.final_system_prompt,
@@ -531,6 +503,7 @@ def get_runtime_settings() -> Dict[str, Any]:
             api_key=api_key,
         )
         model = validation.get("model") or resolved["model"]
+        model_profile = resolve_model_profile(model, tier=detect_from_model_name(model).tier)
         return {
             "backend": resolved["backend"],
             "provider_id": validation.get("provider_id", resolved["backend"]),
@@ -539,6 +512,7 @@ def get_runtime_settings() -> Dict[str, Any]:
             "api_key": _mask_api_key(api_key),
             "has_api_key": bool(api_key),
             "model": model,
+            "model_profile": model_profile.to_dict(),
             "temperature": float(env("METIS_TEMPERATURE", "MIRO_TEMPERATURE", "0.3")),
             "reasoning_effort": env("METIS_REASONING_EFFORT", "MIRO_REASONING_EFFORT", "off"),
             "max_tokens": int(env("METIS_MAX_TOKENS", "MIRO_MAX_TOKENS", "4096")),
@@ -1723,11 +1697,8 @@ def save_first_run_config(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def context_limit(model: str = "") -> int:
-    model_name = (model or env("METIS_LLM_MODEL", "MIRO_LLM_MODEL", "")).lower()
-    for key, limit in _MODEL_CONTEXT_LIMITS.items():
-        if key in model_name:
-            return limit
-    return _DEFAULT_CONTEXT_LIMIT
+    model_name = model or env("METIS_LLM_MODEL", "MIRO_LLM_MODEL", "")
+    return resolve_model_profile(model_name).context_window
 
 
 def compaction_stage(prompt_tokens: int, model: str = "") -> int:
@@ -1735,8 +1706,9 @@ def compaction_stage(prompt_tokens: int, model: str = "") -> int:
         return 0
     model_name = model or env("METIS_LLM_MODEL", "MIRO_LLM_MODEL", "")
     capabilities = detect_from_model_name(model_name)
-    stage_1, stage_2, stage_3 = tier_compact_thresholds(capabilities.tier)
-    ratio = prompt_tokens / context_limit(model_name)
+    profile = resolve_model_profile(model_name, tier=capabilities.tier)
+    stage_1, stage_2, stage_3 = profile.compact_thresholds
+    ratio = prompt_tokens / profile.context_window
     if ratio > stage_3:
         return 3
     if ratio > stage_2:

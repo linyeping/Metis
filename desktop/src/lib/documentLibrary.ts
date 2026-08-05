@@ -15,6 +15,7 @@ export type DocumentLibraryItemKind =
 
 export interface DocumentLibraryItem {
   id: string;
+  sessionId?: string;
   kind: DocumentLibraryItemKind;
   title: string;
   subtitle?: string;
@@ -66,6 +67,7 @@ function coerceItem(value: unknown): DocumentLibraryItem | null {
   if (!id || !title) return null;
   return {
     id,
+    sessionId: String(row.sessionId || row.session_id || ''),
     kind: KNOWN_KINDS.includes(String(row.kind) as DocumentLibraryItemKind) ? (row.kind as DocumentLibraryItemKind) : 'file',
     title,
     subtitle: String(row.subtitle || ''),
@@ -86,8 +88,10 @@ function writeItems(items: DocumentLibraryItem[]) {
   window.dispatchEvent(new CustomEvent(DOCUMENT_LIBRARY_EVENT));
 }
 
-export function listDocumentLibraryItems(): DocumentLibraryItem[] {
-  return readRawItems().sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0));
+export function listDocumentLibraryItems(sessionId?: string): DocumentLibraryItem[] {
+  const items = readRawItems();
+  const scoped = sessionId ? items.filter(item => item.sessionId === sessionId) : items;
+  return scoped.sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0));
 }
 
 export function upsertDocumentLibraryItem(item: Omit<DocumentLibraryItem, 'createdAt' | 'updatedAt'> & Partial<Pick<DocumentLibraryItem, 'createdAt' | 'updatedAt'>>): DocumentLibraryItem {
@@ -113,18 +117,21 @@ export async function syncDocumentLibraryFromArtifacts(
   const options = Array.isArray(sourceOrOptions) ? {} : (sourceOrOptions || {});
   const fetched = Array.isArray(sourceOrOptions)
     ? sourceOrOptions
-    : (await listArtifacts({ runId: options.runId, kind: options.kind, limit: options.limit || 120 })).artifacts;
+    : (await listArtifacts({ sessionId: options.sessionId, runId: options.runId, kind: options.kind, limit: options.limit || 120 })).artifacts;
   const source = options.sessionId
     ? fetched.filter(artifact => artifact.session_id === options.sessionId || (options.includeUnscoped !== false && !artifact.session_id))
     : fetched;
   const artifactItems = source.map(documentItemFromArtifact).filter(Boolean) as DocumentLibraryItem[];
   const artifactIds = new Set(artifactItems.map(item => item.id));
-  const legacyItems = readRawItems().filter(item => !item.artifactId && !artifactIds.has(item.id));
-  const next = [...artifactItems, ...legacyItems]
+  const existingItems = readRawItems().filter(item => (
+    !artifactIds.has(item.id)
+    && !(options.sessionId && item.sessionId === options.sessionId && item.artifactId)
+  ));
+  const next = [...artifactItems, ...existingItems]
     .sort((left, right) => Number(right.updatedAt || 0) - Number(left.updatedAt || 0))
     .slice(0, 120);
   writeItems(next);
-  return next;
+  return options.sessionId ? next.filter(item => item.sessionId === options.sessionId) : next;
 }
 
 export function documentItemFromArtifact(artifact: ArtifactRecord): DocumentLibraryItem | null {
@@ -136,6 +143,7 @@ export function documentItemFromArtifact(artifact: ArtifactRecord): DocumentLibr
   const updatedAt = isoToMs(artifact.updated_at) || createdAt;
   return {
     id: artifactId,
+    sessionId: artifact.session_id || '',
     artifactId,
     kind: normalizeArtifactKind(artifact.kind),
     title: artifact.title || artifact.path || artifact.url || 'Artifact',

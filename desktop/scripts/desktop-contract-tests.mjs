@@ -2386,7 +2386,7 @@ test('NEW-112 project structure reorganization stays wired', () => {
   assert.match(pyinstallerSpec, /BACKEND_ROOT = REPO_ROOT \/ "backend"/);
   assert.match(pyinstallerSpec, /collect_submodules\("backend\.tools"\)/);
   assert.doesNotMatch(pyinstallerSpec, /MIRO_ROOT|hermes_bridge|\"Tools\"/);
-  assert.match(backendPyproject, /name = "metis-backend"/);
+  assert.match(backendPyproject, /name = "metis-agent-sdk"/);
   assert.match(backendPyproject, /metis-backend = "backend\.runtime\.cli:main"/);
   assert.match(ci, /cd desktop && npm ci/);
   assert.match(ci, /pip install -e backend\//);
@@ -2439,7 +2439,7 @@ test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
   assert.match(backendPyproject, /browser-use>=0\.13/);
   assert.match(browserAgent, /browser_use\.llm\.openai\.chat/);
   assert.match(browserAgent, /BrowserLLMConfig/);
-  assert.match(browserAgent, /api_key_encrypted/);
+  assert.match(browserAgent, /Windows 桌面端与 CLI 会共用系统凭据/);
   assert.match(browserAgent, /_format_browser_failure/);
   assert.match(browserAgent, /object\.__setattr__\(llm,\s*"provider"/);
   assert.match(browserTests, /test_fableadv_50_browser_use_native_openai_compatible_llm/);

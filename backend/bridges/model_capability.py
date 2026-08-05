@@ -4,6 +4,8 @@ import re
 import time
 from dataclasses import dataclass, field
 
+from .model_profiles import compact_thresholds_for_tier, resolve_model_profile
+
 
 @dataclass(frozen=True)
 class ModelCapabilities:
@@ -16,6 +18,12 @@ class ModelCapabilities:
     detected_model: str
     detection_method: str
     vision_protocol: str = "legacy"
+    max_output_tokens: int = 32_768
+    compact_thresholds: tuple[float, float, float] = (0.60, 0.80, 0.92)
+    context_source: str = "default"
+    context_source_path: str = ""
+    context_matched_model: str = ""
+    context_is_estimate: bool = True
     detected_at: float = field(default_factory=time.time)
 
 
@@ -61,11 +69,7 @@ def family_prompt_for_model(model_name: str) -> str:
 
 
 def tier_compact_thresholds(tier: int) -> tuple[float, float, float]:
-    if tier == 1:
-        return (0.65, 0.82, 0.93)
-    if tier == 3:
-        return (0.50, 0.70, 0.85)
-    return (0.60, 0.80, 0.92)
+    return compact_thresholds_for_tier(tier)
 
 
 def detect_from_model_name(model_name: str) -> ModelCapabilities:
@@ -74,9 +78,10 @@ def detect_from_model_name(model_name: str) -> ModelCapabilities:
 
     for pattern, tier, family in _TIER_PATTERNS:
         if re.search(pattern, name_lower):
+            profile = resolve_model_profile(model_name, tier=tier)
             return ModelCapabilities(
                 tier=tier,
-                effective_context=_context_for_model(name_lower),
+                effective_context=profile.context_window,
                 supports_tool_calling=True,
                 supports_structured_output=(tier <= 2),
                 instruction_adherence=("high" if tier == 1 else "medium" if tier == 2 else "low"),
@@ -84,11 +89,18 @@ def detect_from_model_name(model_name: str) -> ModelCapabilities:
                 detected_model=model_name,
                 detection_method="name_match",
                 vision_protocol=vision_protocol,
+                max_output_tokens=profile.max_output_tokens,
+                compact_thresholds=profile.compact_thresholds,
+                context_source=profile.source,
+                context_source_path=profile.source_path,
+                context_matched_model=profile.matched_model,
+                context_is_estimate=profile.is_estimate,
             )
 
+    profile = resolve_model_profile(model_name, tier=2)
     return ModelCapabilities(
         tier=2,
-        effective_context=_context_for_model(name_lower),
+        effective_context=profile.context_window,
         supports_tool_calling=True,
         supports_structured_output=False,
         instruction_adherence="medium",
@@ -96,6 +108,12 @@ def detect_from_model_name(model_name: str) -> ModelCapabilities:
         detected_model=model_name,
         detection_method="default",
         vision_protocol=vision_protocol,
+        max_output_tokens=profile.max_output_tokens,
+        compact_thresholds=profile.compact_thresholds,
+        context_source=profile.source,
+        context_source_path=profile.source_path,
+        context_matched_model=profile.matched_model,
+        context_is_estimate=profile.is_estimate,
     )
 
 
@@ -109,9 +127,3 @@ def _vision_protocol_for_model(name: str) -> str:
     if name.startswith(("gpt-4o", "gpt-4.1", "gemini", "qwen-vl")) or "vl" in name:
         return "legacy"
     return "legacy"
-
-
-def _context_for_model(name: str) -> int:
-    from backend.web.llm_state import context_limit
-
-    return context_limit(name)

@@ -50,7 +50,7 @@ import {
 } from '../../lib/api';
 import { contextLimitForModel, contextWindowLevel, contextWindowPercent, estimateContextTokens, formatTokenCount } from '../../lib/contextWindow';
 import { filterSlashWorkflowCommands, moveSlashSelection } from '../../lib/slashCommands';
-import type { ChatFollowupBehavior, ContextLedger, ContextLedgerDetail, ParsedFile, PermissionAccessMode, ProviderModel, RuntimeSettings, SkillSummary } from '../../lib/types';
+import type { ChatFollowupBehavior, ContextLedger, ContextLedgerDetail, ModelProfile, ParsedFile, PermissionAccessMode, ProviderModel, RuntimeSettings, SkillSummary } from '../../lib/types';
 import { useChatStore } from '../../store/chatStore';
 import { useSessionStore } from '../../store/sessionStore';
 import { useUiStore } from '../../store/uiStore';
@@ -186,6 +186,7 @@ export function Composer() {
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [currentModel, setCurrentModel] = useState('');
+  const [currentModelProfile, setCurrentModelProfile] = useState<ModelProfile | null>(null);
   const pendingAttachment = attachments.some(file => file.status === 'parsing');
   const readyAttachmentCount = attachments.filter(file => !file.status || file.status === 'ready').length;
   const sendDisabled = pendingAttachment
@@ -207,9 +208,15 @@ export function Composer() {
     const loadModel = async () => {
       try {
         const settings = await getSettings();
-        if (alive) setCurrentModel(settings.model || '');
+        if (alive) {
+          setCurrentModel(settings.model || '');
+          setCurrentModelProfile(settings.modelProfile);
+        }
       } catch {
-        if (alive) setCurrentModel('');
+        if (alive) {
+          setCurrentModel('');
+          setCurrentModelProfile(null);
+        }
       }
     };
     void loadModel();
@@ -714,7 +721,7 @@ export function Composer() {
             </div>
             <div className="composer-toolbar-right">
               <ComposerModelMenu />
-              <ComposerContextOrb model={currentModel} />
+              <ComposerContextOrb model={currentModel} profile={currentModelProfile} />
               {followupControls}
               {sendButton}
             </div>
@@ -730,7 +737,7 @@ export function Composer() {
           </div>
           <div className="composer-toolbar-right">
             <ComposerModelMenu />
-            <ComposerContextOrb model={currentModel} />
+            <ComposerContextOrb model={currentModel} profile={currentModelProfile} />
           </div>
         </div>
       )}
@@ -1173,7 +1180,7 @@ function coworkModeState(mode: PermissionAccessMode): 'ask' | 'act' {
   return mode === 'ask' ? 'ask' : 'act';
 }
 
-function ComposerContextOrb({ model }: { model: string }) {
+function ComposerContextOrb({ model, profile }: { model: string; profile: ModelProfile | null }) {
   const t = useT();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const messages = useChatStore(state => state.messages);
@@ -1183,18 +1190,20 @@ function ComposerContextOrb({ model }: { model: string }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ mcp: false, memory: false });
 
-  const limit = contextLedger?.contextLimit || contextLimitForModel(model);
+  const limit = contextLedger?.contextLimit || profile?.contextWindow || contextLimitForModel(model);
   const used = contextLedger?.estimatedTotalTokens || estimateContextTokens(messages, usage);
   const percent = contextWindowPercent(used, limit);
   const level = orbLevel(percent);
   const rows = contextRows(contextLedger, used, limit, messages.length);
   const barRows = rows.filter(row => row.tokens > 0);
-  const footerText =
+  const sourceLabel = contextLedger?.contextSourceLabel || profile?.sourceLabel || '';
+  const cacheText =
     compactStatus?.error ||
     compactStatus?.summaryPreview ||
     (contextLedger
       ? `${t('缓存命中')} ${formatContextPercent(contextLedger.cacheHitTokens || 0, Math.max(1, (contextLedger.cacheHitTokens || 0) + (contextLedger.cacheMissTokens || 0)))}`
       : '');
+  const footerText = [sourceLabel ? `${t('配置来源')}：${t(sourceLabel)}` : '', cacheText].filter(Boolean).join(' · ');
 
   useEffect(() => {
     if (!open) return undefined;

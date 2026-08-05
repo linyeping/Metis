@@ -1,0 +1,41 @@
+name: Publish Python SDK
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and validate distributions
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build --sdist --wheel --outdir dist backend/
+          python -m twine check dist/*
+          test "$(find dist -maxdepth 1 -name 'metis_agent_sdk-*.whl' | wc -l)" -eq 1
+
+      - name: Verify wheel in an isolated environment
+        run: |
+          python -m venv "$RUNNER_TEMP/sdk-publish-smoke"
+          "$RUNNER_TEMP/sdk-publish-smoke/bin/python" -m pip install dist/metis_agent_sdk-*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdk-publish-smoke/bin/python" -c "from metis import Agent, SDK_API_VERSION; assert Agent and SDK_API_VERSION == '1'"
+
+      - name: Publish with PyPI trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1

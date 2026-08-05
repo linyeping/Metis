@@ -66,6 +66,13 @@ describe('normalizeChatStreamEvent', () => {
           estimated_total_tokens: 60,
           context_limit: 1000,
           context_ratio: 0.06,
+          context_source: 'user',
+          context_source_label: '用户配置',
+          context_source_path: 'C:/Users/test/.metis/models.toml',
+          context_matched_model: 'test-*',
+          context_is_estimate: false,
+          max_output_tokens: 2048,
+          compact_thresholds: [0.55, 0.75, 0.9],
           cache_hit_tokens: 40,
           cache_miss_tokens: 10,
           cache_hit_rate: 0.8,
@@ -79,6 +86,10 @@ describe('normalizeChatStreamEvent', () => {
     expect(event.contextLedger?.systemBreakdown?.skills).toBe(5);
     expect(event.contextLedger?.schemaBreakdown?.mcp).toBe(8);
     expect(event.contextLedger?.cacheHitRate).toBe(0.8);
+    expect(event.contextLedger?.contextSource).toBe('user');
+    expect(event.contextLedger?.contextMatchedModel).toBe('test-*');
+    expect(event.contextLedger?.maxOutputTokens).toBe(2048);
+    expect(event.contextLedger?.compactThresholds).toEqual([0.55, 0.75, 0.9]);
   });
 
   it('normalizes todo update events', () => {

@@ -394,6 +394,18 @@ function contextLedgerValue(payload: UnknownRecord): ContextLedger {
     estimatedTotalTokens: numberValue(value(payload, {}, 'estimated_total_tokens', 'estimatedTotalTokens')),
     contextLimit: numberValue(value(payload, {}, 'context_limit', 'contextLimit')),
     contextRatio: numberValue(value(payload, {}, 'context_ratio', 'contextRatio')),
+    contextSource: stringValue(value(payload, {}, 'context_source', 'contextSource')) || 'default',
+    contextSourceLabel: stringValue(value(payload, {}, 'context_source_label', 'contextSourceLabel')),
+    contextSourcePath: stringValue(value(payload, {}, 'context_source_path', 'contextSourcePath')),
+    contextMatchedModel: stringValue(value(payload, {}, 'context_matched_model', 'contextMatchedModel')),
+    contextIsEstimate: booleanValue(value(payload, {}, 'context_is_estimate', 'contextIsEstimate')),
+    maxOutputTokens: numberValue(value(payload, {}, 'max_output_tokens', 'maxOutputTokens')),
+    compactThresholds: (() => {
+      const thresholds = payload.compact_thresholds ?? payload.compactThresholds;
+      return Array.isArray(thresholds) && thresholds.length === 3
+        ? [numberValue(thresholds[0]), numberValue(thresholds[1]), numberValue(thresholds[2])] as [number, number, number]
+        : [0.6, 0.8, 0.92] as [number, number, number];
+    })(),
     cacheHitTokens: numberValue(value(payload, {}, 'cache_hit_tokens', 'cacheHitTokens')),
     cacheMissTokens: numberValue(value(payload, {}, 'cache_miss_tokens', 'cacheMissTokens')),
     cacheHitRate: numberValue(value(payload, {}, 'cache_hit_rate', 'cacheHitRate')),
