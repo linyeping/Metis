@@ -93,7 +93,10 @@ jobs:
         with:
           name: metis-cli-release
           if-no-files-found: error
-          retention-days: 14
+          # The standalone metis-cli mirror runs on a schedule and may consume
+          # the latest successful main-branch artifact days later. Keep the
+          # verified binary available long enough for that release handoff.
+          retention-days: 90
           compression-level: 0
           path: |
             desktop/release/metis.exe
