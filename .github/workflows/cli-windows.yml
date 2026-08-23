@@ -28,7 +28,7 @@ on:
       - "desktop/scripts/verify-cli-package.ps1"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-verify:
@@ -93,12 +93,26 @@ jobs:
         with:
           name: metis-cli-release
           if-no-files-found: error
-          # The standalone metis-cli mirror runs on a schedule and may consume
-          # the latest successful main-branch artifact days later. Keep the
-          # verified binary available long enough for that release handoff.
-          retention-days: 90
+          retention-days: 14
           compression-level: 0
           path: |
+            desktop/release/metis.exe
+            desktop/release/metis.exe.sha256
+            desktop/release/release-metadata.json
+
+      - name: Publish verified CLI release assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cli-latest
+          name: Metis CLI (latest verified)
+          prerelease: true
+          make_latest: false
+          body: |
+            Stable pointer to the latest Windows CLI binary verified by the CLI Windows workflow.
+            The assets are replaced only after the full build, attach/resume, dependency-isolation,
+            checksum, and PE icon checks pass.
+          files: |
             desktop/release/metis.exe
             desktop/release/metis.exe.sha256
             desktop/release/release-metadata.json
