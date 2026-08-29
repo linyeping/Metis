@@ -14,6 +14,7 @@ if __name__ == "__main__":
     if any(arg == "--mode" or arg.startswith("--mode=") for arg in sys.argv[1:]):
         from backend.runtime.cli import main  # noqa: E402
     else:
+        os.environ.setdefault("METIS_CLIENT_KIND", "cli")
         from backend.cli import main  # noqa: E402
 
     raise SystemExit(main())

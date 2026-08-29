@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .constants import DEEPSEEK_CHAT_MODEL, REQUEST_TIMEOUT
+from backend.runtime.client_identity import model_client_headers
 
 DEFAULT_MODEL = DEEPSEEK_CHAT_MODEL
 
@@ -18,6 +19,7 @@ class LLMClient:
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
+            **model_client_headers(),
         }
 
     def chat(

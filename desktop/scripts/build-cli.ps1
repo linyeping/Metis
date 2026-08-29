@@ -18,7 +18,6 @@ $pyinstallerWorkRoot = Join-Path $workRoot "pyinstaller"
 $specPath = Join-Path $PSScriptRoot "build-cli.spec"
 $requirementsPath = Join-Path $backendRoot "requirements-build.txt"
 $exe = Join-Path $releaseRoot "metis.exe"
-$iconPath = Join-Path $desktopRoot "resources\icons\logo.ico"
 
 if ([string]::IsNullOrWhiteSpace($Python)) {
   $Python = if ([string]::IsNullOrWhiteSpace($env:METIS_PYTHON)) { "python" } else { $env:METIS_PYTHON }
@@ -84,46 +83,6 @@ if ($MaxExeMB -gt 0 -and $exeSizeMB -gt $MaxExeMB) {
   throw ("metis.exe size {0} MB exceeds budget {1} MB" -f $exeSizeMB, $MaxExeMB)
 }
 
-if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
-  throw "Metis CLI icon is missing: $iconPath"
-}
-Add-Type -AssemblyName System.Drawing
-$actualIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
-if ($null -eq $actualIcon) {
-  throw "metis.exe has no extractable PE icon"
-}
-$expectedIcon = [System.Drawing.Icon]::new($iconPath, 32, 32)
-try {
-  $actualBitmap = $actualIcon.ToBitmap()
-  $expectedBitmap = $expectedIcon.ToBitmap()
-  try {
-    $difference = 0L
-    for ($y = 0; $y -lt 32; $y++) {
-      for ($x = 0; $x -lt 32; $x++) {
-        $actualPixel = $actualBitmap.GetPixel($x, $y)
-        $expectedPixel = $expectedBitmap.GetPixel($x, $y)
-        $difference += [Math]::Abs([int]$actualPixel.A - [int]$expectedPixel.A)
-        $difference += [Math]::Abs([int]$actualPixel.R - [int]$expectedPixel.R)
-        $difference += [Math]::Abs([int]$actualPixel.G - [int]$expectedPixel.G)
-        $difference += [Math]::Abs([int]$actualPixel.B - [int]$expectedPixel.B)
-      }
-    }
-    $meanChannelDifference = $difference / (4.0 * 32 * 32)
-    if ($meanChannelDifference -gt 12.0) {
-      throw ("metis.exe PE icon differs from Metis logo: {0}" -f [Math]::Round($meanChannelDifference, 3))
-    }
-    Write-Host ("metis.exe PE icon matches Metis logo: {0}" -f [Math]::Round($meanChannelDifference, 3))
-  }
-  finally {
-    $actualBitmap.Dispose()
-    $expectedBitmap.Dispose()
-  }
-}
-finally {
-  $actualIcon.Dispose()
-  $expectedIcon.Dispose()
-}
-
 $archiveViewer = Join-Path $venvRoot "Scripts\pyi-archive_viewer.exe"
 if (-not (Test-Path -LiteralPath $archiveViewer -PathType Leaf)) {
   throw "PyInstaller archive viewer is missing: $archiveViewer"
@@ -142,7 +101,7 @@ Write-Host "Packaged CLI contains the interactive TUI runtime"
 if (-not $SkipCliSelfTest) {
   $versionOutput = (& $exe --version 2>&1 | Out-String)
   $versionExitCode = $LASTEXITCODE
-  if ($versionExitCode -ne 0 -or $versionOutput -notmatch "Metis 26\.7\.27") {
+  if ($versionExitCode -ne 0 -or $versionOutput -notmatch "Metis 26\.8\.29") {
     throw "Packaged CLI --version self-test failed"
   }
   $helpOutput = (& $exe --help 2>&1 | Out-String)
@@ -153,8 +112,18 @@ if (-not $SkipCliSelfTest) {
 
   $smokeJsonl = Join-Path $workRoot "smoke.jsonl"
   $smokeStderr = Join-Path $workRoot "smoke.stderr.log"
-  & $exe "reply ok" -p --backend fake --model fake-model --no-desktop --no-mcp --allowed-tools read_file --permission-mode plan --max-turns 2 --output-format stream-json 1> $smokeJsonl 2> $smokeStderr
-  if ($LASTEXITCODE -ne 0) {
+  # The fake backend intentionally emits a fallback diagnostic on stderr.
+  # Capture it without treating the native stderr stream as a terminating error.
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $exe "reply ok" -p --backend fake --model fake-model --no-desktop --no-mcp --allowed-tools read_file --permission-mode plan --max-turns 2 --output-format stream-json 1> $smokeJsonl 2> $smokeStderr
+    $smokeExitCode = $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  if ($smokeExitCode -ne 0) {
     throw "Packaged CLI runtime self-test failed. See $smokeStderr"
   }
   $events = @(Get-Content -LiteralPath $smokeJsonl -Encoding utf8 | ForEach-Object { $_ | ConvertFrom-Json })

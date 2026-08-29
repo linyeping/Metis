@@ -6,6 +6,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const crypto = require('node:crypto')
 const { Readable } = require('node:stream')
+const { app } = require('electron')
 const {
   configFilePath,
   legacyMetisHome,
@@ -3638,6 +3639,7 @@ async function startBackend(emit = () => {}) {
   const runtimePackDir = bundledRuntimePackDir()
   const backendEnv = {
     ...process.env,
+    METIS_CLIENT_KIND: 'desktop',
     METIS_DATA_ROOT: storage.dataRoot,
     METIS_HOME: storage.metisHome,
     METIS_CLI_ATTACH_CHANNEL: app.isPackaged ? "stable" : "dev",
@@ -3750,8 +3752,8 @@ async function startBackend(emit = () => {}) {
 function stopBackend() {
   const current = child
   child = null
-  if (!current || current.killed) {
-    return
+  if (!current || current.killed || current.exitCode !== null) {
+    return Promise.resolve()
   }
 
   manualStopRequested = true
@@ -3759,13 +3761,23 @@ function stopBackend() {
     current.kill('SIGTERM')
   } catch {}
 
-  setTimeout(() => {
-    if (!current.killed) {
-      try {
-        current.kill('SIGKILL')
-      } catch {}
+  return new Promise(resolve => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
     }
-  }, 2000)
+    current.once('exit', finish)
+    setTimeout(() => {
+      if (current.exitCode === null && current.signalCode === null) {
+        try {
+          current.kill('SIGKILL')
+        } catch {}
+      }
+      finish()
+    }, 2000)
+  })
 }
 
 module.exports = {

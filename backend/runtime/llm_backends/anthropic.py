@@ -5,6 +5,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from ._common import parse_json_object, post_with_retries, to_text
 from .base import LLMBackend, LLMResponse, ToolCall, Usage
+from backend.runtime.client_identity import model_client_headers
 
 
 class AnthropicBackend(LLMBackend):
@@ -26,6 +27,7 @@ class AnthropicBackend(LLMBackend):
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
+            **model_client_headers(),
         }
 
     @property

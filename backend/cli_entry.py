@@ -8,6 +8,8 @@ _REPO_ROOT = os.path.dirname(_BACKEND_ROOT)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+os.environ.setdefault("METIS_CLIENT_KIND", "cli")
+
 from backend.cli import main  # noqa: E402
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from ._common import (
 )
 from .base import LLMBackend, LLMResponse, Usage
 from .deepseek_schema import sanitize_deepseek_strict_tools
+from backend.runtime.client_identity import model_client_headers
 
 _VISION_MODELS = {
     "gpt-4o",
@@ -76,6 +77,7 @@ class OpenAICompatBackend(LLMBackend):
         self.headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
+            **model_client_headers(),
         }
 
     @property

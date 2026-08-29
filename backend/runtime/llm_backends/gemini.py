@@ -5,6 +5,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from ._common import json_response, parse_json_object, post_with_retries, to_text
 from .base import LLMBackend, LLMResponse, ToolCall, Usage
+from backend.runtime.client_identity import model_client_headers
 
 
 class GeminiBackend(LLMBackend):
@@ -24,7 +25,7 @@ class GeminiBackend(LLMBackend):
         self.model = model
         self.base_url_template = base_url_template
         self.max_retries = max_retries
-        self.headers = {"Content-Type": "application/json"}
+        self.headers = {"Content-Type": "application/json", **model_client_headers()}
 
     @property
     def supports_vision(self) -> bool:

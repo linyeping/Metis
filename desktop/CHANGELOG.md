@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning after the first public release.
 
+## [26.8.29] - 2026-08-29
+
+## 主要更新
+
+### 1. 客户端身份标志
+
+模型请求现在会携带明确的客户端标志：
+
+- 桌面端：`MetisDesktop/version`
+- CLI：`MetisCLI/version`
+
+### 2. 桌面端更新流程修复
+
+修复点击更新后应用退出但无法重新启动的问题：
+
+- 安装更新前等待 Metis Python 后端完全退出
+- 增加更新安装阶段日志
+- 捕获安装器启动异常
+- 改善更新失败时的错误返回
+
+### 3. 版本信息
+
+- Desktop：`26.8.29`
+- CLI：`26.8.29`
+- 更新日期：2026-08-29
+
+## 安装说明
+
+如果旧版本更新后无法启动，请重新运行安装包并选择原安装目录。
+
 ## [26.7.27] - 2026-07-27
 
 ### Added

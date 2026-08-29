@@ -5520,14 +5520,29 @@ ipcMain.handle('metis:check-updates', async () => {
   }
 })
 
-ipcMain.handle('metis:install-update', () => {
+ipcMain.handle('metis:install-update', async () => {
   if (!pendingUpdateInfo || !autoUpdater) {
     return { ok: false, message: '没有已下载好的更新可以安装。' }
   }
   app.isQuitting = true
   // isSilent/isForceRunAfter: 不再弹 NSIS 安装界面，装完直接重新启动 Metis。
-  setImmediate(() => autoUpdater.quitAndInstall(true, true))
-  return { ok: true }
+  try {
+    log('[update] stopping backend before install')
+    await stopBackend()
+    log('[update] backend stopped; launching installer')
+    setImmediate(() => {
+      try {
+        autoUpdater.quitAndInstall(true, true)
+      } catch (error) {
+        log(`[update] quitAndInstall failed: ${error?.stack || error}`)
+      }
+    })
+    return { ok: true }
+  } catch (error) {
+    app.isQuitting = false
+    log(`[update] install failed: ${error?.stack || error}`)
+    return { ok: false, message: error?.message || String(error) }
+  }
 })
 
 ipcMain.handle('metis:window', (_event, action) => {

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "metis-backend"
-version = "26.7.27"
+version = "26.8.29"
 description = "Metis personal AI agent with coding, desktop automation, and MCP"
 requires-python = ">=3.9"
 dependencies = [

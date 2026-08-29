@@ -54,7 +54,7 @@ export const AboutTab = memo(function AboutTab({
             <h3>Metis Desktop</h3>
             <p>{t('对话、协作、编码和设计集中在一个安静可靠的桌面环境中。')}</p>
           </span>
-          <em>v{appInfo?.version || '26.7.27'}</em>
+          <em>v{appInfo?.version || '26.8.29'}</em>
         </div>
         <div className="about-status-grid">
           <article>

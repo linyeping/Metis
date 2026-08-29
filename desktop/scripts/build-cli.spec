@@ -178,5 +178,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(DESKTOP_ROOT / "resources" / "icons" / "logo.ico"),
 )

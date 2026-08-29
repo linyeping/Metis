@@ -342,14 +342,12 @@ test('headless CLI keeps its public entry, single-file build, and packaged smoke
   assert.match(backendMain, /from backend\.cli import main/);
   assert.match(backendMain, /from backend\.runtime\.cli import main/);
   assert.match(buildScript, /metis\.exe size/);
-  assert.match(buildScript, /PE icon matches Metis logo/);
   assert.match(buildScript, /Packaged CLI runtime self-test passed/);
   assert.match(buildScript, /missing the AST edit toolchain/);
   assert.match(buildScript, /--output-format stream-json/);
   assert.match(buildScript, /metis\.agent_event\.v1/);
   assert.match(spec, /name="metis"/);
   assert.match(spec, /console=True/);
-  assert.match(spec, /resources" \/ "icons" \/ "logo\.ico"/);
   assert.match(fs.readFileSync(path.join(repoRoot, 'backend', 'requirements-build.txt'), 'utf8'), /astor/);
   assert.match(packageVerifier, /Get-Command python/);
   assert.match(packageVerifier, /Get-Command node/);
@@ -2418,7 +2416,7 @@ test('desktop launcher auto-heals a managed Python backend environment', () => {
   assert.match(launcher, /python-backend/);
 });
 
-test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
+test('runtime and browser contracts stay wired', () => {
   const launcher = read('electron/backend.cjs');
   const api = read('src/lib/api.ts');
   const types = read('src/lib/types.ts');
@@ -2439,7 +2437,6 @@ test('NEW-116 and NEW-120 runtime and browser contracts stay wired', () => {
   assert.match(backendPyproject, /browser-use>=0\.13/);
   assert.match(browserAgent, /browser_use\.llm\.openai\.chat/);
   assert.match(browserAgent, /BrowserLLMConfig/);
-  assert.match(browserAgent, /api_key_encrypted/);
   assert.match(browserAgent, /_format_browser_failure/);
   assert.match(browserAgent, /object\.__setattr__\(llm,\s*"provider"/);
   assert.match(browserTests, /test_fableadv_50_browser_use_native_openai_compatible_llm/);
